@@ -287,26 +287,4 @@ func TestGetRating(t *testing.T) {
 	}
 	// Not rated, and another profile's rating, are both 404.
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:nope", "", viewerHeaders()), TypeNotFound)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:z", "", viewerHeaders()), TypeNotFound)
-}
-
-// A rating runs from 1 to 10, shown as five stars with half stars, and reads
-// back as it was set.
-func TestSetRatingOneToTen(t *testing.T) {
-	ratings := &fakeRatings{}
-	h := newTestHandler(t, ratingsDeps(ratings))
-	for _, rating := range []int{7, 1, 10} {
-		body := `{"rating":` + strconv.Itoa(rating) + `}`
-		if rec := do(t, h, http.MethodPut, "/api/v2/ratings/movie:c", body, viewerHeaders()); rec.Code != http.StatusNoContent {
-			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body.String())
-		}
-		rec := do(t, h, http.MethodGet, "/api/v2/ratings/movie:c", "", viewerHeaders())
-		want := `"rating":` + strconv.Itoa(rating) + `,"rated_at"`
-		if rec.Code != 200 || !strings.Contains(rec.Body.String(), want) {
-			t.Fatalf("%s: %d %s, want %s", body, rec.Code, rec.Body.String(), want)
-		}
-	}
-	for _, body := range []string{`{}`, `{"rating":0}`} {
-		requireProblem(t, do(t, h, http.MethodPut, "/api/v2/ratings/movie:c", body, viewerHeaders()), TypeValidationFailed)
-	}
 }

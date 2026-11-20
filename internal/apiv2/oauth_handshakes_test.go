@@ -99,7 +99,7 @@ func (rig *handshakeRig) serve(method, target string, cookies ...*http.Cookie) *
 func binderCookie(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
 	t.Helper()
 	for _, c := range rec.Result().Cookies() {
-		if strings.HasPrefix(c.Name, "silo_oauth_") && c.MaxAge > 0 {
+		if strings.HasPrefix(c.Name, "vio_oauth_") && c.MaxAge > 0 {
 			return c
 		}
 	}

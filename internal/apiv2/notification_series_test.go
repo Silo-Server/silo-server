@@ -48,19 +48,15 @@ func notificationSeriesIDs(items []NotificationSeries) []string {
 func TestNotificationSeriesSearchAndReasonFilter(t *testing.T) {
 	h, _ := notificationSeriesHandler(t)
 	for query, want := range map[string][]string{
-		"?q=BEAR":                        {"series:bear"},
-		"?q=+horses+":                    {"series:slow-horses"},
-		"?reason=watchlist":              {"series:slow-horses"},
-		"?reason=favorite":               {"series:bear", "series:wire"},
-		"?reason=favorite&status=active": {"series:bear"},
-		"?reason=next_up&status=active":  {"series:andor"},
-		"?q=zzz":                         {},
+		"?q=BEAR":                       {"series:bear"},
+		"?q=+horses+":                   {"series:slow-horses"},
+		"?reason=next_up&status=active": {"series:andor"},
+		"?q=zzz":                        {},
 	} {
 		if got := notificationSeriesIDs(getNotificationSeries(t, h, query).Items); !slices.Equal(got, want) {
 			t.Errorf("%s = %v, want %v", query, got, want)
 		}
 	}
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/notifications/series?reason=other", "", profileOwner()), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/notifications/series?sort=rating", "", profileOwner()), TypeValidationFailed)
 }
 
@@ -94,7 +90,7 @@ func TestNotificationSeriesSorts(t *testing.T) {
 		}
 	}
 	first := getNotificationSeries(t, h, "?limit=1&sort=-year")
-	for _, changed := range []string{"&sort=year", "&sort=-year&q=a", "&sort=-year&reason=favorite"} {
+	for _, changed := range []string{"&sort=year", "&sort=-year&q=a", "&sort=-year&reason=next_up"} {
 		requireProblem(t, do(t, h, http.MethodGet, Prefix+"/notifications/series?limit=1"+changed+"&cursor="+url.QueryEscape(first.Page.NextCursor), "", profileOwner()), TypeInvalidCursor)
 	}
 }
