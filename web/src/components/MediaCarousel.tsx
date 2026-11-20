@@ -245,6 +245,7 @@ export default function MediaCarousel({
   const titleClass = compact
     ? "text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase"
     : "text-foreground text-xl font-semibold tracking-tight";
+  const hasExploreAll = Boolean(viewAllHref || onViewAll);
   const headerGap = compact ? "mb-2" : "mb-5";
   const slideGap = compact ? "gap-3" : "gap-4 lg:gap-5";
   const listClassName = `embla__container flex cursor-grab list-none ${slideGap}${containerPadX}`;
@@ -280,10 +281,18 @@ export default function MediaCarousel({
         <div className="flex min-w-0 items-center gap-2">
           {titleHref ? (
             <Link to={titleHref} className="group/title hover:text-primary transition-colors">
-              <h2 className={titleClass}>
+              {/* The heading sets its own color, so without "View" an underline
+                  is the only hover cue. */}
+              <h2
+                className={
+                  hasExploreAll
+                    ? `${titleClass} decoration-1 underline-offset-3 group-hover/title:underline`
+                    : titleClass
+                }
+              >
                 {title}
                 {/* "Explore all" already names the destination. */}
-                {viewAllHref || onViewAll ? null : (
+                {hasExploreAll ? null : (
                   <span className="text-muted-foreground group-hover/title:text-primary ms-2 text-sm transition-colors">
                     {t("web.catalog.carousel.view")}
                   </span>

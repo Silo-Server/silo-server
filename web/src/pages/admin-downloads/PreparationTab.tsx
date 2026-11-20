@@ -508,7 +508,8 @@ function PreparationRow({
 
   const titleBlock = (
     <>
-      <div className="truncate text-[13px] font-medium">{title}</div>
+      {/* Underlines only the title when the row links to its item. */}
+      <div className="truncate text-[13px] font-medium group-hover/item:underline">{title}</div>
       <div className="text-muted-foreground truncate text-[10px]">{subtitle}</div>
       <div className="text-muted-foreground truncate text-[10px]">
         {formatPreparationSource(prep)}
@@ -563,7 +564,10 @@ function PreparationRow({
         {checkbox}
         <div className="min-w-0">
           {itemHref ? (
-            <Link to={itemHref} className="hover:text-primary block min-w-0 transition-colors">
+            <Link
+              to={itemHref}
+              className="group/item hover:text-primary block min-w-0 transition-colors"
+            >
               {titleBlock}
             </Link>
           ) : (
@@ -866,7 +870,7 @@ function Requesters({ prep }: { prep: AdminDownloadPreparation }) {
       <div className="flex min-w-0 items-center gap-1.5">
         <Link
           to={`/admin/users/${first.user_id}`}
-          className="hover:text-primary truncate font-medium transition-colors"
+          className="hover:text-primary truncate font-medium transition-colors hover:underline"
         >
           {requesterName(first)}
         </Link>

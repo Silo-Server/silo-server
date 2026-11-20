@@ -280,7 +280,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             {session.media_item_id ? (
               <Link
                 to={`/item/${session.media_item_id}`}
-                className="hover:text-primary truncate text-sm font-bold transition-colors"
+                className="hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
               >
                 {title}
               </Link>
@@ -297,7 +297,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             {session.media_item_id ? (
               <Link
                 to={`/item/${session.media_item_id}`}
-                className="hover:text-primary truncate text-sm font-bold transition-colors"
+                className="hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
               >
                 {title}
               </Link>
