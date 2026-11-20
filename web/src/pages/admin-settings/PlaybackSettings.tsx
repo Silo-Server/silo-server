@@ -95,10 +95,15 @@ export default function PlaybackSettings() {
     hwAccel === "nvenc" || (hwAccel === "auto" && hwDetection.data?.resolved === "nvenc");
   const inventoriesDiverge = nodeInventoriesDiverge(hwDetection.data);
   // A device choice staged before switching acceleration keeps the picker in
-  // view, so Save never writes a value the admin can't see.
+  // view, so Save never writes a value the admin can't see. Under a mode the
+  // picker doesn't apply to, it only takes devices back to their saved state:
+  // NVENC reads the setting as a CUDA device, not a render path.
+  const devicePickerApplies = hwAccel !== "none" && !isNvenc;
   const showDevicePicker =
-    deviceRows.length > 0 &&
-    ((hwAccel !== "none" && !isNvenc) || form.isDirty("playback.hw_device"));
+    deviceRows.length > 0 && (devicePickerApplies || form.isDirty("playback.hw_device"));
+  const deviceSwitchLocked = (path: string) =>
+    hwDeviceEnv != null ||
+    (!devicePickerApplies && selectedDevices.includes(path) === savedDevices.includes(path));
 
   const nodes = useAdminNodes();
   const trickplayExecution =
@@ -431,7 +436,7 @@ export default function PlaybackSettings() {
                     <Switch
                       checked={selectedDevices.includes(row.path)}
                       aria-label={row.description}
-                      disabled={hwDeviceEnv != null}
+                      disabled={deviceSwitchLocked(row.path)}
                       onCheckedChange={() =>
                         form.setValue(
                           "playback.hw_device",

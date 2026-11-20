@@ -26,14 +26,21 @@ vi.mock("@/hooks/queries/admin/settings", () => ({
   useCheckAdminSettingsConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+const OTHER_KEY = "server.public_url";
+
 function Harness() {
-  const form = useSettingsForm({ keys: REDIS_KEYS });
+  const form = useSettingsForm({ keys: [...REDIS_KEYS, OTHER_KEY] });
   return (
     <>
       <RedisGroup
         form={form}
         restartKeys={{ has: () => false }}
         secrets={{ keepSaved: form.resetValue, setSecret: form.setValue, disabled: false }}
+      />
+      {/* Another setting on the same page, so an edit can stay staged. */}
+      <input
+        aria-label="Other setting"
+        onChange={(e) => form.setValue(OTHER_KEY, e.target.value)}
       />
       <p>{`${form.dirtyCount} staged`}</p>
     </>
@@ -60,15 +67,17 @@ describe("RedisGroup", () => {
   it("shows the connection REDIS_URL sets once it takes over a staged switch-off", async () => {
     sensitiveStatus.current = { configured: ["redis.url"], managed_by_env: [] };
     const { rerender } = render(<Harness />);
-    // The number stays staged after the environment takes the URL over.
-    await userEvent.type(screen.getByLabelText("Database number"), "2");
+    // An edit elsewhere on the page stays staged after the environment takes
+    // the Redis keys over.
+    await userEvent.type(screen.getByLabelText("Other setting"), "https://media.example.com");
     await userEvent.click(screen.getByRole("switch", { name: "Use Redis" }));
     expect(screen.queryByLabelText("Connection URL")).not.toBeInTheDocument();
 
+    // REDIS_URL sets both keys, as the server reports it.
     sensitiveStatus.current = {
       configured: ["redis.url"],
-      managed_by_env: ["redis.url"],
-      managed_by_env_vars: { "redis.url": "REDIS_URL" },
+      managed_by_env: ["redis.url", "redis.db"],
+      managed_by_env_vars: { "redis.url": "REDIS_URL", "redis.db": "REDIS_URL" },
     };
     rerender(<Harness />);
 
