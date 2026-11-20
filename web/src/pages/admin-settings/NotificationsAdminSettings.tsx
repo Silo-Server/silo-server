@@ -459,7 +459,7 @@ function RegisterRelayRow({
             <AlertDialogAction
               disabled={pending}
               onClick={() => void clearRelay()}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {pending
                 ? t("web.admin.settings.notifications.relay.clearing")
@@ -805,7 +805,7 @@ function DiscordAppCredentials({
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
               onClick={() => {
                 void clearAll();
                 setConfirmClear(false);
