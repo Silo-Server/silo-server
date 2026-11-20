@@ -1,7 +1,6 @@
 package playback
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,38 +10,53 @@ import (
 	"testing"
 )
 
-// A progressive remux generates its body from a media position, so a byte range
-// that starts past zero has no position to restart at. It used to be ignored:
-// the client asked for 1.5 MB and received the whole title. The answer is the
-// unsatisfiable range, before any FFmpeg work and without the response being
-// read as evidence about the source.
-func TestServeRemuxRefusesAByteOffsetItCannotResume(t *testing.T) {
+// A progressive remux generates its body from a media position, so a range that
+// starts past zero has no byte offset to resume at. It is still not an error:
+// the client is resuming its own read (a browser does that on a seek), so the
+// answer is the whole stream from the generation's start — exactly what the
+// transport answered before it read Range at all. A 416 here closed the player
+// on every web seek.
+func TestServeRemuxAnswersAStartOffsetFromTheGenerationStart(t *testing.T) {
 	source := remuxSourceFile(t)
-	w := &failoverResponseWriter{}
-	request := httptest.NewRequest(http.MethodGet, "/api/v2/stream/session-1", nil)
-	request.Header.Set("Range", "bytes=1000000-")
+	// Record the seek the generation was started with, so the test also pins
+	// that the plan's anchor is where the restarted body begins.
+	spawned := filepath.Join(t.TempDir(), "argv")
+	bin := remuxFakeFFmpeg(t, "printf '%s ' \"$@\" > '"+spawned+"'\nprintf body\n")
 
-	marker := filepath.Join(t.TempDir(), "spawned")
-	bin := remuxFakeFFmpeg(t, "touch '"+marker+"'\nprintf body\n")
+	for _, rangeHeader := range []string{
+		"bytes=1000000-",      // a client resuming its own read mid-stream
+		"bytes=900000000000-", // past any size: the total is unknown, so not unsatisfiable
+		"bytes=-500",          // suffix: the end of a body whose length is not known yet
+		"bytes=0-10,20-30",    // multi-range
+	} {
+		t.Run(rangeHeader, func(t *testing.T) {
+			w := &failoverResponseWriter{}
+			request := httptest.NewRequest(http.MethodGet, "/api/v2/stream/session-1", nil)
+			request.Header.Set("Range", rangeHeader)
 
-	err := ServeRemuxWithOptions(w, request, source, "mp4", 0, false, 0, 0, RemuxServeOptions{
-		FFmpegPath:      bin,
-		DeferStartError: true,
-	})
-	if !errors.Is(err, ErrRemuxRangeUnsatisfiable) {
-		t.Fatalf("error = %v, want ErrRemuxRangeUnsatisfiable", err)
-	}
-	if w.status != http.StatusRequestedRangeNotSatisfiable {
-		t.Fatalf("status = %d, want 416", w.status)
-	}
-	if got := w.header.Get("Content-Range"); got != "bytes */*" {
-		t.Fatalf("Content-Range = %q, want the unknown-length unsatisfied form", got)
-	}
-	if w.body.Len() != 0 {
-		t.Fatalf("body = %d bytes, want none", w.body.Len())
-	}
-	if _, statErr := os.Stat(marker); statErr == nil {
-		t.Fatal("ffmpeg was spawned for an unsatisfiable range")
+			if err := ServeRemuxWithOptions(w, request, source, "mp4", 328.19, false, 0, 0, RemuxServeOptions{
+				FFmpegPath:      bin,
+				DeferStartError: true,
+			}); err != nil {
+				t.Fatalf("serve %q: %v", rangeHeader, err)
+			}
+			if w.status != http.StatusOK {
+				t.Fatalf("status = %d, want the pre-range 200 from the generation's start", w.status)
+			}
+			if got := w.header.Get("Content-Range"); got != "" {
+				t.Fatalf("Content-Range = %q, want none on a whole response", got)
+			}
+			if got := w.body.String(); got != "body" {
+				t.Fatalf("body = %q, want every produced byte", got)
+			}
+			argv, readErr := os.ReadFile(spawned)
+			if readErr != nil {
+				t.Fatalf("read ffmpeg argv: %v", readErr)
+			}
+			if !strings.Contains(string(argv), "-ss 328.190") {
+				t.Fatalf("ffmpeg argv = %q, want the plan's seek anchor", argv)
+			}
+		})
 	}
 }
 

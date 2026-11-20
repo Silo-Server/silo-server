@@ -2214,12 +2214,6 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		remuxErr := serveRemux()
-		if errors.Is(remuxErr, playback.ErrRemuxRangeUnsatisfiable) {
-			// The transport already answered 416: a generated stream has no byte
-			// offset to restart at, and the range says nothing about the source.
-			// No candidate verdict, no rotation, and no second status write.
-			return
-		}
 		if remuxErr != nil {
 			// The remux only commits 200 after FFmpeg produces media bytes, so
 			// a failure here means the provider release served no output
@@ -2231,7 +2225,7 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 			// refuses the mapped stream) is not evidence about the release. Do
 			// not mark the candidate failed or rotate: that indicts healthy bytes
 			// and hands the client a verdict about a file it never faulted.
-			if !isClientCancellation(r.Context(), remuxErr) && !errors.Is(remuxErr, playback.ErrRemuxRecipeFault) && !errors.Is(remuxErr, playback.ErrRemuxRangeUnsatisfiable) && !stoppedServerSide() && isVirtualPlaybackFile(file) && hasVirtualMediaResolver(h) {
+			if !isClientCancellation(r.Context(), remuxErr) && !errors.Is(remuxErr, playback.ErrRemuxRecipeFault) && !stoppedServerSide() && isVirtualPlaybackFile(file) && hasVirtualMediaResolver(h) {
 				if releaseInput != nil {
 					releaseInput()
 					releaseInput = nil
