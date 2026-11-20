@@ -509,9 +509,11 @@ silent and then sends it quickly; that is server work, not a slow link.
 - Throughput is timed from a response's first body byte to its last, and only
   while bytes flow. Time to first byte, and time between requests, never
   count. A response that received data for less than 1 second gives no
-  reading. Apple measures server HLS on AetherEngine's relay, per media
-  segment; AVPlayer's access log on the relay hop counts the wait before the
-  first byte and is not evidence. That relay reading is the evidence and the
+  reading, and a plan whose combined rate is under 100 kbps gives none
+  either, as for a `throughput_kbps` sample (see *Playback samples*). Apple
+  measures server HLS on AetherEngine's relay, per media segment;
+  AVPlayer's access log on the relay hop counts the wait before the first
+  byte and is not evidence. That relay reading is the evidence and the
   lowering's `observed_throughput_kbps`, but not a `throughput_kbps` sample:
   Apple still sends none on server HLS (see *Playback samples*).
 - A client has slow-link evidence when that throughput for the playing plan is
