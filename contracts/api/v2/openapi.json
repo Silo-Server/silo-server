@@ -53640,6 +53640,10 @@
           "mime_type": {
             "type": "string"
           },
+          "parallel_range_url": {
+            "format": "uri-reference",
+            "type": "string"
+          },
           "protocol": {
             "type": "string"
           },

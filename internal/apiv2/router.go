@@ -549,6 +549,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.Use(joinPreconditionFields)
 	r.Use(rejectMalformedDeviceHeader)
 	r.Use(withRequest)
+	r.Use(playbackMediaCORS)
 	if deps.ActingAdmin != nil {
 		r.Use(apimw.ProvideActingAdmin(deps.ActingAdmin))
 	}
@@ -852,6 +853,11 @@ func (reg *Registry) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 	methods := reg.AllowedMethods(r.URL.Path)
 	if len(methods) == 0 {
 		methods = pluginContentAllowedMethods(r.URL.Path)
+	}
+	// playbackMediaCORS answers OPTIONS on the media path before routing, so the
+	// registry does not declare it.
+	if isPlaybackMediaPath(r.URL.Path) {
+		methods = append(methods, http.MethodOptions)
 	}
 	if allow := strings.Join(methods, ", "); allow != "" {
 		p = p.WithHeader("Allow", allow)
