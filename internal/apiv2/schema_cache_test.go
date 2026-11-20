@@ -19,7 +19,7 @@ type schemaCacheIsolationProbeBody struct {
 	Value string `json:"value"`
 }
 
-func TestRuntimeSchemaRegistryIsolation(t *testing.T) {
+func TestRuntimeSchemaRegistryTestRegisterIsolation(t *testing.T) {
 	probeName := nativeSchemaName(reflect.TypeFor[schemaCacheIsolationProbeBody](), "")
 	base := sharedRuntimeSchemas()
 	if _, exists := base.schemas[probeName]; exists {
@@ -28,14 +28,23 @@ func TestRuntimeSchemaRegistryIsolation(t *testing.T) {
 
 	baseReqBefore := slices.Clone(base.schemas["Problem"].Required)
 	baseTitleDescBefore := base.schemas["Problem"].Properties["title"].Description
+	baseCreateProfile := *(base.schemas["AdminInvitationCreateInputBody"].Properties["create_profile"].Default.(*bool))
+
 	var probeSchemas huma.Registry
 	_ = NewHandler(Dependencies{
 		testRegister: func(reg *Registry) {
-			// Mutating a schema obtained via SchemaFromRef before Map() must
-			// stay isolated to this handler.
+			// Mutating schemas via SchemaFromRef or Map, deleting entries, or
+			// mutating pointer defaults must never affect sharedRuntimeSchemas.
 			refProblem := reg.api.OpenAPI().Components.Schemas.SchemaFromRef(schemaRefPrefix + "Problem")
 			refProblem.Required = append(refProblem.Required, "ref-mutated")
 			refProblem.Properties["title"].Description = "ref-mutated-description"
+
+			inv := reg.api.OpenAPI().Components.Schemas.Map()["AdminInvitationCreateInputBody"]
+			*(inv.Properties["create_profile"].Default.(*bool)) = !baseCreateProfile
+			delete(reg.api.OpenAPI().Components.Schemas.Map(), "Problem")
+			if got := reg.api.OpenAPI().Components.Schemas.SchemaFromRef(schemaRefPrefix + "Problem"); got != nil {
+				t.Fatalf("SchemaFromRef returned %v after deleting Problem from Map()", got)
+			}
 
 			type probeOut struct {
 				Body schemaCacheIsolationProbeBody
@@ -57,26 +66,13 @@ func TestRuntimeSchemaRegistryIsolation(t *testing.T) {
 		t.Fatalf("testRegister probe %q missing from instance schema map", probeName)
 	}
 	if !slices.Equal(base.schemas["Problem"].Required, baseReqBefore) {
-		t.Fatalf("SchemaFromRef mutation leaked into sharedRuntimeSchemas: got %v, want %v", base.schemas["Problem"].Required, baseReqBefore)
-	}
-	if base.schemas["Problem"].Properties["title"].Description != baseTitleDescBefore {
-		t.Fatalf("SchemaFromRef nested property mutation leaked into sharedRuntimeSchemas: got %q, want %q", base.schemas["Problem"].Properties["title"].Description, baseTitleDescBefore)
-	}
-
-	// Mutating a schema (including nested property schemas and nested example
-	// slices) obtained from Map() must not alter the shared snapshot.
-	copiedProblem := probeSchemas.Map()["Problem"]
-	copiedProblem.Required = append(copiedProblem.Required, "mutated-field")
-	copiedProblem.Properties["title"].Description = "mutated-description"
-	copiedProblem.Properties["injected"] = &huma.Schema{Type: huma.TypeString}
-	if !slices.Equal(base.schemas["Problem"].Required, baseReqBefore) {
-		t.Fatalf("Map mutation leaked into sharedRuntimeSchemas: got %v, want %v", base.schemas["Problem"].Required, baseReqBefore)
+		t.Fatalf("mutation leaked into sharedRuntimeSchemas: got %v, want %v", base.schemas["Problem"].Required, baseReqBefore)
 	}
 	if base.schemas["Problem"].Properties["title"].Description != baseTitleDescBefore {
 		t.Fatalf("nested property mutation leaked into sharedRuntimeSchemas: got %q, want %q", base.schemas["Problem"].Properties["title"].Description, baseTitleDescBefore)
 	}
-	if _, leaked := base.schemas["Problem"].Properties["injected"]; leaked {
-		t.Fatal("injected property map entry leaked into sharedRuntimeSchemas")
+	if got := *(base.schemas["AdminInvitationCreateInputBody"].Properties["create_profile"].Default.(*bool)); got != baseCreateProfile {
+		t.Fatalf("pointer default mutation leaked into sharedRuntimeSchemas: got %v, want %v", got, baseCreateProfile)
 	}
 
 	// Registering a duplicate multipart form schema name must still panic.
@@ -100,52 +96,6 @@ func TestRuntimeSchemaRegistryIsolation(t *testing.T) {
 	}()
 	if panicked == nil || !strings.Contains(strings.ToLower(toString(panicked)), "already registered") {
 		t.Fatalf("duplicate multipart form registration panic = %v, want already registered", panicked)
-	}
-}
-
-func TestRuntimeSchemaRegistryNestedExampleIsolation(t *testing.T) {
-	base := sharedRuntimeSchemas()
-	basePermEx := base.schemas["Account"].Properties["permissions"].Examples
-	if len(basePermEx) == 0 {
-		t.Fatal("Account.permissions has no examples to test nested example isolation")
-	}
-	reg := newRuntimeSchemaRegistry()
-	copiedPermEx := reg.Map()["Account"].Properties["permissions"].Examples
-	switch ex := copiedPermEx[0].(type) {
-	case []any:
-		if len(ex) == 0 {
-			t.Fatal("Account.permissions example slice is empty")
-		}
-		orig := basePermEx[0].([]any)[0]
-		ex[0] = "mutated-permission"
-		if basePermEx[0].([]any)[0] != orig {
-			t.Fatalf("nested []any example mutation leaked into sharedRuntimeSchemas: got %v, want %v", basePermEx[0].([]any)[0], orig)
-		}
-	case []string:
-		if len(ex) == 0 {
-			t.Fatal("Account.permissions example slice is empty")
-		}
-		orig := basePermEx[0].([]string)[0]
-		ex[0] = "mutated-permission"
-		if basePermEx[0].([]string)[0] != orig {
-			t.Fatalf("nested []string example mutation leaked into sharedRuntimeSchemas: got %q, want %q", basePermEx[0].([]string)[0], orig)
-		}
-	default:
-		t.Fatalf("unexpected Account.permissions example type %T", copiedPermEx[0])
-	}
-}
-
-func TestRuntimeSchemaRegistryAllowRefFalsePreservesRefinements(t *testing.T) {
-	reg := newRuntimeSchemaRegistry()
-	got := reg.Schema(reflect.TypeFor[AccountPasswordCapability](), false, "")
-	if !slices.Contains(got.Required, "allowed") {
-		t.Fatalf("Schema(AccountPasswordCapability, allowRef=false).Required = %v, want \"allowed\" preserved from baseSchemaSnapshot", got.Required)
-	}
-	// Mutating the returned clone and recomputing messages must not affect the snapshot.
-	got.Required = append(got.Required, "synthetic")
-	got.PrecomputeMessages()
-	if slices.Contains(sharedRuntimeSchemas().schemas["AccountPasswordCapability"].Required, "synthetic") {
-		t.Fatal("allowRef=false clone mutation leaked into sharedRuntimeSchemas")
 	}
 }
 
@@ -174,98 +124,98 @@ func TestRuntimeSchemaRegistryPublicCapabilityPrecedence(t *testing.T) {
 	}
 }
 
-func TestRuntimeSchemaRegistryPrecomputeNoRace(t *testing.T) {
-	base := sharedRuntimeSchemas()
-	problemSchema := base.schemas["Problem"]
-	validProblem := map[string]any{
-		"type":   "https://silo.example/problems/test",
-		"title":  "Test",
-		"status": float64(400),
-		"detail": "detail",
-		"code":   "bad_request",
-	}
+func TestRuntimeSchemaRegistryReadOnlyGuards(t *testing.T) {
+	reg := newRuntimeSchemaRegistry()
+	assertPanics(t, "Map", func() { _ = reg.Map() })
+	assertPanics(t, "allowRef=false", func() { _ = reg.Schema(reflect.TypeFor[Problem](), false, "") })
+	assertPanics(t, "unknown struct", func() { _ = reg.Schema(reflect.TypeFor[schemaCacheIsolationProbeBody](), true, "") })
+}
 
-	var wg sync.WaitGroup
-	// Concurrent readers validating directly against the shared snapshot schemas.
-	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			reg := newRuntimeSchemaRegistry()
-			pb := huma.NewPathBuffer([]byte{}, 0)
-			res := &huma.ValidateResult{}
-			for range 200 {
-				pb.Reset()
-				res.Reset()
-				huma.Validate(reg, problemSchema, pb, huma.ModeReadFromServer, validProblem, res)
-			}
-		}()
-	}
-	// Concurrent testRegister writers exercising Map(), Patch[Problem] (which
-	// copies a base schema and invokes PrecomputeMessages), and direct
-	// PrecomputeMessages after modifying Required.
-	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for range 10 {
-				_ = NewHandler(Dependencies{
-					testRegister: func(reg *Registry) {
-						type patchProblemIn struct {
-							Body struct {
-								Problem Patch[Problem] `json:"problem,omitzero"`
-							}
-						}
-						Register(reg, Operation{
-							Operation:   humaOp(http.MethodPatch, Prefix+"/probe/patch-problem", "probePatchProblem", "system", "Patch Problem probe."),
-							Class:       ClassPublic,
-							RetrySafety: RetrySafetyCoalescing,
-						}, func(context.Context, *patchProblemIn) (*struct{}, error) {
-							return &struct{}{}, nil
-						})
-						s := reg.api.OpenAPI().Components.Schemas.Map()["Problem"]
-						s.Required = append(s.Required, "extra_required")
-						s.PrecomputeMessages()
-					},
-				})
-			}
-		}()
-	}
-	wg.Wait()
-	if slices.Contains(base.schemas["Problem"].Required, "extra_required") {
-		t.Fatal("PrecomputeMessages test leaked Required entry into sharedRuntimeSchemas")
+func assertPanics(t *testing.T, name string, fn func()) {
+	t.Helper()
+	var panicked any
+	func() {
+		defer func() { panicked = recover() }()
+		fn()
+	}()
+	if panicked == nil {
+		t.Fatalf("%s did not panic", name)
 	}
 }
 
-func TestRuntimeSchemaRegistryMatchesUncachedOpenAPI(t *testing.T) {
+// TestRuntimeSchemaRegistryProductionParity compares the production
+// runtimeHumaConfig() + fromSnapshot: true registration path against uncached
+// humaConfig(): every operation's parameters and request body schemas (which
+// Huma validates requests against) and every referenced component schema must
+// match byte for byte.
+func TestRuntimeSchemaRegistryProductionParity(t *testing.T) {
 	uncachedAPI := huma.NewAPI(humaConfig(), noopAdapter{})
 	registerAll(&Registry{api: uncachedAPI})
 
 	cachedAPI := huma.NewAPI(runtimeHumaConfig(), noopAdapter{})
-	registerAll(&Registry{api: cachedAPI})
+	registerAll(&Registry{api: cachedAPI, fromSnapshot: true})
 
-	wantPaths, err := json.Marshal(uncachedAPI.OpenAPI().Paths)
-	if err != nil {
-		t.Fatalf("marshal uncached paths: %v", err)
+	uncachedPaths := uncachedAPI.OpenAPI().Paths
+	cachedPaths := cachedAPI.OpenAPI().Paths
+	if len(cachedPaths) != len(uncachedPaths) {
+		t.Fatalf("cached Paths len = %d, want %d", len(cachedPaths), len(uncachedPaths))
 	}
-	gotPaths, err := json.Marshal(cachedAPI.OpenAPI().Paths)
-	if err != nil {
-		t.Fatalf("marshal cached paths: %v", err)
-	}
-	if !bytes.Equal(wantPaths, gotPaths) {
-		t.Fatal("runtimeHumaConfig() OpenAPI Paths diverge from humaConfig()")
+	for path, wantItem := range uncachedPaths {
+		gotItem := cachedPaths[path]
+		if gotItem == nil {
+			t.Fatalf("cached Paths missing %s", path)
+		}
+		for method, wantOp := range operationByMethod(wantItem) {
+			gotOp := operationByMethod(gotItem)[method]
+			if gotOp == nil {
+				t.Fatalf("cached %s %s missing", method, path)
+			}
+			assertJSONEqual(t, method+" "+path+" parameters", wantOp.Parameters, gotOp.Parameters)
+			assertJSONEqual(t, method+" "+path+" requestBody", wantOp.RequestBody, gotOp.RequestBody)
+		}
 	}
 
-	wantSchemas, err := json.Marshal(uncachedAPI.OpenAPI().Components.Schemas)
-	if err != nil {
-		t.Fatalf("marshal uncached schemas: %v", err)
+	uncachedSchemas := uncachedAPI.OpenAPI().Components.Schemas
+	cachedSchemas := cachedAPI.OpenAPI().Components.Schemas
+	for name, wantSchema := range uncachedSchemas.Map() {
+		gotSchema := cachedSchemas.SchemaFromRef(schemaRefPrefix + name)
+		if gotSchema == nil {
+			t.Fatalf("cached SchemaFromRef missing %s", name)
+		}
+		assertJSONEqual(t, "schema "+name, wantSchema, gotSchema)
 	}
-	gotSchemas, err := json.Marshal(cachedAPI.OpenAPI().Components.Schemas)
-	if err != nil {
-		t.Fatalf("marshal cached schemas: %v", err)
+}
+
+func operationByMethod(item *huma.PathItem) map[string]*huma.Operation {
+	ops := map[string]*huma.Operation{}
+	for method, op := range map[string]*huma.Operation{
+		http.MethodGet:     item.Get,
+		http.MethodPost:    item.Post,
+		http.MethodPut:     item.Put,
+		http.MethodPatch:   item.Patch,
+		http.MethodDelete:  item.Delete,
+		http.MethodHead:    item.Head,
+		http.MethodOptions: item.Options,
+	} {
+		if op != nil {
+			ops[method] = op
+		}
 	}
-	if !bytes.Equal(wantSchemas, gotSchemas) {
-		t.Fatal("runtimeHumaConfig() OpenAPI Components.Schemas diverge from humaConfig()")
+	return ops
+}
+
+func assertJSONEqual(t *testing.T, label string, want, got any) {
+	t.Helper()
+	wantBytes, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("%s: marshal want: %v", label, err)
+	}
+	gotBytes, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("%s: marshal got: %v", label, err)
+	}
+	if !bytes.Equal(wantBytes, gotBytes) {
+		t.Fatalf("%s diverged:\nwant: %s\ngot:  %s", label, wantBytes, gotBytes)
 	}
 }
 

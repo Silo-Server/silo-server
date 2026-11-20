@@ -557,22 +557,25 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	r.NotFound(notFound)
 
-	api := humachi.New(r, runtimeHumaConfig())
+	newConfig := runtimeHumaConfig
+	fromSnapshot := true
+	if deps.testRegister != nil {
+		// Test callbacks register extra routes and may inspect or mutate the
+		// schema map, so build them against a fresh uncached Huma registry and
+		// keep runtimeSchemaRegistry strictly read-only.
+		newConfig = humaConfig
+		fromSnapshot = false
+	}
+	api := humachi.New(r, newConfig())
 	var routeSnapshot []streamtelemetry.WalkedRoute
 	if deps.ObserveRoutes != nil {
-		api = huma.NewAPI(runtimeHumaConfig(), &routeSnapshotAdapter{Adapter: api.Adapter(), routes: &routeSnapshot})
+		api = huma.NewAPI(newConfig(), &routeSnapshotAdapter{Adapter: api.Adapter(), routes: &routeSnapshot})
 	}
 	api.UseMiddleware(bufferStructuredResponse, observeOperation, defaultHeaders, deprecationHeaders, classGate(deps), observeIdentity, normalizeAccept, encodingGuard, mediaTypeGuard, queryGuard)
 
-	reg := &Registry{api: api, deps: deps, fromSnapshot: true}
+	reg := &Registry{api: api, deps: deps, fromSnapshot: fromSnapshot}
 	registerAll(reg)
 	if deps.testRegister != nil {
-		reg.fromSnapshot = false
-		// Materialize handler-owned schema copies and base public-capability
-		// state before test callbacks so neither SchemaFromRef nor Map writes
-		// into sharedRuntimeSchemas and public-capability precedence holds.
-		_ = api.OpenAPI().Components.Schemas.Map()
-		reg.publicCapabilitySchemas = maps.Clone(sharedRuntimeSchemas().publicCapabilitySchemas)
 		deps.testRegister(reg)
 	}
 	// After registration: the 405 answer names the methods the registry
