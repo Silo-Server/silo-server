@@ -61,9 +61,10 @@ func newBackupService(pool *pgxpool.Pool, bc *config.BootstrapConfig, settings *
 // beforeMigrateBackup is the hook database.MigrateAtStartup runs when
 // migrations are pending: the before-upgrade backup, holding the backup lock
 // through the migrations. It runs before this release's schema exists, so
-// it reads only the server_settings rows the previous release left, with
-// defaults for the rest, and publishes no status.
-func beforeMigrateBackup(bc *config.BootstrapConfig, pool *pgxpool.Pool, cipher *secret.Cipher, wait time.Duration) func(context.Context) (database.Guard, error) {
+// it reads the server_settings rows the previous release left, with
+// defaults for the rest and SILO_BACKUP_ENABLED over backup.enabled
+// (withEnvBackupSettings), and publishes no status.
+func beforeMigrateBackup(bc *config.BootstrapConfig, pool *pgxpool.Pool, cipher *secret.Cipher, wait time.Duration, env config.EnvSettings) func(context.Context) (database.Guard, error) {
 	return func(ctx context.Context) (database.Guard, error) {
 		skip := backup.SkipBeforeUpgradeFromEnv()
 		opts, err := upgradeBackupOptions(ctx, pool, bc, cipher)
@@ -74,6 +75,9 @@ func beforeMigrateBackup(bc *config.BootstrapConfig, pool *pgxpool.Pool, cipher 
 			}
 			// Skipping needs only the lock the migrations run under.
 			opts = backup.Options{Pool: pool, Locker: backup.PostgresLocker{Pool: pool}}
+		}
+		if opts.Settings != nil {
+			opts.Settings = withEnvBackupSettings(opts.Settings, env)
 		}
 		// Rotation after the backup keeps a queued restore's source, read
 		// from the admin jobs (Options.ActiveRestore). On a schema the job
@@ -90,6 +94,34 @@ func beforeMigrateBackup(bc *config.BootstrapConfig, pool *pgxpool.Pool, cipher 
 		}
 		return held, nil
 	}
+}
+
+// envBackupEnabled lays SILO_BACKUP_ENABLED over the stored backup.enabled
+// for the backup before migrations, which runs before startup stores the
+// environment's values. Without it, SILO_BACKUP_ENABLED=false set in the same
+// deploy as an upgrade would not skip that backup, nor =true take one. The
+// other SILO_BACKUP_* values wait for startup to store them: that backup holds
+// only the database at no scheduled time, and its rotation keeps by the
+// stored count, so a lower SILO_BACKUP_KEEP removes nothing before the
+// migrations succeed.
+type envBackupEnabled struct {
+	backup.SettingsReader
+	value string
+}
+
+func withEnvBackupSettings(stored backup.SettingsReader, env config.EnvSettings) backup.SettingsReader {
+	value, ok := env.Values(config.EnvScopeStored)[config.BackupEnabledSettingKey]
+	if !ok {
+		return stored
+	}
+	return envBackupEnabled{SettingsReader: stored, value: value}
+}
+
+func (s envBackupEnabled) Get(ctx context.Context, key string) (string, error) {
+	if key == config.BackupEnabledSettingKey {
+		return s.value, nil
+	}
+	return s.SettingsReader.Get(ctx, key)
 }
 
 // upgradeBackupOptions builds the backup service's options from the
