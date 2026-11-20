@@ -95,6 +95,22 @@ const SORT_ASC_MARK = "▲";
 const SORT_DESC_MARK = "▼";
 
 /**
+ * Links inside a row that itself toggles details, underlined on hover like the
+ * other admin tables while the row's highlight steps back (ROW_HOVER_CLASS).
+ * The default theme's primary matches its foreground, so the color alone
+ * shows nothing there.
+ */
+const ROW_LINK_CLASS =
+  "rounded-sm decoration-1 underline-offset-3 transition-colors hover:text-primary hover:underline active:underline focus-visible:text-primary focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+/**
+ * A clickable row's highlight and lit expand chevron, held back while the
+ * pointer is on a link or a button that does something else; the expand
+ * controls keep them. Uses the app's pointer-gated hover variant.
+ */
+const ROW_HOVER_CLASS =
+  "transition-colors hover:[&:not(:has(a:hover,button:not([data-row-toggle]):hover))]:bg-surface-hover hover:[&:not(:has(a:hover,button:not([data-row-toggle]):hover))_[data-row-chevron]]:text-foreground";
+
+/**
  * The stream table's two layouts. Rows and the header share one column
  * template; the route column only exists when routes differ between sessions
  * (see sessionRoutesVary). Below the container width the columns need, rows
@@ -702,6 +718,8 @@ function StreamRow({
 }) {
   const t = useT();
   const panelId = useId();
+  const username =
+    session.username || t("web.admin.activity.userFallback", { id: session.user_id });
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [ffmpegOpen, setFFmpegOpen] = useState(false);
   const logsHref = `/admin/logs?playback_session_id=${encodeURIComponent(session.session_id)}&focus=playback`;
@@ -777,16 +795,18 @@ function StreamRow({
   const expandButton = (
     <button
       type="button"
+      data-row-toggle
       onClick={toggleDetails}
       aria-expanded={expandedOpen}
       aria-controls={expandedOpen ? panelId : undefined}
       aria-label={t("web.admin.activity.row.details")}
       title={t("web.admin.activity.row.details")}
-      className="text-muted-foreground hover:text-foreground hover:bg-surface flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors"
+      className="text-muted-foreground hover:text-foreground hover:bg-surface-raised flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors"
     >
       <ChevronRight
         aria-hidden="true"
-        className={`h-4 w-4 transition-transform rtl:-scale-x-100 ${expandedOpen ? "rotate-90 rtl:-rotate-90" : ""}`}
+        data-row-chevron
+        className={`h-4 w-4 transition-[transform,color] rtl:-scale-x-100 ${expandedOpen ? "rotate-90 rtl:-rotate-90" : ""}`}
       />
     </button>
   );
@@ -796,7 +816,7 @@ function StreamRow({
       {/* Table row */}
       <div
         onClick={onRowClick}
-        className={`${layout.table} ${layout.columns} hover:bg-surface/40 cursor-pointer items-center gap-3 px-3 py-2 transition-colors`}
+        className={`${layout.table} ${layout.columns} ${ROW_HOVER_CLASS} cursor-pointer items-center gap-3 px-3 py-2`}
       >
         {expandButton}
         <MediaCell session={session} />
@@ -843,7 +863,10 @@ function StreamRow({
       </div>
 
       {/* Stacked card */}
-      <div onClick={onRowClick} className={`${layout.stacked} flex cursor-pointer gap-3 px-3 py-3`}>
+      <div
+        onClick={onRowClick}
+        className={`${layout.stacked} ${ROW_HOVER_CLASS} flex cursor-pointer gap-3 px-3 py-3`}
+      >
         <Poster session={session} size="stacked" />
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-start gap-2">
@@ -858,10 +881,10 @@ function StreamRow({
               <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[12px]">
                 <Link
                   to={`/admin/users/${session.user_id}`}
-                  className="hover:text-primary shrink-0 transition-colors"
+                  title={username}
+                  className={`${ROW_LINK_CLASS} min-w-0 truncate`}
                 >
-                  {session.username ||
-                    t("web.admin.activity.userFallback", { id: session.user_id })}
+                  {username}
                 </Link>
                 <ProfilePill session={session} />
                 <JellyfinSessionPill session={session} />
@@ -936,7 +959,7 @@ function TitleLink({ session }: { session: AdminSession }) {
     <Link
       to={itemHref}
       title={title}
-      className="hover:text-primary block truncate text-[13px] font-medium transition-colors"
+      className={`${ROW_LINK_CLASS} block w-fit max-w-full truncate text-[13px] font-medium`}
     >
       {title}
     </Link>
@@ -1039,7 +1062,8 @@ function ViewerCell({
       <div className="flex min-w-0 items-center gap-1.5">
         <Link
           to={`/admin/users/${session.user_id}`}
-          className="hover:text-primary truncate text-[13px] font-medium transition-colors"
+          title={username}
+          className={`${ROW_LINK_CLASS} truncate text-[13px] font-medium`}
         >
           {username}
         </Link>
@@ -1066,7 +1090,7 @@ function ViewerCell({
               type="button"
               onClick={() => onIPLookup(clientIP)}
               title={t("web.admin.activity.ipLookup.heading")}
-              className="hover:text-primary shrink-0 tabular-nums transition-colors"
+              className={`${ROW_LINK_CLASS} shrink-0 tabular-nums`}
             >
               {clientIP}
             </button>
@@ -1107,6 +1131,7 @@ function MethodLine({
       {rest.length > 0 ? (
         <button
           type="button"
+          data-row-toggle
           onClick={onMore}
           aria-expanded={expanded}
           aria-controls={expanded ? panelId : undefined}
@@ -1395,7 +1420,8 @@ function PlaybackExpandedPanel({
                 <button
                   type="button"
                   onClick={() => onIPLookup(clientIP)}
-                  className="hover:text-primary ms-1 tabular-nums transition-colors"
+                  title={t("web.admin.activity.ipLookup.heading")}
+                  className={`${ROW_LINK_CLASS} ms-1 tabular-nums`}
                 >
                   {clientIP}
                 </button>
