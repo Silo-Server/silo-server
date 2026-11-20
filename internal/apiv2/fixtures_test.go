@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/librarymonitor"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/routeinventory"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -1771,7 +1772,17 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, adminCatalogMatchHintsFixtureCases()...)
 	cases = append(cases, deviceLoginBindingFixtureCases()...)
 	cases = append(cases, adminDashboardLayoutFixtureCases()...)
-	return append(cases, catalogItemCollectionsFixtureCases()...)
+	cases = append(cases, catalogItemCollectionsFixtureCases()...)
+	return append(cases,
+		fixtureCase{name: "get_admin_plugin_capabilities_ok", operationID: "getAdminPluginCapabilities",
+			scenario: "An administrator discovers deployment-managed plugin settings.",
+			method:   http.MethodGet, path: Prefix + "/admin/plugins/capabilities", headers: actingRequestAdmin,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AdminPluginCapabilities"},
+		fixtureCase{name: "list_admin_plugin_provisioning_status_ok", operationID: "listAdminPluginProvisioningStatus",
+			scenario: "The declaration is pending before the plugin is installed.",
+			method:   http.MethodGet, path: Prefix + "/admin/plugins/provisioning-status", headers: actingRequestAdmin,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/CollectionAdminPluginProvisionStatus"},
+	)
 }
 
 // deviceLoginBindingFixtureCases pin the session binding a device-login
@@ -2108,6 +2119,9 @@ func fixtureDeps() Dependencies {
 	deps := pilotDeps(&fakeProgress{entries: progressRows()}, nil)
 	deps.NetworkAccess = newFakeNetworkAccess()
 	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
+	deps.AdminPluginProvisionStatus = func(context.Context) ([]plugins.ProvisionStatus, error) {
+		return []plugins.ProvisionStatus{{PluginID: "silo.auth.oidc", Version: "0.1.2", State: "pending"}}, nil
+	}
 	deps.AdminDashboardLayout = new(fakeDashboardLayout)
 	deps.OrderedApplePush = new(fakeOrderedApple)
 	deps.OrderedAndroidPush = new(fakeOrderedPush)
@@ -2262,7 +2276,7 @@ func fixtureDeps() Dependencies {
 	deps.CatalogAccess, deps.CatalogBrowse, deps.CatalogItems = catalog, catalog, catalog
 	actions := &fakeCatalogActions{enabled: true, trailerView: handlers.TrailerRefreshView{Status: "queued"}}
 	deps.CatalogTrailers, deps.MetadataAI, deps.People, deps.LiteraryWorks = actions, actions, actions, actions
-	deps.ExternalSignIn = &fakeExternalSignIn{}
+	deps.ExternalSignIn = &fakeExternalSignIn{callbackMode: plugins.AuthCallbackInstallation}
 	deps.CursorSecret = []byte("fixture-cursor-key")
 	deps.SettingValues.(*fakeSettingValuesSeam).contendedLabel = "Contended"
 	prefs := preferenceDeps(nil, nil)

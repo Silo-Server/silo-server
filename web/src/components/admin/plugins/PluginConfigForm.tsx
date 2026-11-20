@@ -26,6 +26,7 @@ import {
 type PluginConfigValue = Record<string, unknown>;
 
 const EMPTY_FIELDS: PluginAdminFormField[] = [];
+const NO_MANAGED_FIELDS: readonly string[] = [];
 // Global config saves merge into the stored value, so an emptied field must
 // be sent as an explicit clear or the stored value stays.
 const SAVE_OPTIONS: BuildSchemaValuesOptions = { explicitClears: true };
@@ -34,6 +35,7 @@ type Props = {
   schema: PluginConfigSchema;
   value?: PluginConfigValue;
   configuredSecrets?: string[];
+  managedFields?: readonly string[];
   onSave: (key: string, value: PluginConfigValue, clearSecrets: string[]) => void;
   onTest?: (
     key: string,
@@ -64,6 +66,7 @@ export function PluginConfigForm({
   schema,
   value,
   configuredSecrets = [],
+  managedFields = NO_MANAGED_FIELDS,
   onSave,
   onTest,
   isSaving = false,
@@ -76,6 +79,11 @@ export function PluginConfigForm({
   const inferredDescriptor = useMemo(() => adminFormForConfigSchema(schema), [schema]);
   const fields = inferredDescriptor?.fields ?? EMPTY_FIELDS;
   const supported = inferredDescriptor != null;
+  const lockedKeys = Object.fromEntries(
+    managedFields.map((key) => [key, t("web.admin.plugins.provisioning.managed")]),
+  );
+  const allFieldsManaged =
+    fields.length > 0 && fields.every((field) => managedFields.includes(field.key));
 
   const descriptor = useMemo<PluginAdminForm>(() => {
     const base = inferredDescriptor ?? { fields };
@@ -90,19 +98,34 @@ export function PluginConfigForm({
     };
   }, [configuredSecrets, fields, inferredDescriptor, t]);
   const fieldTypes = useMemo(() => parseFieldTypes(schema.json_schema), [schema.json_schema]);
-  const stagedValue = (draft: PluginConfigValue) =>
-    buildSchemaValues(descriptor, draft, fieldTypes, SAVE_OPTIONS);
+  function stagedValue(draft: PluginConfigValue) {
+    const result = buildSchemaValues(descriptor, draft, fieldTypes, SAVE_OPTIONS);
+    for (const key of managedFields) delete result[key];
+    return result;
+  }
+  const editableClears = (keys: Set<string>) =>
+    Array.from(keys).filter((key) => !managedFields.includes(key));
 
-  const [values, setValues] = useState<PluginConfigValue>(() =>
-    formValuesFromConfig(fields, value),
-  );
+  const savedValues = useMemo(() => formValuesFromConfig(fields, value), [fields, value]);
+  const [values, setValues] = useState<PluginConfigValue>(savedValues);
   const [testResult, setTestResult] = useState<ConnectionCheckResponse | null>(null);
   const [clearSecrets, setClearSecrets] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setValues(formValuesFromConfig(fields, value));
+    setValues(savedValues);
     setClearSecrets(new Set());
-  }, [fields, value]);
+  }, [savedValues]);
+
+  // A later release of ownership must not restore an edit or a secret clear.
+  if (managedFields.some((key) => values[key] !== savedValues[key])) {
+    setValues({
+      ...values,
+      ...Object.fromEntries(managedFields.map((key) => [key, savedValues[key]])),
+    });
+  }
+  if (managedFields.some((key) => clearSecrets.has(key))) {
+    setClearSecrets(new Set(editableClears(clearSecrets)));
+  }
 
   function handleChange(next: PluginConfigValue) {
     setTestResult(null);
@@ -115,7 +138,7 @@ export function PluginConfigForm({
       }
     }
     setClearSecrets(updated);
-    onDraftChange?.(schema.key, stagedValue(next), Array.from(updated));
+    onDraftChange?.(schema.key, stagedValue(next), editableClears(updated));
   }
 
   function toggleClearSecret(key: string) {
@@ -123,7 +146,7 @@ export function PluginConfigForm({
     if (updated.has(key)) updated.delete(key);
     else updated.add(key);
     setClearSecrets(updated);
-    onDraftChange?.(schema.key, stagedValue(values), Array.from(updated));
+    onDraftChange?.(schema.key, stagedValue(values), editableClears(updated));
   }
 
   async function handleTest() {
@@ -132,7 +155,7 @@ export function PluginConfigForm({
     }
 
     try {
-      setTestResult(await onTest(schema.key, stagedValue(values), Array.from(clearSecrets)));
+      setTestResult(await onTest(schema.key, stagedValue(values), editableClears(clearSecrets)));
     } catch (error) {
       setTestResult({
         success: false,
@@ -172,13 +195,14 @@ export function PluginConfigForm({
         values={values}
         onChange={handleChange}
         idPrefix={idPrefix ?? schema.key}
+        lockedKeys={lockedKeys}
       />
 
       {configuredSecrets.length > 0 ? (
         <div className="space-y-2 rounded-md border border-dashed p-2.5">
           {configuredSecrets.map((key) => {
             const field = fields.find((candidate) => candidate.key === key);
-            const clearing = clearSecrets.has(key);
+            const clearing = !managedFields.includes(key) && clearSecrets.has(key);
             const required = field?.required === true;
             return (
               <div key={key} className="flex items-center justify-between gap-3 text-xs">
@@ -189,7 +213,7 @@ export function PluginConfigForm({
                     required: required ? "yes" : "no",
                   })}
                 </span>
-                {!required ? (
+                {!required && !managedFields.includes(key) ? (
                   <Button
                     type="button"
                     size="xs"
@@ -219,8 +243,8 @@ export function PluginConfigForm({
         <Button
           size="sm"
           variant="outline"
-          disabled={isSaving || isTesting}
-          onClick={() => onSave(schema.key, stagedValue(values), Array.from(clearSecrets))}
+          disabled={isSaving || isTesting || allFieldsManaged}
+          onClick={() => onSave(schema.key, stagedValue(values), editableClears(clearSecrets))}
         >
           {schema.admin_form?.submit_label || t("web.admin.plugins.configForm.save")}
         </Button>

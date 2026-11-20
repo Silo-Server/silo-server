@@ -254,10 +254,13 @@ type localPlugin struct {
 	version string
 	enabled bool
 	configs map[string][]byte
+	owned   map[string][]string
 }
 
 func readLocalPlugins(ctx context.Context, q queryer) (map[string]localPlugin, error) {
-	rows, err := q.Query(ctx, `SELECT id, plugin_id, version, enabled FROM plugin_installations WHERE kind = 'plugin' ORDER BY id`)
+	rows, err := q.Query(ctx, `SELECT i.id, i.plugin_id, i.version, i.enabled, o.config_fields
+		FROM plugin_installations i LEFT JOIN plugin_provision_ownership o ON o.plugin_installation_id = i.id
+		WHERE i.kind = 'plugin' ORDER BY i.id`)
 	if err != nil {
 		return nil, fmt.Errorf("reading plugins: %w", err)
 	}
@@ -266,7 +269,7 @@ func readLocalPlugins(ctx context.Context, q queryer) (map[string]localPlugin, e
 	for rows.Next() {
 		var l localPlugin
 		var pluginID string
-		if err := rows.Scan(&l.id, &pluginID, &l.version, &l.enabled); err != nil {
+		if err := rows.Scan(&l.id, &pluginID, &l.version, &l.enabled, &l.owned); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -342,7 +345,12 @@ func (p *planner) planPlugin(doc PluginDocument, locals map[string]localPlugin) 
 		item.Message = "Its configuration was encrypted with another SECRET_KEY and cannot be read here."
 		return item
 	}
+	return p.comparePluginConfig(item, doc, local)
+}
+
+func (p *planner) comparePluginConfig(item PreviewItem, doc PluginDocument, local localPlugin) PreviewItem {
 	same := true
+	var skipped []string
 	for _, c := range doc.Configs {
 		backupValue, err := p.s.targets.Plugins.DecodeStoredConfig(doc.InstallationID, c.Key, c.Value)
 		if err != nil {
@@ -350,21 +358,39 @@ func (p *planner) planPlugin(doc PluginDocument, locals map[string]localPlugin) 
 			item.Message = "Its configuration cannot be decrypted with this server's key."
 			return item
 		}
-		stored, ok := local.configs[c.Key]
-		if !ok {
+		fields := local.owned[c.Key]
+		stored, exists := local.configs[c.Key]
+		var localValue map[string]any
+		if exists {
+			localValue, err = p.s.targets.Plugins.DecodeStoredConfig(local.id, c.Key, stored)
+		}
+		if err != nil && len(fields) > 0 {
+			skipped = append(skipped, c.Key+": the managed config entry cannot be read")
+			continue
+		}
+		if err != nil {
 			same = false
 			continue
 		}
-		localValue, err := p.s.targets.Plugins.DecodeStoredConfig(local.id, c.Key, stored)
-		if err != nil || !plugins.SameConfig(localValue, backupValue) {
+		next, blocked := plugins.MergeRestoreConfig(c.Key, fields, localValue, backupValue)
+		if blocked != nil {
+			skipped = append(skipped, blocked.Error())
+		}
+		if !exists && len(fields) > 0 && len(next) == 0 {
+			continue
+		}
+		if !exists || !plugins.SameConfig(localValue, next) {
 			same = false
 		}
 	}
 	if same {
 		item.Status, item.Reason, item.Message = ItemOnThisServer, ReasonSame, ""
-		return item
+	} else {
+		item.Status, item.Selectable = ItemDiffers, true
 	}
-	item.Status, item.Selectable = ItemDiffers, true
+	if len(skipped) > 0 {
+		item.Message = strings.TrimSpace(item.Message + " " + strings.Join(skipped, ". "))
+	}
 	return item
 }
 

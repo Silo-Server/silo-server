@@ -270,6 +270,9 @@ func (l fakeLoader) CarryPluginReleases(context.Context, string, string) ([]stri
 func (l fakeLoader) DisablePlugins(context.Context, string) ([]string, error) {
 	return nil, nil
 }
+func (l fakeLoader) FinishPluginProvisionRestore(context.Context, string, string, bool, bool) (string, error) {
+	return "", nil
+}
 func (l fakeLoader) CarryServerSpecificSettings(context.Context, string, string) (int, error) {
 	return 0, nil
 }

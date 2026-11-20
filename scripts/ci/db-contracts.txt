@@ -310,6 +310,8 @@
 ./internal/auth TestCreatePersonalAPIKeyDB
 ./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
+./internal/auth TestExternalAccountCannotPreemptInitialSetupDB
+./internal/auth TestPluginAuthBindingCallbackModeDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
 ./internal/auth TestSignupPolicySerializationDB
@@ -857,7 +859,10 @@
 # the row and leaves its files, which can sit above the plugin root, and the
 # installation and user settings lists still answer with the row present.
 ./internal/plugins TestInstallationStoreDeleteRemovesOnlyTrustedFiles
+./internal/plugins TestInstallationStoreRetiresFilesAfterCommittedDeleteDB
+./internal/plugins TestArchiveCacheRejectsSupersededSameVersionDB
 ./internal/api/handlers TestPluginListsKeepWorkingWithAnInvalidIdentityRowDB
+./internal/api/handlers TestPluginInventoryDuringReplacementDB
 
 # An enabled plugin whose stored archive won't open stays in the installation
 # list, marked failed, leaves the user settings list working, and turning it off
@@ -867,6 +872,16 @@
 # A refused automatic plugin update stays on its installation until it is
 # cleared or the installed version changes.
 ./internal/plugins TestInstallationStoreUpdateFailureDB
+./internal/plugins TestLifecyclePollRecoversMissedEnablementCycleDB
+
+# Provisioned settings remain protected when runtime and admin writes share
+# an entry, and release puts its settings back under ordinary admin control.
+./internal/plugins TestProvisionOwnershipGuardsDB
+./internal/plugins TestProvisionedReplacementValidatesOwnedCallbackDB
+./internal/plugins TestProvisionedReplacementValidatesStoredConfigDB
+./internal/plugins TestProvisionedReplacementProtectsNestedCredentialDB
+./internal/plugins TestLegacyReplacementPreservesCredentialProtectionDB
+./internal/plugins TestReenableRejectsIneligibleStableBindingDB
 
 # Updating an installed plugin from its catalog stops the running plugin only
 # after the new package passed its download and checksum checks.
@@ -879,6 +894,8 @@
 # A plugin has one installation: an archive link for an installed plugin
 # replaces it, and a second create for the same plugin is refused.
 ./internal/plugins TestPluginInstallKeepsOneInstallationPerPluginDB
+./internal/plugins TestProvisionPackageCommitAndRollbackDB
+./internal/plugins TestAutoUpdateClearsWithdrawnNoticeDB
 
 # Cleaning up duplicate installations keeps a break-glass account's local
 # credentials and moves a deleted duplicate's marker provider settings.
@@ -1283,6 +1300,7 @@
 # a restored library whose setup partly failed, or whose provider placement
 # could not be read, reports it so it is retried without a fallback chain.
 ./internal/backup TestBackupRestoreRoundTripDB
+./internal/backup TestRestorePluginProvisioningDB
 ./internal/backup TestCarryOntoAnOlderKeyDropsSharedRowsDB
 ./internal/backup TestCarryDropsAProfileKeyItCannotBindDB
 ./internal/backup TestCarryMovesAnswerSequencePastCarriedLinksDB
@@ -1302,6 +1320,7 @@
 ./internal/backup TestBackupAndDeleteWithOnePoolConnectionDB
 ./internal/backup TestEveryTableIsClassifiedDB
 ./internal/backup TestSelectiveRestoreDB
+./internal/backup TestSelectivePluginRestorePreviewsOwnedConfigDB
 ./internal/backup TestRestoreRechecksAccessSettingsUnderTheLockDB
 ./internal/backup TestRestoreNeverSendsLiveSecretsToARestoredAddressDB
 ./internal/backup TestTemplateCollectionsAndHomeSectionsDB
@@ -1476,3 +1495,14 @@
 ./internal/metadata TestEbookRefreshDropsWorkClaimsOfAContradictingAnswerDB
 ./internal/metadata TestEbookIdentifyClearsOldWorkClaimsDB
 ./internal/literaryworks TestCandidatesIncludeEditionsSharingOnlyAWorkIDDB
+
+# Provisioning rolls back an entire conflicting declaration, fences a second
+# writer on a dedicated session, and preserves generations on identical input.
+./internal/plugins TestProvisionWriterAtomicOfflineDB
+./internal/plugins TestProvisionWriterMetadataPlacementRecoveryDB
+./internal/plugins TestProvisionWriterOrphanedSessionDB
+./internal/plugins TestProvisionWriterPreservesPrivateNumbersDB
+./internal/plugins TestProvisionWriterRefusesInvalidSavedConfigDB
+./internal/plugins TestProvisionWriterReleasesHeldFieldsDB
+./internal/plugins TestProvisionWriterRestartsAfterRestoreHoldDB
+./internal/plugins TestAutomaticInstallHonorsRestoreHoldDB

@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "הערך נקבע בסביבה של הצומת. יש לשנות אותו שם ולהפעיל מחדש את הצומת."
+      "value": "הערך נקבע בסביבה. יש לשנות אותו שם ולהפעיל מחדש את השירות המושפע."
     }
   ],
   "error.field.out_of_range": [
@@ -57525,6 +57525,68 @@
     {
       "type": 0,
       "value": "תוספים"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "הוחל"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "מושהה"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לטעון את סטטוס ההקצאה של התוספים."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "מנוהל על ידי הסביבה"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "ממתין"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "נדחה"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "הפריסה קובעת את מקור החבילה ואת ההסרה."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "סטטוס הקצאה"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "הפריסה מקבעת את התוסף הזה לגרסה "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
