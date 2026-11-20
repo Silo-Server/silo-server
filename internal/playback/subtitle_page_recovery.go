@@ -287,12 +287,13 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 }
 
 // pageWaitSeek reports whether start is a seek away from the page the track's
-// wait is following rather than the playhead crossing into the next page during
+// wait is following rather than the playhead crossing into a later page during
 // a retry. The client re-anchors a page request on the playhead, and a 75 s
-// retry ladder can advance one page; backwards, or more than one page ahead, is
-// the viewer seeking, and the page it lands on pays its own bounded wait instead
-// of inheriting the one it left. Without this a seek inherited a spent budget
-// and was answered `subtitle_page_unavailable` in 1 ms with covered=0.
+// retry ladder can advance up to two 120 s pages even at double playback speed;
+// backwards, or further ahead than that, is the viewer seeking, and the page it
+// lands on pays its own bounded wait instead of inheriting the one it left.
+// Without this a seek inherited a spent budget and was answered
+// `subtitle_page_unavailable` in 1 ms with covered=0.
 func pageWaitSeek(previous, start float64, opts StreamExtractOpts) bool {
 	if start < previous-1 {
 		return true
@@ -301,7 +302,7 @@ func pageWaitSeek(previous, start float64, opts StreamExtractOpts) bool {
 	if step <= 0 {
 		step = SubtitleBitmapPageSeconds
 	}
-	return start > previous+step+1
+	return start > previous+2*step+1
 }
 
 // pageReachVerdict reports how fast the fill is parsing and whether the page it
