@@ -150,9 +150,8 @@ nothing, and any refusal stops startup:
   key that no longer decrypts after a `SECRET_KEY` change).
 - An unmanaged transcode row is adopted only when it already holds the declared
   key. A proxy row, a keyless row, or one with another key stops startup: a
-  declaration never takes over a row it did not create. To bring an existing
-  node under the document, issue it a key in the admin API and reference that
-  key; a key from `silo node-key generate` suits only an id never used.
+  declaration never takes over a row it did not create, so an existing node
+  comes under the document only with the key it already holds.
 - A managed row the document no longer lists is released. `nodes: {}` releases
   every node; an API server with neither variable set leaves them as they are.
 
@@ -167,12 +166,13 @@ used only to create a row; afterwards they belong to the node's own
 anything it publishes `node_pool_changed`; a missed event is caught by the
 periodic registry and pool reloads.
 
-Every API server needs the same document, or the last to start wins. Rotate a
-key by updating the secret, restarting the API servers, then restarting the
-node; its running streams fail until it restarts, as with an admin rotation,
-so drain it first. An API server that predates `deployment_managed` ignores the
-document and still lets an administrator issue a key or delete the node, so
-upgrade every API server before using it.
+Every API server needs the same document, or the last to start wins. A
+declared key changes only when an API server starts with the new one; until the
+node restarts with it, its running streams fail, as after an admin rotation.
+`ALTER SEQUENCE` needs the role that owns `stream_nodes`, which every API server
+already uses to run migrations. An API server that predates
+`deployment_managed` ignores the document and still lets an administrator issue
+a key or delete the node.
 
 ### Credential registry
 

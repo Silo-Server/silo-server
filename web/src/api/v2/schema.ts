@@ -19362,7 +19362,7 @@ export interface components {
     AdminNodeCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
-      /** @description API servers can create transcode nodes and their keys from their deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE): deployment_managed on node rows, and issueAdminNodeKey and deleteAdminNode refuse such a node with node_deployment_managed. */
+      /** @description API servers can create transcode nodes and their keys from their deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE): deployment_managed on node rows, and issueAdminNodeKey and deleteAdminNode refuse such a node with node_deployment_managed. An API server that starts with a document no longer listing a node releases it (nodes: {} releases every node); one started with neither variable set changes nothing. */
       deployment_nodes: boolean;
       /** @description Transcode nodes can drain: the drain and resume operations, and drain_requested and drain_state on node rows. */
       drain: boolean;

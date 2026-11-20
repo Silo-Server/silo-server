@@ -175,9 +175,10 @@ node cannot work with an earlier main server. Proxy nodes keep their current set
    `SILO_TRANSCODE_NODES` or `SILO_TRANSCODE_NODES_FILE` with a reference to that key, and restart
    the main server and every API replica. Each listed node is adopted, and from then on its key
    comes from the configuration. A node added later skips the administration UI: write its key
-   with `silo node-key generate --id <n>` for an id no node has used, and list it the same way;
-   the API servers create it when they start. An existing node needs its key from the
-   administration UI, because a node that exists with no key or another key stops the API server.
+   with `silo node-key generate --id <n>` for an id above every node id the server has handed
+   out, and list it the same way; the API servers create it when they start. An existing node
+   needs its key from the administration UI, because a node that exists with no key or another
+   key stops the API server.
    See [declared nodes](architecture/transcode-nodes.md#declared-nodes).
 4. Update each transcode node and start it with:
    - `MODE=transcode`;
