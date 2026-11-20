@@ -28,7 +28,8 @@ import { MarkerEditPanel } from "./MarkerEditPanel";
 import { usePlaybackRealtime } from "../hooks/usePlaybackRealtime";
 import { useWatchProgress } from "../hooks/useWatchProgress";
 import type { PlaybackConnectionStatus } from "../hooks/usePlaybackSession";
-import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { useKeyboardShortcuts, type RemoteControls } from "../hooks/useKeyboardShortcuts";
+import { REMOTE_BACK_KEYS } from "@/hooks/useRemoteBackKey";
 import { usePlayerFullscreenRoot } from "../context/PlayerFullscreenContext";
 import { isNativeVideoFullscreen, isPlayerFullscreen, toggleFullscreen } from "../utils/fullscreen";
 import { useIntroSkipPrompt } from "../hooks/useIntroSkipPrompt";
@@ -165,7 +166,9 @@ function pillKey(
   if (isEditingOrInMenu) return null;
 
   const isSelect = event.key === "Enter" || event.key === " ";
-  const isBack = event.key === "Escape" || event.key === "BrowserBack";
+  // Every key a remote sends as Back, so Backspace dismisses the pill rather
+  // than leaving the player.
+  const isBack = REMOTE_BACK_KEYS.has(event.key) || event.key === "BrowserBack";
   if (!isSelect && !isBack) return null;
 
   // Select belongs to the focused control: Space on Play/Pause or Seek must
@@ -3804,7 +3807,23 @@ export function VideoPlayer({
     };
   }, []);
 
-  const focusTransportAfterIntroPrompt = useCallback(() => {
+  // Controls that fade out keep focus, and Enter would then press a button the
+  // viewer cannot see. Hidden controls stop taking pointer events, which is
+  // the one signal that is already true while they are still fading.
+  useEffect(() => {
+    if (controlsVisible) return;
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      active !== containerRef.current &&
+      containerRef.current?.contains(active) &&
+      getComputedStyle(active).pointerEvents === "none"
+    ) {
+      active.blur();
+    }
+  }, [controlsVisible]);
+
+  const focusTransport = useCallback(() => {
     resetControlsTimer();
     window.setTimeout(() => {
       containerRef.current
@@ -3817,15 +3836,15 @@ export function VideoPlayer({
     if (!selectActiveIntroPrompt()) return false;
     // A press on the prompt is the viewer's seek; automatic skips are not.
     resetStillWatchingStreak();
-    focusTransportAfterIntroPrompt();
+    focusTransport();
     return true;
-  }, [focusTransportAfterIntroPrompt, selectActiveIntroPrompt]);
+  }, [focusTransport, selectActiveIntroPrompt]);
 
   const dismissIntroPrompt = useCallback(() => {
     if (!dismissActiveIntroPrompt()) return false;
-    focusTransportAfterIntroPrompt();
+    focusTransport();
     return true;
-  }, [dismissActiveIntroPrompt, focusTransportAfterIntroPrompt]);
+  }, [dismissActiveIntroPrompt, focusTransport]);
 
   const introPromptVisible = activeIntroPrompt !== null;
   // Only a timed prompt takes focus and claims Enter/Space/Escape from the rest
@@ -4988,6 +5007,29 @@ export function VideoPlayer({
   }, [handleMutedChange, muted]);
 
   // -- Keyboard shortcuts --
+  const markerEditing = markerEditor.editing;
+  const remoteControls = useMemo<RemoteControls>(
+    () => ({
+      container: containerRef,
+      visible: controlsVisible,
+      reveal: resetControlsTimer,
+      focusTransport,
+      back: () => {
+        // An open menu closes on Escape by itself; Back must not also leave.
+        // Nor while markers are edited, which would throw the draft away.
+        if (hasOpenPlayerMenu() || markerEditing) return;
+        void handleExit();
+      },
+    }),
+    [
+      controlsVisible,
+      focusTransport,
+      handleExit,
+      hasOpenPlayerMenu,
+      markerEditing,
+      resetControlsTimer,
+    ],
+  );
   useKeyboardShortcuts(
     videoRef,
     handleFullscreenToggle,
@@ -4999,6 +5041,7 @@ export function VideoPlayer({
     // too, so the shortcut does nothing rather than reject.
     browserEngineActive ? undefined : handleTogglePiP,
     displayMode === "foreground",
+    remoteControls,
   );
 
   // The id is the plan's own quality label, handed back to the server verbatim.
@@ -5182,9 +5225,9 @@ export function VideoPlayer({
       const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       const pillHadFocus = active?.closest('[data-buffering-prompt="true"]') != null;
       answerBufferingPill(answer);
-      if (pillHadFocus) focusTransportAfterIntroPrompt();
+      if (pillHadFocus) focusTransport();
     },
-    [answerBufferingPill, focusTransportAfterIntroPrompt],
+    [answerBufferingPill, focusTransport],
   );
   // Select and Back reach the pill from the player root, as for intro skip.
   const bufferingPillKind = bufferingPill?.kind;
@@ -5591,6 +5634,8 @@ export function VideoPlayer({
   return (
     <div
       ref={containerRef}
+      // Arrow keys stay on the player instead of reaching the page behind it.
+      data-nav-scope={isDetached ? undefined : ""}
       className={
         displayMode === "postroll"
           ? `player-container fixed start-6 top-6 z-[60] aspect-video overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10 transition-opacity duration-700 lg:start-12 lg:top-1/2 lg:-translate-y-1/2 ${hasEnded ? "pointer-events-none opacity-0" : "cursor-pointer"}`

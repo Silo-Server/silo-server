@@ -19,6 +19,7 @@ import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
 import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
 import { hasMachineTranslation } from "@/pages/ItemDetail/components/machineTranslation";
+import { isRemoteBack } from "@/hooks/useRemoteBackKey";
 
 /** Decorative separator between values; not text, so not translated. */
 const SEPARATOR = "\u00b7";
@@ -134,7 +135,9 @@ function PlayingNextContent({
   // -- Keyboard shortcuts --
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // Every key a remote sends as Back, so Backspace closes the screen
+      // instead of the page-level Back key leaving it.
+      if (isRemoteBack(e)) {
         e.preventDefault();
         onClose();
       } else if (e.key === "Enter" && onPlayNow) {

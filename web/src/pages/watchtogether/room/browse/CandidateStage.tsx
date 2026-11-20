@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { WatchTogetherRoomMember } from "@/lib/watchTogether";
 import { useSeasonEpisodes } from "@/hooks/queries/episodes";
 import { useT } from "@/i18n";
+import { isRemoteBack } from "@/hooks/useRemoteBackKey";
 import { MovieDetailPanel } from "../picker/MovieDetailPanel";
 import { SeriesDrilldown, spoilerRisk, type EpisodePick } from "../picker/SeriesDrilldown";
 import { useMemberState } from "../picker/usePickerData";
@@ -87,10 +88,13 @@ function CandidateBody({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onDismiss();
+      if (!isRemoteBack(event)) return;
+      // Claimed, so the page-level Back key does not also leave the room.
+      event.preventDefault();
+      onDismiss();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, [onDismiss]);
 
   if (!isSeries) {

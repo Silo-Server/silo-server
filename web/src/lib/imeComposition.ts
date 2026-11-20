@@ -14,5 +14,10 @@ import type { KeyboardEvent } from "react";
  * handlers that act on keys themselves.
  */
 export function isImeComposing(event: KeyboardEvent): boolean {
-  return event.nativeEvent.isComposing || event.keyCode === 229;
+  return isNativeImeComposing(event.nativeEvent);
+}
+
+/** `isImeComposing` for a listener added outside React. */
+export function isNativeImeComposing(event: globalThis.KeyboardEvent): boolean {
+  return event.isComposing || event.keyCode === 229;
 }

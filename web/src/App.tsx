@@ -43,6 +43,7 @@ import { RealtimeEventsProvider } from "@/components/RealtimeEventsProvider";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { useSettingValuesRealtime } from "@/hooks/queries/settingValues";
 import Layout from "@/components/Layout";
+import { useRemoteBackKey } from "@/hooks/useRemoteBackKey";
 import Home from "@/pages/Home";
 import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { useProfileRequestsAllowed } from "@/hooks/useCanRequest";
@@ -215,6 +216,16 @@ function RouteAnnouncer() {
 
 function ScrollRestorationManager() {
   useScrollRestoration();
+  return null;
+}
+
+/**
+ * A remote's Back key steps back a page; see `useRemoteBackKey`. Not on admin
+ * or settings pages, whose forms hold unsaved edits that Back would discard.
+ */
+function RemoteBackKeyManager() {
+  const { pathname } = useLocation();
+  useRemoteBackKey(!/^\/(admin|settings)(\/|$)/.test(pathname));
   return null;
 }
 
@@ -964,6 +975,7 @@ function AppShell() {
                         <WebPushSubscriptionSync />
                         <RealtimeEventChannels />
                         <ScrollRestorationManager />
+                        <RemoteBackKeyManager />
                         <NavigationDirectionManager />
                         <RouteAnnouncer />
                         <QueryCacheManager />

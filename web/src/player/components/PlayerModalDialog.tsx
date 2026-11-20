@@ -1,6 +1,8 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+import { isRemoteBack } from "@/hooks/useRemoteBackKey";
+
 const supportsClosedBy =
   typeof HTMLDialogElement !== "undefined" && "closedBy" in HTMLDialogElement.prototype;
 
@@ -80,6 +82,13 @@ export function PlayerModalDialog({ label, className, onClose, children }: Playe
       ref={ref}
       aria-label={label}
       closedby="any"
+      onKeyDown={(e) => {
+        // The browser closes the dialog on Escape. A remote may send Back as
+        // Backspace or GoBack instead, which close it too, except in a field.
+        if (e.key === "Escape" || !isRemoteBack(e.nativeEvent)) return;
+        e.preventDefault();
+        e.currentTarget.close();
+      }}
       className={`m-auto overscroll-contain p-0 backdrop:overflow-hidden backdrop:overscroll-contain backdrop:bg-black/80 ${className}`}
       onPointerDown={
         supportsClosedBy ? undefined : (e) => (pressedOutside.current = outsideDialog(e))

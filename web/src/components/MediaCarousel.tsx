@@ -279,7 +279,13 @@ export default function MediaCarousel({
       <div className={`${headerGap} flex items-end justify-between gap-4${headerPadX}`}>
         <div className="flex min-w-0 items-center gap-2">
           {titleHref ? (
-            <Link to={titleHref} className="group/title hover:text-primary transition-colors">
+            <Link
+              to={titleHref}
+              // With "Explore all" beside it, a remote reaches the page there;
+              // stopping on the title too would put a stop between every row.
+              data-nav-skip={viewAllHref === titleHref ? "" : undefined}
+              className="group/title hover:text-primary transition-colors"
+            >
               <h2 className={titleClass}>
                 {title}
                 {/* "Explore all" already names the destination. */}
@@ -333,11 +339,18 @@ export default function MediaCarousel({
           className={`embla__viewport -mt-1 overflow-hidden pt-1${viewportPadX}`}
           tabIndex={0}
           aria-label={t("web.catalog.carousel.label")}
+          data-nav-group
           onKeyDown={(e) => {
+            // Only the row itself pages; with a card focused, the arrows move
+            // between cards (see spatialNavigation) and Embla follows focus.
+            // The arrow the row pages with is claimed, so focus stays put.
+            if (e.target !== e.currentTarget) return;
             const key = readingArrowKey(e);
             if (key === "ArrowLeft") {
+              e.preventDefault();
               scrollPrev();
             } else if (key === "ArrowRight") {
+              e.preventDefault();
               scrollNext();
             }
           }}

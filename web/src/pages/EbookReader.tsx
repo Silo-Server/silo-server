@@ -538,14 +538,18 @@ export default function EbookReader() {
       if (event.defaultPrevented || isEditableTarget(event.target)) return;
       // The page buttons mirror right to left, so the keys follow them.
       const key = readingArrowKey({ key: event.key, currentTarget: document.documentElement });
+      // Claimed, so spatial navigation doesn't also move focus.
       if (key === "ArrowLeft") {
+        event.preventDefault();
         readerRef.current?.prev();
       } else if (key === "ArrowRight") {
+        event.preventDefault();
         readerRef.current?.next();
       }
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    // On document, which runs before spatial navigation's window listener.
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   useEffect(() => {
