@@ -38,7 +38,9 @@ library does not have (outside titles; see Discover recommendations in
 [recommendations.md](architecture/recommendations.md)): `enabled` (recommendations
 are enabled and `recommendations.external.enabled` is set), `running`, `count`
 (outside titles stored), `rows` (stored outside rows, one per profile and
-media type) and `last_run` in the job run shape. Its `result` holds
+media type), optional live progress while running (`phase` in `sources`,
+`titles`, or `rows`, plus `progress_done` and `progress_total`), and `last_run`
+in the job run shape. Its `result` holds
 `enabled`, the retention counts (`pruned_titles`, `pruned_sources`,
 `pruned_links`, and `prune_failed`, present and true when retention failed),
 the pool counts (`profiles`, `seeds` (distinct seed titles across profiles),
@@ -49,12 +51,16 @@ cap or because the library now has them), `sources_fetched`,
 has under their IMDb or TVDB ID), `text_unchanged` (refetched titles whose
 vector was kept), `refused_skipped` (titles whose text the provider refused
 before), `tmdb_requests`, `embeddings` with the embedding job's counts,
-`budget_exhausted`, and `vectors_skipped`, the reason no vectors could be
-stored), and the row counts (`row_profiles`, `rows_built`, `rows_deleted`,
+`budget_exhausted`, `vectors_skipped` (the English reason no vectors could be
+stored), and `vectors_skipped_reason` (stable code: `no_provider`, `no_lock`,
+`lock_conflict`, or `no_taste_profiles`)), and the row counts (`row_profiles`, `rows_built`, `rows_deleted`,
 `rows_refused`, `row_failures`, `rows_busy`, `rows_remaining` (profiles not
 reached when the run stopped)). A run with the feature off only applies
-retention. Saving either switch as off cancels active generation when the
-worker receives the change. If only the main recommendations switch is turned
+retention; scheduled idle off-runs that prune nothing are not recorded in run
+history. Saving either switch as off cancels active generation when the
+worker receives the change; enabling `recommendations.external.enabled` while
+recommendations are running kicks off an initial build automatically if no
+outside rows exist yet. If only the main recommendations switch is turned
 off, Discover can still serve stored rows until restart.
 
 `stale_sweep` reports the sweep that rebuilds profiles after their signals or

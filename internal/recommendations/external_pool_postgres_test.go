@@ -206,26 +206,24 @@ func TestBuildExternalPoolDB(t *testing.T) {
 	ctx := context.Background()
 
 	counts := s.build(externalTMDBRequestBudget, externalEmbedBudget)
-	if counts.VectorsSkipped != errNoExternalLock.Error() || counts.DetailsFetched != 0 || *s.embedded != 0 {
-		t.Fatalf("without a lock: %+v, %d texts embedded", counts, *s.embedded)
+	if counts.VectorsSkippedReason != ExternalSkipNoLock || counts.VectorsSkipped != errNoExternalLock.Error() ||
+		counts.TMDBRequests != 0 || counts.SourcesFetched != 0 || counts.DetailsFetched != 0 || *s.embedded != 0 {
+		t.Fatalf("without a lock: %+v, %d texts embedded (want no TMDB calls before lock exists)", counts, *s.embedded)
 	}
 	if lock, err := s.engine.repo.GetEmbeddingLock(ctx); err != nil || lock != nil {
 		t.Fatalf("outside run wrote the lock %+v (%v)", lock, err)
 	}
+
+	s.lock()
+	counts = s.build(externalTMDBRequestBudget, externalEmbedBudget)
 	if counts.Seeds != 3 || counts.SourcesFetched != 5 || s.tmdb.detailCalls(s.seeds...) != 3 || s.tmdb.pages != 2 {
-		t.Fatalf("first run: %+v, seed calls %d, pages %d", counts, s.tmdb.detailCalls(s.seeds...), s.tmdb.pages)
+		t.Fatalf("first locked run: %+v, seed calls %d, pages %d", counts, s.tmdb.detailCalls(s.seeds...), s.tmdb.pages)
 	}
 	if counts.PoolTitles != len(s.pool) {
 		t.Fatalf("pool %d titles, want %d (the owned one left out)", counts.PoolTitles, len(s.pool))
 	}
-
-	s.lock()
-	counts = s.build(externalTMDBRequestBudget, externalEmbedBudget)
-	if s.tmdb.detailCalls(s.seeds...) != 3 || s.tmdb.pages != 2 {
-		t.Fatalf("fresh lists or sets fetched again: seed calls %d, pages %d", s.tmdb.detailCalls(s.seeds...), s.tmdb.pages)
-	}
 	if counts.DetailsFetched != len(s.pool) || counts.Embeddings.Embedded != len(s.pool) || s.vectors() != len(s.pool) {
-		t.Fatalf("second run: %+v, %d vectors", counts, s.vectors())
+		t.Fatalf("first locked run details/vectors: %+v, %d vectors", counts, s.vectors())
 	}
 	owned := ExternalTitleKey{MediaType: ExternalMediaMovie, TMDBID: s.base + 12}
 	if stored, err := s.engine.repo.externalTitlesByKeys(ctx, []ExternalTitleKey{owned}); err != nil || len(stored) != 0 {

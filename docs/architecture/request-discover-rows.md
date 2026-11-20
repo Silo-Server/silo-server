@@ -141,7 +141,12 @@ Each title carries up to two `reasons`: the library titles that led to it, best
 first, and only ones the profile watched, rated or favorited. A reason the viewer cannot see is left out; the title stays.
 
 Filtering comes before paging, so totals are exact: `total_results` counts the
-titles the viewer gets and `total_pages` is that over 20. The Discover page
+titles the viewer gets and `total_pages` is that over 20. Titles whose request
+by the viewer's profile was declined (with no active request) are dropped, and
+titles that already have an active request are stably moved behind fresh
+unrequested titles so leading slots stay actionable. Daily tail rotation
+(pinning the top 10 and rotating positions 11–20 by UTC date) keeps rows fresh
+between rebuilds. The Discover page
 shows up to the row's limit. Its see all page serves 20 titles a page with no
 `next_page`; page+1 follows. A row the Discover page trims has no cursor, as on
 other rows; a row it shows whole over several pages points past its last page.

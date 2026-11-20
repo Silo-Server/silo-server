@@ -17,26 +17,41 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 )
 
+// Machine-readable reasons a Discover recommendations run skipped fetching
+// details and storing vectors.
+const (
+	ExternalSkipNoProvider      = "no_provider"
+	ExternalSkipNoLock          = "no_lock"
+	ExternalSkipLockConflict    = "lock_conflict"
+	ExternalSkipNoTasteProfiles = "no_taste_profiles"
+)
+
+// Phases reported while the outside-title job runs.
+const (
+	ExternalPhaseSources = "sources"
+	ExternalPhaseTitles  = "titles"
+	ExternalPhaseRows    = "rows"
+)
+
 // errNoExternalLock is why a run stores no outside vectors before library
 // vectors have locked the embedding model.
-var errNoExternalLock = errors.New("no embedding lock yet; library embeddings create it")
+var (
+	errNoExternalLock          = errors.New("no embedding lock yet; library embeddings create it")
+	errNoExternalTasteProfiles = errors.New("no profiles have a taste profile yet")
+)
+
+func (r *externalRun) reportProgress(phase string, done, total int) {
+	if r.onProgress != nil {
+		r.onProgress(phase, done, total)
+	}
+}
 
 // refreshTitles fetches the detail of each chosen title that has none, an old
-// one, or no vector for the locked model, stores its card fields, and embeds
-// its canonical text unless the stored vector's text is the same. Titles come
-// in chosen's order, so sets go first. Without a usable embedding lock it
-// fetches nothing: a detail is only worth its request when the title can be
-// embedded from it.
-func (r *externalRun) refreshTitles(ctx context.Context, chosen []ExternalTitleKey, embedBudget int) error {
+// one, or no vector for lock's model, stores its card fields, and embeds its
+// canonical text unless the stored vector's text is the same. Titles come in
+// chosen's order, so sets go first.
+func (r *externalRun) refreshTitles(ctx context.Context, lock *EmbeddingLock, chosen []ExternalTitleKey, embedBudget int) error {
 	e := r.e
-	lock, reason, err := e.externalEmbeddingLock(ctx)
-	if err != nil {
-		return err
-	}
-	if lock == nil {
-		r.counts.VectorsSkipped = reason
-		return nil
-	}
 	stale, err := e.repo.ExternalTitlesNeedingDetail(ctx, chosen, r.now.Add(-externalDetailRefetch))
 	if err != nil {
 		return err
@@ -83,6 +98,7 @@ func (r *externalRun) refreshTitles(ctx context.Context, chosen []ExternalTitleK
 		refused: refused,
 	}
 	attempted := 0
+	r.reportProgress(ExternalPhaseTitles, 0, len(work))
 	defer func() {
 		r.counts.Embeddings = emb.counts
 		r.counts.DetailsLeft = len(work) - attempted
@@ -120,6 +136,7 @@ func (r *externalRun) refreshTitles(ctx context.Context, chosen []ExternalTitleK
 		if err := emb.embedBatch(ctx, ids, chunkTexts); err != nil {
 			return err
 		}
+		r.reportProgress(ExternalPhaseTitles, attempted, len(work))
 		if n < len(chunk) {
 			break
 		}
@@ -137,23 +154,24 @@ func (r *externalRun) Embed(ctx context.Context, texts []string) ([][]float32, e
 }
 
 // externalEmbeddingLock returns the embedding lock outside vectors are stored
-// under, or nil and why there is none to use: no embedding provider, no lock
-// yet, or a lock for another model than the configured one.
-func (e *Engine) externalEmbeddingLock(ctx context.Context) (*EmbeddingLock, string, error) {
+// under, or nil with a structured reason code and message when there is none
+// to use: no embedding provider, no lock yet, or a lock for another model
+// than the configured one.
+func (e *Engine) externalEmbeddingLock(ctx context.Context) (*EmbeddingLock, string, string, error) {
 	if !e.embeddingConfigured() || e.embClient == nil {
-		return nil, ErrNoEmbeddingProvider.Error(), nil
+		return nil, ExternalSkipNoProvider, ErrNoEmbeddingProvider.Error(), nil
 	}
 	lock, err := checkEmbeddingLockConfig(ctx, e.repo, e.cfg.EmbeddingModel)
 	if err != nil {
 		if lock != nil {
-			return nil, err.Error(), nil
+			return nil, ExternalSkipLockConflict, err.Error(), nil
 		}
-		return nil, "", err
+		return nil, "", "", err
 	}
 	if lock == nil {
-		return nil, errNoExternalLock.Error(), nil
+		return nil, ExternalSkipNoLock, errNoExternalLock.Error(), nil
 	}
-	return lock, "", nil
+	return lock, "", "", nil
 }
 
 // fetchDetails fetches the details of keys in language, in parallel within

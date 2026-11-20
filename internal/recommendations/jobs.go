@@ -323,7 +323,11 @@ func (w *Worker) runJob(j job, background bool) error {
 
 // runScheduled runs a cron job, logging instead of returning a busy job.
 func (w *Worker) runScheduled(name JobName) {
-	err := w.runJob(w.jobFor(name), false)
+	j := w.jobFor(name)
+	if name == JobExternal {
+		j.quietWhenIdle = true
+	}
+	err := w.runJob(j, false)
 	switch {
 	case err == nil:
 	case errors.Is(err, ErrJobRunningElsewhere):

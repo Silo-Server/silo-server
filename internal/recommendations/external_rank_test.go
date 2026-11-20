@@ -121,3 +121,110 @@ func TestRankExternalCandidatesReasons(t *testing.T) {
 		}
 	}
 }
+
+func TestFilterExternalByCeiling(t *testing.T) {
+	sims := []ExternalSimilarity{
+		{Key: ExternalTitleKey{MediaType: ExternalMediaMovie, TMDBID: 1}, USCertification: "G"},
+		{Key: ExternalTitleKey{MediaType: ExternalMediaMovie, TMDBID: 2}, USCertification: "PG-13"},
+		{Key: ExternalTitleKey{MediaType: ExternalMediaMovie, TMDBID: 3}, USCertification: "R"},
+		{Key: ExternalTitleKey{MediaType: ExternalMediaMovie, TMDBID: 4}, USCertification: ""},
+		{Key: ExternalTitleKey{MediaType: ExternalMediaMovie, TMDBID: 5}, USCertification: "UNKNOWN"},
+	}
+	if got := filterExternalByCeiling(sims, ""); len(got) != len(sims) {
+		t.Fatalf("unrestricted ceiling kept %d, want %d", len(got), len(sims))
+	}
+	got := filterExternalByCeiling(sims, "PG-13")
+	var ids []int
+	for _, s := range got {
+		ids = append(ids, s.Key.TMDBID)
+	}
+	if !slices.Equal(ids, []int{1, 2}) {
+		t.Fatalf("PG-13 ceiling kept %v, want [1 2] (R and uncertified dropped)", ids)
+	}
+}
+
+func TestApplyExternalQualityPrior(t *testing.T) {
+	sims := externalSims(qualityMinRated+2, func(int) float64 { return 0.7 }, func(int) int { return 500 })
+	// Give spread to base scores so scoreSD > 0, while titles 1 and 2 tie on
+	// similarity and vote count and differ only in vote_average.
+	for i := range sims {
+		sims[i].Similarity = 0.5 + float64(i)*0.02
+		sims[i].VoteAverage = 6.5
+	}
+	sims[0].Similarity, sims[1].Similarity = 0.7, 0.7
+	sims[0].VoteAverage = 5.0
+	sims[1].VoteAverage = 8.8
+	// Title 3 has a 9.9 rating but too few votes to qualify.
+	sims[2].Similarity, sims[2].VoteCount, sims[2].VoteAverage = 0.7, externalQualityMinVotes-1, 9.9
+	sims[3].Similarity = 0.7
+
+	items := scoreExternalCandidates(sims, nil, nil)
+	pos := map[int]int{}
+	for i, it := range items {
+		pos[it.TMDBID] = i
+	}
+	if pos[2] >= pos[1] {
+		t.Fatalf("high-rated title 2 (pos %d) should outrank low-rated title 1 (pos %d): %+v", pos[2], pos[1], items)
+	}
+	if pos[3] <= pos[2] {
+		t.Fatalf("under-threshold title 3 (pos %d) should not outrank qualified title 2 (pos %d): %+v", pos[3], pos[2], items)
+	}
+}
+
+func TestRerankExternalCandidatesAversionAndMMR(t *testing.T) {
+	// Include negative z-scores so we verify MMR shifting and aversion work
+	// cleanly when scores span negative to positive.
+	items := []ExternalRowItem{
+		{TMDBID: 1, Score: 1.5},
+		{TMDBID: 2, Score: 1.4},
+		{TMDBID: 3, Score: 1.1},
+		{TMDBID: 4, Score: -0.5},
+		{TMDBID: 5, Score: -1.2},
+	}
+	// Title 1 and 2 are near-duplicates along axis 0; title 3 is orthogonal
+	// along axis 1; title 4 sits on an avoided axis 2.
+	embs := map[int][]float32{
+		1: {1, 0, 0, 0},
+		2: {0.999, 0.04, 0, 0},
+		3: {0, 1, 0, 0},
+		4: {0, 0, 1, 0},
+		5: {0, 0, 0, 1},
+	}
+	// MMR alone: #1 leads, then #3 (orthogonal) beats near-duplicate #2.
+	mmrOnly := rerankExternalCandidates(items, embs, nil, nil, 0.5)
+	if len(mmrOnly) != len(items) || mmrOnly[0].TMDBID != 1 || mmrOnly[1].TMDBID != 3 {
+		t.Fatalf("MMR order = %+v, want title 1 then orthogonal title 3 ahead of near-duplicate 2", mmrOnly)
+	}
+	scoreByID := map[int]float64{}
+	for _, it := range mmrOnly {
+		scoreByID[it.TMDBID] = it.Score
+	}
+	if scoreByID[1] != 1.5 || scoreByID[5] != -1.2 {
+		t.Fatalf("MMR should keep original scores rather than shifted [0,1] values: %+v", mmrOnly)
+	}
+
+	// Aversion alone (lambda = 1): with enough candidates to establish the
+	// similarity distribution, a turned-away title near the taste vector pushes
+	// down a candidate nearly identical to it.
+	avItems := make([]ExternalRowItem, 12)
+	avEmbs := make(map[int][]float32, 12)
+	for i := range 12 {
+		id := i + 1
+		avItems[i] = ExternalRowItem{TMDBID: id, Score: float64(12-i)*0.2 - 1.0}
+		// Spread candidates along axes 1..3 with small axis-0 component so the
+		// median similarity to taste (axis 0) is low (~0.2).
+		angle := float64(i) * 0.4
+		avEmbs[id] = []float32{0.2, float32(math.Cos(angle)), float32(math.Sin(angle)), 0}
+	}
+	// Candidate 1 sits near the taste vector AND near the turned-away title
+	// along axis 0 + axis 3.
+	avEmbs[1] = []float32{0.7, 0, 0, 0.7}
+	av := &aversion{
+		titles: []aversionTitle{{embedding: []float32{0.7, 0, 0, 0.7}, weight: 1.0}},
+	}
+	taste := []float32{1, 0, 0, 0}
+	avOnly := rerankExternalCandidates(avItems, avEmbs, av, taste, 1.0)
+	if avOnly[0].TMDBID == 1 {
+		t.Fatalf("averted candidate 1 stayed at position 0: %+v", avOnly[:4])
+	}
+}

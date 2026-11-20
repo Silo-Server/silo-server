@@ -495,3 +495,31 @@ func TestRefreshProfileDefersToAnotherServersRefresh(t *testing.T) {
 		t.Fatal("different profiles share a refresh lock")
 	}
 }
+
+func TestExternalResultIdleAndProgress(t *testing.T) {
+	if !(externalResult{}).idle() {
+		t.Fatal("disabled run with no pruned titles should be idle")
+	}
+	if (externalResult{Enabled: true}).idle() {
+		t.Fatal("enabled run must not be idle")
+	}
+	if (externalResult{PrunedTitles: 3}).idle() {
+		t.Fatal("disabled run that pruned titles must not be idle")
+	}
+	if (externalResult{PruneFailed: true}).idle() {
+		t.Fatal("disabled run with prune failure must not be idle")
+	}
+
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	if p := w.currentExternalProgress(); p != (ExternalProgress{}) {
+		t.Fatalf("initial progress = %+v, want zero value", p)
+	}
+	w.setExternalProgress(ExternalPhaseTitles, 5, 20)
+	if p := w.currentExternalProgress(); p.Phase != ExternalPhaseTitles || p.Done != 5 || p.Total != 20 {
+		t.Fatalf("progress = %+v, want titles 5/20", p)
+	}
+	w.clearExternalProgress()
+	if p := w.currentExternalProgress(); p != (ExternalProgress{}) {
+		t.Fatalf("after clear progress = %+v, want zero value", p)
+	}
+}

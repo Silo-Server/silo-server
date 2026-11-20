@@ -3140,9 +3140,13 @@ func main() {
 					}
 					return savedCfg.Recommendations, nil
 				})
-			configWatcher.OnChange(func(_, updated *config.Config) {
+			configWatcher.OnChange(func(prev, updated *config.Config) {
 				if !updated.Recommendations.Enabled || !updated.Recommendations.ExternalEnabled {
 					recWorker.StopExternalGeneration()
+					return
+				}
+				if prev == nil || !prev.Recommendations.ExternalEnabled {
+					recWorker.EnsureExternalNow()
 				}
 			})
 			deps.RecWorker = recWorker

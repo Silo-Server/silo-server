@@ -4,39 +4,73 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 const (
 	// ExternalRowSize is how many outside titles a profile's row keeps.
 	ExternalRowSize = 60
+	// externalRerankPool is how many top-scored candidates enter aversion and
+	// MMR reranking before slicing to ExternalRowSize.
+	externalRerankPool = ExternalRowSize * 3
 	// externalMinCandidates is the fewest candidates of a media type a
 	// profile needs for a row. Standardizing fewer gives scores that mean
 	// little, and a shorter row is not worth a place on a page.
 	externalMinCandidates = 10
 	// externalMaxReasons is how many seeds an item names as its reasons.
 	externalMaxReasons = 2
+	// externalQualityMinVotes is the fewest TMDB votes a title needs before
+	// its vote_average nudges its score, so sparse ratings do not dominate.
+	externalQualityMinVotes = 25
 )
 
 // externalMediaTypes are the media types a profile gets an outside row of.
 var externalMediaTypes = []string{ExternalMediaMovie, ExternalMediaSeries}
 
+// filterExternalByCeiling leaves only candidates admitted by ceiling, failing
+// closed on missing or unrecognized US certifications when ceiling is set.
+func filterExternalByCeiling(sims []ExternalSimilarity, ceiling string) []ExternalSimilarity {
+	if ceiling == "" {
+		return sims
+	}
+	out := make([]ExternalSimilarity, 0, len(sims))
+	for _, s := range sims {
+		if access.RatingAllowed(s.USCertification, ceiling) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // rankExternalCandidates scores a profile's candidates of one media type and
-// returns its row: score = z(similarity) + z(log(1 + vote count)), each
-// standardized over these candidates, best first (ties by TMDB ID), at most
-// ExternalRowSize. A measure with no spread adds 0 to every score. Each item
-// names up to externalMaxReasons of the seeds that named it, best rank
-// first, as library content IDs from seedContentIDs; seeds missing from it
-// are skipped. A candidate whose similarity is not finite is left out. Fewer
-// than externalMinCandidates candidates give no row.
+// returns its row: score = z(similarity) + z(log(1 + vote count)) plus a
+// gentle quality prior on vote_average (when enough rated titles qualify),
+// best first (ties by TMDB ID), at most ExternalRowSize. A measure with no
+// spread adds 0 to every score. Each item names up to externalMaxReasons of
+// the seeds that named it, best rank first, as library content IDs from
+// seedContentIDs; seeds missing from it are skipped. A candidate whose
+// similarity is not finite is left out. Fewer than externalMinCandidates
+// candidates give no row.
 func rankExternalCandidates(sims []ExternalSimilarity, pool map[ExternalTitleKey]ExternalPoolTitle, seedContentIDs map[string]string) []ExternalRowItem {
+	items := scoreExternalCandidates(sims, pool, seedContentIDs)
+	return items[:min(len(items), ExternalRowSize)]
+}
+
+// scoreExternalCandidates computes base relevance + popularity + quality
+// scores for every finite candidate and returns them best first (ties by TMDB
+// ID). Fewer than externalMinCandidates candidates return nil.
+func scoreExternalCandidates(sims []ExternalSimilarity, pool map[ExternalTitleKey]ExternalPoolTitle, seedContentIDs map[string]string) []ExternalRowItem {
 	// A zero vector has no cosine: its similarity is NaN, which would turn
 	// every standardized score NaN and make the row unstorable.
 	sims = slices.DeleteFunc(slices.Clone(sims), func(s ExternalSimilarity) bool {
@@ -60,10 +94,113 @@ func rankExternalCandidates(sims []ExternalSimilarity, pool map[ExternalTitleKey
 			Reasons: externalReasons(pool[s.Key].Seeds, seedContentIDs),
 		}
 	}
+	applyExternalQualityPrior(items, sims)
+	sortExternalRowItems(items)
+	return items
+}
+
+// applyExternalQualityPrior applies quality.go's scale-free quality nudge
+// (qualityPriorWeight × sd(scores) × clamp(z(vote_average), -1, 1)) to titles
+// with at least externalQualityMinVotes votes, when at least qualityMinRated
+// candidates qualify and have spread.
+func applyExternalQualityPrior(items []ExternalRowItem, sims []ExternalSimilarity) {
+	scores := make([]float64, len(items))
+	ratings := make([]float64, 0, len(sims))
+	for i, it := range items {
+		scores[i] = it.Score
+		if sims[i].VoteCount >= externalQualityMinVotes && sims[i].VoteAverage > 0 {
+			ratings = append(ratings, sims[i].VoteAverage)
+		}
+	}
+	if len(ratings) < qualityMinRated {
+		return
+	}
+	_, scoreSD := meanSD(scores)
+	ratingMean, ratingSD := meanSD(ratings)
+	if scoreSD < 1e-12 || ratingSD < 1e-12 {
+		return
+	}
+	for i, s := range sims {
+		if s.VoteCount < externalQualityMinVotes || s.VoteAverage <= 0 {
+			continue
+		}
+		z := max(-1, min(1, (s.VoteAverage-ratingMean)/ratingSD))
+		items[i].Score += qualityPriorWeight * scoreSD * z
+	}
+}
+
+func sortExternalRowItems(items []ExternalRowItem) {
 	slices.SortFunc(items, func(a, b ExternalRowItem) int {
 		return cmp.Or(cmp.Compare(b.Score, a.Score), cmp.Compare(a.TMDBID, b.TMDBID))
 	})
-	return items[:min(len(items), ExternalRowSize)]
+}
+
+// rerankExternalCandidates applies the viewer's library aversion and MMR
+// diversity over a shortlist of base-scored candidates and returns up to
+// ExternalRowSize items.
+func rerankExternalCandidates(items []ExternalRowItem, embByID map[int][]float32, av *aversion, taste []float32, lambda float64) []ExternalRowItem {
+	if len(items) == 0 {
+		return nil
+	}
+	if len(embByID) == 0 || (av.empty() && lambda >= 1) {
+		return items[:min(len(items), ExternalRowSize)]
+	}
+	scored := make([]ScoredItem, len(items))
+	byID := make(map[string]ExternalRowItem, len(items))
+	embs := make(map[string][]float32, len(embByID))
+	for i, it := range items {
+		key := strconv.Itoa(it.TMDBID)
+		scored[i] = ScoredItem{MediaItemID: key, Score: it.Score}
+		byID[key] = it
+		if emb, ok := embByID[it.TMDBID]; ok {
+			embs[key] = emb
+		}
+	}
+	if !av.empty() && len(taste) > 0 {
+		scored, _ = av.apply(scored, embs, taste)
+		slices.SortFunc(scored, func(a, b ScoredItem) int {
+			return cmp.Or(cmp.Compare(b.Score, a.Score), cmp.Compare(byID[a.MediaItemID].TMDBID, byID[b.MediaItemID].TMDBID))
+		})
+	}
+	scoreByID := make(map[string]float64, len(scored))
+	for _, s := range scored {
+		scoreByID[s.MediaItemID] = s.Score
+	}
+	if lambda < 1 {
+		scored = applyExternalMMR(scored, embs, lambda, ExternalRowSize)
+	} else if len(scored) > ExternalRowSize {
+		scored = scored[:ExternalRowSize]
+	}
+	out := make([]ExternalRowItem, 0, len(scored))
+	for _, s := range scored {
+		it := byID[s.MediaItemID]
+		it.Score = scoreByID[s.MediaItemID]
+		out = append(out, it)
+	}
+	return out
+}
+
+// applyExternalMMR shifts z-based scores to [0, 1] before calling applyMMR,
+// since applyMMR divides by maxScore assuming non-negative relevance scores.
+func applyExternalMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda float64, limit int) []ScoredItem {
+	if len(candidates) == 0 || limit <= 0 {
+		return nil
+	}
+	minS, maxS := candidates[0].Score, candidates[0].Score
+	for _, c := range candidates[1:] {
+		minS = min(minS, c.Score)
+		maxS = max(maxS, c.Score)
+	}
+	shifted := make([]ScoredItem, len(candidates))
+	span := maxS - minS
+	for i, c := range candidates {
+		norm := 1.0
+		if span >= 1e-12 {
+			norm = (c.Score - minS) / span
+		}
+		shifted[i] = ScoredItem{MediaItemID: c.MediaItemID, Score: norm}
+	}
+	return applyMMR(shifted, embeddings, lambda, limit)
 }
 
 // standardize returns each value's z-score over values (population standard
@@ -160,6 +297,13 @@ func (e *Engine) rebuildExternalRows(ctx context.Context, held clusterLock, user
 	if !exists {
 		return deleteAll()
 	}
+	accessFilter, err := e.profileAccessFilter(ctx, userID, profileID)
+	if errors.Is(err, access.ErrProfileNotFound) {
+		return deleteAll()
+	}
+	if err != nil {
+		return res, err
+	}
 	poolTitles, err := e.repo.ExternalPool(ctx, profile.PoolQuery())
 	if err != nil {
 		return res, err
@@ -175,12 +319,16 @@ func (e *Engine) rebuildExternalRows(ctx context.Context, held clusterLock, user
 	if err != nil {
 		return res, err
 	}
+	av, avErr := e.loadAversion(ctx, userID, profileID, builtAt)
+	if avErr != nil {
+		slog.WarnContext(ctx, "loading aversion for outside rows failed; ranking without it",
+			"component", "recommendations", "user_id", userID, "profile_id", profileID, "error", avErr)
+	}
 	for _, mediaType := range externalMediaTypes {
-		sims, err := e.repo.ExternalSimilarities(ctx, taste, lock.Model, mediaType, ids[mediaType])
+		items, err := e.rankExternalMediaType(ctx, taste, lock.Model, mediaType, ids[mediaType], accessFilter.MaxContentRating, pool, seedContentIDs, av)
 		if err != nil {
 			return res, err
 		}
-		items := rankExternalCandidates(sims, pool, seedContentIDs)
 		if len(items) == 0 {
 			n, err := writer.deleteExternalRow(ctx, userID, profileID, mediaType)
 			if err != nil {
@@ -203,6 +351,46 @@ func (e *Engine) rebuildExternalRows(ctx context.Context, held clusterLock, user
 		}
 	}
 	return res, nil
+}
+
+// rankExternalMediaType filters one media type's candidates by the profile's
+// content-rating ceiling before scoring, then applies library aversion and MMR
+// diversity over the top shortlist so restricted profiles still get a full row.
+func (e *Engine) rankExternalMediaType(
+	ctx context.Context,
+	taste []float32,
+	model, mediaType string,
+	tmdbIDs []int,
+	ceiling string,
+	pool map[ExternalTitleKey]ExternalPoolTitle,
+	seedContentIDs map[string]string,
+	av *aversion,
+) ([]ExternalRowItem, error) {
+	sims, err := e.repo.ExternalSimilarities(ctx, taste, model, mediaType, tmdbIDs)
+	if err != nil {
+		return nil, err
+	}
+	sims = filterExternalByCeiling(sims, ceiling)
+	scored := scoreExternalCandidates(sims, pool, seedContentIDs)
+	if len(scored) == 0 {
+		return nil, nil
+	}
+	shortlist := scored[:min(len(scored), externalRerankPool)]
+	lambda := e.mmrLambda()
+	if av.empty() && lambda >= 1 {
+		return shortlist[:min(len(shortlist), ExternalRowSize)], nil
+	}
+	shortlistIDs := make([]int, len(shortlist))
+	for i, it := range shortlist {
+		shortlistIDs[i] = it.TMDBID
+	}
+	embs, err := e.repo.ExternalEmbeddings(ctx, model, mediaType, shortlistIDs)
+	if err != nil {
+		slog.WarnContext(ctx, "loading outside embeddings for reranking failed; keeping base rank",
+			"component", "recommendations", "media_type", mediaType, "error", err)
+		return shortlist[:min(len(shortlist), ExternalRowSize)], nil
+	}
+	return rerankExternalCandidates(shortlist, embs, av, taste, lambda), nil
 }
 
 // externalRowLock returns the stored embedding lock and the version of its

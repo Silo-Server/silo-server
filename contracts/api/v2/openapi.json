@@ -19190,7 +19190,21 @@
           },
           "last_run": {
             "$ref": "#/components/schemas/AdminRecommendationJobRun",
-            "description": "The newest finished run on any server. Its result counts titles stored, details fetched, TMDB requests, embeddings and rows built, says whether a per-run budget ran out, and gives vectors_skipped when no vectors could be stored. Absent until one finishes."
+            "description": "The newest finished run on any server. Its result counts titles stored, details fetched, TMDB requests, embeddings and rows built, says whether a per-run budget ran out, and gives vectors_skipped and vectors_skipped_reason when no vectors could be stored. Absent until one finishes."
+          },
+          "phase": {
+            "description": "Current phase while the job is running: sources, titles, or rows. Absent when idle.",
+            "type": "string"
+          },
+          "progress_done": {
+            "description": "Items completed in the current phase while running.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "progress_total": {
+            "description": "Total items in the current phase while running.",
+            "format": "int64",
+            "type": "integer"
           },
           "rows": {
             "description": "Stored outside rows, one per profile and media type.",

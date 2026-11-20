@@ -15387,6 +15387,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " element se ne more obnoviti – okolje tega strežnika določa nastavitve, ki se razlikujejo, ali del njihove povezave"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementa se ne moreta obnoviti – okolje tega strežnika določa nastavitve, ki se razlikujejo, ali del njihove povezave"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementi se ne morejo obnoviti – okolje tega strežnika določa nastavitve, ki se razlikujejo, ali del njihove povezave"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementov se ne more obnoviti – okolje tega strežnika določa nastavitve, ki se razlikujejo, ali del njihove povezave"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -16245,6 +16303,64 @@
     {
       "type": 0,
       "value": "Naslov storitve se spremeni brez njenih poverilnic v varnostni kopiji, zato obnovitev tukaj poverilnice počisti in storitev izklopi, dokler jih ne vnesete znova."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavitev ohrani trenutno vrednost, ker okolje tega strežnika določa njo ali del njene povezave."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavitvi ohranita trenutni vrednosti, ker okolje tega strežnika določa njiju ali del njune povezave."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavitve ohranijo trenutne vrednosti, ker okolje tega strežnika določa njih ali del njihove povezave."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavitev ohrani trenutne vrednosti, ker okolje tega strežnika določa njih ali del njihove povezave."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -20257,6 +20373,12 @@
       "value": "Drug račun na tem strežniku se prijavlja z istim uporabniškim imenom ali e-poštnim naslovom."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Okolje tega strežnika določa nastavitve, ki se razlikujejo, ali del njihove povezave, zato ta strežnik ohrani svoje trenutne vrednosti."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -21619,6 +21741,16 @@
     {
       "type": 0,
       "value": " (ohranjeno: strožje)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (ohranjeno: okolje)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -64992,6 +65124,146 @@
       "value": "Ustvarjanje se je ustavilo. Shranjena priporočila ostanejo vidna v Odkrivanju, dokler se strežnik znova ne zažene."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Razvrščanje profilov ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Pridobivanje seznamov TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Iskanje in vlaganje naslovov ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Počiščen "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pretečen naslov"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Počiščena "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pretečena naslova"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Počiščeni "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pretečeni naslovi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Počiščenih "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pretečenih naslovov"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -65048,6 +65320,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Preden ustvarite priporočila za Odkrivanje, razrešite spodnji spor zaklepa vložitev."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Najprej zaženite posel Vložitve, da bo imel Silo vektorje knjižnice za primerjavo."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Preden ustvarite priporočila za Odkrivanje, povežite ponudnika vložitev v razdelku Storitve UI."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Noben profil še nima profila okusa. Zaženite Profili okusa, ko bo kdo gledal ali ocenil naslove."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -67658,6 +67954,32 @@
       "value": "Ostane prazno, dokler priporočila za Odkrivanje niso vklopljena v Skrbništvo → Priporočila."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Vrstice s priporočili ostanejo prazne, dokler priporočila za Odkrivanje niso vklopljena v "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Skrbništvo → Priporočila"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Izklopljeno v Priporočilih"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -69398,6 +69720,12 @@
       "value": "Nove vrstice se dodajo na dno strani Odkrivanje"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Odpri nastavitve Priporočil"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -69410,6 +69738,12 @@
       "value": "Vir storitve MDBList ne vsebuje razvrstitve, shranjene na strani seznama. Izberite tisto, ki jo seznam prikazuje."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Vaš profil še nima priporočil za Odkrivanje. Za predogled te vrstice zaženite Priporočila za Odkrivanje ali si oglejte in ocenite nekaj naslovov."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -69420,6 +69754,12 @@
     {
       "type": 0,
       "value": "Izberite seznam ali prilepite njegovo povezavo, da vidite njegove naslove."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Za predogled te vrstice vklopite priporočila za Odkrivanje v Skrbništvo → Priporočila."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -79668,6 +80008,24 @@
       "value": "Preklop na drug model zahteva ponastavitev vdelav, kar izbriše vse vdelave. Drug ponudnik, ki ponuja isti model, začne veljati po ponovnem zagonu."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Dodaj v Odkrivanje"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Vrstic s priporočili ni bilo mogoče dodati na stran Odkrivanje."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Vrstice s priporočili so bile dodane na stran Odkrivanje."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -79690,6 +80048,44 @@
     {
       "type": 0,
       "value": "Koliko naslovov, ki jih ni v knjižnici, strežnik hrani za priporočanje. Vsak se poišče v storitvi TMDB in vdela. Vdelava je običajno poceni, vendar je višje število glede na ponudnika vdelav lahko dražje ali počasnejše in porabi več prostora za shranjevanje."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Vaša stran Odkrivanje še ne prikazuje nobene vrstice Priporočila."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Preden se lahko zaženejo priporočila za Odkrivanje, zgoraj vklopite Omogoči priporočila in znova zaženite strežnik."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Zahteve so trenutno izklopljene. Vklopite jih v "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Nastavitve zahtev"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", da bodo gledalci videli stran Odkrivanje."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Odpri stran Odkrivanje"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -90354,6 +90750,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Ta urnik izhaja iz nastavitev varnostnih kopij. Spremenite ga v "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Strežnik › Varnostne kopije"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

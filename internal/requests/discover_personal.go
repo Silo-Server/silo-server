@@ -25,8 +25,17 @@ func (s *Service) SetRecommendations(r discoverrows.Recommendations) { s.recomme
 //   - Request state and follows are overlaid on the page shown, as on other
 //     rows.
 
+// declinedRequestStore is the optional narrow slice of *Repository used to
+// hide titles whose request by the viewer was declined.
+type declinedRequestStore interface {
+	ListDeclinedByViewerTMDB(ctx context.Context, viewer Viewer, mediaType MediaType, tmdbIDs []int) (map[int]bool, error)
+}
+
 // personalTitles returns the viewer's titles of a personal row that pass its
-// rating ceiling and that the library does not have.
+// rating ceiling and that the library does not have. Titles whose request by
+// the viewer was declined (with no newer active request) are dropped, and
+// titles that already have an active request are stably moved after fresh
+// unrequested recommendations so the leading slots stay actionable.
 func (s *Service) personalTitles(ctx context.Context, viewer Viewer, source discoverrows.PersonalSource, ceiling string) ([]discoverrows.PersonalTitle, error) {
 	titles, err := source.Titles(ctx, discoverrows.Viewer{UserID: viewer.UserID, ProfileID: viewer.ProfileID, Library: viewer.Library})
 	if err != nil {
@@ -46,19 +55,58 @@ func (s *Service) personalTitles(ctx context.Context, viewer Viewer, source disc
 		candidatesByType[mediaType] = append(candidatesByType[mediaType], storedPresenceCandidate(t))
 	}
 	owned := map[MediaType]map[int]PresenceMatch{}
+	idsByType := map[MediaType][]int{}
 	for mediaType, candidates := range candidatesByType {
 		if owned[mediaType], err = s.lookupPresence(ctx, mediaType, candidates); err != nil {
 			return nil, err
 		}
 	}
-	out := allowed[:0]
+	unowned := allowed[:0]
 	for _, t := range allowed {
 		mediaType, _ := normalizeMediaType(MediaType(t.Card.MediaType))
 		if !owned[mediaType][t.Card.ID].Available {
-			out = append(out, t)
+			unowned = append(unowned, t)
+			idsByType[mediaType] = append(idsByType[mediaType], t.Card.ID)
 		}
 	}
-	return out, nil
+	return s.orderPersonalByRequestState(ctx, viewer, unowned, idsByType)
+}
+
+// orderPersonalByRequestState drops titles declined for the viewer (unless an
+// active request exists) and stably demotes titles with an active request
+// behind fresh unrequested recommendations.
+func (s *Service) orderPersonalByRequestState(ctx context.Context, viewer Viewer, titles []discoverrows.PersonalTitle, idsByType map[MediaType][]int) ([]discoverrows.PersonalTitle, error) {
+	if len(titles) == 0 || s.store == nil {
+		return titles, nil
+	}
+	active := map[MediaType]map[int]*Request{}
+	declined := map[MediaType]map[int]bool{}
+	declinedStore, hasDeclined := s.store.(declinedRequestStore)
+	for mediaType, ids := range idsByType {
+		var err error
+		if active[mediaType], err = s.store.ListActiveByTMDB(ctx, mediaType, ids); err != nil {
+			return nil, err
+		}
+		if hasDeclined {
+			if declined[mediaType], err = declinedStore.ListDeclinedByViewerTMDB(ctx, viewer, mediaType, ids); err != nil {
+				return nil, err
+			}
+		}
+	}
+	fresh := make([]discoverrows.PersonalTitle, 0, len(titles))
+	var requested []discoverrows.PersonalTitle
+	for _, t := range titles {
+		mediaType, _ := normalizeMediaType(MediaType(t.Card.MediaType))
+		if active[mediaType][t.Card.ID] != nil {
+			requested = append(requested, t)
+			continue
+		}
+		if declined[mediaType][t.Card.ID] {
+			continue
+		}
+		fresh = append(fresh, t)
+	}
+	return append(fresh, requested...), nil
 }
 
 // storedPresenceCandidate is a personal title's library lookup with the IDs

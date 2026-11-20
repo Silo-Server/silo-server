@@ -287,13 +287,19 @@ func TestRecommendedDiscoverRowDatabase(t *testing.T) {
 }
 
 // The parent gets everything but the owned title: the Discover page shows the
-// row's limit, the see all pages the rest 20 at a time.
+// row's limit with the top head pinned and the tail rotated daily, and see all
+// pages the rest 20 at a time in the same order.
 func (s *recRowScenario) checkParent(t *testing.T) {
 	want := slices.Concat(s.order[:3], s.order[4:])
 	page := s.page(recParent)
 	section := recMovieRow(page)
-	if section == nil || !slices.Equal(recIDs(section.Results), want[:20]) || section.TotalResults != len(want) || section.TotalPages != 2 || section.NextPage != 0 {
-		t.Fatalf("Discover row = %+v, want the first 20 of %v", section, want)
+	if section == nil || len(section.Results) != 20 || section.TotalResults != len(want) || section.TotalPages != 2 || section.NextPage != 0 {
+		t.Fatalf("Discover row = %+v, want 20 of %d", section, len(want))
+	}
+	// The first 10 stored items are pinned by daily rotation; dropping the
+	// owned title at index 3 leaves the leading 9 titles in exact order.
+	if got := recIDs(section.Results); !slices.Equal(got[:9], want[:9]) {
+		t.Fatalf("Discover row pinned head = %v, want %v", got[:9], want[:9])
 	}
 	if first := section.Results[0]; len(first.Reasons) != 1 || first.Reasons[0] != (discoverrows.Reason{ContentID: s.seed, Title: s.seed}) ||
 		first.Availability != AvailabilityMissing || !first.Request.Requestable {
@@ -312,16 +318,35 @@ func (s *recRowScenario) checkParent(t *testing.T) {
 		}
 		seen = append(seen, recIDs(p.Results)...)
 	}
-	if !slices.Equal(seen, want) {
-		t.Fatalf("see all pages = %v, want %v", seen, want)
+	if !slices.Equal(seen[:20], recIDs(section.Results)) {
+		t.Fatalf("see all page 1 = %v, want Discover row order %v", seen[:20], recIDs(section.Results))
+	}
+	sortedSeen, sortedWant := slices.Clone(seen), slices.Clone(want)
+	slices.Sort(sortedSeen)
+	slices.Sort(sortedWant)
+	if !slices.Equal(sortedSeen, sortedWant) {
+		t.Fatalf("see all set = %v, want %v", sortedSeen, sortedWant)
 	}
 }
 
 // A PG-13 profile sees neither the R title nor the uncertified one.
 func (s *recRowScenario) checkCeiling(t *testing.T) {
-	p := s.seeAll(recTeen, 1)
-	if got := recIDs(p.Results); !slices.Equal(got, slices.Concat(s.order[:1], s.order[4:23])) || p.TotalResults != 26 {
-		t.Fatalf("PG-13 row = %v (%d titles), want the PG title and the G titles", got, p.TotalResults)
+	p1 := s.seeAll(recTeen, 1)
+	p2 := s.seeAll(recTeen, 2)
+	want := slices.Concat(s.order[:1], s.order[4:])
+	if p1.TotalResults != len(want) || len(p1.Results) != 20 || len(p2.Results) != len(want)-20 {
+		t.Fatalf("PG-13 pages = %d + %d (total %d), want %d", len(p1.Results), len(p2.Results), p1.TotalResults, len(want))
+	}
+	// Top 10 pinned minus R, uncertified, and owned leaves 7 pinned titles.
+	if got := recIDs(p1.Results); !slices.Equal(got[:7], want[:7]) {
+		t.Fatalf("PG-13 pinned head = %v, want %v", got[:7], want[:7])
+	}
+	all := append(recIDs(p1.Results), recIDs(p2.Results)...)
+	slices.Sort(all)
+	sortedWant := slices.Clone(want)
+	slices.Sort(sortedWant)
+	if !slices.Equal(all, sortedWant) {
+		t.Fatalf("PG-13 titles = %v, want %v", all, sortedWant)
 	}
 }
 

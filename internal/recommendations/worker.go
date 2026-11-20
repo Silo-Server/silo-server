@@ -101,8 +101,10 @@ type Worker struct {
 	embeddingsJobTimeout time.Duration
 	// liveConfig reads the settings outside titles follow; nil keeps the
 	// engine's.
-	liveConfig     LiveConfig
-	cancelExternal context.CancelCauseFunc // guarded by mu
+	liveConfig        LiveConfig
+	cancelExternal    context.CancelCauseFunc // guarded by mu
+	externalProgress  ExternalProgress        // guarded by mu
+	externalBootstrap refreshThrottle
 }
 
 const tasteProfileRefreshSubjectsQuery = `
@@ -175,6 +177,7 @@ func (w *Worker) Start() {
 	go w.stalenessLoop(ctx)
 	go w.embedMissingLoop(ctx)
 	go w.ensureGlobalRows(ctx, w.engine.repo)
+	go w.ensureExternalRows(ctx)
 
 	slog.Info("recommendation worker started")
 }
@@ -661,6 +664,9 @@ func (w *Worker) doTasteProfiles(ctx context.Context, held clusterLock) (tastePr
 	}
 	if res.Refreshed == 0 && res.NoOp > 0 {
 		slog.WarnContext(ctx, "taste profile job stored no taste vectors; their titles may have no embeddings yet", "component", "recommendations", "profiles", res.Profiles, "no_op", res.NoOp)
+	}
+	if res.Refreshed > 0 {
+		w.maybeBootstrapExternal()
 	}
 	return res, nil
 }
@@ -1469,12 +1475,16 @@ func (w *Worker) refreshProfile(ctx context.Context, held clusterLock, userID in
 // rebuilds the rows on its next run, where keeping the profile stale would
 // redo its whole refresh on every sweep while the failure lasts.
 func (w *Worker) refreshExternalRows(ctx context.Context, lock clusterLock, userID int, profileID string, signals *tasteSignals) error {
-	_, err := w.rebuildProfileExternalRows(ctx, lock, userID, profileID, signals)
+	built, err := w.rebuildProfileExternalRows(ctx, lock, userID, profileID, signals)
 	if errors.Is(err, errProfilePurgeCheck) || errors.Is(err, errJobLockLost) {
 		return fmt.Errorf("rebuild outside rows: %w", err)
 	}
 	if err != nil {
 		slog.WarnContext(ctx, "rebuilding a profile's outside rows failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+		return nil
+	}
+	if built.Written == 0 && signals != nil {
+		w.maybeBootstrapExternal()
 	}
 	return nil
 }

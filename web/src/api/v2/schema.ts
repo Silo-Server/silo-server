@@ -21222,8 +21222,20 @@ export interface components {
       count: number;
       /** @description Whether outside-title recommendations are on: recommendations are enabled and recommendations.external.enabled is set. When off, the job only deletes expired outside titles. */
       enabled: boolean;
-      /** @description The newest finished run on any server. Its result counts titles stored, details fetched, TMDB requests, embeddings and rows built, says whether a per-run budget ran out, and gives vectors_skipped when no vectors could be stored. Absent until one finishes. */
+      /** @description The newest finished run on any server. Its result counts titles stored, details fetched, TMDB requests, embeddings and rows built, says whether a per-run budget ran out, and gives vectors_skipped and vectors_skipped_reason when no vectors could be stored. Absent until one finishes. */
       last_run?: components["schemas"]["AdminRecommendationJobRun"];
+      /** @description Current phase while the job is running: sources, titles, or rows. Absent when idle. */
+      phase?: string;
+      /**
+       * Format: int64
+       * @description Items completed in the current phase while running.
+       */
+      progress_done?: number;
+      /**
+       * Format: int64
+       * @description Total items in the current phase while running.
+       */
+      progress_total?: number;
       /**
        * Format: int64
        * @description Stored outside rows, one per profile and media type.

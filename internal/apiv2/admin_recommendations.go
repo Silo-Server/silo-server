@@ -48,11 +48,14 @@ type AdminRecommendationJobRun struct {
 // AdminRecommendationExternalStatus is the outside-title job: titles the
 // library does not have, fetched from TMDB, embedded and ranked per profile.
 type AdminRecommendationExternalStatus struct {
-	Enabled bool                       `json:"enabled" doc:"Whether outside-title recommendations are on: recommendations are enabled and recommendations.external.enabled is set. When off, the job only deletes expired outside titles."`
-	Running bool                       `json:"running"`
-	Count   int                        `json:"count" doc:"Outside titles stored."`
-	Rows    int                        `json:"rows" doc:"Stored outside rows, one per profile and media type."`
-	LastRun *AdminRecommendationJobRun `json:"last_run,omitempty" doc:"The newest finished run on any server. Its result counts titles stored, details fetched, TMDB requests, embeddings and rows built, says whether a per-run budget ran out, and gives vectors_skipped when no vectors could be stored. Absent until one finishes."`
+	Enabled       bool                       `json:"enabled" doc:"Whether outside-title recommendations are on: recommendations are enabled and recommendations.external.enabled is set. When off, the job only deletes expired outside titles."`
+	Running       bool                       `json:"running"`
+	Count         int                        `json:"count" doc:"Outside titles stored."`
+	Rows          int                        `json:"rows" doc:"Stored outside rows, one per profile and media type."`
+	Phase         string                     `json:"phase,omitempty" doc:"Current phase while the job is running: sources, titles, or rows. Absent when idle."`
+	ProgressDone  int                        `json:"progress_done,omitempty" doc:"Items completed in the current phase while running."`
+	ProgressTotal int                        `json:"progress_total,omitempty" doc:"Total items in the current phase while running."`
+	LastRun       *AdminRecommendationJobRun `json:"last_run,omitempty" doc:"The newest finished run on any server. Its result counts titles stored, details fetched, TMDB requests, embeddings and rows built, says whether a per-run budget ran out, and gives vectors_skipped and vectors_skipped_reason when no vectors could be stored. Absent until one finishes."`
 }
 type AdminRecommendationsStatus struct {
 	Embeddings       AdminRecommendationJobStatus      `json:"embeddings"`
@@ -209,8 +212,13 @@ func (reg *Registry) getAdminRecommendationsStatus(ctx context.Context, _ *struc
 		LockConflictKey:  conflictKey,
 		LockConflictArgs: conflictArgs,
 		External: AdminRecommendationExternalStatus{
-			Enabled: external.Enabled, Running: w.IsRunning(recommendations.JobExternal),
-			Count: external.Titles, Rows: external.Rows,
+			Enabled:       external.Enabled,
+			Running:       w.IsRunning(recommendations.JobExternal),
+			Count:         external.Titles,
+			Rows:          external.Rows,
+			Phase:         external.Progress.Phase,
+			ProgressDone:  external.Progress.Done,
+			ProgressTotal: external.Progress.Total,
 		},
 		StaleSweep:       AdminRecommendationStaleSweep{Pending: sweep.Pending},
 		CacheRefreshedAt: instantPtr(refreshedAt),

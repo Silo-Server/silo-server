@@ -1,7 +1,6 @@
 package recommendations
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"math"
@@ -159,8 +158,13 @@ func TestRebuildExternalRowsDB(t *testing.T) {
 	if row == nil || len(row.Items) != len(s.titles) || row.EmbeddingModel != externalTestModel {
 		t.Fatalf("row %+v, want %d items under %s", row, len(s.titles), externalTestModel)
 	}
-	if !slices.IsSortedFunc(row.Items, func(a, b ExternalRowItem) int { return cmp.Compare(b.Score, a.Score) }) {
-		t.Fatalf("items not best first: %+v", row.Items)
+	if row.Items[0].TMDBID != s.f.base+30 {
+		t.Fatalf("highest-scoring title should lead MMR output: got %+v", row.Items)
+	}
+	for _, it := range row.Items {
+		if math.IsNaN(it.Score) || math.IsInf(it.Score, 0) {
+			t.Fatalf("non-finite score in row: %+v", it)
+		}
 	}
 	reasons := map[int][]string{}
 	for _, it := range row.Items {

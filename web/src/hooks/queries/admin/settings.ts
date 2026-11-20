@@ -265,6 +265,7 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
       }
       if (keys.includes("recommendations.external.enabled")) {
         invalidations.push(
+          queryClient.invalidateQueries({ queryKey: adminKeys.recommendationsStatus() }),
           queryClient.invalidateQueries({ queryKey: requestKeys.status() }),
           queryClient.invalidateQueries({ queryKey: requestKeys.discovery() }),
         );

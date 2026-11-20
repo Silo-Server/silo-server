@@ -198,13 +198,15 @@ export function rowKindSentence(type: DiscoverRowType): string {
   return t(ROW_KINDS[type].sentence);
 }
 
-/** The types Add row starts a new row from; brand rows come back from "Bring back". */
+/**
+ * The types Add row starts a new row from; brand rows and the stock recommended
+ * rows come back from "Bring back" so they keep their IDs and localized titles.
+ */
 export const NEW_ROW_TYPES: readonly DiscoverRowType[] = [
   "tmdb_chart",
   "tmdb_discover",
   "mdblist",
   "tmdb_list",
-  "recommended",
 ];
 
 export const DEFAULT_ROW_LIMIT = 20;
@@ -295,6 +297,24 @@ export function missingStockRows(rows: readonly Pick<DiscoverRowBody, "id">[]): 
   return STOCK_ROWS.filter((row) => !ids.has(row.id));
 }
 
+/**
+ * Returns a layout body list with enabled recommended rows: re-enables any
+ * existing disabled recommended rows, or prepends the stock recommended rows
+ * when the layout has none. Returns null if adding the stock rows would exceed
+ * `layout.max_rows`.
+ */
+export function withRecommendedDiscoverRows(layout: DiscoverLayout): DiscoverRowBody[] | null {
+  const existing = layoutBodies(layout);
+  if (existing.some((row) => row.type === "recommended")) {
+    return existing.map((row) => (row.type === "recommended" ? { ...row, enabled: true } : row));
+  }
+  const toAdd = RECOMMENDED_ROWS.map((row) => ({ ...row }));
+  if (existing.length + toAdd.length > layout.max_rows) {
+    return null;
+  }
+  return [...toAdd, ...existing];
+}
+
 // The collection charts name series "tv"; the request API says series.
 export function toTMDBChart(chart: DiscoverChart): TMDBChart {
   return {
@@ -315,19 +335,31 @@ export function fromTMDBChart(chart: TMDBChart): DiscoverChart {
 /** The name a row shows when none is typed, in the interface language; empty when it needs one. */
 export function defaultTitle(row: DiscoverRowBody): string {
   if (row.chart) return chartName(toTMDBChart(row.chart), t);
+  if (row.recommended) {
+    return row.recommended.media_type === "series"
+      ? t("home.section.discoverRecommendedSeries")
+      : t("home.section.discoverRecommendedMovies");
+  }
   if (isBrandRow(row)) return rowKindLabel(row.type);
   return "";
 }
 
 /**
  * The name the row is saved with. It is stored data, so an untyped chart row keeps its
- * English chart name and an untyped brand row the server's English default ("Studios")
+ * English chart name and an untyped brand or recommended row the server's English default
  * in every interface language.
  */
 export function savedTitle(row: DiscoverRowBody): string {
   const typed = row.title.trim();
   if (typed) return typed;
   if (row.chart) return chartName(toTMDBChart(row.chart));
+  if (row.recommended) {
+    return (
+      RECOMMENDED_ROWS.find(
+        (stock) => stock.recommended?.media_type === row.recommended?.media_type,
+      )?.title ?? ""
+    );
+  }
   if (isBrandRow(row)) return BRAND_ROWS.find((brand) => brand.type === row.type)?.title ?? "";
   return defaultTitle(row);
 }
@@ -527,7 +559,7 @@ export function describeDiscoverRow(row: DiscoverRow, personalRowsOff = false): 
       t("web.admin.requests.discover.describe.recommended", { media: row.recommended.media_type }),
     );
     if (personalRowsOff) {
-      parts.push(" · ", { warning: t("web.admin.requests.discover.recommendedOff") });
+      parts.push(` · ${t("web.admin.requests.discover.recommendedOffShort")}`);
     }
     // A recommended row never shows titles the library has, so "Missing titles only" says nothing.
     return parts;

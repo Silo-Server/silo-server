@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { ExternalLink, Pencil, RotateCcw, Rows3, Trash2, type LucideIcon } from "lucide-react";
 
 import type { DiscoverRow, DiscoverRowType } from "@/api/v2/adminRequests";
@@ -133,6 +133,7 @@ function DiscoverLayoutEditor() {
   const personalRowsOff =
     requestStatus?.requests_enabled === true &&
     requestStatus.personal_discover_rows_supported === false;
+  const hasEnabledRecommended = discoverRows.some((row) => row.recommended && row.enabled);
 
   function openDialog(row: DiscoverRow | null) {
     setRowDialog({ key: ++dialogCount.current, row });
@@ -223,19 +224,35 @@ function DiscoverLayoutEditor() {
       addRow={{ onClick: () => openDialog(null), disabled: !adapter.canEdit || full }}
       notices={
         layout ? (
-          <p className="text-muted-foreground max-w-3xl text-sm">
-            {[
-              layout.customized
-                ? t("web.admin.requests.discoverPage.notice.customized")
-                : t("web.admin.requests.discoverPage.notice.default"),
-              t("web.admin.requests.discoverPage.notice.olderApps"),
-              full
-                ? t("web.admin.requests.discoverPage.notice.full", { count: layout.max_rows })
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" ")}
-          </p>
+          <div className="max-w-3xl space-y-2 text-sm">
+            <p className="text-muted-foreground">
+              {[
+                layout.customized
+                  ? t("web.admin.requests.discoverPage.notice.customized")
+                  : t("web.admin.requests.discoverPage.notice.default"),
+                t("web.admin.requests.discoverPage.notice.olderApps"),
+                full
+                  ? t("web.admin.requests.discoverPage.notice.full", { count: layout.max_rows })
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            </p>
+            {personalRowsOff && hasEnabledRecommended ? (
+              <p className="text-muted-foreground">
+                {t("web.admin.requests.discover.recommendedOffBanner", {
+                  link: (chunks) => (
+                    <Link
+                      to="/admin/recommendations"
+                      className="text-foreground font-medium underline underline-offset-2"
+                    >
+                      {chunks}
+                    </Link>
+                  ),
+                })}
+              </p>
+            ) : null}
+          </div>
         ) : null
       }
     >

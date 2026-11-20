@@ -14,7 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -94,6 +93,8 @@ type ExternalPoolOptions struct {
 	// MaxTitles caps the outside titles the server stores;
 	// the configured default when <= 0.
 	MaxTitles int
+	// OnProgress reports phase progress while the run is executing.
+	OnProgress func(phase string, done, total int)
 	// held owns the PostgreSQL session used for pool writes.
 	held clusterLock
 	// partialProfiles prevents cap eviction if some profiles could not be read.
@@ -136,8 +137,10 @@ type ExternalPoolCounts struct {
 	// BudgetExhausted is set when a per-run budget stopped the run.
 	BudgetExhausted bool `json:"budget_exhausted"`
 	// VectorsSkipped says why the run fetched no details and stored no
-	// vectors, or is empty.
-	VectorsSkipped string `json:"vectors_skipped,omitempty"`
+	// vectors, or is empty; VectorsSkippedReason holds its machine-readable
+	// code (ExternalSkip*) for localized UI guidance.
+	VectorsSkipped       string `json:"vectors_skipped,omitempty"`
+	VectorsSkippedReason string `json:"vectors_skipped_reason,omitempty"`
 }
 
 // externalLimits are a run's budgets.
@@ -198,6 +201,7 @@ type externalRun struct {
 	// tmdbLeft is the TMDB requests the run may still make.
 	tmdbLeft        int
 	partialProfiles bool
+	onProgress      func(phase string, done, total int)
 	// failures counts TMDB calls in a row that failed.
 	failures atomic.Int32
 	mu       sync.Mutex
@@ -215,7 +219,7 @@ func (e *Engine) buildExternalPool(ctx context.Context, profiles []ExternalProfi
 	if err != nil {
 		return ExternalPoolCounts{}, err
 	}
-	r := &externalRun{e: e, tmdb: e.externalTMDB, now: now, held: opts.held, partialProfiles: opts.partialProfiles}
+	r := &externalRun{e: e, tmdb: e.externalTMDB, now: now, held: opts.held, partialProfiles: opts.partialProfiles, onProgress: opts.OnProgress}
 	r.writer = e.repo.externalPoolWriter
 	if opts.held != nil {
 		r.writer = opts.held.poolWriter(r.writer)
@@ -228,6 +232,19 @@ func (e *Engine) buildExternalPool(ctx context.Context, profiles []ExternalProfi
 }
 
 func (r *externalRun) run(ctx context.Context, profiles []ExternalProfile, maxTitles, embedBudget int) error {
+	// Verify the embedding provider and lock before spending TMDB calls.
+	lock, code, msg, err := r.e.externalEmbeddingLock(ctx)
+	if err != nil {
+		return err
+	}
+	if lock == nil {
+		r.counts.VectorsSkipped, r.counts.VectorsSkippedReason = msg, code
+		return nil
+	}
+	if len(profiles) == 0 && !r.partialProfiles {
+		r.counts.VectorsSkipped, r.counts.VectorsSkippedReason = errNoExternalTasteProfiles.Error(), ExternalSkipNoTasteProfiles
+		return nil
+	}
 	// Sets first: the server cap admits them first, and they are few requests.
 	var setKeys []string
 	for _, p := range profiles {
@@ -247,7 +264,7 @@ func (r *externalRun) run(ctx context.Context, profiles []ExternalProfile, maxTi
 	if err != nil {
 		return err
 	}
-	return r.refreshTitles(ctx, chosen, embedBudget)
+	return r.refreshTitles(ctx, lock, chosen, embedBudget)
 }
 
 // externalSeedFetchOrder lists the profiles' distinct seed titles in the
@@ -398,6 +415,9 @@ func (r *externalRun) fetchSeedLists(ctx context.Context, seeds []ExternalTitleK
 		r.counts.BudgetExhausted = true
 		r.mu.Unlock()
 	}
+	if len(fetch) > 0 {
+		r.reportProgress(ExternalPhaseSources, 0, len(fetch))
+	}
 	var done atomic.Int64
 	err = forEachBounded(ctx, len(fetch), func(ctx context.Context, i int) (bool, error) {
 		if ok, err := r.takeRequest(ctx); !ok {
@@ -425,7 +445,8 @@ func (r *externalRun) fetchSeedLists(ctx context.Context, seeds []ExternalTitleK
 		default:
 			res.Links = externalSeedLinks(seed.MediaType, detail)
 		}
-		done.Add(1)
+		n := int(done.Add(1))
+		r.reportProgress(ExternalPhaseSources, n, len(fetch))
 		return false, r.recordSource(ctx, res)
 	})
 	r.leaveSources(len(due) - int(done.Load()))
@@ -920,56 +941,4 @@ func (r *externalRun) ownedTitles(ctx context.Context, titles iter.Seq[externalT
 		}
 	}
 	return owned, nil
-}
-
-// externalSetTitles returns the titles each of the given sets names, best
-// rank first, in source-key order. A set with no stored links is left out.
-func (r *Repo) externalSetTitles(ctx context.Context, setKeys []string) ([]externalSetTitles, error) {
-	if len(setKeys) == 0 {
-		return nil, nil
-	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT source_key, media_type, tmdb_id
-		FROM   external_title_links
-		WHERE  source_key = ANY($1) AND list = 'set'
-		ORDER  BY source_key, rank`, setKeys)
-	if err != nil {
-		return nil, fmt.Errorf("read outside set titles: %w", err)
-	}
-	defer rows.Close()
-	var out []externalSetTitles
-	for rows.Next() {
-		var key string
-		var k ExternalTitleKey
-		if err := rows.Scan(&key, &k.MediaType, &k.TMDBID); err != nil {
-			return nil, fmt.Errorf("read outside set titles: %w", err)
-		}
-		if len(out) == 0 || out[len(out)-1].key != key {
-			out = append(out, externalSetTitles{key: key})
-		}
-		last := &out[len(out)-1]
-		last.titles = append(last.titles, k)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read outside set titles: %w", err)
-	}
-	return out, nil
-}
-
-// externalStoredTitleIDs returns every stored outside title with its other
-// IDs.
-func (r *Repo) externalStoredTitleIDs(ctx context.Context) ([]externalTitleIDs, error) {
-	rows, err := r.pool.Query(ctx, `SELECT media_type, tmdb_id, imdb_id, tvdb_id FROM external_titles`)
-	if err != nil {
-		return nil, fmt.Errorf("list outside titles: %w", err)
-	}
-	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (externalTitleIDs, error) {
-		var t externalTitleIDs
-		err := row.Scan(&t.key.MediaType, &t.key.TMDBID, &t.imdbID, &t.tvdbID)
-		return t, err
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list outside titles: %w", err)
-	}
-	return out, nil
 }

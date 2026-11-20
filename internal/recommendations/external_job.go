@@ -65,17 +65,46 @@ func (w *Worker) TriggerExternal() error {
 	return w.runJob(w.jobFor(JobExternal), true)
 }
 
+// ExternalProgress reports the live phase and counts of a running outside-title job.
+type ExternalProgress struct {
+	Phase string
+	Done  int
+	Total int
+}
+
 // ExternalStatus is what admin status reports about outside titles.
 type ExternalStatus struct {
 	Enabled bool
 	// Titles counts the outside titles stored; Rows the profile rows.
-	Titles int
-	Rows   int
+	Titles   int
+	Rows     int
+	Progress ExternalProgress
+}
+
+func (w *Worker) setExternalProgress(phase string, done, total int) {
+	w.mu.Lock()
+	w.externalProgress = ExternalProgress{Phase: phase, Done: done, Total: total}
+	w.mu.Unlock()
+}
+
+func (w *Worker) clearExternalProgress() {
+	w.mu.Lock()
+	w.externalProgress = ExternalProgress{}
+	w.mu.Unlock()
+}
+
+func (w *Worker) currentExternalProgress() ExternalProgress {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.externalProgress
 }
 
 // ExternalStatus reports whether outside titles are on and what is stored.
 func (w *Worker) ExternalStatus(ctx context.Context) (ExternalStatus, error) {
-	status := ExternalStatus{Enabled: w.ExternalEnabled()}
+	status := ExternalStatus{
+		Enabled:  w.ExternalEnabled(),
+		Progress: w.currentExternalProgress(),
+	}
 	var err error
 	if status.Titles, err = w.engine.repo.CountExternalTitles(ctx); err != nil {
 		return status, err
@@ -84,6 +113,61 @@ func (w *Worker) ExternalStatus(ctx context.Context) (ExternalStatus, error) {
 		return status, fmt.Errorf("count outside rows: %w", err)
 	}
 	return status, nil
+}
+
+// externalBootstrapInterval throttles automatic bootstrap checks after a
+// taste-profile rebuild when Discover recommendations are on with no rows yet.
+const externalBootstrapInterval = 15 * time.Minute
+
+// EnsureExternalNow starts an outside-title run in the background when the
+// feature is on, no outside rows exist yet, an embedding lock is ready, and
+// at least one profile has a taste vector.
+func (w *Worker) EnsureExternalNow() {
+	if w == nil || w.engine == nil || !w.ExternalEnabled() || w.engine.externalTMDB == nil || w.IsRunning(JobExternal) {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		w.ensureExternalRows(ctx)
+	}()
+}
+
+// maybeBootstrapExternal checks, at most once per externalBootstrapInterval,
+// whether turning on or completing initial taste profiles left Discover
+// recommendations empty and ready to build.
+func (w *Worker) maybeBootstrapExternal() {
+	if w == nil || w.engine == nil || !w.ExternalEnabled() || w.engine.externalTMDB == nil || w.IsRunning(JobExternal) {
+		return
+	}
+	if !w.externalBootstrap.allow("bootstrap", externalBootstrapInterval) {
+		return
+	}
+	w.EnsureExternalNow()
+}
+
+func (w *Worker) ensureExternalRows(ctx context.Context) {
+	if w == nil || w.engine == nil || !w.ExternalEnabled() || w.engine.externalTMDB == nil || w.IsRunning(JobExternal) {
+		return
+	}
+	lock, _, _, err := w.engine.externalEmbeddingLock(ctx)
+	if err != nil || lock == nil {
+		return
+	}
+	var hasRows, hasTaste bool
+	if err := w.engine.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM external_recommendation_rows),
+		       EXISTS (SELECT 1 FROM user_taste_profiles WHERE embedding IS NOT NULL)`).Scan(&hasRows, &hasTaste); err != nil {
+		slog.WarnContext(ctx, "checking whether Discover recommendations need an initial run failed", "component", "recommendations", "error", err)
+		return
+	}
+	if hasRows || !hasTaste {
+		return
+	}
+	slog.InfoContext(ctx, "Discover recommendations enabled with no rows yet; starting initial run", "component", "recommendations")
+	if err := w.TriggerExternal(); err != nil && !errors.Is(err, ErrJobRunning) && !errors.Is(err, ErrJobRunningElsewhere) {
+		slog.WarnContext(ctx, "initial Discover recommendations run could not start", "component", "recommendations", "error", err)
+	}
 }
 
 // externalResult is one outside-title run's result data.
@@ -128,11 +212,19 @@ func (r externalResult) failures() int {
 	return n
 }
 
+// idle reports a retention-only run (with the feature off) that deleted
+// nothing, so scheduled runs on servers that never enabled Discover
+// recommendations stay quiet in job history.
+func (r externalResult) idle() bool {
+	return !r.Enabled && r.PrunedTitles == 0 && r.PrunedSources == 0 && r.PrunedLinks == 0 && !r.PruneFailed
+}
+
 // doExternal runs the outside-title job: retention always, then, while the
 // feature is on, the pool (TMDB lists and details, vectors) and every
 // profile's rows. With the feature off it calls neither TMDB nor the
 // embedding provider.
 func (w *Worker) doExternal(ctx context.Context, held clusterLock) (externalResult, error) {
+	defer w.clearExternalProgress()
 	var res externalResult
 	e := w.engine
 	pruned, err := e.PruneExternalTitles(ctx)
@@ -157,7 +249,11 @@ func (w *Worker) doExternal(ctx context.Context, held clusterLock) (externalResu
 	cfg := w.currentConfig()
 	res.Enabled = cfg.Enabled && cfg.ExternalEnabled
 	if res.Enabled {
-		res.ExternalPoolCounts, err = e.BuildExternalPool(generationCtx, ExternalPoolOptions{MaxTitles: cfg.ExternalMaxTitles, held: held})
+		res.ExternalPoolCounts, err = e.BuildExternalPool(generationCtx, ExternalPoolOptions{
+			MaxTitles:  cfg.ExternalMaxTitles,
+			OnProgress: w.setExternalProgress,
+			held:       held,
+		})
 		// A failed write on the pinned connection may be the first sign its
 		// session closed. Only rebuild from partial results while we own it.
 		if err != nil && held != nil && generationCtx.Err() == nil && !errors.Is(err, errJobLockLost) {
@@ -187,6 +283,9 @@ func (w *Worker) rebuildAllExternalRows(ctx context.Context, held clusterLock) (
 		return res, err
 	}
 	res.RowProfiles = len(profiles)
+	if len(profiles) > 0 {
+		w.setExternalProgress(ExternalPhaseRows, 0, len(profiles))
+	}
 	for i, p := range profiles {
 		if err := ctx.Err(); err != nil {
 			res.RowsRemaining = len(profiles) - i
@@ -200,11 +299,13 @@ func (w *Worker) rebuildAllExternalRows(ctx context.Context, held clusterLock) (
 		if err != nil {
 			res.RowFailures++
 			slog.WarnContext(ctx, "outside rows could not lock a profile", "component", "recommendations", "user_id", p.UserID, "profile_id", p.ProfileID, "error", err)
+			w.setExternalProgress(ExternalPhaseRows, i+1, len(profiles))
 			continue
 		}
 		if !acquired {
 			res.RowsBusy++
 			w.markBusyProfileStale(ctx, p.UserID, p.ProfileID)
+			w.setExternalProgress(ExternalPhaseRows, i+1, len(profiles))
 			continue
 		}
 		profileCtx, cancel := context.WithTimeout(ctx, profileRefreshTimeout)
@@ -214,6 +315,7 @@ func (w *Worker) rebuildAllExternalRows(ctx context.Context, held clusterLock) (
 		res.RowsBuilt += built.Written
 		res.RowsDeleted += built.Deleted
 		res.RowsRefused += built.Refused
+		w.setExternalProgress(ExternalPhaseRows, i+1, len(profiles))
 		if errors.Is(err, errJobLockLost) {
 			res.RowsRemaining = len(profiles) - i
 			return res, err

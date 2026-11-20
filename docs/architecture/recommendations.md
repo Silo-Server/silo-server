@@ -595,7 +595,10 @@ run. Turning off the main switch leaves stored rows visible until restart.
   `embeddings.BuildEmbeddingText` from the detail adapted to a media item, as
   the TMDB metadata plugin stores library titles. Vectors use the existing
   embedding lock's model and never create the lock: before library vectors
-  lock a model, a run fetches no details and stores no vectors. A title
+  lock a model, or when no embedding provider is configured, the lock
+  conflicts, or no profiles have a taste vector yet, a run skips TMDB source
+  and detail fetches up front and records a structured `vectors_skipped_reason`
+  rather than burning TMDB requests without vectors. A title
   whose text the provider refuses at every length is remembered in memory
   for this server, apart from library refusals: until its stored detail is
   due it is neither fetched nor embedded, and a refetch with the same text is
@@ -613,14 +616,26 @@ run. Turning off the main switch leaves stored rows visible until restart.
   (lists, sets, details and vectors, within per-run budgets of 10000 TMDB
   client calls, each of which the client may retry or answer from its cache,
   and 10000 embeddings; seed lists take at most half of the calls left, so
-  details are fetched in the same run) and every profile's rows. A run cut short by
+  details are fetched in the same run) and every profile's rows. While running,
+  the worker reports its current phase (`sources`, `titles`, or `rows`) and
+  progress counts in status. A run cut short by
   a budget, a node dying or TMDB failing leaves stored state for the next run
   to continue from. With the feature off it calls neither TMDB nor the
-  embedding provider.
-- **Ranking.** Per profile and media type, over the pool's stored titles with
-  a vector for the locked model: `score = z(similarity) + z(log(1 + votes))`,
-  both standardized within those candidates, similarity being the cosine to
-  the taste vector. The best 60 are kept, each with up to two reasons: the
+  embedding provider, and scheduled runs that prune nothing are left out of
+  run history. Enabling `recommendations.external.enabled`, starting the worker
+  with it enabled, or completing initial taste profiles bootstraps a first run
+  automatically whenever no outside rows exist yet (throttled to avoid repeat
+  checks).
+- **Ranking.** Per profile and media type, candidates are first filtered by the
+  profile's content-rating ceiling (failing closed on missing or unrecognized
+  US certifications) so restricted profiles still get a full row. Over the
+  remaining stored titles with a vector for the locked model:
+  `score = z(similarity) + z(log(1 + votes))` plus a gentle scale-free quality
+  prior on `vote_average` (for titles with at least 25 votes, when enough rated
+  candidates qualify). The top shortlist (180 titles) then passes through the
+  profile's library aversion and MMR diversity (using the configured
+  `diversity_lambda`, with z-scores min-max shifted to `[0, 1]` before MMR).
+  The best 60 are kept, each with up to two reasons: the
   library titles whose lists named it, best rank first. Only a title the
   profile watched, rated or favorited is named; one that is only on its
   watchlist seeds the pool and is never a reason. A profile with no
@@ -647,8 +662,11 @@ run. Turning off the main switch leaves stored rows visible until restart.
   sources and links stay, and the next run embeds them again.
 - **Reads.** `Reader.ExternalRecommendations` serves a profile's row with
   card data in two indexed queries and calls neither TMDB nor the embedding
-  provider. It serves nothing while recommendations or the feature are off.
+  provider. It serves nothing while recommendations or the feature are off,
+  and applies daily tail rotation (pinning the top 10 and rotating positions
+  11–20 by UTC date, like library personal rows) so idle profiles see fresh
+  titles each day.
   A reason naming a library title the viewer cannot see is dropped; the
   title stays. The caller applies the viewer's rating ceiling to the stored
-  US certification and drops titles the library has gained since, matching
-  the stored TMDB, TVDB and IMDb IDs in the catalog.
+  US certification as defense in depth and drops titles the library has gained
+  since, matching the stored TMDB, TVDB and IMDb IDs in the catalog.

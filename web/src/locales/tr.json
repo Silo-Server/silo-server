@@ -13753,6 +13753,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " geri yüklenemiyor — farklı olan ayarları veya bağlantılarının bir kısmını bu sunucunun ortamı belirliyor"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " geri yüklenemiyor — farklı olan ayarları veya bağlantılarının bir kısmını bu sunucunun ortamı belirliyor"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14275,6 +14309,40 @@
     {
       "type": 0,
       "value": "Bir hizmetin adresi, yedekte kimlik bilgileri olmadan değişiyor; bu nedenle geri yükleme buradaki kimlik bilgilerini temizler ve bunlar yeniden girilene kadar hizmeti kapatır."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ayar mevcut değerini koruyor: bu ayarı veya ait olduğu bağlantının bir kısmını bu sunucunun ortamı belirliyor."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ayar mevcut değerlerini koruyor: bu ayarları veya ait oldukları bağlantının bir kısmını bu sunucunun ortamı belirliyor."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17063,6 +17131,12 @@
       "value": "Buradaki başka bir hesap, bunun kullanıcı adı veya e-postasıyla oturum açıyor."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Farklı olan ayarları veya bunların bağlantısının bir kısmını bu sunucunun ortamı belirlediğinden bu sunucu mevcut değerlerini korur."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18137,6 +18211,16 @@
     {
       "type": 0,
       "value": " (korundu: daha katı)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (korundu: ortam)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -52501,6 +52585,114 @@
       "value": "Oluşturma durduruldu. Depolanan öneriler, sunucu yeniden başlatılana kadar Keşfet’te görünmeye devam eder."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Profiller sıralanıyor ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDB listeleri getiriliyor ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "İçerik bilgileri alınıyor ve gömmeler oluşturuluyor ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Süresi dolmuş "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " içerik temizlendi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Süresi dolmuş "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " içerik temizlendi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -52533,6 +52725,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Keşfet önerilerini oluşturmadan önce aşağıdaki gömme kilidi çakışmasını çözün."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Silo’nun karşılaştırma yapacağı kitaplık vektörleri olması için önce “Gömmeler” işini çalıştırın."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Keşfet önerilerini oluşturmadan önce “Yapay zekâ hizmetleri” sayfasında bir gömme sağlayıcısı bağlayın."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Henüz hiçbir profilin zevk profili yok. Biri içerik izledikten veya puanladıktan sonra “Zevk profilleri” işini çalıştırın."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54443,6 +54659,32 @@
       "value": "Keşfet önerileri Yönetim → Öneriler kısmında açılana kadar boş kalır."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Öneri satırları, Keşfet önerileri "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Yönetim → Öneriler"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " kısmında açılana kadar boş kalır."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Öneriler’de kapalı"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -55913,6 +56155,12 @@
       "value": "Yeni satırlar Keşfet’in en altına eklenir"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Öneriler ayarlarını aç"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -55925,6 +56173,12 @@
       "value": "MDBList akışı, listenin sayfasında kaydedilen sıralama düzenini içermez. Sayfada görünen düzeni seçin."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Profilinizin henüz Keşfet önerisi yok. Bu satırı önizlemek için “Keşfet önerileri” işini çalıştırın veya birkaç içerik izleyip puanlayın."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -55935,6 +56189,12 @@
     {
       "type": 0,
       "value": "İçeriklerini görmek için bir liste seçin veya bağlantısını yapıştırın."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Bu satırı önizlemek için Keşfet önerilerini Yönetim → Öneriler kısmında açın."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -65553,6 +65813,24 @@
       "value": "Başka bir modele geçmek gömmelerin sıfırlanmasını gerektirir; bu işlem tüm gömmeleri siler. Aynı modeli sunan başka bir sağlayıcı ise yeniden başlatmadan sonra uygulanır."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Keşfet’e ekle"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Öneri satırları Keşfet sayfasına eklenemedi."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Öneri satırları Keşfet sayfasına eklendi."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -65575,6 +65853,44 @@
     {
       "type": 0,
       "value": "Sunucunun öneri yapmak için tuttuğu, kitaplıkta olmayan içerik sayısı. Her biri TMDB’de aranır ve gömmesi oluşturulur. Gömme genellikle ucuzdur, ancak daha yüksek bir sayı gömme sağlayıcınıza bağlı olarak daha pahalıya mal olabilir veya daha uzun sürebilir; ayrıca daha fazla depolama alanı kullanır."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Keşfet sayfanızda henüz hiçbir Öneriler satırı gösterilmiyor."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Keşfet önerilerinin çalışabilmesi için yukarıdaki “Önerileri etkinleştir” seçeneğini açın ve sunucuyu yeniden başlatın."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "İstekler şu anda kapalı. İzleyicilerin Keşfet sayfasını görebilmesi için bunları "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "İstek ayarları"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " kısmında açın."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Keşfet sayfasını aç"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -75831,6 +76147,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Bu zamanlama yedekleme ayarlarından gelir. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Sunucu › Yedekler"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " sayfasından değiştirin."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

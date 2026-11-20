@@ -143,13 +143,13 @@ type ExternalRecommendation struct {
 }
 
 // ExternalRecommendations returns the profile's ranked outside titles of
-// mediaType (ExternalMediaMovie or ExternalMediaSeries), best first, with
-// their stored card data, or none when ExternalRecommendationsEnabled is
-// false or the profile has no row. A reason naming a library title filter
-// does not admit is dropped; the title stays. It reads two indexed queries
-// and calls neither TMDB nor the embedding provider. The caller applies the
-// viewer's rating ceiling to USCertification and drops titles the library
-// has since gained.
+// mediaType (ExternalMediaMovie or ExternalMediaSeries), best first with
+// daily tail rotation (same rule as library personal rows), with their stored
+// card data, or none when ExternalRecommendationsEnabled is false or the
+// profile has no row. A reason naming a library title filter does not admit
+// is dropped; the title stays. It reads two indexed queries and calls neither
+// TMDB nor the embedding provider. The caller applies the viewer's rating
+// ceiling to USCertification and drops titles the library has since gained.
 func (r *Reader) ExternalRecommendations(ctx context.Context, userID int, profileID, mediaType string, filter catalog.AccessFilter) ([]ExternalRecommendation, error) {
 	if mediaType != ExternalMediaMovie && mediaType != ExternalMediaSeries {
 		return nil, fmt.Errorf("outside recommendations: unknown media type %q", mediaType)
@@ -178,6 +178,9 @@ func (r *Reader) ExternalRecommendations(ctx context.Context, userID int, profil
 			}
 		}
 	}
+	out = rotateTailBy(out, ServedRowSize, rotationSeedKey(userID, profileID, "external:"+mediaType), r.today(), func(rec ExternalRecommendation) string {
+		return strconv.Itoa(rec.Key.TMDBID)
+	})
 	return out, nil
 }
 

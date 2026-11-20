@@ -38,6 +38,7 @@ import { formatLocale } from "@/lib/appLocale";
 import { countText } from "@/pages/adminRecommendationsExternal";
 import { useT } from "@/i18n";
 import { RecEmbeddingLockCard, RecEmbeddingResetCard } from "./AdminRecommendationsEmbedding";
+import { RecExternalSectionNotices } from "./AdminRecommendationsExternalNotices";
 import { RecExternalJobCard, RecJobStatusCard } from "./AdminRecommendationsJobs";
 
 interface RecLocalValues {
@@ -384,8 +385,8 @@ export default function AdminRecommendations() {
   if (isLoading)
     return (
       <div className="space-y-6 pb-4 sm:pb-6">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-28 rounded-2xl" />
           ))}
         </div>
@@ -424,7 +425,7 @@ export default function AdminRecommendations() {
           <h2 className="text-lg font-medium tracking-tight">
             {t("web.admin.recommendations.jobs.title")}
           </h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             <RecJobStatusCard
               title={t("web.admin.recommendations.jobs.embeddings")}
               count={status.embeddings.count}
@@ -591,6 +592,14 @@ export default function AdminRecommendations() {
                       />
                     ),
                   )}
+                  {section.id === "external" ? (
+                    <RecExternalSectionNotices
+                      recsEnabled={serverSettings["recommendations.enabled"] === "true"}
+                      externalEnabled={
+                        serverSettings["recommendations.external.enabled"] === "true"
+                      }
+                    />
+                  ) : null}
                   {isEmbeddingSection ? (
                     // ConnectionCheckAction brings its own row padding.
                     <div>

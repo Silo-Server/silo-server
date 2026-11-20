@@ -14625,6 +14625,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "לא ניתן לשחזר: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — הסביבה של השרת הזה קובעת את ההגדרות השונות, או חלק מהחיבור שלהן"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "לא ניתן לשחזר: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — הסביבה של השרת הזה קובעת את ההגדרות השונות, או חלק מהחיבור שלהן"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "לא ניתן לשחזר: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — הסביבה של השרת הזה קובעת את ההגדרות השונות, או חלק מהחיבור שלהן"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15483,6 +15541,56 @@
     {
       "type": 0,
       "value": "הכתובת של שירות משתנה בלי פרטי הכניסה שלו בגיבוי, ולכן השחזור מנקה כאן את פרטי הכניסה ומשבית את השירות עד שהם יוזנו שוב."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נשמר הערך הנוכחי של הגדרה אחת: הסביבה של השרת הזה קובעת אותה, או חלק מהחיבור שלה."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נשמרים הערכים הנוכחיים של "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " הגדרות: הסביבה של השרת הזה קובעת אותן, או חלק מהחיבור שלהן."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נשמרים הערכים הנוכחיים של "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " הגדרות: הסביבה של השרת הזה קובעת אותן, או חלק מהחיבור שלהן."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -18783,6 +18891,12 @@
       "value": "חשבון אחר כאן מתחבר עם שם המשתמש או האימייל שלו."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "הסביבה של השרת הזה קובעת את ההגדרות השונות, או חלק מהחיבור שלהן, ולכן השרת הזה שומר על הערכים הנוכחיים שלו."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -20005,6 +20119,16 @@
     {
       "type": 0,
       "value": " (נשמר: מחמיר יותר)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (נשמר: סביבה)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -58445,6 +58569,122 @@
       "value": "יצירת ההמלצות הופסקה. ההמלצות השמורות יישארו גלויות בדף ”גילוי” עד שהשרת יופעל מחדש."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "מתבצע דירוג של פרופילים ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "מתבצע אחזור של רשימות TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "מתבצעת בדיקה והטמעה של פריטים ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נוקה פריט אחד שפג תוקפו"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נוקו "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פריטים שפג תוקפם"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נוקו "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פריטים שפג תוקפם"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -58493,6 +58733,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "יש לפתור את התנגשות נעילת ההטמעה שלמטה לפני בניית המלצות הגילוי."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "יש להריץ קודם את העבודה ”הטמעות” כדי של-Silo יהיו וקטורים של הספרייה להשוואה."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "יש לחבר ספק הטמעות בדף ”שירותי AI” לפני בניית המלצות הגילוי."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "לאף פרופיל עדיין אין פרופיל טעם. יש להריץ את העבודה ”פרופילי טעם” אחרי שיהיו צפיות או דירוגים של פריטים."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -60695,6 +60959,32 @@
       "value": "השורה תישאר ריקה עד להפעלת המלצות הגילוי בניהול ← המלצות."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "השורות המומלצות יישארו ריקות עד להפעלת המלצות הגילוי בדף "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "ניהול ← המלצות"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "כבוי בדף ”המלצות”"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -62277,6 +62567,12 @@
       "value": "שורות חדשות נוספות לתחתית דף הגילוי"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "פתיחת הגדרות ההמלצות"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -62289,6 +62585,12 @@
       "value": "הפיד של MDBList לא כולל את המיון שנשמר בדף הרשימה. יש לבחור את המיון שמוצג שם."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "לפרופיל שלך עדיין אין המלצות גילוי. כדי לראות תצוגה מקדימה של השורה, אפשר להריץ את העבודה ”המלצות גילוי” או לצפות בכמה פריטים ולדרג אותם."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -62299,6 +62601,12 @@
     {
       "type": 0,
       "value": "יש לבחור רשימה או להדביק את הקישור שלה כדי לראות את הפריטים שבה."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "כדי לראות תצוגה מקדימה של השורה, יש להפעיל את המלצות הגילוי בניהול ← המלצות."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -72340,6 +72648,24 @@
       "value": "מעבר למודל אחר מחייב איפוס של ההטמעות, שמוחק את כולן. ספק אחר שמספק את אותו המודל נכנס לתוקף אחרי הפעלה מחדש."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "הוספה לדף ”גילוי”"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה להוסיף שורות מומלצות לדף ”גילוי”."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "השורות המומלצות נוספו לדף ”גילוי”."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -72362,6 +72688,44 @@
     {
       "type": 0,
       "value": "כמה פריטים שאינם בספרייה השרת שומר כמקור להמלצות. כל פריט נבדק ב-TMDB ועובר הטמעה. ההטמעה בדרך כלל זולה, אבל מספר גבוה יותר עלול לעלות יותר או להימשך זמן רב יותר, בהתאם לספק ההטמעות שלך, ולתפוס יותר נפח אחסון."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "בדף ”גילוי” עדיין לא מוצגות שורות מסוג ”המלצות”."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "יש להפעיל את האפשרות ”הפעלת ההמלצות” שלמעלה ולהפעיל מחדש את השרת כדי שהמלצות הגילוי יוכלו לרוץ."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "הבקשות כבויות כרגע. יש להפעיל אותן בדף "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "הגדרות הבקשות"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " כדי שהצופים יוכלו לראות את דף ”גילוי”."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "פתיחת דף ”גילוי”"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -82884,6 +83248,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "לוח הזמנים הזה נקבע בהגדרות הגיבוי. אפשר לשנות אותו בדף "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "שרת ← גיבויים"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

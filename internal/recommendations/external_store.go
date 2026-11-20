@@ -137,9 +137,11 @@ type ExternalPoolTitle struct {
 
 // ExternalSimilarity is a candidate's cosine similarity to a taste vector.
 type ExternalSimilarity struct {
-	Key        ExternalTitleKey
-	Similarity float64
-	VoteCount  int
+	Key             ExternalTitleKey
+	Similarity      float64
+	VoteCount       int
+	VoteAverage     float64
+	USCertification string
 }
 
 // ExternalRowItem is one ranked title in a profile's row. Reasons are the
@@ -513,7 +515,8 @@ func (r *Repo) ExternalPool(ctx context.Context, q ExternalPoolQuery) ([]Externa
 
 // ExternalSimilarities returns, most similar first, the cosine similarity of
 // taste to each of tmdbIDs (all of mediaType) that has a vector for model,
-// with its vote count. It is an exact scan over the given titles.
+// with its vote count, vote average, and stored US certification. It is an
+// exact scan over the given titles.
 func (r *Repo) ExternalSimilarities(ctx context.Context, taste []float32, model, mediaType string, tmdbIDs []int) ([]ExternalSimilarity, error) {
 	if len(taste) == 0 || len(tmdbIDs) == 0 {
 		return nil, nil
@@ -525,7 +528,9 @@ func (r *Repo) ExternalSimilarities(ctx context.Context, taste []float32, model,
 	rows, err := r.pool.Query(ctx, `
 		SELECT e.tmdb_id,
 		       1 - (e.embedding <=> $1::vector(3072)) AS similarity,
-		       t.vote_count
+		       t.vote_count,
+		       t.vote_average,
+		       t.us_certification
 		FROM   external_title_embeddings e
 		JOIN   external_titles t ON t.media_type = e.media_type AND t.tmdb_id = e.tmdb_id
 		WHERE  e.media_type = $2 AND e.tmdb_id = ANY($3::int[]) AND e.model = $4
@@ -538,7 +543,7 @@ func (r *Repo) ExternalSimilarities(ctx context.Context, taste []float32, model,
 	var out []ExternalSimilarity
 	for rows.Next() {
 		s := ExternalSimilarity{Key: ExternalTitleKey{MediaType: mediaType}}
-		if err := rows.Scan(&s.Key.TMDBID, &s.Similarity, &s.VoteCount); err != nil {
+		if err := rows.Scan(&s.Key.TMDBID, &s.Similarity, &s.VoteCount, &s.VoteAverage, &s.USCertification); err != nil {
 			return nil, fmt.Errorf("scan outside similarity: %w", err)
 		}
 		out = append(out, s)
@@ -547,6 +552,33 @@ func (r *Repo) ExternalSimilarities(ctx context.Context, taste []float32, model,
 		return nil, fmt.Errorf("outside similarities: %w", err)
 	}
 	return out, nil
+}
+
+// ExternalEmbeddings returns the stored vectors of tmdbIDs (all of mediaType)
+// for model, keyed by TMDB ID.
+func (r *Repo) ExternalEmbeddings(ctx context.Context, model, mediaType string, tmdbIDs []int) (map[int][]float32, error) {
+	if len(tmdbIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT tmdb_id, embedding
+		FROM   external_title_embeddings
+		WHERE  media_type = $1 AND tmdb_id = ANY($2::int[]) AND model = $3`,
+		mediaType, tmdbIDs, model)
+	if err != nil {
+		return nil, fmt.Errorf("read outside embeddings: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[int][]float32, len(tmdbIDs))
+	for rows.Next() {
+		var id int
+		var v pgvector.Vector
+		if err := rows.Scan(&id, &v); err != nil {
+			return nil, fmt.Errorf("scan outside embedding: %w", err)
+		}
+		out[id] = v.Slice()
+	}
+	return out, rows.Err()
 }
 
 // deleteExternalRows deletes a profile's rows of every media type.
@@ -649,4 +681,56 @@ func resetExternalEmbeddings(ctx context.Context, tx pgx.Tx) (ExternalReset, err
 	}
 	res.Rows = tag.RowsAffected()
 	return res, nil
+}
+
+// externalSetTitles returns the titles each of the given sets names, best
+// rank first, in source-key order. A set with no stored links is left out.
+func (r *Repo) externalSetTitles(ctx context.Context, setKeys []string) ([]externalSetTitles, error) {
+	if len(setKeys) == 0 {
+		return nil, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT source_key, media_type, tmdb_id
+		FROM   external_title_links
+		WHERE  source_key = ANY($1) AND list = 'set'
+		ORDER  BY source_key, rank`, setKeys)
+	if err != nil {
+		return nil, fmt.Errorf("read outside set titles: %w", err)
+	}
+	defer rows.Close()
+	var out []externalSetTitles
+	for rows.Next() {
+		var key string
+		var k ExternalTitleKey
+		if err := rows.Scan(&key, &k.MediaType, &k.TMDBID); err != nil {
+			return nil, fmt.Errorf("read outside set titles: %w", err)
+		}
+		if len(out) == 0 || out[len(out)-1].key != key {
+			out = append(out, externalSetTitles{key: key})
+		}
+		last := &out[len(out)-1]
+		last.titles = append(last.titles, k)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read outside set titles: %w", err)
+	}
+	return out, nil
+}
+
+// externalStoredTitleIDs returns every stored outside title with its other
+// IDs.
+func (r *Repo) externalStoredTitleIDs(ctx context.Context) ([]externalTitleIDs, error) {
+	rows, err := r.pool.Query(ctx, `SELECT media_type, tmdb_id, imdb_id, tvdb_id FROM external_titles`)
+	if err != nil {
+		return nil, fmt.Errorf("list outside titles: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (externalTitleIDs, error) {
+		var t externalTitleIDs
+		err := row.Scan(&t.key.MediaType, &t.key.TMDBID, &t.imdbID, &t.tvdbID)
+		return t, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list outside titles: %w", err)
+	}
+	return out, nil
 }

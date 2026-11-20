@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link } from "react-router";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -328,10 +329,14 @@ function RowFields({
   // The server needs a name to preview a row, but the name doesn't change its
   // titles: a fixed one keeps typing a name from reading the source again.
   const previewRow = { ...row, title: rowKindEnglishLabel(row.type) };
-  const preview = useDiscoverRowPreview(brand || rowProblem(previewRow) ? null : previewRow);
+  const recommendedOff = Boolean(row.recommended && personalRowsOff);
+  const preview = useDiscoverRowPreview(
+    brand || recommendedOff || rowProblem(previewRow) ? null : previewRow,
+  );
   let offText = t("web.admin.requests.rowDialog.previewOff.chart");
   if (row.list) offText = t("web.admin.requests.rowDialog.previewOff.list");
   if (row.discover) offText = t("web.admin.requests.rowDialog.previewOff.region");
+  if (row.recommended) offText = t("web.admin.requests.rowDialog.previewOff.recommended");
   const previewStrip = brand ? null : (
     <RowPreview
       title={savedTitle(row)}
@@ -347,22 +352,30 @@ function RowFields({
             : t("web.admin.requests.rowDialog.livePreviewTmdb")
       }
       offText={offText}
+      emptyText={
+        row.recommended ? t("web.admin.requests.rowDialog.previewEmptyRecommended") : undefined
+      }
     />
   );
   const sourceControl = (
     <SourceControl row={row} editing={editing} onChange={onChange} onPick={onPick} />
   );
-  const control =
-    row.recommended && personalRowsOff ? (
-      <div className="grid gap-2">
-        {sourceControl}
-        <p className="text-muted-foreground text-[13px]">
-          {t("web.admin.requests.discover.recommendedOff")}
-        </p>
-      </div>
-    ) : (
-      sourceControl
-    );
+  const control = recommendedOff ? (
+    <div className="grid gap-2">
+      {sourceControl}
+      <p className="text-muted-foreground flex flex-wrap items-baseline gap-x-1.5 gap-y-1 text-[13px]">
+        <span>{t("web.admin.requests.discover.recommendedOff")}</span>
+        <Link
+          to="/admin/recommendations"
+          className="text-foreground font-medium underline underline-offset-2"
+        >
+          {t("web.admin.requests.rowDialog.openRecommendations")}
+        </Link>
+      </p>
+    </div>
+  ) : (
+    sourceControl
+  );
   const controlFirst = Boolean(row.list || row.discover);
   const moreCount = row.discover ? moreFilterCount(row.discover) : 0;
   const summary = [

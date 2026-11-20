@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -66,5 +67,46 @@ func TestPagesOfAnyLimitMatchTheSeeAllOrder(t *testing.T) {
 				t.Fatalf("limit %d: %s = %v, want the see-all page's first %d %v", limit, row.Label, got, limit, seeAll[row.Label][:limit])
 			}
 		}
+	}
+}
+
+func TestRotateTailByExternalPinsHeadAndRotatesAcrossDays(t *testing.T) {
+	items := make([]ExternalRecommendation, 40)
+	for i := range items {
+		items[i] = ExternalRecommendation{Key: ExternalTitleKey{MediaType: ExternalMediaMovie, TMDBID: i + 1}}
+	}
+	keyFn := func(item ExternalRecommendation) string { return strconv.Itoa(item.Key.TMDBID) }
+	seed := rotationSeedKey(7, "p1", "external:movie")
+
+	ids := func(in []ExternalRecommendation) []int {
+		out := make([]int, len(in))
+		for i, it := range in {
+			out[i] = it.Key.TMDBID
+		}
+		return out
+	}
+
+	// Rows up to ServedRowSize return unchanged.
+	short := items[:ServedRowSize]
+	if got := rotateTailBy(short, ServedRowSize, seed, rotationDay, keyFn); !slices.Equal(ids(got), ids(short)) {
+		t.Fatalf("short row rotated: %v", ids(got))
+	}
+
+	day1 := rotateTailBy(items, ServedRowSize, seed, rotationDay, keyFn)
+	day2 := rotateTailBy(items, ServedRowSize, seed, rotationDay.AddDate(0, 0, 1), keyFn)
+
+	got1, got2, orig := ids(day1), ids(day2), ids(items)
+	if !slices.Equal(got1[:rotationMaxPinned], orig[:rotationMaxPinned]) ||
+		!slices.Equal(got2[:rotationMaxPinned], orig[:rotationMaxPinned]) {
+		t.Fatalf("pinned head changed: day1=%v day2=%v", got1[:rotationMaxPinned], got2[:rotationMaxPinned])
+	}
+	if slices.Equal(got1[:ServedRowSize], got2[:ServedRowSize]) {
+		t.Fatalf("served window did not rotate across UTC days: %v", got1[:ServedRowSize])
+	}
+	sorted1, sorted2 := slices.Clone(got1), slices.Clone(got2)
+	slices.Sort(sorted1)
+	slices.Sort(sorted2)
+	if !slices.Equal(sorted1, orig) || !slices.Equal(sorted2, orig) {
+		t.Fatalf("rotation lost or duplicated items: day1=%v day2=%v", sorted1, sorted2)
 	}
 }

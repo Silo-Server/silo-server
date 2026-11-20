@@ -4,7 +4,13 @@ import { Button } from "@/components/ui/button";
 import { useT } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
 import { formatRelativeTime } from "@/lib/date";
-import { countText, externalRunLines } from "@/pages/adminRecommendationsExternal";
+import {
+  countText,
+  externalProgress,
+  externalRunLines,
+  type ExternalProgressBar,
+  type ExternalRunDetail,
+} from "@/pages/adminRecommendationsExternal";
 
 type RecJobRun = components["schemas"]["AdminRecommendationJobRun"];
 type RecExternalStatus = components["schemas"]["AdminRecommendationExternalStatus"];
@@ -63,6 +69,7 @@ export function RecExternalJobCard({
         count_text: countText(status.count),
       })}
       running={status.running}
+      progress={externalProgress(t, status)}
       lastRun={status.last_run}
       details={[
         t("web.admin.recommendations.external.rowsBuilt", {
@@ -82,6 +89,7 @@ export function RecExternalJobCard({
       runDetails={externalRunLines(t, status.last_run)}
       onTrigger={onTrigger}
       triggerPending={triggerPending}
+      triggerDisabled={!status.enabled}
     />
   );
 }
@@ -92,6 +100,7 @@ export function RecJobStatusCard({
   summary,
   total,
   running,
+  progress,
   lastRun,
   secondaryRun,
   secondaryRunKind,
@@ -100,6 +109,7 @@ export function RecJobStatusCard({
   runDetails = [],
   onTrigger,
   triggerPending,
+  triggerDisabled = false,
 }: {
   title: string;
   count: number;
@@ -107,6 +117,8 @@ export function RecJobStatusCard({
   summary?: string;
   total?: number;
   running: boolean;
+  /** Live in-flight progress bar shown below the button without replacing `summary`. */
+  progress?: ExternalProgressBar;
   lastRun?: RecJobRun;
   /** Work that runs between full runs (a catch-up pass, the stale sweep), shown beside the last full run. */
   secondaryRun?: RecJobRun;
@@ -115,14 +127,20 @@ export function RecJobStatusCard({
   /** More lines under the counts. */
   details?: string[];
   /** Lines about the last run, under it. */
-  runDetails?: string[];
+  runDetails?: Array<string | ExternalRunDetail>;
   onTrigger: () => void;
   triggerPending: boolean;
+  triggerDisabled?: boolean;
 }) {
   const t = useT();
-  const hasProgress = total !== undefined && total > 0;
-  const pct = hasProgress ? Math.round((count / total) * 100) : 0;
-  const isDisabled = running || triggerPending;
+  const hasCountProgress = total !== undefined && total > 0;
+  const hasBarProgress = hasCountProgress || (progress !== undefined && progress.total > 0);
+  const pct = hasCountProgress
+    ? Math.min(100, Math.round((count / total) * 100))
+    : progress && progress.total > 0
+      ? Math.min(100, Math.round((progress.done / progress.total) * 100))
+      : 0;
+  const isDisabled = running || triggerPending || triggerDisabled;
 
   return (
     <div className="surface-panel min-w-0 rounded-2xl border-0 px-4 py-4 sm:px-5">
@@ -130,7 +148,7 @@ export function RecJobStatusCard({
         <div className="min-w-0 space-y-1">
           <span className="text-sm font-semibold">{title}</span>
           <p className="text-muted-foreground text-xs">
-            {hasProgress
+            {hasCountProgress
               ? t("web.admin.recommendations.jobs.itemsProgress", {
                   count: total,
                   done_text: count.toLocaleString(formatLocale()),
@@ -149,11 +167,21 @@ export function RecJobStatusCard({
           ))}
           {note && <p className="text-muted-foreground text-xs">{note}</p>}
           <RecJobLastRun run={lastRun} />
-          {runDetails.map((line) => (
-            <p key={line} className="text-muted-foreground text-xs break-words">
-              {line}
-            </p>
-          ))}
+          {runDetails.map((entry) => {
+            const detail = typeof entry === "string" ? { text: entry } : entry;
+            return (
+              <p
+                key={detail.text}
+                className={
+                  detail.tone === "warning"
+                    ? "text-warning text-xs font-medium break-words"
+                    : "text-muted-foreground text-xs break-words"
+                }
+              >
+                {detail.text}
+              </p>
+            );
+          })}
           {secondaryRun && <RecJobLastRun run={secondaryRun} kind={secondaryRunKind} />}
         </div>
         <Button
@@ -177,8 +205,11 @@ export function RecJobStatusCard({
         </Button>
       </div>
 
-      {hasProgress && (
+      {hasBarProgress && (
         <div className="mt-3">
+          {progress && !hasCountProgress && (
+            <p className="text-muted-foreground mb-1 text-xs">{progress.label}</p>
+          )}
           <div className="bg-muted h-2 w-full overflow-hidden rounded-full">
             <div
               className="bg-primary h-full rounded-full transition-all duration-500"

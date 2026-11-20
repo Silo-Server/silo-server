@@ -739,10 +739,11 @@ export function useLoadRequestIntegrationOptions() {
   });
 }
 
-export function useAdminRequestCapabilities() {
+export function useAdminRequestCapabilities(enabled = true) {
   return useQuery({
     queryKey: [...adminKeys.requestsRoot(), "capabilities"],
     queryFn: () => v2("GET /api/v2/admin/requests/capabilities"),
     staleTime: REQUESTS_STALE_TIME,
+    enabled,
   });
 }

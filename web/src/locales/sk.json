@@ -15395,6 +15395,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položka sa nedá obnoviť – prostredie tohto servera určuje odlišné nastavenia alebo časť jej pripojenia"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položky sa nedajú obnoviť – prostredie tohto servera určuje odlišné nastavenia alebo časť ich pripojenia"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položky sa nedá obnoviť – prostredie tohto servera určuje odlišné nastavenia alebo časť ich pripojenia"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položiek sa nedá obnoviť – prostredie tohto servera určuje odlišné nastavenia alebo časť ich pripojenia"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -16253,6 +16311,64 @@
     {
       "type": 0,
       "value": "Adresa služby sa mení bez jej prihlasovacích údajov v zálohe, preto ich obnovenie tu vymaže a službu vypne, kým sa znova nezadajú."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavenie si ponechá aktuálnu hodnotu, pretože prostredie tohto servera určuje priamo jeho alebo časť jeho pripojenia."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavenia si ponechajú aktuálne hodnoty, pretože prostredie tohto servera určuje priamo ich alebo časť ich pripojenia."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavenia si ponechá aktuálne hodnoty, pretože prostredie tohto servera určuje priamo ich alebo časť ich pripojenia."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechá aktuálne hodnoty, pretože prostredie tohto servera určuje priamo ich alebo časť ich pripojenia."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -20245,6 +20361,12 @@
       "value": "Iný účet na tomto serveri sa prihlasuje rovnakým používateľským menom alebo e-mailom."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Prostredie tohto servera určuje odlišné nastavenia alebo časť ich pripojenia, preto tento server ponecháva svoje aktuálne hodnoty."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -21639,6 +21761,16 @@
     {
       "type": 0,
       "value": " (ponechané: prísnejšie)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (ponechané: prostredie)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -65261,6 +65393,146 @@
       "value": "Generovanie sa zastavilo. Uložené odporúčania zostanú viditeľné v sekcii Objavovať, kým sa server nereštartuje."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Zoraďujú sa odporúčania pre profily ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Načítavajú sa zoznamy TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Vyhľadávajú sa tituly a vytvárajú sa ich embeddingy ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazal sa "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titul s uplynutou platnosťou"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazali sa "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tituly s uplynutou platnosťou"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazalo sa "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titulu s uplynutou platnosťou"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazalo sa "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titulov s uplynutou platnosťou"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -65317,6 +65589,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Pred vytváraním odporúčaní v sekcii Objavovať vyriešte konflikt zámku embeddingov nižšie."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Najprv spustite úlohu Embeddingy, aby Silo malo vektory knižnice na porovnanie."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Pred vytváraním odporúčaní v sekcii Objavovať pripojte poskytovateľa embeddingov v časti Služby AI."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Žiadny profil zatiaľ nemá profil vkusu. Keď niekto pozrie alebo ohodnotí tituly, spustite úlohu Profily vkusu."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -67927,6 +68223,32 @@
       "value": "Zostane prázdny, kým nezapnete odporúčania v sekcii Objavovať v časti Správa → Odporúčania."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Odporúčané rady zostanú prázdne, kým nezapnete odporúčania v sekcii Objavovať v časti "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Správa → Odporúčania"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Vypnuté v časti Odporúčania"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -69639,6 +69961,12 @@
       "value": "Nové rady sa pridajú na koniec stránky Objavovať"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Otvoriť nastavenia stránky Odporúčania"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -69651,6 +69979,12 @@
       "value": "Feed zo služby MDBList neobsahuje zoradenie uložené na stránke zoznamu. Vyberte to, ktoré zoznam zobrazuje."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Váš profil zatiaľ nemá žiadne odporúčania v sekcii Objavovať. Ak chcete zobraziť ukážku tohto radu, spustite úlohu Odporúčania v sekcii Objavovať alebo si pozrite a ohodnoťte niekoľko titulov."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -69661,6 +69995,12 @@
     {
       "type": 0,
       "value": "Vyberte zoznam alebo vložte jeho odkaz, aby ste videli jeho tituly."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Ak chcete zobraziť ukážku tohto radu, zapnite odporúčania v sekcii Objavovať v časti Správa → Odporúčania."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -79961,6 +80301,24 @@
       "value": "Prechod na iný model vyžaduje obnovenie embeddingov, čím sa všetky odstránia. Iný poskytovateľ s rovnakým modelom sa uplatní po reštarte."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Pridať do sekcie Objavovať"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Nepodarilo sa pridať odporúčané rady na stránku Objavovať."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Odporúčané rady sa pridali na stránku Objavovať."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -79983,6 +80341,44 @@
     {
       "type": 0,
       "value": "Koľko titulov, ktoré nie sú v knižnici, si server uchováva na odporúčanie. Každý z nich sa vyhľadá v službe TMDB a vytvorí sa preň embedding. Vytváranie embeddingov je zvyčajne lacné, no vyšší počet môže v závislosti od vášho poskytovateľa embeddingov stáť viac alebo trvať dlhšie a zaberie viac úložiska."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Vaša stránka Objavovať zatiaľ nezobrazuje žiadne rady typu Odporúčania."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Aby sa mohli spúšťať odporúčania v sekcii Objavovať, zapnite vyššie možnosť „Povoliť odporúčania“ a reštartujte server."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Žiadosti sú momentálne vypnuté. Zapnite ich v "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "nastaveniach žiadostí"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", aby diváci videli stránku Objavovať."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Otvoriť stránku Objavovať"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -90647,6 +91043,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Tento plán pochádza z nastavení záloh. Zmeniť ho môžete v časti "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Zálohy"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
