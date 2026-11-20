@@ -3,57 +3,27 @@ import type { components } from "@/api/v2/schema";
 export type ProfileSectionBaseline = components["schemas"]["ProfileSectionBaseline"];
 export type ProfileSectionBaselineRow = components["schemas"]["ProfileSectionBaselineRow"];
 
-export type HomeLayoutBaselineMode = "baseline" | "unmatched" | "legacy";
-
-export interface PageHideCandidatePlan {
-  mode: HomeLayoutBaselineMode;
-  candidates: ProfileSectionBaselineRow[];
-  defaultChecked: boolean;
-}
-
 export function homeLayoutPageKey(page: { scope: "home" | "library"; libraryId?: number }): string {
   return `${page.scope}:${page.libraryId ?? ""}`;
 }
 
 /**
- * Determines which pre-override server rows on a same-server page can be
- * hidden during import and whether they start checked:
+ * The server rows on a same-server page that were added since the export, so
+ * the import can offer to hide them.
  *
- * - A valid baseline (present, non-empty, overlapping at least one active row
- *   on the page) offers only rows whose token was absent at export, checked by
- *   default.
- * - A legacy file (no baseline field) or an unmatched/truncated baseline offers
- *   all visible server rows not mentioned in `overrides`, unchecked by default
- *   so untouched defaults are never wiped silently.
+ * Only an export whose tokens still match at least one row the profile sees
+ * now can tell new rows from old ones. A file without tokens, or whose tokens
+ * match nothing (the server's key changed, or every row was replaced), offers
+ * none and imports as it did before tokens existed.
  */
-export function planPageHideCandidates(
+export function rowsAddedSinceExport(
   page: { overrides: readonly { section_id?: string }[]; serverSectionTokens?: readonly string[] },
   baseline: ProfileSectionBaseline,
-): PageHideCandidatePlan {
-  const mentionedIds = new Set<string>();
-  for (const override of page.overrides) {
-    if (override.section_id) mentionedIds.add(override.section_id);
-  }
-  const hasBaselineField = page.serverSectionTokens !== undefined;
-  const baselineTokens = new Set(page.serverSectionTokens ?? []);
-  const activeOverlap =
-    hasBaselineField &&
-    baselineTokens.size > 0 &&
-    baseline.active_section_tokens.some((token) => baselineTokens.has(token));
-
-  if (activeOverlap) {
-    return {
-      mode: "baseline",
-      defaultChecked: true,
-      candidates: baseline.visible_sections.filter(
-        (row) => !mentionedIds.has(row.id) && !baselineTokens.has(row.token),
-      ),
-    };
-  }
-
-  return {
-    mode: hasBaselineField ? "unmatched" : "legacy",
-    defaultChecked: false,
-    candidates: baseline.visible_sections.filter((row) => !mentionedIds.has(row.id)),
-  };
+): ProfileSectionBaselineRow[] {
+  const exported = new Set(page.serverSectionTokens ?? []);
+  if (!baseline.visible_sections.some((row) => exported.has(row.token))) return [];
+  const mentioned = new Set(page.overrides.map((override) => override.section_id).filter(Boolean));
+  return baseline.visible_sections.filter(
+    (row) => !exported.has(row.token) && !mentioned.has(row.id),
+  );
 }

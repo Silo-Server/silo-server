@@ -1004,8 +1004,7 @@ func (f *fakeProfileSections) GetProfileSectionBaseline(_ context.Context, userI
 		return handlers.ProfileSectionBaseline{}, f.err
 	}
 	return handlers.ProfileSectionBaseline{
-		AllSectionIDs:    []string{"s-continue", "s-disabled"},
-		ActiveSectionIDs: []string{"s-continue"},
+		SectionIDs: []string{"s-continue", "s-disabled"},
 		VisibleSections: []sections.ResolvedSection{
 			{ID: "s-continue", SectionType: "continue_watching", Title: "Continue Watching", TitleKey: "home.section.continueWatching"},
 		},

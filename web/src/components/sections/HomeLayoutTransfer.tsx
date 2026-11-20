@@ -28,8 +28,7 @@ import { useAppLanguage, useT } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
 import {
   homeLayoutPageKey,
-  planPageHideCandidates,
-  type HomeLayoutBaselineMode,
+  rowsAddedSinceExport,
   type ProfileSectionBaseline,
   type ProfileSectionBaselineRow,
 } from "@/lib/homeLayoutBaseline";
@@ -62,12 +61,11 @@ interface HideRowOption {
   pageKey: string;
   pageLabel: string;
   row: ProfileSectionBaselineRow;
-  mode: HomeLayoutBaselineMode;
   checked: boolean;
 }
 
 function hideRowOptionKey(pageKey: string, sectionId: string): string {
-  return `${pageKey}\u0000${sectionId}`;
+  return `${pageKey}/${sectionId}`;
 }
 
 interface HomeLayoutImportDialogProps {
@@ -186,18 +184,29 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
     allowAdminOnlyRecipes,
   ]);
 
-  const sameServerPages = useMemo<HomeLayoutPlannedPage[]>(
-    () => (plan?.sameServer ? [...plan.pages, ...plan.unappliedPages] : []),
+  // Only pages whose export recorded the server's rows can tell which rows
+  // are new; a file without them imports as it did before.
+  const pagesWithTokens = useMemo<HomeLayoutPlannedPage[]>(
+    () =>
+      plan?.sameServer
+        ? [...plan.pages, ...plan.unappliedPages].filter(
+            (page) => (page.serverSectionTokens?.length ?? 0) > 0,
+          )
+        : [],
     [plan],
   );
-  const sameServerPageKeys = sameServerPages.map(homeLayoutPageKey);
+  const needsBaselines = pagesWithTokens.length > 0;
   const baselinesQuery = useQuery({
-    queryKey: ["home-layout-import", "section-baselines", ...sameServerPageKeys],
+    queryKey: [
+      "home-layout-import",
+      "section-baselines",
+      ...pagesWithTokens.map(homeLayoutPageKey),
+    ],
     // A page whose baseline can't be read offers no rows to hide and imports
     // as it did before baselines existed, so one failed read never blocks the
     // rest of the import.
     queryFn: async () => {
-      const entries = await readInBatches(sameServerPages, async (page) => {
+      const entries = await readInBatches(pagesWithTokens, async (page) => {
         const baseline = await v2("GET /api/v2/profile/sections/baseline", {
           query: pageQuery(page.scope, page.libraryId),
           profileContext: profileContext ?? undefined,
@@ -210,11 +219,10 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
       }
       return baselines;
     },
-    enabled: Boolean(plan?.sameServer && sameServerPages.length > 0),
+    enabled: needsBaselines,
     gcTime: 0,
   });
 
-  const needsBaselines = Boolean(plan?.sameServer && sameServerPages.length > 0);
   const baselinesReady = !needsBaselines || Boolean(baselinesQuery.data);
   const targetReady = Boolean(
     identityQuery.data && personalCollectionIds && profileIds && recipeCatalog && baselinesReady,
@@ -225,34 +233,26 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
     (refs.profiles && profilesQuery.isError) ||
     recipeCatalogQuery.isError;
 
-  const { hideOptions, hasUnmatchedBaseline } = useMemo(() => {
-    if (!plan?.sameServer || !baselinesQuery.data) {
-      return { hideOptions: [] as HideRowOption[], hasUnmatchedBaseline: false };
-    }
+  const hideOptions = useMemo(() => {
     const options: HideRowOption[] = [];
-    let unmatched = false;
-    for (const page of sameServerPages) {
+    if (!baselinesQuery.data) return options;
+    for (const page of pagesWithTokens) {
       const key = homeLayoutPageKey(page);
       const baseline = baselinesQuery.data.get(key);
       if (!baseline) continue;
-      const planned = planPageHideCandidates(page, baseline);
-      if (planned.mode === "unmatched" && planned.candidates.length > 0) {
-        unmatched = true;
-      }
-      for (const row of planned.candidates) {
+      for (const row of rowsAddedSinceExport(page, baseline)) {
         const optionKey = hideRowOptionKey(key, row.id);
         options.push({
           key: optionKey,
           pageKey: key,
           pageLabel: page.label,
           row,
-          mode: planned.mode,
-          checked: hideOverrides[optionKey] ?? planned.defaultChecked,
+          checked: hideOverrides[optionKey] ?? true,
         });
       }
     }
-    return { hideOptions: options, hasUnmatchedBaseline: unmatched };
-  }, [plan, sameServerPages, baselinesQuery.data, hideOverrides]);
+    return options;
+  }, [pagesWithTokens, baselinesQuery.data, hideOverrides]);
 
   const checkedByPage = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -422,9 +422,8 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
               plan={plan}
               hasChanges={hasChanges}
               hideOptions={hideOptions}
-              hasUnmatchedBaseline={hasUnmatchedBaseline}
               hideOnlyPageNames={checkedUnappliedPages.map((page) => page.label)}
-              showPageInRowLabel={sameServerPages.length > 1}
+              showPageInRowLabel={pagesWithTokens.length > 1}
               disabled={applying}
               onToggleRow={(optionKey, checked) =>
                 setHideOverrides((prev) => ({ ...prev, [optionKey]: checked }))
@@ -495,7 +494,6 @@ function HomeLayoutImportSummary({
   plan,
   hasChanges,
   hideOptions,
-  hasUnmatchedBaseline,
   hideOnlyPageNames,
   showPageInRowLabel,
   disabled,
@@ -504,7 +502,6 @@ function HomeLayoutImportSummary({
   plan: HomeLayoutImportPlan;
   hasChanges: boolean;
   hideOptions: HideRowOption[];
-  hasUnmatchedBaseline: boolean;
   hideOnlyPageNames: string[];
   showPageInRowLabel: boolean;
   disabled: boolean;
@@ -513,8 +510,6 @@ function HomeLayoutImportSummary({
   const t = useT();
   const pageNames = plan.pages.map((page) => page.label);
   const strong = (chunks: ReactNode[]) => <strong>{chunks}</strong>;
-  const addedOptions = hideOptions.filter((option) => option.mode === "baseline");
-  const unlistedOptions = hideOptions.filter((option) => option.mode !== "baseline");
   return (
     <div className="surface-panel-subtle space-y-2 rounded-lg p-3 text-sm">
       {!hasChanges ? <p>{t("web.home.layout.nothingApplies")}</p> : null}
@@ -534,19 +529,9 @@ function HomeLayoutImportSummary({
             : t("web.home.layout.hideWatchedOff")}
         </p>
       ) : null}
-      {hasUnmatchedBaseline ? (
-        <p className="text-muted-foreground">{t("web.home.layout.baselineUnmatched")}</p>
-      ) : null}
       <HideRowsChecklist
         heading={t("web.home.layout.addedRowsHeading")}
-        options={addedOptions}
-        showPageInRowLabel={showPageInRowLabel}
-        disabled={disabled}
-        onToggleRow={onToggleRow}
-      />
-      <HideRowsChecklist
-        heading={t("web.home.layout.unlistedRowsHeading")}
-        options={unlistedOptions}
+        options={hideOptions}
         showPageInRowLabel={showPageInRowLabel}
         disabled={disabled}
         onToggleRow={onToggleRow}

@@ -105,7 +105,6 @@ beforeEach(() => {
           if (libraryId && !canOpen(Number(libraryId))) throw notFound();
           return {
             section_tokens: [`tok-${libraryId ?? "home"}`],
-            active_section_tokens: [`tok-${libraryId ?? "home"}`],
             visible_sections: [],
           };
         }

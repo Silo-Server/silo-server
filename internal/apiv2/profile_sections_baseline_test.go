@@ -33,14 +33,8 @@ func TestGetProfileSectionBaselineRoute(t *testing.T) {
 		if !slices.IsSorted(got.SectionTokens) {
 			t.Fatalf("section_tokens = %v, want sorted", got.SectionTokens)
 		}
-		if len(got.ActiveSectionTokens) != 1 {
-			t.Fatalf("active_section_tokens = %v, want 1 token", got.ActiveSectionTokens)
-		}
 		if len(got.VisibleSections) != 1 || got.VisibleSections[0].ID != "s-continue" {
 			t.Fatalf("visible_sections = %+v, want s-continue", got.VisibleSections)
-		}
-		if got.VisibleSections[0].Token != got.ActiveSectionTokens[0] {
-			t.Fatalf("visible token %q != active token %q", got.VisibleSections[0].Token, got.ActiveSectionTokens[0])
 		}
 		if !slices.Contains(got.SectionTokens, got.VisibleSections[0].Token) {
 			t.Fatalf("section_tokens %v missing visible token %q", got.SectionTokens, got.VisibleSections[0].Token)

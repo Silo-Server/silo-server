@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { planPageHideCandidates, type ProfileSectionBaseline } from "./homeLayoutBaseline";
+import { rowsAddedSinceExport, type ProfileSectionBaseline } from "./homeLayoutBaseline";
 
 function baseline(overrides: Partial<ProfileSectionBaseline> = {}): ProfileSectionBaseline {
   return {
     section_tokens: ["tok-continue", "tok-collections", "tok-disabled"],
-    active_section_tokens: ["tok-continue", "tok-collections"],
     visible_sections: [
       {
         id: "default-continue-watching",
@@ -23,17 +22,15 @@ function baseline(overrides: Partial<ProfileSectionBaseline> = {}): ProfileSecti
   };
 }
 
-describe("planPageHideCandidates", () => {
-  it("prechecks only rows absent from a valid baseline, ignoring disabled rows that existed at export", () => {
-    const result = planPageHideCandidates(
-      {
-        overrides: [],
-        serverSectionTokens: ["tok-continue", "tok-disabled"],
-      },
+function ids(rows: { id: string }[]): string[] {
+  return rows.map((row) => row.id);
+}
+
+describe("rowsAddedSinceExport", () => {
+  it("offers rows absent at export, not a disabled row that existed then and was re-enabled", () => {
+    const rows = rowsAddedSinceExport(
+      { overrides: [], serverSectionTokens: ["tok-continue", "tok-disabled"] },
       baseline({
-        // Disabled row re-enabled later is already in serverSectionTokens, so it
-        // isn't flagged as added since export.
-        active_section_tokens: ["tok-continue", "tok-collections", "tok-disabled"],
         visible_sections: [
           ...baseline().visible_sections,
           {
@@ -46,50 +43,35 @@ describe("planPageHideCandidates", () => {
       }),
     );
 
-    expect(result.mode).toBe("baseline");
-    expect(result.defaultChecked).toBe(true);
-    expect(result.candidates.map((row) => row.id)).toEqual(["s-collections"]);
+    expect(ids(rows)).toEqual(["s-collections"]);
   });
 
-  it("requires overlap with active_section_tokens before prechecking any row", () => {
-    // Only a disabled row's token overlaps; active rows are all fallback defaults.
-    const result = planPageHideCandidates(
-      {
-        overrides: [],
-        serverSectionTokens: ["tok-disabled"],
-      },
+  it("offers nothing when no row the profile sees matches the export", () => {
+    // Only a row the profile can't see now matched, so the export can't
+    // describe this page.
+    expect(
+      rowsAddedSinceExport({ overrides: [], serverSectionTokens: ["tok-disabled"] }, baseline()),
+    ).toEqual([]);
+  });
+
+  it("offers nothing for a file without tokens or with an empty list", () => {
+    expect(
+      rowsAddedSinceExport(
+        { overrides: [{ section_id: "default-continue-watching" }] },
+        baseline(),
+      ),
+    ).toEqual([]);
+    expect(rowsAddedSinceExport({ overrides: [], serverSectionTokens: [] }, baseline())).toEqual(
+      [],
+    );
+  });
+
+  it("leaves out a new row the file already has a change for", () => {
+    const rows = rowsAddedSinceExport(
+      { overrides: [{ section_id: "s-collections" }], serverSectionTokens: ["tok-continue"] },
       baseline(),
     );
 
-    expect(result.mode).toBe("unmatched");
-    expect(result.defaultChecked).toBe(false);
-    expect(result.candidates.map((row) => row.id)).toEqual([
-      "default-continue-watching",
-      "s-collections",
-    ]);
-  });
-
-  it("treats legacy v1 pages without serverSectionTokens as unchecked per-row choices", () => {
-    const result = planPageHideCandidates(
-      {
-        overrides: [{ section_id: "default-continue-watching" }],
-      },
-      baseline(),
-    );
-
-    expect(result.mode).toBe("legacy");
-    expect(result.defaultChecked).toBe(false);
-    expect(result.candidates.map((row) => row.id)).toEqual(["s-collections"]);
-  });
-
-  it("treats an empty or malformed baseline token list as unmatched and unchecked", () => {
-    const result = planPageHideCandidates({ overrides: [], serverSectionTokens: [] }, baseline());
-
-    expect(result.mode).toBe("unmatched");
-    expect(result.defaultChecked).toBe(false);
-    expect(result.candidates.map((row) => row.id)).toEqual([
-      "default-continue-watching",
-      "s-collections",
-    ]);
+    expect(rows).toEqual([]);
   });
 });

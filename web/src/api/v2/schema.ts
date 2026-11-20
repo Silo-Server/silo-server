@@ -33330,9 +33330,7 @@ export interface components {
       pin: string;
     };
     ProfileSectionBaseline: {
-      /** @description Opaque server-keyed tokens for the currently active server sections on this page (enabled rows, or fallback defaults when no stored row is enabled), sorted deterministically */
-      active_section_tokens: string[];
-      /** @description Opaque server-keyed tokens for every server section on this page (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically */
+      /** @description Opaque server-keyed tokens for every server section on this page that the acting profile's access policy permits (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically. Rows tied to libraries the profile can't see are left out. */
       section_tokens: string[];
       /** @description Pre-override active server sections the acting profile's access policy permits, in display order */
       visible_sections: components["schemas"]["ProfileSectionBaselineRow"][];
@@ -33377,6 +33375,11 @@ export interface components {
        * @example true
        */
       allow_profile_custom_sections: boolean;
+      /**
+       * @description True when this server serves getProfileSectionBaseline, so a home layout export can record the server's rows and an import on this server can offer to hide rows added since.
+       * @example true
+       */
+      home_layout_baseline: boolean;
     };
     ProfileSectionSetting: {
       /** @description The recipe's effective config; absent when none, {} when explicitly empty */

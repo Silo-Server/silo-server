@@ -43,7 +43,6 @@ beforeEach(() => {
         case "GET /api/v2/profile/sections/baseline":
           return {
             section_tokens: ["tok-continue", "tok-collections"],
-            active_section_tokens: ["tok-continue", "tok-collections"],
             visible_sections: [
               {
                 id: "default-continue-watching",
@@ -114,10 +113,10 @@ describe("HomeLayoutImportDialog", () => {
     });
   });
 
-  it("offers unchecked per-row checkboxes for legacy v1 files so the user can hide only Collections", async () => {
+  it("imports a file from before tokens existed as before, without offering rows to hide", async () => {
     renderDialog();
 
-    const legacyFile = {
+    const olderFile = {
       format: "silo-home-layout",
       version: 1,
       exported_at: "2026-10-01T00:00:00.000Z",
@@ -126,27 +125,20 @@ describe("HomeLayoutImportDialog", () => {
       pages: [{ scope: "home", overrides: [] }],
     };
     fireEvent.change(screen.getByLabelText("Layout file"), {
-      target: { value: JSON.stringify(legacyFile) },
+      target: { value: JSON.stringify(olderFile) },
     });
 
-    const continueBox = await screen.findByRole("checkbox", { name: "Continue Watching" });
-    const collectionsBox = await screen.findByRole("checkbox", { name: "Collections" });
-    expect(continueBox).toHaveAttribute("data-state", "unchecked");
-    expect(collectionsBox).toHaveAttribute("data-state", "unchecked");
+    const importButton = await screen.findByRole("button", { name: "Import" });
+    await waitFor(() => expect(importButton).toBeEnabled());
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(mocks.request).not.toHaveBeenCalledWith(
+      "GET /api/v2/profile/sections/baseline",
+      expect.anything(),
+    );
 
-    fireEvent.click(collectionsBox);
-    expect(collectionsBox).toHaveAttribute("data-state", "checked");
-
-    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    fireEvent.click(importButton);
     await waitFor(() => expect(mocks.savedPuts).toHaveLength(1));
-    expect(mocks.savedPuts[0]?.body).toEqual({
-      overrides: [
-        expect.objectContaining({
-          section_id: "s-collections",
-          hidden: true,
-        }),
-      ],
-    });
+    expect(mocks.savedPuts[0]?.body).toEqual({ overrides: [] });
   });
 
   it("still imports the file's rows when the server baseline can't be read", async () => {

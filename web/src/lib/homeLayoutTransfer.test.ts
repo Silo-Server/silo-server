@@ -789,7 +789,6 @@ describe("importPage", () => {
       ...fakeApi([{}]),
       getBaseline: vi.fn(async () => ({
         section_tokens: ["t1", "t2"],
-        active_section_tokens: ["t1", "t2"],
         visible_sections: [
           {
             id: "s-collections",
@@ -843,7 +842,6 @@ describe("importPage", () => {
       ...fakeApi([]),
       getBaseline: vi.fn(async () => ({
         section_tokens: [],
-        active_section_tokens: [],
         visible_sections: [],
       })),
     };

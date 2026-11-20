@@ -154,9 +154,9 @@ function sanitizeOverride(raw: unknown): SectionOverrideWrite | null {
   return write;
 }
 
-// Validates the optional server baseline token list on a page. Absent means a
-// legacy v1 export (undefined); malformed or truncated (> 500) becomes [] so
-// import falls back to explicit per-row selection without auto-hiding.
+// Validates the optional server baseline token list on a page. Absent means an
+// export from before tokens existed (undefined); a malformed or oversized
+// (> 500) list becomes [], so the import offers no rows to hide on that page.
 function sanitizeServerSectionTokens(raw: unknown): string[] | undefined {
   if (raw === undefined) return undefined;
   if (!Array.isArray(raw) || raw.length > HOME_LAYOUT_MAX_PAGE_OVERRIDES) return [];

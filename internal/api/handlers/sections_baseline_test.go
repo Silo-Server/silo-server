@@ -29,7 +29,7 @@ func (s *stubSectionScopeLister) ListByScopeAll(_ context.Context, _ string, _ *
 	return s.all, nil
 }
 
-func TestGetProfileSectionBaselineDistinguishesAllActiveAndVisible(t *testing.T) {
+func TestGetProfileSectionBaselineLeavesOutRowsTheProfileCannotSee(t *testing.T) {
 	h := &SectionHandler{
 		sectionLister: &stubSectionScopeLister{
 			all: []*sections.PageSection{
@@ -49,11 +49,10 @@ func TestGetProfileSectionBaselineDistinguishesAllActiveAndVisible(t *testing.T)
 		t.Fatalf("GetProfileSectionBaseline failed: %v", err)
 	}
 
-	if !slices.Equal(got.AllSectionIDs, []string{"s-home", "s-kids", "s-disabled"}) {
-		t.Fatalf("AllSectionIDs = %v, want [s-home s-kids s-disabled]", got.AllSectionIDs)
-	}
-	if !slices.Equal(got.ActiveSectionIDs, []string{"s-home", "s-kids"}) {
-		t.Fatalf("ActiveSectionIDs = %v, want [s-home s-kids]", got.ActiveSectionIDs)
+	// s-kids is tied to library 2, which this profile can't see, so it is
+	// neither listed nor counted.
+	if !slices.Equal(got.SectionIDs, []string{"s-home", "s-disabled"}) {
+		t.Fatalf("SectionIDs = %v, want [s-home s-disabled]", got.SectionIDs)
 	}
 	if len(got.VisibleSections) != 1 || got.VisibleSections[0].ID != "s-home" {
 		t.Fatalf("VisibleSections = %+v, want only s-home", got.VisibleSections)
@@ -73,17 +72,16 @@ func TestSectionBaselineAndSettingsFallBackWhenNoRowsEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetProfileSectionBaseline failed: %v", err)
 	}
-	if !slices.Contains(baseline.AllSectionIDs, "s-disabled-only") {
-		t.Fatalf("AllSectionIDs = %v, expected disabled stored row to remain included", baseline.AllSectionIDs)
+	if !slices.Contains(baseline.SectionIDs, "s-disabled-only") || !slices.Contains(baseline.SectionIDs, "default-continue-watching") {
+		t.Fatalf("SectionIDs = %v, expected the disabled stored row and the fallback home defaults", baseline.SectionIDs)
 	}
-	if len(baseline.ActiveSectionIDs) == 0 || !slices.Contains(baseline.ActiveSectionIDs, "default-continue-watching") {
-		t.Fatalf("ActiveSectionIDs = %v, expected fallback home defaults", baseline.ActiveSectionIDs)
+	if len(baseline.VisibleSections) == 0 || baseline.VisibleSections[0].ID != "default-continue-watching" {
+		t.Fatalf("VisibleSections = %+v, expected fallback home defaults", baseline.VisibleSections)
 	}
-	if slices.Contains(baseline.ActiveSectionIDs, "s-disabled-only") {
-		t.Fatalf("ActiveSectionIDs = %v, disabled row should not be active", baseline.ActiveSectionIDs)
-	}
-	if len(baseline.VisibleSections) == 0 {
-		t.Fatal("VisibleSections is empty, expected fallback home defaults")
+	for _, s := range baseline.VisibleSections {
+		if s.ID == "s-disabled-only" {
+			t.Fatal("VisibleSections includes a disabled row")
+		}
 	}
 
 	settings, err := h.ResolveProfileSectionSettings(context.Background(), 1, "p-1", "home", nil, catalog.AccessFilter{})

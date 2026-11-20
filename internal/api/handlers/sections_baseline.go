@@ -19,13 +19,12 @@ type sectionScopeLister interface {
 // overrides are applied, used for home layout export snapshots and import
 // previews.
 type ProfileSectionBaseline struct {
-	// AllSectionIDs holds every server section ID on this page: stored rows
-	// (enabled and disabled) plus fallback defaults when no stored row is
-	// enabled.
-	AllSectionIDs []string
-	// ActiveSectionIDs holds the currently active server section IDs on this
-	// page (enabled stored rows, or fallback defaults when none are enabled).
-	ActiveSectionIDs []string
+	// SectionIDs holds every server section ID on this page that the acting
+	// profile's access policy permits: stored rows (enabled and disabled)
+	// plus fallback defaults when no stored row is enabled. Rows tied to
+	// libraries the profile can't see are left out, so the list reveals
+	// nothing about them.
+	SectionIDs []string
 	// VisibleSections holds the pre-override active server sections permitted
 	// by the acting profile's access policy, in display order.
 	VisibleSections []sections.ResolvedSection
@@ -112,10 +111,21 @@ func (h *SectionHandler) GetProfileSectionBaseline(ctx context.Context, userID i
 	}
 
 	return ProfileSectionBaseline{
-		AllSectionIDs:    uniqueSectionIDs(storedAll, active),
-		ActiveSectionIDs: uniqueSectionIDs(active),
-		VisibleSections:  visible,
+		SectionIDs:      uniqueSectionIDs(allowedPageSections(storedAll, accessFilter), allowedPageSections(active, accessFilter)),
+		VisibleSections: visible,
 	}, nil
+}
+
+// allowedPageSections keeps the rows the access filter permits, by the same
+// rule the Home feed applies to resolved rows.
+func allowedPageSections(rows []*sections.PageSection, filter catalog.AccessFilter) []*sections.PageSection {
+	out := make([]*sections.PageSection, 0, len(rows))
+	for _, s := range rows {
+		if s != nil && sectionAllowedByAccess(sections.ResolvedSection{Config: s.Config}, filter) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func (h *SectionHandler) sectionBaselineAccessFilter(ctx context.Context, userID int) (catalog.AccessFilter, error) {

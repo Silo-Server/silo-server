@@ -150,6 +150,7 @@ type ProfileSectionSettingCollectionOutput struct {
 // ProfileSectionFlags is what this server lets profiles do to their pages.
 type ProfileSectionFlags struct {
 	AllowProfileCustomSections bool `json:"allow_profile_custom_sections" doc:"Deprecated; always true. Profiles may always add rule rows (custom_filter). Whether a profile that is not an admin may add a new row of a recipe is that recipe's admin_only in listSectionRecipes; follow it instead of this flag. Kept for clients that still read it." example:"true" deprecated:"true"`
+	HomeLayoutBaseline         bool `json:"home_layout_baseline" doc:"True when this server serves getProfileSectionBaseline, so a home layout export can record the server's rows and an import on this server can offer to hide rows added since." example:"true"`
 }
 
 // ProfileSectionFlagsOutput is the getProfileSectionFlags response.
@@ -171,9 +172,8 @@ type ProfileSectionBaselineRow struct {
 // profile overrides are applied, for home layout export snapshots and import
 // previews.
 type ProfileSectionBaseline struct {
-	SectionTokens       []string                    `json:"section_tokens" doc:"Opaque server-keyed tokens for every server section on this page (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically"`
-	ActiveSectionTokens []string                    `json:"active_section_tokens" doc:"Opaque server-keyed tokens for the currently active server sections on this page (enabled rows, or fallback defaults when no stored row is enabled), sorted deterministically"`
-	VisibleSections     []ProfileSectionBaselineRow `json:"visible_sections" doc:"Pre-override active server sections the acting profile's access policy permits, in display order"`
+	SectionTokens   []string                    `json:"section_tokens" doc:"Opaque server-keyed tokens for every server section on this page that the acting profile's access policy permits (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically. Rows tied to libraries the profile can't see are left out."`
+	VisibleSections []ProfileSectionBaselineRow `json:"visible_sections" doc:"Pre-override active server sections the acting profile's access policy permits, in display order"`
 }
 
 // ProfileSectionBaselineOutput is the getProfileSectionBaseline response.
@@ -420,11 +420,11 @@ func profileSectionSettingsOf(resolved []sections.ResolvedSection) (*ProfileSect
 // getProfileSectionFlags answers what v1 GET /profile/sections/flags does:
 // profiles may always add rule rows, so the flag is always true.
 func (reg *Registry) getProfileSectionFlags(context.Context, *struct{}) (*ProfileSectionFlagsOutput, error) {
-	return &ProfileSectionFlagsOutput{Body: ProfileSectionFlags{AllowProfileCustomSections: true}}, nil
+	return &ProfileSectionFlagsOutput{Body: ProfileSectionFlags{AllowProfileCustomSections: true, HomeLayoutBaseline: true}}, nil
 }
 
 // getProfileSectionBaseline returns one page's pre-override server section
-// baseline: opaque HMAC tokens for all and active server rows, plus the
+// baseline: opaque HMAC tokens for the server rows the profile may see, plus the
 // pre-override active rows visible to the acting profile.
 func (reg *Registry) getProfileSectionBaseline(ctx context.Context, in *SectionOverridesScopeInput) (*ProfileSectionBaselineOutput, error) {
 	if reg.deps.ProfileSections == nil {
@@ -447,8 +447,7 @@ func (reg *Registry) getProfileSectionBaseline(ctx context.Context, in *SectionO
 }
 
 func profileSectionBaselineOf(secret []byte, scope, libraryID string, baseline handlers.ProfileSectionBaseline) ProfileSectionBaseline {
-	allTokens := baselineTokensOf(secret, scope, libraryID, baseline.AllSectionIDs)
-	activeTokens := baselineTokensOf(secret, scope, libraryID, baseline.ActiveSectionIDs)
+	tokens := baselineTokensOf(secret, scope, libraryID, baseline.SectionIDs)
 	visible := make([]ProfileSectionBaselineRow, 0, len(baseline.VisibleSections))
 	for _, s := range baseline.VisibleSections {
 		visible = append(visible, ProfileSectionBaselineRow{
@@ -460,9 +459,8 @@ func profileSectionBaselineOf(secret []byte, scope, libraryID string, baseline h
 		})
 	}
 	return ProfileSectionBaseline{
-		SectionTokens:       allTokens,
-		ActiveSectionTokens: activeTokens,
-		VisibleSections:     visible,
+		SectionTokens:   tokens,
+		VisibleSections: visible,
 	}
 }
 
