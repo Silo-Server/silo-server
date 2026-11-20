@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Setat de mediul nodului. Modificați-l acolo și reporniți nodul."
+      "value": "Valoarea este setată de mediul de implementare. Modificați-o acolo și reporniți serviciul afectat."
     }
   ],
   "error.field.out_of_range": [
@@ -58163,6 +58163,68 @@
       "value": "Pluginuri"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Aplicat"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Suspendat"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Nu s-a putut încărca starea provizionării pluginurilor."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Gestionat de mediul de implementare"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "În așteptare"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Refuzat"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Implementarea controlează sursa pachetului și eliminarea acestuia."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Starea provizionării"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Implementarea fixează acest plugin la versiunea "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -63728,6 +63790,12 @@
     {
       "type": 0,
       "value": "Mesajul a fost trimis"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Playerul nu a confirmat primirea mesajului. Este posibil ca mesajul să apară mai târziu sau deloc."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

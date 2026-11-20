@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "यह नोड के एनवायरनमेंट में सेट है। इसे वहीं बदलें और नोड रीस्टार्ट करें।"
+      "value": "यह एनवायरनमेंट में सेट है। इसे वहीं बदलें और प्रभावित सेवा रीस्टार्ट करें।"
     }
   ],
   "error.field.out_of_range": [
@@ -51831,6 +51831,68 @@
       "value": "प्लगइन"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "लागू"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "रोका गया"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "प्लगइन प्रोविज़निंग की स्थिति लोड नहीं की जा सकी।"
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "एनवायरनमेंट द्वारा नियंत्रित"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "लंबित"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "अस्वीकृत"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "पैकेज सोर्स और हटाने का नियंत्रण डिप्लॉयमेंट के पास है।"
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "प्रोविज़निंग की स्थिति"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "डिप्लॉयमेंट ने इस प्लगइन को वर्शन "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": " पर पिन किया है।"
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -56807,6 +56869,12 @@
     {
       "type": 0,
       "value": "मैसेज भेजा गया"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "प्लेयर ने मैसेज मिलने की पुष्टि नहीं की। हो सकता है कि यह देर से दिखे या बिल्कुल न दिखे।"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

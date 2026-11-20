@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Задається середовищем вузла. Змініть це значення там і перезапустіть вузол."
+      "value": "Задається середовищем. Змініть це значення там і перезапустіть відповідну службу."
     }
   ],
   "error.field.out_of_range": [
@@ -64066,6 +64066,68 @@
       "value": "Плагіни"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Застосовано"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Утримано"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Не вдалося завантажити стан розгортання плагінів."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Керується середовищем"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Очікує"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Відхилено"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Джерелом пакета та видаленням керує середовище розгортання."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Стан розгортання"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Середовище розгортання закріплює цей плагін на версії "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -70216,6 +70278,12 @@
     {
       "type": 0,
       "value": "Повідомлення надіслано"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Програвач не підтвердив отримання повідомлення. Воно може з’явитися пізніше або не з’явитися взагалі."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

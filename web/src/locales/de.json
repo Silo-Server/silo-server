@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Wird über die Umgebung des Knotens festgelegt. Ändere den Wert dort und starte den Knoten neu."
+      "value": "Wird über die Umgebung festgelegt. Ändere den Wert dort und starte den betroffenen Dienst neu."
     }
   ],
   "error.field.out_of_range": [
@@ -51951,6 +51951,68 @@
       "value": "Plugins"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Angewendet"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Zurückgehalten"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Der Bereitstellungsstatus der Plugins konnte nicht geladen werden."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Über die Umgebung verwaltet"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Ausstehend"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Abgelehnt"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Die Paketquelle und das Entfernen werden vom Deployment gesteuert."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Bereitstellungsstatus"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Das Deployment legt dieses Plugin auf Version "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": " fest."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -56883,6 +56945,12 @@
     {
       "type": 0,
       "value": "Nachricht gesendet"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Der Player hat die Nachricht nicht bestätigt. Sie wird möglicherweise verspätet oder gar nicht angezeigt."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

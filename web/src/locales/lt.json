@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Nustatyta mazgo aplinkoje. Pakeiskite tai ten ir paleiskite mazgą iš naujo."
+      "value": "Nustatyta aplinkoje. Pakeiskite reikšmę ten ir paleiskite paveiktą paslaugą iš naujo."
     }
   ],
   "error.field.out_of_range": [
@@ -64894,6 +64894,68 @@
       "value": "Papildiniai"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Pritaikyta"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Sulaikyta"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Nepavyko įkelti papildinių parengimo būsenos."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Valdoma aplinkos"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Laukiama"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Atmesta"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Paketo šaltinį ir pašalinimą valdo diegimo konfigūracija."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Parengimo būsena"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Diegimo konfigūracija fiksuoja šio papildinio versiją "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -71112,6 +71174,12 @@
     {
       "type": 0,
       "value": "Žinutė išsiųsta"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Leistuvas nepatvirtino, kad gavo žinutę. Ji gali būti parodyta vėliau arba visai neparodyta."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

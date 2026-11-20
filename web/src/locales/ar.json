@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "يُعيَّن هذا الخيار من بيئة العقدة. غيّره هناك وأعد تشغيل العقدة."
+      "value": "يُعيَّن هذا الخيار من البيئة. غيّره هناك وأعد تشغيل الخدمة المتأثرة."
     }
   ],
   "error.field.out_of_range": [
@@ -74907,6 +74907,68 @@
       "value": "المكونات الإضافية"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "مطبَّق"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "معلّق"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "تعذّر تحميل حالة تهيئة المكونات الإضافية."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "تديره البيئة"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "قيد الانتظار"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "مرفوض"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "يتحكم النشر في مصدر الحزمة وإزالتها."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "حالة التهيئة"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "يقيّد النشر هذا المكون الإضافي بالإصدار "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -81980,6 +82042,12 @@
     {
       "type": 0,
       "value": "تم إرسال الرسالة"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "لم يؤكّد المشغّل استلام الرسالة. قد تظهر متأخرة أو لا تظهر إطلاقًا."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

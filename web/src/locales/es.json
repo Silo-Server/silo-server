@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Lo define el entorno del nodo. Cámbialo allí y reinicia el nodo."
+      "value": "Lo define el entorno. Cámbialo allí y reinicia el servicio afectado."
     }
   ],
   "error.field.out_of_range": [
@@ -58147,6 +58147,68 @@
       "value": "Complementos"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Aplicado"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Retenido"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "No se pudo cargar el estado de aprovisionamiento de los complementos."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Administrado por el entorno"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Pendiente"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Rechazado"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "La implementación controla el origen del paquete y su eliminación."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Estado de aprovisionamiento"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "La implementación fija este complemento en la versión "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -63620,6 +63682,12 @@
     {
       "type": 0,
       "value": "Mensaje enviado"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "El reproductor no confirmó el mensaje. Es posible que se muestre más tarde o que no llegue a mostrarse."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

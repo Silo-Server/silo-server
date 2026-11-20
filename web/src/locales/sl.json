@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Nastavljeno v okolju vozlišča. Spremenite ga tam in znova zaženite vozlišče."
+      "value": "Nastavljeno v okolju. Spremenite nastavitev tam in znova zaženite prizadeto storitev."
     }
   ],
   "error.field.out_of_range": [
@@ -64078,6 +64078,68 @@
       "value": "Vtičniki"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Uveljavljeno"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Zadržano"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Stanja zagotavljanja vtičnikov ni bilo mogoče naložiti."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Upravlja okolje"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Na čakanju"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Zavrnjeno"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Vir paketa in odstranitev določa uvedba."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Stanje zagotavljanja"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Uvedba ta vtičnik zaklene na različico "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -70216,6 +70278,12 @@
     {
       "type": 0,
       "value": "Sporočilo je poslano"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Predvajalnik ni potrdil prejema sporočila. Morda bo prikazano pozneje ali pa sploh ne."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

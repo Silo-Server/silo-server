@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Ustawione w środowisku węzła. Zmień je tam i uruchom węzeł ponownie."
+      "value": "Ta wartość jest ustawiona przez środowisko. Zmień ją tam i uruchom ponownie odpowiednią usługę."
     }
   ],
   "error.field.out_of_range": [
@@ -64881,6 +64881,68 @@
       "value": "Wtyczki"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Zastosowano"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Wstrzymano"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Nie udało się wczytać stanu aprowizacji wtyczek."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Zarządzane przez środowisko"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Oczekuje"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Odrzucono"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Źródłem pakietu i jego usuwaniem zarządza wdrożenie."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Stan aprowizacji"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Wdrożenie przypina tę wtyczkę do wersji "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -71067,6 +71129,12 @@
     {
       "type": 0,
       "value": "Wysłano wiadomość"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Odtwarzacz nie potwierdził odebrania wiadomości. Może pojawić się z opóźnieniem albo wcale się nie pojawić."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

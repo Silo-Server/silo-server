@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Nastavené prostredím uzla. Zmeňte to tam a reštartujte uzol."
+      "value": "Nastavené prostredím. Zmeňte to tam a reštartujte príslušnú službu."
     }
   ],
   "error.field.out_of_range": [
@@ -64347,6 +64347,68 @@
       "value": "Doplnky"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Použité"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Zadržané"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Nepodarilo sa načítať stav zriaďovania doplnkov."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Spravované prostredím"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Čakajúce"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Zamietnuté"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Zdroj balíka a jeho odstránenie riadi nasadenie."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Stav zriaďovania"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Nasadenie uzamyká tento doplnok na verzii "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -70521,6 +70583,12 @@
     {
       "type": 0,
       "value": "Správa bola odoslaná"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Prehrávač nepotvrdil prijatie správy. Môže sa zobraziť s oneskorením alebo sa nezobrazí vôbec."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

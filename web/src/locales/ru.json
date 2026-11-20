@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Задаётся в окружении узла. Измените значение там и перезапустите узел."
+      "value": "Задаётся в окружении. Измените значение там и перезапустите соответствующую службу."
     }
   ],
   "error.field.out_of_range": [
@@ -65008,6 +65008,68 @@
       "value": "Плагины"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Применено"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Удержано"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Не удалось загрузить статус подготовки плагинов."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Управляется окружением"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Ожидание"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Отклонено"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Источник пакета и удаление контролируются развёртыванием."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Статус подготовки"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Развёртывание закрепляет этот плагин на версии "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -71274,6 +71336,12 @@
     {
       "type": 0,
       "value": "Сообщение отправлено"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Плеер не подтвердил получение сообщения. Оно может появиться с задержкой или не появиться вовсе."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

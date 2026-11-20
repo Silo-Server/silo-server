@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Ingesteld door de omgeving van de node. Wijzig het daar en herstart de node."
+      "value": "Ingesteld door de omgeving. Wijzig het daar en herstart de betreffende dienst."
     }
   ],
   "error.field.out_of_range": [
@@ -51863,6 +51863,68 @@
       "value": "Plug-ins"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Toegepast"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Aangehouden"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Kan de provisioningstatus van plug-ins niet laden."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Beheerd door de omgeving"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "In behandeling"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Geweigerd"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "De deployment bepaalt de pakketbron en het verwijderen."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Provisioningstatus"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "De deployment zet deze plug-in vast op "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -56783,6 +56845,12 @@
     {
       "type": 0,
       "value": "Bericht verzonden"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "De speler heeft het bericht niet bevestigd. Het kan later of helemaal niet verschijnen."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

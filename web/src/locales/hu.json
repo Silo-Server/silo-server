@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "A csomópont környezete állítja be. Ott módosítsa, majd indítsa újra a csomópontot."
+      "value": "A környezet állítja be. Ott módosítsa, majd indítsa újra az érintett szolgáltatást."
     }
   ],
   "error.field.out_of_range": [
@@ -52011,6 +52011,68 @@
       "value": "Bővítmények"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Alkalmazva"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Visszatartva"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Nem sikerült betölteni a bővítmények kiépítési állapotát."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "A környezet kezeli"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Függőben"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Elutasítva"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "A csomag forrását és eltávolítását a telepítési környezet szabályozza."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Kiépítési állapot"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "A telepítési környezet ehhez a verzióhoz rögzíti a bővítményt: "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -56931,6 +56993,12 @@
     {
       "type": 0,
       "value": "Üzenet elküldve"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "A lejátszó nem erősítette meg az üzenet fogadását. Lehet, hogy az üzenet később jelenik meg, vagy egyáltalán nem."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

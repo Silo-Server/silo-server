@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Düğümün ortamı tarafından ayarlanır. Orada değiştirip düğümü yeniden başlatın."
+      "value": "Ortam tarafından ayarlanır. Orada değiştirip ilgili hizmeti yeniden başlatın."
     }
   ],
   "error.field.out_of_range": [
@@ -51603,6 +51603,68 @@
       "value": "Eklentiler"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Uygulandı"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Bekletildi"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Eklenti hazırlama durumu yüklenemedi."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Ortam tarafından yönetiliyor"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Bekliyor"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Reddedildi"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Paket kaynağını ve kaldırma işlemini dağıtım yönetiyor."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Hazırlama durumu"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Dağıtım bu eklentiyi şu sürüme sabitliyor: "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -56559,6 +56621,12 @@
     {
       "type": 0,
       "value": "Mesaj gönderildi"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Oynatıcı mesajı onaylamadı. Mesaj geç gösterilebilir veya hiç gösterilmeyebilir."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
