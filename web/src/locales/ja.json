@@ -449,6 +449,12 @@
       "value": "続行するには、ネットワークのサインインからサインインしてください。"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "このノードはサーバーのデプロイ構成で設定されています。ここで管理するには、デプロイ構成からノードを削除して、APIサーバーを再起動してください。"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -27600,7 +27606,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "最近開始した再生セッションのフィード"
+      "value": "全アカウントの最近の再生"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -29042,6 +29048,80 @@
     {
       "type": 0,
       "value": "アクティビティを読み込めませんでした。"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "が"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "を再生しました"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "が"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "を再生しました"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -43912,6 +43992,12 @@
       "value": "設定を完成させるには、サーバーアドレスを入力してください。"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "サーバーのデプロイ構成で設定されたキー"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 1,
@@ -44800,6 +44886,12 @@
     {
       "type": 0,
       "value": "を削除"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "サーバーのデプロイ構成で設定されています。ここで削除するには、デプロイ構成から削除してください。"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -50867,6 +50959,12 @@
     {
       "type": 0,
       "value": "メッセージを送信しました"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "プレーヤーからメッセージの受信確認がありませんでした。メッセージの表示が遅れるか、表示されない可能性があります。"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

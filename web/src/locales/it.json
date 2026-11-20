@@ -449,6 +449,12 @@
       "value": "Accedi tramite il sistema di accesso della tua rete per continuare."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Questo nodo è impostato dalla configurazione di deployment del server. Rimuovilo da lì e riavvia i server API per gestirlo qui."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -33516,7 +33522,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Feed delle sessioni di riproduzione avviate di recente"
+      "value": "Riproduzioni più recenti di tutti gli account"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35316,6 +35322,72 @@
     {
       "type": 0,
       "value": "Impossibile caricare l’attività."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ha riprodotto "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ha riprodotto "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -55075,6 +55147,12 @@
       "value": "Inserisci l’indirizzo del server per completare le impostazioni."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Chiave impostata dalla configurazione di deployment del server"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -55995,6 +56073,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Impostato dalla configurazione di deployment del server. Rimuovilo da lì per eliminarlo qui."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -63554,6 +63638,12 @@
     {
       "type": 0,
       "value": "Messaggio inviato"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Il lettore non ha confermato il messaggio. Potrebbe essere mostrato in ritardo o non essere mostrato affatto."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

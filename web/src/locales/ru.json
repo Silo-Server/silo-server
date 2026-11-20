@@ -449,6 +449,12 @@
       "value": "Войдите через систему входа вашей сети, чтобы продолжить."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Этот узел задан в конфигурации развёртывания сервера. Удалите его там и перезапустите API-серверы, чтобы управлять им здесь."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -37476,7 +37482,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Лента недавно начатых сеансов воспроизведения"
+      "value": "Последние воспроизведения во всех аккаунтах"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -39459,6 +39465,88 @@
     {
       "type": 0,
       "value": "Не удалось загрузить активность."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "Пользователь "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " воспроизвёл «"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "»"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "Пользователь "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " воспроизвёл «"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "»"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -61903,6 +61991,12 @@
       "value": "Введите адрес сервера, чтобы завершить настройку."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ключ задан в конфигурации развёртывания сервера"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -62847,6 +62941,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Задаётся в конфигурации развёртывания сервера. Удалите узел там, чтобы удалить его здесь."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -71336,6 +71436,12 @@
     {
       "type": 0,
       "value": "Сообщение отправлено"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Плеер не подтвердил получение сообщения. Оно может появиться с задержкой или не появиться вовсе."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

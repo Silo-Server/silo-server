@@ -449,6 +449,12 @@
       "value": "Logga in via nätverkets inloggning för att fortsätta."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Den här noden anges av serverns driftsättningskonfiguration. Ta bort den där och starta om API-servrarna för att hantera den här."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30458,7 +30464,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Flöde med nyligen startade uppspelningssessioner"
+      "value": "Senaste uppspelningarna från alla konton"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32087,6 +32093,72 @@
     {
       "type": 0,
       "value": "Det gick inte att läsa in aktiviteten."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " spelade upp "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " spelade upp "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49408,6 +49480,12 @@
       "value": "Ange serveradressen för att slutföra inställningarna."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nyckeln anges av serverns driftsättningskonfiguration"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50316,6 +50394,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Anges av serverns driftsättningskonfiguration. Ta bort den där för att kunna radera den här."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -57065,6 +57149,12 @@
     {
       "type": 0,
       "value": "Meddelandet har skickats"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Spelaren bekräftade inte meddelandet. Det kan visas senare eller inte alls."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

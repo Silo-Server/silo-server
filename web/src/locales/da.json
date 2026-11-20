@@ -449,6 +449,12 @@
       "value": "Log ind via dit netværks login for at fortsætte."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Denne node er angivet af serverens udrulningskonfiguration. Fjern den dér, og genstart API-serverne for at administrere den her."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30470,7 +30476,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Oversigt over nyligt startede afspilningssessioner"
+      "value": "Seneste afspilninger på tværs af alle konti"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32099,6 +32105,72 @@
     {
       "type": 0,
       "value": "Kunne ikke indlæse aktivitet."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " afspillede "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " afspillede "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49464,6 +49536,12 @@
       "value": "Angiv serveradressen for at fuldføre indstillingerne."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nøgle angivet af serverens udrulningskonfiguration"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50372,6 +50450,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Angivet af serverens udrulningskonfiguration. Fjern den dér for at slette den her."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -57121,6 +57205,12 @@
     {
       "type": 0,
       "value": "Beskeden er sendt"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Afspilleren bekræftede ikke beskeden. Den vises muligvis sent eller slet ikke."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

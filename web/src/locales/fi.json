@@ -449,6 +449,12 @@
       "value": "Kirjaudu sisään verkkosi kirjautumispalvelun kautta jatkaaksesi."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Tämä solmu on asetettu palvelimen käyttöönottomäärityksissä. Poista solmu sieltä ja käynnistä API-palvelimet uudelleen, jotta voit hallita sitä täällä."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30554,7 +30560,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Syöte äskettäin aloitetuista toistoistunnoista"
+      "value": "Viimeisimmät toistot kaikilla tileillä"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32191,6 +32197,72 @@
     {
       "type": 0,
       "value": "Toiminnan lataaminen epäonnistui."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " toisti kohteen "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " toisti kohteen "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49468,6 +49540,12 @@
       "value": "Viimeistele asetukset antamalla palvelimen osoite."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Avain asetettu palvelimen käyttöönottomäärityksissä"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50388,6 +50466,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Asetettu palvelimen käyttöönottomäärityksissä. Poista solmu sieltä, jotta voit poistaa sen täällä."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -57169,6 +57253,12 @@
     {
       "type": 0,
       "value": "Viesti lähetetty"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Soitin ei vahvistanut viestin vastaanottamista. Viesti voi näkyä myöhässä tai jäädä kokonaan näkymättä."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

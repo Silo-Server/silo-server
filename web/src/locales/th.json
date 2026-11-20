@@ -449,6 +449,12 @@
       "value": "ลงชื่อเข้าใช้ผ่านระบบลงชื่อเข้าใช้ของเครือข่ายเพื่อดำเนินการต่อ"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "โหนดนี้กำหนดโดยการกำหนดค่าการติดตั้งใช้งานของเซิร์ฟเวอร์ โปรดนำโหนดออกจากการกำหนดค่านั้นแล้วรีสตาร์ตเซิร์ฟเวอร์ API เพื่อจัดการโหนดที่นี่"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -27916,7 +27922,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "ฟีดเซสชันการเล่นที่เพิ่งเริ่ม"
+      "value": "การเล่นล่าสุดจากทุกบัญชี"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -29394,6 +29400,72 @@
     {
       "type": 0,
       "value": "โหลดกิจกรรมไม่ได้"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " เล่น "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " เล่น "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -44644,6 +44716,12 @@
       "value": "ป้อนที่อยู่เซิร์ฟเวอร์เพื่อทำการตั้งค่าให้เสร็จสมบูรณ์"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "คีย์กำหนดโดยการกำหนดค่าการติดตั้งใช้งานของเซิร์ฟเวอร์"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -45540,6 +45618,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "โหนดนี้กำหนดโดยการกำหนดค่าการติดตั้งใช้งานของเซิร์ฟเวอร์ โปรดนำโหนดออกจากการกำหนดค่านั้นเพื่อลบโหนดที่นี่"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -51671,6 +51755,12 @@
     {
       "type": 0,
       "value": "ส่งข้อความแล้ว"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "เครื่องเล่นไม่ได้ยืนยันว่าได้รับข้อความ ข้อความอาจแสดงช้าหรืออาจไม่แสดง"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
