@@ -1096,6 +1096,8 @@
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
 ./internal/playback/planstore TestAttemptDesiredTracksRoundTrip
 ./internal/playback/planstore TestProgressCommitsLifecycleStateDB
+./internal/playback/planstore TestLatePlaybackProgressCannotOverwriteFinalStopDB
+./internal/playback/planstore TestPlaybackStopCommitsResumeAndEpisodeSpanOnceDB
 ./internal/api/handlers TestSlowPlanDeliveryLookupKeepsTheSummaryDB
 ./internal/api/handlers TestForgetDeviceKeepsConnectionsUntilLastRegistrationDB
 ./internal/api/handlers TestConcurrentLastRegistrationDeletesDropConnectionsDB
