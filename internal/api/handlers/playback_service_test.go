@@ -1326,7 +1326,7 @@ func TestRealtimeConfirmedStopNotifiesProvidersOnce(t *testing.T) {
 			if tc.race != nil {
 				tc.race(t, f, f.handler.PlanStoreV3.(*playback.MemoryPlanStoreV3))
 			}
-			f.handler.recordRealtimeStoppedSession(context.Background(), snapshot)
+			f.handler.recordRealtimeStoppedSession(context.Background(), snapshot, time.Time{})
 			if got := len(scrobbler.stops) + len(scrobbler.pauses); got != 1 {
 				t.Fatalf("provider end events = %d stops + %d pauses, want 1", len(scrobbler.stops), len(scrobbler.pauses))
 			}
@@ -1339,6 +1339,54 @@ func TestRealtimeConfirmedStopNotifiesProvidersOnce(t *testing.T) {
 			if tc.wantReason == PlaybackEndAborted && (len(scrobbler.pauses) != 1 || !scrobbler.pauses[0].SessionEnded) {
 				t.Fatalf("abort provider events = %+v, want one pause that ends the session", scrobbler.pauses)
 			}
+		})
+	}
+}
+
+// TestRealtimeConfirmedStopCreditsPlayAfterTheLastReport covers an
+// administrator's stop the player confirms between progress reports. The
+// player kept playing from its last report until the stop reached it, so the
+// play is recorded up to when the stop was sent, within one report interval
+// plus slack: not cut back to the last report, and not credited while paused.
+func TestRealtimeConfirmedStopCreditsPlayAfterTheLastReport(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// paused: the last report was paused. sinceReport: how long the stop
+		// was sent after the last report.
+		paused      bool
+		sinceReport time.Duration
+		// played and end are the recorded watch time and end position.
+		played, end float64
+	}{
+		{name: "playing", sinceReport: 7 * time.Second, played: 7, end: 907},
+		{name: "paused", paused: true, sinceReport: 7 * time.Second, played: 0, end: 900},
+		{name: "reports stopped long before", sinceReport: time.Minute, played: 12, end: 912},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := newPlaybackServiceFixture(t)
+				admin := &recordingPlaybackAdminStore{}
+				f.handler.AdminStore = admin
+				f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+				if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 900, IsPaused: tc.paused}); err != nil {
+					t.Fatal(err)
+				}
+				time.Sleep(tc.sinceReport) //nolint:forbidigo // advances the synctest clock from the report to the stop
+				f.handler.rememberRealtimeCommand("cmd-stop", f.session.ID, playback.CommandStop)
+				// The player's confirmation arrives after the stop reached it.
+				time.Sleep(200 * time.Millisecond) //nolint:forbidigo // advances the synctest clock to the confirmation
+				if err := f.handler.handleRealtimeClientMessage(f.session.ID, realtimeResultMessage(t, f.session.ID, "cmd-stop", playback.RealtimeResultStatusCompleted)); err != nil {
+					t.Fatal(err)
+				}
+				synctest.Wait()
+				if len(admin.history) != 1 || admin.history[0].EndReason != PlaybackEndTerminated {
+					t.Fatalf("admin history = %+v, want one terminated row", admin.history)
+				}
+				row := admin.history[0]
+				if row.Watch.PlayedSeconds != tc.played || row.EndPositionSeconds != tc.end {
+					t.Fatalf("played %v s ending at %v, want %v s ending at %v", row.Watch.PlayedSeconds, row.EndPositionSeconds, tc.played, tc.end)
+				}
+			})
 		})
 	}
 }

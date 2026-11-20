@@ -15,6 +15,8 @@ import (
 type playbackCommandRecord struct {
 	SessionID string
 	Name      playback.CommandName
+	// SentAt is when the command was sent to the player.
+	SentAt time.Time
 }
 
 // stopPlaybackSession stops a session. reason is PlaybackEndStopped or
@@ -122,9 +124,10 @@ func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID
 // recordRealtimeStoppedSession shares native history finalization with the
 // client's HTTP stop for a player-confirmed administrator stop or terminate.
 // Authority is already removed, so the client may have finalized from the
-// attempt row while this provider work was queued.
-func (h *PlaybackHandler) recordRealtimeStoppedSession(ctx context.Context, session *playback.Session) {
-	outcome := h.realtimeStopHistory(ctx, session)
+// attempt row while this provider work was queued. sentAt is when the stop
+// was sent to the player, which played on until it arrived.
+func (h *PlaybackHandler) recordRealtimeStoppedSession(ctx context.Context, session *playback.Session, sentAt time.Time) {
+	outcome := h.realtimeStopHistory(ctx, session, sentAt)
 	if outcome.adminLog {
 		h.recordAdminStopHistory(ctx, session, outcome.reason)
 	}
@@ -154,7 +157,7 @@ func unarbitratedRealtimeStop(result watchstate.PlaybackStopResult) realtimeStop
 // realtimeStopHistory records the confirmed stop's watch history and reports
 // what its caller still owes: nothing when another stop's finalizer already
 // recorded the end and told providers.
-func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *playback.Session) realtimeStopOutcome {
+func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *playback.Session, sentAt time.Time) realtimeStopOutcome {
 	store, ok := h.PlanStoreV3.(playback.ProgressStoreV3)
 	if !ok {
 		return unarbitratedRealtimeStop(h.persistStopAndHistory(parent, session))
@@ -171,11 +174,18 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	if record == nil {
 		return unarbitratedRealtimeStop(h.persistStopAndHistory(ctx, session)) // Unsequenced bridge play.
 	}
+	file, fileErr := h.loadFileByPreferredID(ctx, requestedMediaFileID(session), session.MediaFileID)
 	var final *playback.ProgressSampleV3
 	if record.LastSample == nil && session.Position > 0 {
 		// A bridge progress report may have updated the live session without
 		// a sequenced native sample. Preserve its final resume position.
 		final = &playback.ProgressSampleV3{Sequence: record.LastSequence + 1, Position: session.Position, IsPaused: session.IsPaused}
+	} else if fileErr == nil && file != nil {
+		duration := float64(file.Duration)
+		if session.TimelineDuration > 0 {
+			duration = session.TimelineDuration
+		}
+		final = playedSinceLastReport(record, session, sentAt, duration)
 	}
 	var receipt playback.StopReceiptV3
 	for range 3 {
@@ -223,14 +233,39 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 		}
 	}
 	result := watchstate.PlaybackStopResult{HistoryID: receipt.HistoryID, FinalPositionSeconds: session.Position}
-	file, err := h.loadFileByPreferredID(ctx, requestedMediaFileID(session), session.MediaFileID)
-	if err == nil && file != nil {
+	if fileErr == nil && file != nil {
 		result.MediaItemID = playbackProgressTarget(file)
 		result.DurationSeconds = float64(file.Duration)
 		result.Completed = result.HistoryID != "" && !session.DisableProgressPersistence && result.DurationSeconds > 0 &&
 			session.Position/result.DurationSeconds > userstore.WatchedFraction(h.playbackThresholds(ctx).WatchedPct)
 	}
 	return realtimeStopOutcome{result: result, reason: endReasonForStop(session.ID, receipt.StopID), notify: notify}
+}
+
+// maxPlayedSinceLastReport bounds the play credited after the last progress
+// report: players report every 10 seconds, plus reporting slack.
+const maxPlayedSinceLastReport = 12 * time.Second
+
+// playedSinceLastReport is the final sample of a player that confirmed an
+// administrator's stop: the reply carries no position, and the player kept
+// playing from its last report until the stop reached it. It advances the
+// last report by the time from when the attempt accepted it to when the stop
+// was sent, at most maxPlayedSinceLastReport and the rest of the file. A
+// paused player, or one with nothing to add, gets none.
+func playedSinceLastReport(record *playback.AttemptRecordV3, session *playback.Session, sentAt time.Time, duration float64) *playback.ProgressSampleV3 {
+	last := record.LastSample
+	if last == nil || last.IsPaused || session.IsPaused || record.SampleAcceptedAt.IsZero() {
+		return nil
+	}
+	played := min(sentAt.Sub(record.SampleAcceptedAt), maxPlayedSinceLastReport).Seconds()
+	position := last.Position + played
+	if duration > 0 {
+		position = min(position, duration)
+	}
+	if position <= last.Position {
+		return nil
+	}
+	return &playback.ProgressSampleV3{Sequence: record.LastSequence + 1, Position: position}
 }
 
 // finalizeRealtimeStop runs stop finalization for the one queued realtime
@@ -331,6 +366,7 @@ func (h *PlaybackHandler) rememberRealtimeCommand(commandID, sessionID string, n
 	h.realtimeCommands[commandID] = playbackCommandRecord{
 		SessionID: sessionID,
 		Name:      name,
+		SentAt:    time.Now(),
 	}
 	h.realtimeCommandMu.Unlock()
 }
