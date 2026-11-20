@@ -13247,7 +13247,7 @@
             },
             {
               "type": 0,
-              "value": "件は復元できません — ここですでに同じです"
+              "value": "件は復元できません — このサーバーですでに同じ内容です"
             }
           ]
         }
@@ -13766,8 +13766,20 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "非表示にする"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "非表示にする"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13888,8 +13900,20 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "表示する"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "表示する"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -53976,6 +54000,12 @@
       "value": "接続を確認できませんでした。"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "サーバーの環境でこの設定が指定されているかを確認できませんでした。編集するにはページを再読み込みしてください。"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -54514,6 +54544,30 @@
     {
       "type": 0,
       "value": "チャンネルを更新できませんでした"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "再読み込みすると現在の値が表示されます。変更された設定、および保存済みのパスワードとキーへの編集は取り消されます。その他の編集は保持されます。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "再読み込み"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "設定を再読み込みできませんでした。もう一度お試しください。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "設定が別の場所で変更されました"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -68968,6 +69022,20 @@
     {
       "type": 0,
       "value": "）。"
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "環境変数でストレージの設定が指定されている間（"
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "）は、ここでストレージを移動できません。先にこれらの変数の設定を解除し、すべてのAPIサーバーを再起動してください。"
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

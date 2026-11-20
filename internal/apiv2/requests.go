@@ -898,16 +898,19 @@ func withholdRequestDeployment(r *MediaRequest) {
 // left out while the size is unknown (a total of 0). Progress with no report
 // time, which only an out-of-band database edit can leave behind, is left out
 // whole: a zero Instant cannot be marshaled and would fail the entire response.
-// It stays on the domain value so the download refresh pass can still clear it.
+// A zero estimate is left out for the same reason. Both stay on the domain value
+// so the download refresh pass can still clear them.
 func requestDownloadOf(d *mediarequests.DownloadProgress) *RequestDownload {
 	if d == nil || d.UpdatedAt.IsZero() {
 		return nil
 	}
 	out := &RequestDownload{
-		Phase:                 string(d.Phase),
-		EstimatedCompletionAt: instantPtr(d.EstimatedCompletion),
-		Downloads:             max(d.Downloads, 0),
-		UpdatedAt:             NewInstant(d.UpdatedAt),
+		Phase:     string(d.Phase),
+		Downloads: max(d.Downloads, 0),
+		UpdatedAt: NewInstant(d.UpdatedAt),
+	}
+	if d.EstimatedCompletion != nil && !d.EstimatedCompletion.IsZero() {
+		out.EstimatedCompletionAt = instantPtr(d.EstimatedCompletion)
 	}
 	if d.BytesTotal > 0 {
 		total, left := d.BytesTotal, min(max(d.BytesLeft, 0), d.BytesTotal)

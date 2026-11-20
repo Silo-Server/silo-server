@@ -12935,7 +12935,7 @@
             },
             {
               "type": 0,
-              "value": "项无法恢复——恢复会扩大访问权限，因此此服务器保留其更严格的值"
+              "value": "项无法恢复——恢复会扩大访问权限，因此此服务器保留自身更严格的值"
             }
           ]
         }
@@ -13750,8 +13750,20 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "隐藏"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隐藏"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13864,8 +13876,20 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "显示"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "显示"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -54328,6 +54352,12 @@
       "value": "连接检查失败。"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "无法检查服务器的环境是否设置了此项。请重新加载页面后再编辑。"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -54866,6 +54896,30 @@
     {
       "type": 0,
       "value": "更新渠道失败"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "重新加载以查看当前值。你对已更改的设置项以及已保存的密码和密钥所做的编辑将被撤销；你的其他编辑会保留。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "重新加载"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "无法重新加载设置。请重试。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "设置已在别处更改"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -69400,6 +69454,20 @@
     {
       "type": 0,
       "value": "）。"
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "环境变量设置了存储选项（"
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "）时，无法在此处迁移存储。请先取消设置这些变量，然后重启所有API服务器。"
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

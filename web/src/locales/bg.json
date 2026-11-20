@@ -13618,7 +13618,7 @@
             },
             {
               "type": 0,
-              "value": " не може да се възстанови – ще разшири достъпа, затова този сървър запазва по-строгите си стойности"
+              "value": " не може да се възстанови – ще разшири достъпа, затова този сървър запазва собствените си по-строги стойности"
             }
           ]
         },
@@ -14785,8 +14785,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Скриване"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14935,8 +14955,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Показване"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -60593,6 +60633,12 @@
       "value": "Проверката на връзката е неуспешна."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Не можа да се провери дали средата на сървъра задава тази настройка. Презаредете страницата, за да я редактирате."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -61147,6 +61193,30 @@
     {
       "type": 0,
       "value": "Неуспешно обновяване на канала"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Презаредете, за да видите текущите стойности. Промените ви в настройките, които са се променили, както и в запазените пароли и ключове, се отменят; другите ви промени се запазват."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Презареждане"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Не можаха да се презаредят настройките. Опитайте отново."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Настройките са променени другаде"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -75883,6 +75953,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Хранилището не може да се премести тук, докато средата задава настройки за хранилището ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Първо премахнете тези променливи и рестартирайте всички API сървъри."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

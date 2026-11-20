@@ -13462,7 +13462,7 @@
             },
             {
               "type": 0,
-              "value": " – nende kuvatavat kollektsiooni pole siin ega varukoopias"
+              "value": " – selle kuvatavat kollektsiooni pole siin ega varukoopias"
             }
           ]
         },
@@ -13504,7 +13504,7 @@
             },
             {
               "type": 0,
-              "value": " – nende seaded on krüptitud teise võtmega SECRET_KEY"
+              "value": " – selle seadistused on krüptitud teise võtmega SECRET_KEY"
             }
           ]
         },
@@ -13520,7 +13520,7 @@
             },
             {
               "type": 0,
-              "value": " – nende seaded on krüptitud teise võtmega SECRET_KEY"
+              "value": " – nende seadistused on krüptitud teise võtmega SECRET_KEY"
             }
           ]
         }
@@ -13546,7 +13546,7 @@
             },
             {
               "type": 0,
-              "value": " – see server ei saa neid vastu võtta"
+              "value": " – see server ei saa seda vastu võtta"
             }
           ]
         },
@@ -13630,7 +13630,7 @@
             },
             {
               "type": 0,
-              "value": " – nende failid puuduvad selles serveris"
+              "value": " – selle failid puuduvad selles serveris"
             }
           ]
         },
@@ -13672,7 +13672,7 @@
             },
             {
               "type": 0,
-              "value": " – nende kaustu pole selles serveris"
+              "value": " – selle kaustu pole selles serveris"
             }
           ]
         },
@@ -13714,7 +13714,7 @@
             },
             {
               "type": 0,
-              "value": " – nende juurdepääsugruppi pole selles serveris"
+              "value": " – selle juurdepääsugruppi pole selles serveris"
             }
           ]
         },
@@ -13756,7 +13756,7 @@
             },
             {
               "type": 0,
-              "value": " – nende pealkirja pole selle serveri kataloogis"
+              "value": " – selle pealkirja pole selle serveri kataloogis"
             }
           ]
         },
@@ -13798,7 +13798,7 @@
             },
             {
               "type": 0,
-              "value": " – need laiendaksid juurdepääsu, seega jätab see server alles oma rangemad väärtused"
+              "value": " – see laiendaks juurdepääsu, seega jätab see server alles oma rangemad väärtused"
             }
           ]
         },
@@ -13840,7 +13840,7 @@
             },
             {
               "type": 0,
-              "value": " – nende meediakogu pole selles serveris"
+              "value": " – selle meediakogu pole selles serveris"
             }
           ]
         },
@@ -13882,7 +13882,7 @@
             },
             {
               "type": 0,
-              "value": " – nende meediakogu ei saa siin taastada"
+              "value": " – selle meediakogu ei saa siin taastada"
             }
           ]
         },
@@ -14008,7 +14008,7 @@
             },
             {
               "type": 0,
-              "value": " – need on krüptitud teise võtmega SECRET_KEY"
+              "value": " – see on krüptitud teise võtmega SECRET_KEY"
             }
           ]
         },
@@ -14050,7 +14050,7 @@
             },
             {
               "type": 0,
-              "value": " – need tuleb esmalt installida pistikprogrammide kataloogist"
+              "value": " – see tuleb esmalt installida pistikprogrammide kataloogist"
             }
           ]
         },
@@ -14092,7 +14092,7 @@
             },
             {
               "type": 0,
-              "value": " – nende põhiprofiil tuleb taastada koos nendega"
+              "value": " – selle põhiprofiil tuleb taastada koos sellega"
             }
           ]
         },
@@ -14134,7 +14134,7 @@
             },
             {
               "type": 0,
-              "value": " – varukoopias neid pole"
+              "value": " – varukoopias seda pole"
             }
           ]
         },
@@ -14302,7 +14302,7 @@
             },
             {
               "type": 0,
-              "value": " – see server annaks neile rohkem juurdepääsu kui varukoopia"
+              "value": " – see server annaks sellele rohkem juurdepääsu kui varukoopia"
             }
           ]
         },
@@ -14386,7 +14386,7 @@
             },
             {
               "type": 0,
-              "value": " – need on siin juba samad"
+              "value": " – see on siin juba sama"
             }
           ]
         },
@@ -14470,7 +14470,7 @@
             },
             {
               "type": 0,
-              "value": " – nende koopiat varukoopias ei saa lugeda"
+              "value": " – selle koopiat varukoopias ei saa lugeda"
             }
           ]
         },
@@ -14512,7 +14512,7 @@
             },
             {
               "type": 0,
-              "value": " – need ühenduvad välisteenustega ja see server ei saa varukoopiat kontrollida"
+              "value": " – see ühendub välisteenustega ja see server ei saa varukoopiat kontrollida"
             }
           ]
         },
@@ -15113,8 +15113,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Peida need"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Peida see"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Peida need"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -15263,8 +15283,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Näita neid"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita seda"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita neid"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -60973,6 +61013,12 @@
       "value": "Ühenduse kontrollimine ebaõnnestus."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Ei õnnestunud kontrollida, kas serveri keskkond selle määrab. Muutmiseks laadige leht uuesti."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -61527,6 +61573,30 @@
     {
       "type": 0,
       "value": "Kanali muutmine ebaõnnestus"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Praeguste väärtuste nägemiseks laadige leht uuesti. Teie muudatused vahepeal muutunud seadistustes ning salvestatud paroolides ja võtmetes tühistatakse; teie ülejäänud muudatused jäävad alles."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Laadi uuesti"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Seadete uuesti laadimine ebaõnnestus. Proovige uuesti."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Seadeid muudeti mujal"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -76291,6 +76361,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Salvestusruumi ei saa siia teisaldada, kuni salvestusruumi seadeid määravad keskkonnamuutujad ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Eemaldage esmalt need muutujad ja taaskäivitage kõik API-serverid."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

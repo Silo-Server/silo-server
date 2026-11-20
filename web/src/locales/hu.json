@@ -13330,7 +13330,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – az általuk megjelenített gyűjtemény sem itt, sem a biztonsági mentésben nincs meg"
+              "value": " nem állítható vissza – az általa megjelenített gyűjtemény sem itt, sem a biztonsági mentésben nincs meg"
             }
           ]
         },
@@ -13364,7 +13364,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a beállításaik egy másik SECRET_KEY kulccsal vannak titkosítva"
+              "value": " nem állítható vissza – a beállításai egy másik SECRET_KEY kulccsal vannak titkosítva"
             }
           ]
         },
@@ -13398,7 +13398,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – ez a szerver nem tudja fogadni őket"
+              "value": " nem állítható vissza – ez a szerver nem tudja fogadni"
             }
           ]
         },
@@ -13466,7 +13466,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a hozzájuk tartozó fájlok hiányoznak ezen a szerveren"
+              "value": " nem állítható vissza – a hozzá tartozó fájlok hiányoznak ezen a szerveren"
             }
           ]
         },
@@ -13500,7 +13500,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a hozzájuk tartozó mappák nincsenek ezen a szerveren"
+              "value": " nem állítható vissza – a hozzá tartozó mappák nincsenek ezen a szerveren"
             }
           ]
         },
@@ -13534,7 +13534,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a hozzáférési csoportjuk nincs ezen a szerveren"
+              "value": " nem állítható vissza – a hozzáférési csoportja nincs ezen a szerveren"
             }
           ]
         },
@@ -13568,7 +13568,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a hozzájuk tartozó cím nem szerepel ennek a szervernek a katalógusában"
+              "value": " nem állítható vissza – a hozzá tartozó cím nem szerepel ennek a szervernek a katalógusában"
             }
           ]
         },
@@ -13602,7 +13602,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – bővítenék a hozzáférést, ezért ez a szerver megtartja a szigorúbb értékeit"
+              "value": " nem állítható vissza – bővítené a hozzáférést, ezért ez a szerver megtartja a saját szigorúbb értékeit"
             }
           ]
         },
@@ -13636,7 +13636,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a könyvtáruk nincs ezen a szerveren"
+              "value": " nem állítható vissza – a könyvtára nincs ezen a szerveren"
             }
           ]
         },
@@ -13670,7 +13670,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a könyvtáruk itt nem állítható vissza"
+              "value": " nem állítható vissza – a könyvtára itt nem állítható vissza"
             }
           ]
         },
@@ -13772,7 +13772,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – egy másik SECRET_KEY kulccsal vannak titkosítva"
+              "value": " nem állítható vissza – egy másik SECRET_KEY kulccsal van titkosítva"
             }
           ]
         },
@@ -13806,7 +13806,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – előbb telepíteni kell őket egy bővítménykatalógusból"
+              "value": " nem állítható vissza – előbb telepíteni kell egy bővítménykatalógusból"
             }
           ]
         },
@@ -13840,7 +13840,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – az elsődleges profiljukat is velük együtt kell visszaállítani"
+              "value": " nem állítható vissza – az elsődleges profilját is vele együtt kell visszaállítani"
             }
           ]
         },
@@ -13874,7 +13874,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a biztonsági mentés nem tartalmazza őket"
+              "value": " nem állítható vissza – a biztonsági mentés nem tartalmazza"
             }
           ]
         },
@@ -14010,7 +14010,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – ez a szerver több hozzáférést adna nekik, mint a biztonsági mentés"
+              "value": " nem állítható vissza – ez a szerver több hozzáférést adna neki, mint a biztonsági mentés"
             }
           ]
         },
@@ -14078,7 +14078,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – itt már ugyanilyenek"
+              "value": " nem állítható vissza – itt már ugyanilyen"
             }
           ]
         },
@@ -14146,7 +14146,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a biztonsági mentésben lévő példányuk nem olvasható"
+              "value": " nem állítható vissza – a biztonsági mentésben lévő példánya nem olvasható"
             }
           ]
         },
@@ -14180,7 +14180,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – külső szolgáltatásokhoz csatlakoznak, és ez a szerver nem tudja ellenőrizni a biztonsági mentést"
+              "value": " nem állítható vissza – külső szolgáltatásokhoz csatlakozik, és ez a szerver nem tudja ellenőrizni a biztonsági mentést"
             }
           ]
         },
@@ -14769,8 +14769,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Elrejtés"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Elrejtés"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Elrejtés"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14919,8 +14939,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Megjelenítés"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Megjelenítés"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Megjelenítés"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -60193,6 +60233,12 @@
       "value": "Nem sikerült ellenőrizni a kapcsolatot."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nem sikerült ellenőrizni, hogy a szerver környezete beállítja-e ezt. A szerkesztéshez töltse be újra az oldalt."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60747,6 +60793,30 @@
     {
       "type": 0,
       "value": "Nem sikerült frissíteni a csatornát"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Az aktuális értékek megtekintéséhez töltse be újra a beállításokat. A közben módosult beállításokon, valamint a mentett jelszavakon és kulcsokon végzett változtatásai elvesznek; a többi változtatása megmarad."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Újratöltés"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült újratölteni a beállításokat. Próbálja újra."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "A beállítások máshol módosultak"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -75439,6 +75509,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "A tárhely nem helyezhető át ide, amíg környezeti változók adják meg a tárolási beállításokat ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Előbb szüntesse meg ezeknek a változóknak a beállítását, és indítsa újra az összes API-szervert."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

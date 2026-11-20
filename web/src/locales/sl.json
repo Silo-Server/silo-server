@@ -14704,7 +14704,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – prikazane zbirke ni ne tukaj ne v varnostni kopiji"
+              "value": " element se ne more obnoviti – zbirke, ki jo prikazuje, ni ne tukaj ne v varnostni kopiji"
             }
           ]
         },
@@ -14716,7 +14716,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – prikazane zbirke ni ne tukaj ne v varnostni kopiji"
+              "value": " elementa se ne moreta obnoviti – zbirke, ki jo prikazujeta, ni ne tukaj ne v varnostni kopiji"
             }
           ]
         },
@@ -14728,7 +14728,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – prikazane zbirke ni ne tukaj ne v varnostni kopiji"
+              "value": " elementi se ne morejo obnoviti – zbirke, ki jo prikazujejo, ni ne tukaj ne v varnostni kopiji"
             }
           ]
         },
@@ -14740,7 +14740,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – prikazane zbirke ni ne tukaj ne v varnostni kopiji"
+              "value": " elementov se ne more obnoviti – zbirke, ki jo prikazujejo, ni ne tukaj ne v varnostni kopiji"
             }
           ]
         }
@@ -14762,7 +14762,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – nastavitve so šifrirane z drugim SECRET_KEY"
+              "value": " element se ne more obnoviti – njegove nastavitve so šifrirane z drugim SECRET_KEY"
             }
           ]
         },
@@ -14774,7 +14774,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – nastavitve so šifrirane z drugim SECRET_KEY"
+              "value": " elementa se ne moreta obnoviti – njune nastavitve so šifrirane z drugim SECRET_KEY"
             }
           ]
         },
@@ -14786,7 +14786,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – nastavitve so šifrirane z drugim SECRET_KEY"
+              "value": " elementi se ne morejo obnoviti – njihove nastavitve so šifrirane z drugim SECRET_KEY"
             }
           ]
         },
@@ -14798,7 +14798,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – nastavitve so šifrirane z drugim SECRET_KEY"
+              "value": " elementov se ne more obnoviti – njihove nastavitve so šifrirane z drugim SECRET_KEY"
             }
           ]
         }
@@ -14936,7 +14936,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – datoteke na tem strežniku manjkajo"
+              "value": " element se ne more obnoviti – njegove datoteke na tem strežniku manjkajo"
             }
           ]
         },
@@ -14948,7 +14948,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – datoteke na tem strežniku manjkajo"
+              "value": " elementa se ne moreta obnoviti – njune datoteke na tem strežniku manjkajo"
             }
           ]
         },
@@ -14960,7 +14960,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – datoteke na tem strežniku manjkajo"
+              "value": " elementi se ne morejo obnoviti – njihove datoteke na tem strežniku manjkajo"
             }
           ]
         },
@@ -14972,7 +14972,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – datoteke na tem strežniku manjkajo"
+              "value": " elementov se ne more obnoviti – njihove datoteke na tem strežniku manjkajo"
             }
           ]
         }
@@ -14994,7 +14994,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – ustreznih map ni na tem strežniku"
+              "value": " element se ne more obnoviti – njegovih map ni na tem strežniku"
             }
           ]
         },
@@ -15006,7 +15006,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – ustreznih map ni na tem strežniku"
+              "value": " elementa se ne moreta obnoviti – njunih map ni na tem strežniku"
             }
           ]
         },
@@ -15018,7 +15018,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – ustreznih map ni na tem strežniku"
+              "value": " elementi se ne morejo obnoviti – njihovih map ni na tem strežniku"
             }
           ]
         },
@@ -15030,7 +15030,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – ustreznih map ni na tem strežniku"
+              "value": " elementov se ne more obnoviti – njihovih map ni na tem strežniku"
             }
           ]
         }
@@ -15052,7 +15052,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – skupine za dostop ni na tem strežniku"
+              "value": " element se ne more obnoviti – njegove skupine za dostop ni na tem strežniku"
             }
           ]
         },
@@ -15064,7 +15064,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – skupine za dostop ni na tem strežniku"
+              "value": " elementa se ne moreta obnoviti – njune skupine za dostop ni na tem strežniku"
             }
           ]
         },
@@ -15076,7 +15076,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – skupine za dostop ni na tem strežniku"
+              "value": " elementi se ne morejo obnoviti – njihove skupine za dostop ni na tem strežniku"
             }
           ]
         },
@@ -15088,7 +15088,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – skupine za dostop ni na tem strežniku"
+              "value": " elementov se ne more obnoviti – njihove skupine za dostop ni na tem strežniku"
             }
           ]
         }
@@ -15110,7 +15110,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – naslova ni v katalogu tega strežnika"
+              "value": " element se ne more obnoviti – njegovega naslova ni v katalogu tega strežnika"
             }
           ]
         },
@@ -15122,7 +15122,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – naslova ni v katalogu tega strežnika"
+              "value": " elementa se ne moreta obnoviti – njunega naslova ni v katalogu tega strežnika"
             }
           ]
         },
@@ -15134,7 +15134,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – naslova ni v katalogu tega strežnika"
+              "value": " elementi se ne morejo obnoviti – njihovega naslova ni v katalogu tega strežnika"
             }
           ]
         },
@@ -15146,7 +15146,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – naslova ni v katalogu tega strežnika"
+              "value": " elementov se ne more obnoviti – njihovega naslova ni v katalogu tega strežnika"
             }
           ]
         }
@@ -15204,7 +15204,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – razširilo bi dostop, zato ta strežnik ohrani svoje strožje vrednosti"
+              "value": " elementov se ne more obnoviti – razširili bi dostop, zato ta strežnik ohrani svoje strožje vrednosti"
             }
           ]
         }
@@ -15226,7 +15226,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – knjižnice ni na tem strežniku"
+              "value": " element se ne more obnoviti – njegove knjižnice ni na tem strežniku"
             }
           ]
         },
@@ -15238,7 +15238,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – knjižnice ni na tem strežniku"
+              "value": " elementa se ne moreta obnoviti – njune knjižnice ni na tem strežniku"
             }
           ]
         },
@@ -15250,7 +15250,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – knjižnice ni na tem strežniku"
+              "value": " elementi se ne morejo obnoviti – njihove knjižnice ni na tem strežniku"
             }
           ]
         },
@@ -15262,7 +15262,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – knjižnice ni na tem strežniku"
+              "value": " elementov se ne more obnoviti – njihove knjižnice ni na tem strežniku"
             }
           ]
         }
@@ -15284,7 +15284,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – knjižnice tukaj ni mogoče obnoviti"
+              "value": " element se ne more obnoviti – njegove knjižnice tukaj ni mogoče obnoviti"
             }
           ]
         },
@@ -15296,7 +15296,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – knjižnice tukaj ni mogoče obnoviti"
+              "value": " elementa se ne moreta obnoviti – njune knjižnice tukaj ni mogoče obnoviti"
             }
           ]
         },
@@ -15308,7 +15308,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – knjižnice tukaj ni mogoče obnoviti"
+              "value": " elementi se ne morejo obnoviti – njihove knjižnice tukaj ni mogoče obnoviti"
             }
           ]
         },
@@ -15320,7 +15320,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – knjižnice tukaj ni mogoče obnoviti"
+              "value": " elementov se ne more obnoviti – njihove knjižnice tukaj ni mogoče obnoviti"
             }
           ]
         }
@@ -15494,7 +15494,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – šifriranih je z drugim SECRET_KEY"
+              "value": " elementov se ne more obnoviti – šifrirani so z drugim SECRET_KEY"
             }
           ]
         }
@@ -15574,7 +15574,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – hkrati je treba obnoviti tudi glavni profil"
+              "value": " element se ne more obnoviti – njegov glavni profil je treba obnoviti hkrati z njim"
             }
           ]
         },
@@ -15586,7 +15586,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – hkrati je treba obnoviti tudi glavni profil"
+              "value": " elementa se ne moreta obnoviti – njun glavni profil je treba obnoviti hkrati z njima"
             }
           ]
         },
@@ -15598,7 +15598,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – hkrati je treba obnoviti tudi glavni profil"
+              "value": " elementi se ne morejo obnoviti – njihov glavni profil je treba obnoviti hkrati z njimi"
             }
           ]
         },
@@ -15610,7 +15610,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – hkrati je treba obnoviti tudi glavni profil"
+              "value": " elementov se ne more obnoviti – njihov glavni profil je treba obnoviti hkrati z njimi"
             }
           ]
         }
@@ -15980,7 +15980,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – tukaj je že vse enako"
+              "value": " element se ne more obnoviti – tukaj je že enak"
             }
           ]
         },
@@ -15992,7 +15992,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – tukaj je že vse enako"
+              "value": " elementa se ne moreta obnoviti – tukaj sta že enaka"
             }
           ]
         },
@@ -16004,7 +16004,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – tukaj je že vse enako"
+              "value": " elementi se ne morejo obnoviti – tukaj so že enaki"
             }
           ]
         },
@@ -16016,7 +16016,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – tukaj je že vse enako"
+              "value": " elementov se ne more obnoviti – tukaj so že enaki"
             }
           ]
         }
@@ -16096,7 +16096,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – kopije v varnostni kopiji ni mogoče prebrati"
+              "value": " element se ne more obnoviti – njegove kopije v varnostni kopiji ni mogoče prebrati"
             }
           ]
         },
@@ -16108,7 +16108,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – kopije v varnostni kopiji ni mogoče prebrati"
+              "value": " elementa se ne moreta obnoviti – njune kopije v varnostni kopiji ni mogoče prebrati"
             }
           ]
         },
@@ -16120,7 +16120,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – kopije v varnostni kopiji ni mogoče prebrati"
+              "value": " elementi se ne morejo obnoviti – njihove kopije v varnostni kopiji ni mogoče prebrati"
             }
           ]
         },
@@ -16132,7 +16132,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – kopije v varnostni kopiji ni mogoče prebrati"
+              "value": " elementov se ne more obnoviti – njihove kopije v varnostni kopiji ni mogoče prebrati"
             }
           ]
         }
@@ -17039,8 +17039,44 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Skrij jih"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij jih"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij jih"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17261,8 +17297,44 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Prikaži jih"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži jih"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži jih"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -73724,6 +73796,12 @@
       "value": "Preverjanje povezave ni uspelo."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Ni bilo mogoče preveriti, ali okolje strežnika nastavlja to možnost. Če jo želite urediti, znova naložite stran."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -74310,6 +74388,30 @@
     {
       "type": 0,
       "value": "Kanala ni bilo mogoče posodobiti"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Znova naložite, da vidite trenutne vrednosti. Vaše spremembe nastavitev, ki so se medtem spremenile, ter shranjenih gesel in ključev bodo razveljavljene; druge spremembe ostanejo."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Znova naloži"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nastavitev ni bilo mogoče znova naložiti. Poskusite znova."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Nastavitve so bile spremenjene drugje"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -89490,6 +89592,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Shrambe ni mogoče premakniti sem, dokler okolje določa nastavitve shrambe ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Najprej odstranite te spremenljivke in znova zaženite vse strežnike API."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

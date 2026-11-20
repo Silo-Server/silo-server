@@ -17155,8 +17155,44 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Slėpti"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17393,8 +17429,44 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Rodyti"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -74644,6 +74716,12 @@
       "value": "Nepavyko patikrinti ryšio."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nepavyko patikrinti, ar serverio aplinka nustato šią parinktį. Įkelkite puslapį iš naujo, kad galėtumėte ją redaguoti."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -75230,6 +75308,30 @@
     {
       "type": 0,
       "value": "Nepavyko atnaujinti kanalo"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Įkelkite iš naujo, kad matytumėte dabartines reikšmes. Pakeitimai, kuriuos atlikote pasikeitusiuose nustatymuose ir išsaugotuose slaptažodžiuose bei raktuose, atšaukiami; kiti jūsų pakeitimai išlaikomi."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Įkelti iš naujo"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko iš naujo įkelti nustatymų. Bandykite dar kartą."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Nustatymai pakeisti kitur"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -90454,6 +90556,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Saugyklos negalima perkelti čia, kol saugyklos nustatymai nustatyti aplinkoje ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Pirmiausia panaikinkite šiuos kintamuosius ir iš naujo paleiskite kiekvieną API serverį."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

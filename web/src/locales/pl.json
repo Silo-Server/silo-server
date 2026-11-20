@@ -14964,7 +14964,7 @@
             },
             {
               "type": 0,
-              "value": " — ten serwer tego nie obsługuje"
+              "value": " — ten serwer nie może tego przyjąć"
             }
           ]
         },
@@ -14980,7 +14980,7 @@
             },
             {
               "type": 0,
-              "value": " — ten serwer tego nie obsługuje"
+              "value": " — ten serwer nie może tego przyjąć"
             }
           ]
         },
@@ -14996,7 +14996,7 @@
             },
             {
               "type": 0,
-              "value": " — ten serwer tego nie obsługuje"
+              "value": " — ten serwer nie może tego przyjąć"
             }
           ]
         },
@@ -15012,7 +15012,7 @@
             },
             {
               "type": 0,
-              "value": " — ten serwer tego nie obsługuje"
+              "value": " — ten serwer nie może tego przyjąć"
             }
           ]
         }
@@ -15408,7 +15408,7 @@
             },
             {
               "type": 0,
-              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje bardziej restrykcyjne wartości"
+              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje własne, bardziej restrykcyjne wartości"
             }
           ]
         },
@@ -15424,7 +15424,7 @@
             },
             {
               "type": 0,
-              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje bardziej restrykcyjne wartości"
+              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje własne, bardziej restrykcyjne wartości"
             }
           ]
         },
@@ -15440,7 +15440,7 @@
             },
             {
               "type": 0,
-              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje bardziej restrykcyjne wartości"
+              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje własne, bardziej restrykcyjne wartości"
             }
           ]
         },
@@ -15456,7 +15456,7 @@
             },
             {
               "type": 0,
-              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje bardziej restrykcyjne wartości"
+              "value": " — rozszerzyłoby to dostęp, więc ten serwer zachowuje własne, bardziej restrykcyjne wartości"
             }
           ]
         }
@@ -17659,8 +17659,44 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Ukryj je"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ukryj to"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ukryj je"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ukryj je"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ukryj je"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17897,8 +17933,44 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Pokaż je"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż to"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż je"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż je"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż je"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -74583,6 +74655,12 @@
       "value": "Nie udało się sprawdzić połączenia."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nie udało się sprawdzić, czy środowisko serwera ustawia tę opcję. Odśwież stronę, aby ją edytować."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -75169,6 +75247,30 @@
     {
       "type": 0,
       "value": "Nie udało się zaktualizować kanału"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Wczytaj ponownie, aby zobaczyć bieżące wartości. Twoje zmiany w ustawieniach, które się zmieniły, oraz w zapisanych hasłach i kluczach zostaną cofnięte; pozostałe zmiany zostaną zachowane."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Wczytaj ponownie"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się ponownie wczytać ustawień. Spróbuj ponownie."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Ustawienia zmieniono w innym miejscu"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -90349,6 +90451,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Nie można tu przenieść magazynu, dopóki ustawienia magazynu są określone w środowisku ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Najpierw usuń te zmienne i uruchom ponownie każdy serwer API."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

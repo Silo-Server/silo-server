@@ -12703,7 +12703,7 @@
             },
             {
               "type": 0,
-              "value": " tidak dapat dipulihkan — koleksi yang ditampilkan tidak ada di sini maupun di cadangan"
+              "value": " tidak dapat dipulihkan — koleksi yang ditampilkannya tidak ada di sini maupun di cadangan"
             }
           ]
         }
@@ -12879,7 +12879,7 @@
             },
             {
               "type": 0,
-              "value": " tidak dapat dipulihkan — item ini akan memperluas akses, jadi server ini mempertahankan nilainya yang lebih ketat"
+              "value": " tidak dapat dipulihkan — item ini akan memperluas akses, jadi server ini mempertahankan nilainya sendiri yang lebih ketat"
             }
           ]
         }
@@ -13690,8 +13690,20 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Sembunyikan"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13804,8 +13816,20 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Tampilkan"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -53836,6 +53860,12 @@
       "value": "Pemeriksaan koneksi gagal."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memeriksa apakah lingkungan server mengatur opsi ini. Muat ulang halaman untuk mengeditnya."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -54374,6 +54404,30 @@
     {
       "type": 0,
       "value": "Gagal memperbarui saluran"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Muat ulang untuk melihat nilai saat ini. Perubahan Anda pada pengaturan yang berubah, serta pada kata sandi dan kunci yang disimpan, dibatalkan; perubahan Anda yang lain tetap dipertahankan."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Muat ulang"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuat ulang pengaturan. Coba lagi."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Pengaturan diubah di tempat lain"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -68820,6 +68874,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Penyimpanan tidak dapat dipindahkan ke sini selama environment menetapkan pengaturan penyimpanan ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Hapus variabel tersebut dan mulai ulang setiap server API terlebih dahulu."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

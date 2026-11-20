@@ -14189,7 +14189,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to rādītā kolekcija nav ne šeit, ne dublējumā"
+              "value": " vienumus – to rādītā kolekcija nav ne šeit, ne dublējumā"
             }
           ]
         },
@@ -14205,7 +14205,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tā rādītā kolekcija nav ne šeit, ne dublējumā"
+              "value": " vienumu – tā rādītā kolekcija nav ne šeit, ne dublējumā"
             }
           ]
         },
@@ -14221,7 +14221,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to rādītā kolekcija nav ne šeit, ne dublējumā"
+              "value": " vienumus – to rādītā kolekcija nav ne šeit, ne dublējumā"
             }
           ]
         }
@@ -14247,7 +14247,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to iestatījumi ir šifrēti ar citu SECRET_KEY"
+              "value": " vienumus – to iestatījumi ir šifrēti ar citu SECRET_KEY"
             }
           ]
         },
@@ -14263,7 +14263,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tā iestatījumi ir šifrēti ar citu SECRET_KEY"
+              "value": " vienumu – tā iestatījumi ir šifrēti ar citu SECRET_KEY"
             }
           ]
         },
@@ -14279,7 +14279,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to iestatījumi ir šifrēti ar citu SECRET_KEY"
+              "value": " vienumus – to iestatījumi ir šifrēti ar citu SECRET_KEY"
             }
           ]
         }
@@ -14305,7 +14305,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šis serveris tos nevar pieņemt"
+              "value": " vienumus – šis serveris tos nevar pieņemt"
             }
           ]
         },
@@ -14321,7 +14321,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — šis serveris to nevar pieņemt"
+              "value": " vienumu – šis serveris to nevar pieņemt"
             }
           ]
         },
@@ -14337,7 +14337,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šis serveris tos nevar pieņemt"
+              "value": " vienumus – šis serveris tos nevar pieņemt"
             }
           ]
         }
@@ -14421,7 +14421,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šajā serverī trūkst to failu"
+              "value": " vienumus – šajā serverī trūkst to failu"
             }
           ]
         },
@@ -14437,7 +14437,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — šajā serverī trūkst tā failu"
+              "value": " vienumu – šajā serverī trūkst tā failu"
             }
           ]
         },
@@ -14453,7 +14453,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šajā serverī trūkst to failu"
+              "value": " vienumus – šajā serverī trūkst to failu"
             }
           ]
         }
@@ -14479,7 +14479,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to mapju nav šajā serverī"
+              "value": " vienumus – to mapju nav šajā serverī"
             }
           ]
         },
@@ -14495,7 +14495,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tā mapju nav šajā serverī"
+              "value": " vienumu – tā mapju nav šajā serverī"
             }
           ]
         },
@@ -14511,7 +14511,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to mapju nav šajā serverī"
+              "value": " vienumus – to mapju nav šajā serverī"
             }
           ]
         }
@@ -14537,7 +14537,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to piekļuves grupa nav šajā serverī"
+              "value": " vienumus – to piekļuves grupa nav šajā serverī"
             }
           ]
         },
@@ -14553,7 +14553,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tā piekļuves grupa nav šajā serverī"
+              "value": " vienumu – tā piekļuves grupa nav šajā serverī"
             }
           ]
         },
@@ -14569,7 +14569,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to piekļuves grupa nav šajā serverī"
+              "value": " vienumus – to piekļuves grupa nav šajā serverī"
             }
           ]
         }
@@ -14595,7 +14595,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šī servera katalogā nav to satura"
+              "value": " vienumus – to nosaukuma nav šī servera katalogā"
             }
           ]
         },
@@ -14611,7 +14611,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — šī servera katalogā nav tā satura"
+              "value": " vienumu – tā nosaukuma nav šī servera katalogā"
             }
           ]
         },
@@ -14627,7 +14627,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šī servera katalogā nav to satura"
+              "value": " vienumus – to nosaukuma nav šī servera katalogā"
             }
           ]
         }
@@ -14653,7 +14653,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie paplašinātu piekļuvi, tāpēc šis serveris saglabā savas stingrākās vērtības"
+              "value": " vienumus – tie paplašinātu piekļuvi, tāpēc šis serveris saglabā savas stingrākās vērtības"
             }
           ]
         },
@@ -14669,7 +14669,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tas paplašinātu piekļuvi, tāpēc šis serveris saglabā savas stingrākās vērtības"
+              "value": " vienumu – tas paplašinātu piekļuvi, tāpēc šis serveris saglabā savas stingrākās vērtības"
             }
           ]
         },
@@ -14685,7 +14685,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie paplašinātu piekļuvi, tāpēc šis serveris saglabā savas stingrākās vērtības"
+              "value": " vienumus – tie paplašinātu piekļuvi, tāpēc šis serveris saglabā savas stingrākās vērtības"
             }
           ]
         }
@@ -14711,7 +14711,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to bibliotēka nav šajā serverī"
+              "value": " vienumus – to bibliotēka nav šajā serverī"
             }
           ]
         },
@@ -14727,7 +14727,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tā bibliotēka nav šajā serverī"
+              "value": " vienumu – tā bibliotēka nav šajā serverī"
             }
           ]
         },
@@ -14743,7 +14743,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to bibliotēka nav šajā serverī"
+              "value": " vienumus – to bibliotēka nav šajā serverī"
             }
           ]
         }
@@ -14769,7 +14769,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to bibliotēku šeit nevar atjaunot"
+              "value": " vienumus – to bibliotēku šeit nevar atjaunot"
             }
           ]
         },
@@ -14785,7 +14785,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tā bibliotēku šeit nevar atjaunot"
+              "value": " vienumu – tā bibliotēku šeit nevar atjaunot"
             }
           ]
         },
@@ -14801,7 +14801,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to bibliotēku šeit nevar atjaunot"
+              "value": " vienumus – to bibliotēku šeit nevar atjaunot"
             }
           ]
         }
@@ -14943,7 +14943,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie ir šifrēti ar citu SECRET_KEY"
+              "value": " vienumus – tie ir šifrēti ar citu SECRET_KEY"
             }
           ]
         },
@@ -14959,7 +14959,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tas ir šifrēts ar citu SECRET_KEY"
+              "value": " vienumu – tas ir šifrēts ar citu SECRET_KEY"
             }
           ]
         },
@@ -14975,7 +14975,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie ir šifrēti ar citu SECRET_KEY"
+              "value": " vienumus – tie ir šifrēti ar citu SECRET_KEY"
             }
           ]
         }
@@ -15001,7 +15001,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie vispirms jāinstalē no spraudņu kataloga"
+              "value": " vienumus – tie vispirms jāinstalē no spraudņu kataloga"
             }
           ]
         },
@@ -15017,7 +15017,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tas vispirms jāinstalē no spraudņu kataloga"
+              "value": " vienumu – tas vispirms jāinstalē no spraudņu kataloga"
             }
           ]
         },
@@ -15033,7 +15033,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie vispirms jāinstalē no spraudņu kataloga"
+              "value": " vienumus – tie vispirms jāinstalē no spraudņu kataloga"
             }
           ]
         }
@@ -15059,7 +15059,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — kopā ar tiem jāatjauno to primārais profils"
+              "value": " vienumus – kopā ar tiem jāatjauno to primārais profils"
             }
           ]
         },
@@ -15075,7 +15075,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — kopā ar to jāatjauno tā primārais profils"
+              "value": " vienumu – kopā ar to jāatjauno tā primārais profils"
             }
           ]
         },
@@ -15091,7 +15091,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — kopā ar tiem jāatjauno to primārais profils"
+              "value": " vienumus – kopā ar tiem jāatjauno to primārais profils"
             }
           ]
         }
@@ -15117,7 +15117,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — dublējumā to nav"
+              "value": " vienumus – dublējumā to nav"
             }
           ]
         },
@@ -15133,7 +15133,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — dublējumā tā nav"
+              "value": " vienumu – dublējumā tā nav"
             }
           ]
         },
@@ -15149,7 +15149,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — dublējumā to nav"
+              "value": " vienumus – dublējumā to nav"
             }
           ]
         }
@@ -15349,7 +15349,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šis serveris tiem dotu plašāku piekļuvi nekā dublējumā"
+              "value": " vienumus – šis serveris tiem dotu plašāku piekļuvi nekā dublējumā"
             }
           ]
         },
@@ -15365,7 +15365,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — šis serveris tam dotu plašāku piekļuvi nekā dublējumā"
+              "value": " vienumu – šis serveris tam dotu plašāku piekļuvi nekā dublējumā"
             }
           ]
         },
@@ -15381,7 +15381,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šis serveris tiem dotu plašāku piekļuvi nekā dublējumā"
+              "value": " vienumus – šis serveris tiem dotu plašāku piekļuvi nekā dublējumā"
             }
           ]
         }
@@ -15465,7 +15465,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šeit tie jau ir tādi paši"
+              "value": " vienumus – šeit tie jau ir tādi paši"
             }
           ]
         },
@@ -15481,7 +15481,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — šeit tas jau ir tāds pats"
+              "value": " vienumu – šeit tas jau ir tāds pats"
             }
           ]
         },
@@ -15497,7 +15497,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šeit tie jau ir tādi paši"
+              "value": " vienumus – šeit tie jau ir tādi paši"
             }
           ]
         }
@@ -15581,7 +15581,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to kopiju dublējumā nevar nolasīt"
+              "value": " vienumus – to kopiju dublējumā nevar nolasīt"
             }
           ]
         },
@@ -15597,7 +15597,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tā kopiju dublējumā nevar nolasīt"
+              "value": " vienumu – tā kopiju dublējumā nevar nolasīt"
             }
           ]
         },
@@ -15613,7 +15613,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to kopiju dublējumā nevar nolasīt"
+              "value": " vienumus – to kopiju dublējumā nevar nolasīt"
             }
           ]
         }
@@ -15639,7 +15639,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie izveido savienojumu ar ārējiem pakalpojumiem, un šis serveris nevar pārbaudīt dublējumu"
+              "value": " vienumus – tie izveido savienojumu ar ārējiem pakalpojumiem, un šis serveris nevar pārbaudīt dublējumu"
             }
           ]
         },
@@ -15655,7 +15655,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tas izveido savienojumu ar ārējiem pakalpojumiem, un šis serveris nevar pārbaudīt dublējumu"
+              "value": " vienumu – tas izveido savienojumu ar ārējiem pakalpojumiem, un šis serveris nevar pārbaudīt dublējumu"
             }
           ]
         },
@@ -15671,7 +15671,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie izveido savienojumu ar ārējiem pakalpojumiem, un šis serveris nevar pārbaudīt dublējumu"
+              "value": " vienumus – tie izveido savienojumu ar ārējiem pakalpojumiem, un šis serveris nevar pārbaudīt dublējumu"
             }
           ]
         }
@@ -16396,8 +16396,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Paslēpt tos"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt tos"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt to"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt tos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16582,8 +16610,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Rādīt tos"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt tos"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt to"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt tos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -68160,6 +68216,12 @@
       "value": "Savienojuma pārbaude neizdevās."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Neizdevās pārbaudīt, vai servera vide nosaka šo iestatījumu. Lai to rediģētu, ielādējiet lapu vēlreiz."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -68730,6 +68792,30 @@
     {
       "type": 0,
       "value": "Neizdevās atjaunināt kanālu"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Ielādējiet iestatījumus vēlreiz, lai redzētu pašreizējās vērtības. Jūsu labojumi iestatījumos, kas ir mainījušies, kā arī saglabātajās parolēs un atslēgās tiks atsaukti; pārējie jūsu labojumi tiks saglabāti."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Ielādēt vēlreiz"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās vēlreiz ielādēt iestatījumus. Mēģiniet vēlreiz."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Iestatījumi ir mainīti citur"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -83688,6 +83774,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Krātuvi nevar pārvietot uz šejieni, kamēr krātuves iestatījumi ir norādīti vidē ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Vispirms noņemiet šos mainīgos un restartējiet katru API serveri."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

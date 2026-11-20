@@ -12963,7 +12963,7 @@
             },
             {
               "type": 0,
-              "value": " 個無法還原——還原會放寬存取權限，因此此伺服器保留較嚴格的值"
+              "value": " 個無法還原——還原會放寬存取權限，因此此伺服器保留自身較嚴格的值"
             }
           ]
         }
@@ -13786,8 +13786,20 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "隱藏"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13904,8 +13916,20 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "顯示"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -54462,6 +54486,12 @@
       "value": "連線檢查失敗。"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "無法檢查伺服器的環境是否已設定此項目。請重新載入頁面以進行編輯。"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -55000,6 +55030,30 @@
     {
       "type": 0,
       "value": "無法更新頻道"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "重新載入即可查看目前的值。你對已變更的設定項目以及已儲存的密碼和金鑰所做的編輯將會復原；其他編輯則會保留。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "重新載入"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "無法重新載入設定。請再試一次。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "設定已在其他地方變更"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -69546,6 +69600,20 @@
     {
       "type": 0,
       "value": "）。"
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "環境變數已設定儲存設定（"
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "）時，無法在此移動儲存空間。請先取消設定這些變數，並重新啟動所有 API 伺服器。"
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

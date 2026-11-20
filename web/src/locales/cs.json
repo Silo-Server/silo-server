@@ -14708,7 +14708,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — kolekce, kterou zobrazují, není zde ani v záloze"
+              "value": " nelze obnovit — kolekce, kterou zobrazuje, není zde ani v záloze"
             }
           ]
         },
@@ -14732,7 +14732,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — kolekce, kterou zobrazují, není zde ani v záloze"
+              "value": " nelze obnovit — kolekce, kterou zobrazuje, není zde ani v záloze"
             }
           ]
         },
@@ -14766,7 +14766,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich nastavení je zašifrované jiným SECRET_KEY"
+              "value": " nelze obnovit — nastavení je zašifrované jiným SECRET_KEY"
             }
           ]
         },
@@ -14790,7 +14790,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich nastavení je zašifrované jiným SECRET_KEY"
+              "value": " nelze obnovit — nastavení je zašifrované jiným SECRET_KEY"
             }
           ]
         },
@@ -14824,7 +14824,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — tento server je nemůže přijmout"
+              "value": " nelze obnovit — tento server to nemůže přijmout"
             }
           ]
         },
@@ -14848,7 +14848,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — tento server je nemůže přijmout"
+              "value": " nelze obnovit — tento server to nemůže přijmout"
             }
           ]
         },
@@ -14940,7 +14940,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich soubory na tomto serveru chybí"
+              "value": " nelze obnovit — soubory na tomto serveru chybí"
             }
           ]
         },
@@ -14964,7 +14964,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich soubory na tomto serveru chybí"
+              "value": " nelze obnovit — soubory na tomto serveru chybí"
             }
           ]
         },
@@ -14998,7 +14998,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich složky nejsou na tomto serveru"
+              "value": " nelze obnovit — složky nejsou na tomto serveru"
             }
           ]
         },
@@ -15022,7 +15022,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich složky nejsou na tomto serveru"
+              "value": " nelze obnovit — složky nejsou na tomto serveru"
             }
           ]
         },
@@ -15056,7 +15056,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich přístupová skupina není na tomto serveru"
+              "value": " nelze obnovit — přístupová skupina není na tomto serveru"
             }
           ]
         },
@@ -15080,7 +15080,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich přístupová skupina není na tomto serveru"
+              "value": " nelze obnovit — přístupová skupina není na tomto serveru"
             }
           ]
         },
@@ -15114,7 +15114,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich titul není v katalogu tohoto serveru"
+              "value": " nelze obnovit — titul není v katalogu tohoto serveru"
             }
           ]
         },
@@ -15138,7 +15138,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich titul není v katalogu tohoto serveru"
+              "value": " nelze obnovit — titul není v katalogu tohoto serveru"
             }
           ]
         },
@@ -15230,7 +15230,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich knihovna není na tomto serveru"
+              "value": " nelze obnovit — knihovna není na tomto serveru"
             }
           ]
         },
@@ -15254,7 +15254,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich knihovna není na tomto serveru"
+              "value": " nelze obnovit — knihovna není na tomto serveru"
             }
           ]
         },
@@ -15288,7 +15288,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich knihovnu zde nelze obnovit"
+              "value": " nelze obnovit — knihovnu, do které patří, zde nelze obnovit"
             }
           ]
         },
@@ -15312,7 +15312,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich knihovnu zde nelze obnovit"
+              "value": " nelze obnovit — knihovnu, do které patří, zde nelze obnovit"
             }
           ]
         },
@@ -15462,7 +15462,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jsou zašifrované jiným SECRET_KEY"
+              "value": " nelze obnovit — k dešifrování je potřeba jiný SECRET_KEY"
             }
           ]
         },
@@ -15486,7 +15486,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jsou zašifrované jiným SECRET_KEY"
+              "value": " nelze obnovit — k dešifrování je potřeba jiný SECRET_KEY"
             }
           ]
         },
@@ -15520,7 +15520,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — nejprve je třeba je nainstalovat z katalogu pluginů"
+              "value": " nelze obnovit — nejprve je nutná instalace z katalogu pluginů"
             }
           ]
         },
@@ -15544,7 +15544,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — nejprve je třeba je nainstalovat z katalogu pluginů"
+              "value": " nelze obnovit — nejprve je nutná instalace z katalogu pluginů"
             }
           ]
         },
@@ -15578,7 +15578,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich hlavní profil je nutné obnovit spolu s nimi"
+              "value": " nelze obnovit — současně je nutné obnovit i hlavní profil"
             }
           ]
         },
@@ -15602,7 +15602,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich hlavní profil je nutné obnovit spolu s nimi"
+              "value": " nelze obnovit — současně je nutné obnovit i hlavní profil"
             }
           ]
         },
@@ -15636,7 +15636,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — záloha je neobsahuje"
+              "value": " nelze obnovit — v záloze chybí"
             }
           ]
         },
@@ -15660,7 +15660,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — záloha je neobsahuje"
+              "value": " nelze obnovit — v záloze chybí"
             }
           ]
         },
@@ -15868,7 +15868,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — tento server by jim dal větší přístup než záloha"
+              "value": " nelze obnovit — tento server by přidělil větší přístup než záloha"
             }
           ]
         },
@@ -15892,7 +15892,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — tento server by jim dal větší přístup než záloha"
+              "value": " nelze obnovit — tento server by přidělil větší přístup než záloha"
             }
           ]
         },
@@ -15984,7 +15984,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — zde už jsou stejné"
+              "value": " nelze obnovit — zde se už neliší"
             }
           ]
         },
@@ -16008,7 +16008,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — zde už jsou stejné"
+              "value": " nelze obnovit — zde se už neliší"
             }
           ]
         },
@@ -16100,7 +16100,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich kopii v záloze nelze přečíst"
+              "value": " nelze obnovit — kopii v záloze nelze přečíst"
             }
           ]
         },
@@ -16124,7 +16124,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich kopii v záloze nelze přečíst"
+              "value": " nelze obnovit — kopii v záloze nelze přečíst"
             }
           ]
         },
@@ -16158,7 +16158,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — připojují se k externím službám a tento server nemůže zálohu ověřit"
+              "value": " nelze obnovit — připojuje se k externím službám a tento server nemůže zálohu ověřit"
             }
           ]
         },
@@ -16182,7 +16182,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — připojují se k externím službám a tento server nemůže zálohu ověřit"
+              "value": " nelze obnovit — připojuje se k externím službám a tento server nemůže zálohu ověřit"
             }
           ]
         },
@@ -17043,8 +17043,44 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Skrýt je"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt je"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt je"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt je"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17265,8 +17301,44 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Zobrazit je"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit je"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit je"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit je"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -73961,6 +74033,12 @@
       "value": "Kontrola připojení selhala."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nepodařilo se ověřit, zda tuto možnost nastavuje prostředí serveru. Chcete-li ji upravit, znovu načtěte stránku."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -74547,6 +74625,30 @@
     {
       "type": 0,
       "value": "Kanál se nepodařilo aktualizovat"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Znovu načtěte aktuální hodnoty. Úpravy nastavení, která se změnila, a uložených hesel a klíčů se zruší; ostatní úpravy zůstanou zachovány."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Načíst znovu"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nastavení se nepodařilo znovu načíst. Zkuste to znovu."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Nastavení se změnilo jinde"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -89695,6 +89797,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Úložiště sem nelze přesunout, dokud nastavení úložiště určuje prostředí ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Nejprve tyto proměnné odstraňte a restartujte všechny servery API."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

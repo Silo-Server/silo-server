@@ -14712,7 +14712,7 @@
             },
             {
               "type": 0,
-              "value": " položka sa nedá obnoviť – zobrazená kolekcia nie je tu ani v zálohe"
+              "value": " položka sa nedá obnoviť – kolekcia, ktorú zobrazuje, nie je tu ani v zálohe"
             }
           ]
         },
@@ -14724,7 +14724,7 @@
             },
             {
               "type": 0,
-              "value": " položky sa nedajú obnoviť – zobrazená kolekcia nie je tu ani v zálohe"
+              "value": " položky sa nedajú obnoviť – kolekcia, ktorú zobrazujú, nie je tu ani v zálohe"
             }
           ]
         },
@@ -14736,7 +14736,7 @@
             },
             {
               "type": 0,
-              "value": " položky sa nedá obnoviť – zobrazená kolekcia nie je tu ani v zálohe"
+              "value": " položky sa nedá obnoviť – kolekcia, ktorú zobrazujú, nie je tu ani v zálohe"
             }
           ]
         },
@@ -14748,7 +14748,7 @@
             },
             {
               "type": 0,
-              "value": " položiek sa nedá obnoviť – zobrazená kolekcia nie je tu ani v zálohe"
+              "value": " položiek sa nedá obnoviť – kolekcia, ktorú zobrazujú, nie je tu ani v zálohe"
             }
           ]
         }
@@ -15988,7 +15988,7 @@
             },
             {
               "type": 0,
-              "value": " položka sa nedá obnoviť – tu je už rovnaká"
+              "value": " položka sa nedá obnoviť – už je tu rovnaká"
             }
           ]
         },
@@ -16000,7 +16000,7 @@
             },
             {
               "type": 0,
-              "value": " položky sa nedajú obnoviť – tu sú už rovnaké"
+              "value": " položky sa nedajú obnoviť – už sú tu rovnaké"
             }
           ]
         },
@@ -16012,7 +16012,7 @@
             },
             {
               "type": 0,
-              "value": " položky sa nedá obnoviť – tu sú už rovnaké"
+              "value": " položky sa nedá obnoviť – už sú tu rovnaké"
             }
           ]
         },
@@ -16024,7 +16024,7 @@
             },
             {
               "type": 0,
-              "value": " položiek sa nedá obnoviť – tu sú už rovnaké"
+              "value": " položiek sa nedá obnoviť – už sú tu rovnaké"
             }
           ]
         }
@@ -17031,8 +17031,44 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Skryť ich"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skryť"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skryť ich"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skryť ich"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skryť ich"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17253,8 +17289,44 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Zobraziť ich"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobraziť"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobraziť ich"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobraziť ich"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobraziť ich"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -74029,6 +74101,12 @@
       "value": "Kontrola pripojenia zlyhala."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nepodarilo sa overiť, či toto nastavenie určuje prostredie servera. Ak ho chcete upraviť, znova načítajte stránku."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -74615,6 +74693,30 @@
     {
       "type": 0,
       "value": "Kanál sa nepodarilo aktualizovať"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Znova načítajte nastavenia, aby sa zobrazili aktuálne hodnoty. Vaše úpravy zmenených nastavení a uložených hesiel a kľúčov sa zrušia; ostatné úpravy zostanú zachované."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Znova načítať"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nastavenia sa nepodarilo znova načítať. Skúste to znova."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Nastavenia sa zmenili inde"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -89783,6 +89885,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Úložisko sa sem nedá presunúť, kým nastavenia úložiska určujú premenné prostredia ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Najprv tieto premenné zrušte a reštartujte všetky servery API."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

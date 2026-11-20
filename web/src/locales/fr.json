@@ -14381,7 +14381,7 @@
             },
             {
               "type": 0,
-              "value": " ne peut pas être restauré — il élargirait l’accès, donc ce serveur garde ses valeurs plus strictes"
+              "value": " ne peut pas être restauré — il élargirait l’accès, donc ce serveur conserve ses propres valeurs plus strictes"
             }
           ]
         },
@@ -14393,7 +14393,7 @@
             },
             {
               "type": 0,
-              "value": " ne peuvent pas être restaurés — ils élargiraient l’accès, donc ce serveur garde ses valeurs plus strictes"
+              "value": " ne peuvent pas être restaurés — ils élargiraient l’accès, donc ce serveur conserve ses valeurs plus strictes"
             }
           ]
         },
@@ -14405,7 +14405,7 @@
             },
             {
               "type": 0,
-              "value": " ne peuvent pas être restaurés — ils élargiraient l’accès, donc ce serveur garde ses valeurs plus strictes"
+              "value": " ne peuvent pas être restaurés — ils élargiraient l’accès, donc ce serveur conserve ses valeurs plus strictes"
             }
           ]
         }
@@ -15888,8 +15888,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Les masquer"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Le masquer"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Les masquer"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Les masquer"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16074,8 +16102,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Les afficher"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "L’afficher"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Les afficher"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Les afficher"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -66805,6 +66861,12 @@
       "value": "Échec de la vérification de la connexion."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Impossible de vérifier si l’environnement du serveur définit ce paramètre. Rechargez la page pour le modifier."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -67363,6 +67425,30 @@
     {
       "type": 0,
       "value": "Impossible de mettre à jour le canal"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Rechargez pour afficher les valeurs actuelles. Vos modifications des paramètres qui ont changé, ainsi que des mots de passe et clés enregistrés, sont annulées ; vos autres modifications sont conservées."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Recharger"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Impossible de recharger les paramètres. Réessayez."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Paramètres modifiés ailleurs"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -82217,6 +82303,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Impossible de déplacer le stockage ici tant que l’environnement définit des paramètres de stockage ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Supprimez d’abord ces variables, puis redémarrez tous les serveurs d’API."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

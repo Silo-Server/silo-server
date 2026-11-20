@@ -14009,7 +14009,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — kolekcija koju prikazuju nije ni ovdje ni u sigurnosnoj kopiji"
+              "value": " nije moguće vratiti — kolekcija koju prikazuje nije ni ovdje ni u sigurnosnoj kopiji"
             }
           ]
         },
@@ -14055,7 +14055,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihove su postavke šifrirane drugim ključem SECRET_KEY"
+              "value": " nije moguće vratiti — postavke su šifrirane drugim ključem SECRET_KEY"
             }
           ]
         },
@@ -14101,7 +14101,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — ovaj ih poslužitelj ne može prihvatiti"
+              "value": " nije moguće vratiti — ovaj poslužitelj to ne može prihvatiti"
             }
           ]
         },
@@ -14193,7 +14193,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihove datoteke nedostaju na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuće datoteke nedostaju na ovom poslužitelju"
             }
           ]
         },
@@ -14239,7 +14239,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihove mape nisu na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuće mape nisu na ovom poslužitelju"
             }
           ]
         },
@@ -14285,7 +14285,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihova grupa pristupa nije na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuća grupa pristupa nije na ovom poslužitelju"
             }
           ]
         },
@@ -14331,7 +14331,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihov naslov nije u katalogu ovog poslužitelja"
+              "value": " nije moguće vratiti — pripadajući naslov nije u katalogu ovog poslužitelja"
             }
           ]
         },
@@ -14377,7 +14377,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — proširili bi pristup pa ovaj poslužitelj zadržava svoje strože vrijednosti"
+              "value": " nije moguće vratiti — to bi proširilo pristup pa ovaj poslužitelj zadržava svoje strože vrijednosti"
             }
           ]
         },
@@ -14423,7 +14423,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihova medijateka nije na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuća medijateka nije na ovom poslužitelju"
             }
           ]
         },
@@ -14469,7 +14469,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihovu medijateku ovdje nije moguće vratiti"
+              "value": " nije moguće vratiti — pripadajuću medijateku ovdje nije moguće vratiti"
             }
           ]
         },
@@ -14607,7 +14607,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — šifrirani su drugim ključem SECRET_KEY"
+              "value": " nije moguće vratiti — šifrirano je drugim ključem SECRET_KEY"
             }
           ]
         },
@@ -14653,7 +14653,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — najprije ih treba instalirati iz kataloga dodataka"
+              "value": " nije moguće vratiti — najprije to treba instalirati iz kataloga dodataka"
             }
           ]
         },
@@ -14699,7 +14699,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihov glavni profil mora se vratiti zajedno s njima"
+              "value": " nije moguće vratiti — zajedno s tim mora se vratiti i pripadajući glavni profil"
             }
           ]
         },
@@ -14745,7 +14745,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — nema ih u sigurnosnoj kopiji"
+              "value": " nije moguće vratiti — sigurnosna kopija to ne sadrži"
             }
           ]
         },
@@ -14929,7 +14929,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — ovaj bi im poslužitelj dao veći pristup nego sigurnosna kopija"
+              "value": " nije moguće vratiti — ovaj bi poslužitelj tome dao veći pristup nego sigurnosna kopija"
             }
           ]
         },
@@ -15021,7 +15021,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — ovdje su već isti"
+              "value": " nije moguće vratiti — ovdje je već isto"
             }
           ]
         },
@@ -15113,7 +15113,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihovu kopiju u sigurnosnoj kopiji nije moguće pročitati"
+              "value": " nije moguće vratiti — pripadajuću kopiju u sigurnosnoj kopiji nije moguće pročitati"
             }
           ]
         },
@@ -15159,7 +15159,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — povezuju se s vanjskim uslugama, a ovaj poslužitelj ne može provjeriti sigurnosnu kopiju"
+              "value": " nije moguće vratiti — povezuje se s vanjskim uslugama, a ovaj poslužitelj ne može provjeriti sigurnosnu kopiju"
             }
           ]
         },
@@ -15896,8 +15896,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Sakrij ih"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij ih"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij ih"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16082,8 +16110,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Prikaži ih"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži ih"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži ih"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -67129,6 +67185,12 @@
       "value": "Provjera veze nije uspjela."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nije moguće provjeriti postavlja li ovo okruženje poslužitelja. Ponovno učitajte stranicu da biste to uredili."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -67699,6 +67761,30 @@
     {
       "type": 0,
       "value": "Ažuriranje kanala nije uspjelo"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Ponovno učitajte da biste vidjeli trenutačne vrijednosti. Vaše izmjene postavki koje su se promijenile te spremljenih lozinki i ključeva poništavaju se; ostale izmjene ostaju."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Ponovno učitaj"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nije moguće ponovno učitati postavke. Pokušajte ponovno."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Postavke su promijenjene drugdje"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -82625,6 +82711,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Pohranu nije moguće premjestiti ovamo dok okruženje postavlja postavke pohrane ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Najprije uklonite te varijable i ponovno pokrenite sve API poslužitelje."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

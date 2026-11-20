@@ -14405,7 +14405,7 @@
             },
             {
               "type": 0,
-              "value": " no se puede restaurar — ampliaría el acceso, así que este servidor mantiene sus valores más estrictos"
+              "value": " no se puede restaurar — ampliaría el acceso, así que este servidor mantiene sus propios valores más estrictos"
             }
           ]
         },
@@ -15924,8 +15924,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Ocultarlos"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ocultarlo"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ocultarlos"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ocultarlos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16110,8 +16138,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Mostrarlos"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrarlo"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrarlos"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrarlos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -67017,6 +67073,12 @@
       "value": "No se pudo comprobar la conexión."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "No se pudo comprobar si el entorno del servidor define este ajuste. Vuelve a cargar la página para editarlo."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -67587,6 +67649,30 @@
     {
       "type": 0,
       "value": "No se pudo actualizar el canal"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Recarga para ver los valores actuales. Se deshacen tus cambios en las opciones que cambiaron y en las contraseñas y claves guardadas; se conservan tus demás cambios."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Recargar"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "No se pudo recargar la configuración. Vuelve a intentarlo."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "La configuración cambió en otro lugar"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -82485,6 +82571,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "No se puede mover el almacenamiento aquí mientras el entorno define opciones de almacenamiento ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Primero elimina esas variables y reinicia todos los servidores de API."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

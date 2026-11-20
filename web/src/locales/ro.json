@@ -14055,7 +14055,7 @@
             },
             {
               "type": 0,
-              "value": " element nu poate fi restaurat — setările sale sunt criptate cu un alt SECRET_KEY"
+              "value": " element nu poate fi restaurat — setările sale sunt criptate cu altă cheie SECRET_KEY"
             }
           ]
         },
@@ -14067,7 +14067,7 @@
             },
             {
               "type": 0,
-              "value": " elemente nu pot fi restaurate — setările lor sunt criptate cu un alt SECRET_KEY"
+              "value": " elemente nu pot fi restaurate — setările lor sunt criptate cu altă cheie SECRET_KEY"
             }
           ]
         },
@@ -14079,7 +14079,7 @@
             },
             {
               "type": 0,
-              "value": " de elemente nu pot fi restaurate — setările lor sunt criptate cu un alt SECRET_KEY"
+              "value": " de elemente nu pot fi restaurate — setările lor sunt criptate cu altă cheie SECRET_KEY"
             }
           ]
         }
@@ -14607,7 +14607,7 @@
             },
             {
               "type": 0,
-              "value": " element nu poate fi restaurat — este criptat cu un alt SECRET_KEY"
+              "value": " element nu poate fi restaurat — este criptat cu altă cheie SECRET_KEY"
             }
           ]
         },
@@ -14619,7 +14619,7 @@
             },
             {
               "type": 0,
-              "value": " elemente nu pot fi restaurate — sunt criptate cu un alt SECRET_KEY"
+              "value": " elemente nu pot fi restaurate — sunt criptate cu altă cheie SECRET_KEY"
             }
           ]
         },
@@ -14631,7 +14631,7 @@
             },
             {
               "type": 0,
-              "value": " de elemente nu pot fi restaurate — sunt criptate cu un alt SECRET_KEY"
+              "value": " de elemente nu pot fi restaurate — sunt criptate cu altă cheie SECRET_KEY"
             }
           ]
         }
@@ -14929,7 +14929,7 @@
             },
             {
               "type": 0,
-              "value": " element nu poate fi restaurat — acest server i-ar oferi mai mult acces decât backupul"
+              "value": " element nu poate fi restaurat — acest server i-ar oferi mai mult acces decât îi oferea backupul"
             }
           ]
         },
@@ -14941,7 +14941,7 @@
             },
             {
               "type": 0,
-              "value": " elemente nu pot fi restaurate — acest server le-ar oferi mai mult acces decât backupul"
+              "value": " elemente nu pot fi restaurate — acest server le-ar oferi mai mult acces decât le oferea backupul"
             }
           ]
         },
@@ -14953,7 +14953,7 @@
             },
             {
               "type": 0,
-              "value": " de elemente nu pot fi restaurate — acest server le-ar oferi mai mult acces decât backupul"
+              "value": " de elemente nu pot fi restaurate — acest server le-ar oferi mai mult acces decât le oferea backupul"
             }
           ]
         }
@@ -15896,8 +15896,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Ascundeți-le"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți-le"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți-le"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16082,8 +16110,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Afișați-le"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați-le"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați-le"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -67125,6 +67181,12 @@
       "value": "Nu s-a putut verifica conexiunea."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nu s-a putut verifica dacă mediul serverului definește această setare. Reîncărcați pagina pentru a o edita."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -67695,6 +67757,30 @@
     {
       "type": 0,
       "value": "Nu s-a putut actualiza canalul"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Reîncărcați pentru a vedea valorile curente. Modificările dvs. la setările care s-au schimbat și la parolele și cheile salvate se anulează; celelalte modificări se păstrează."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Reîncărcați"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-au putut reîncărca setările. Încercați din nou."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Setările au fost modificate în altă parte"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -82633,6 +82719,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Spațiul de stocare nu poate fi mutat aici cât timp mediul setează opțiunile de stocare ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Mai întâi eliminați aceste variabile și reporniți fiecare server API."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

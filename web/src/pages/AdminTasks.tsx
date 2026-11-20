@@ -23,16 +23,10 @@ import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
 import { useServerText, useT, type MessageKey, type Translate } from "@/i18n";
-import { taskText } from "@/lib/taskText";
+import { TASK_CATEGORY_LABELS, taskText } from "@/lib/taskText";
 
 const CATEGORY_ORDER: TaskCategory[] = ["library", "metadata", "system"];
 const RUN_BUTTON_MIN_VISIBLE_MS = 1_000;
-
-const CATEGORY_LABELS: Record<TaskCategory, MessageKey> = {
-  library: "web.admin.tasks.category.library",
-  metadata: "web.admin.tasks.category.metadata",
-  system: "web.admin.tasks.category.system",
-};
 
 const REFRESH_REASON_LABELS: Record<string, MessageKey> = {
   episode_incomplete: "web.admin.tasks.refreshReason.episodeIncomplete",
@@ -359,7 +353,7 @@ export default function AdminTasks() {
   const grouped: { id: string; label: string; description?: string; tasks: TaskInfo[] }[] = [
     ...CATEGORY_ORDER.map((cat) => ({
       id: cat,
-      label: t(CATEGORY_LABELS[cat]),
+      label: t(TASK_CATEGORY_LABELS[cat]),
       tasks: scheduledTasks.filter((task) => task.category === cat),
     })),
     {

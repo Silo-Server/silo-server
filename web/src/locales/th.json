@@ -13051,7 +13051,7 @@
             },
             {
               "type": 0,
-              "value": " รายการไม่ได้ — รายการเหล่านี้จะขยายสิทธิ์เข้าถึง เซิร์ฟเวอร์นี้จึงคงค่าที่เข้มงวดกว่าไว้"
+              "value": " รายการไม่ได้ — รายการเหล่านี้จะขยายสิทธิ์เข้าถึง เซิร์ฟเวอร์นี้จึงคงค่าที่เข้มงวดกว่าของตนไว้"
             }
           ]
         }
@@ -13954,8 +13954,20 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "ซ่อน"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อน"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14076,8 +14088,20 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "แสดง"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดง"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -54800,6 +54824,12 @@
       "value": "ตรวจสอบการเชื่อมต่อไม่สำเร็จ"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบไม่ได้ว่าสภาพแวดล้อมของเซิร์ฟเวอร์ตั้งค่านี้ไว้หรือไม่ โหลดหน้าซ้ำเพื่อแก้ไขการตั้งค่านี้"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -55338,6 +55368,30 @@
     {
       "type": 0,
       "value": "อัปเดตช่องทางไม่ได้"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "โหลดซ้ำเพื่อดูค่าปัจจุบัน ระบบจะยกเลิกการแก้ไขการตั้งค่าที่มีการเปลี่ยนแปลง และการแก้ไขรหัสผ่านและคีย์ที่บันทึกไว้ ส่วนการแก้ไขอื่นจะยังคงอยู่"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "โหลดซ้ำ"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "โหลดการตั้งค่าซ้ำไม่ได้ โปรดลองอีกครั้ง"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "มีการเปลี่ยนการตั้งค่าจากที่อื่น"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -69828,6 +69882,20 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "ย้ายพื้นที่จัดเก็บมาที่นี่ไม่ได้ขณะที่สภาพแวดล้อมกำหนดการตั้งค่าพื้นที่จัดเก็บไว้ ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": ") ยกเลิกการตั้งค่าตัวแปรเหล่านั้นแล้วรีสตาร์ตเซิร์ฟเวอร์ API ทุกเครื่องก่อน"
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

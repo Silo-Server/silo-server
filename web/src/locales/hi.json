@@ -13804,7 +13804,7 @@
             },
             {
               "type": 0,
-              "value": " रीस्टोर नहीं किया जा सकता — यह किसी दूसरी SECRET_KEY से एन्क्रिप्ट किया गया है"
+              "value": " रीस्टोर नहीं किया जा सकता — इसे किसी दूसरी SECRET_KEY से एन्क्रिप्ट किया गया है"
             }
           ]
         },
@@ -13816,7 +13816,7 @@
             },
             {
               "type": 0,
-              "value": " रीस्टोर नहीं किए जा सकते — ये किसी दूसरी SECRET_KEY से एन्क्रिप्ट किए गए हैं"
+              "value": " रीस्टोर नहीं किए जा सकते — इन्हें किसी दूसरी SECRET_KEY से एन्क्रिप्ट किया गया है"
             }
           ]
         }
@@ -14110,7 +14110,7 @@
             },
             {
               "type": 0,
-              "value": " रीस्टोर नहीं किया जा सकता — यह यहाँ पहले से एक जैसा है"
+              "value": " रीस्टोर नहीं किया जा सकता — यहाँ इसमें और बैकअप में कोई अंतर नहीं है"
             }
           ]
         },
@@ -14122,7 +14122,7 @@
             },
             {
               "type": 0,
-              "value": " रीस्टोर नहीं किए जा सकते — ये यहाँ पहले से एक जैसे हैं"
+              "value": " रीस्टोर नहीं किए जा सकते — यहाँ इनमें और बैकअप में कोई अंतर नहीं है"
             }
           ]
         }
@@ -14817,8 +14817,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "इन्हें छिपाएँ"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इसे छिपाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इन्हें छिपाएँ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14975,8 +14995,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "इन्हें दिखाएँ"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इसे दिखाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इन्हें दिखाएँ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -60097,6 +60137,12 @@
       "value": "कनेक्शन की जाँच विफल रही।"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "यह जाँचा नहीं जा सका कि सर्वर का एनवायरनमेंट इसे सेट करता है या नहीं। इसे बदलने के लिए पेज फिर से लोड करें।"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60651,6 +60697,30 @@
     {
       "type": 0,
       "value": "चैनल अपडेट नहीं किया जा सका"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "मौजूदा वैल्यू देखने के लिए फिर से लोड करें। जो सेटिंग बदल गई हैं उनमें, और सेव किए गए पासवर्ड और कुंजियों में किए गए आपके बदलाव वापस ले लिए जाएँगे; आपके बाकी बदलाव बने रहेंगे।"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "फिर से लोड करें"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "सेटिंग फिर से लोड नहीं की जा सकी। फिर से कोशिश करें।"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "सेटिंग कहीं और बदली गई हैं"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -75331,6 +75401,20 @@
     {
       "type": 0,
       "value": ")।"
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "जब तक एनवायरनमेंट स्टोरेज की सेटिंग ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": ") सेट करता है, तब तक स्टोरेज को यहाँ नहीं ले जाया जा सकता। पहले इन वेरिएबल को अनसेट करें और हर API सर्वर को रीस्टार्ट करें।"
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

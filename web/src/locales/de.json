@@ -13424,7 +13424,7 @@
             },
             {
               "type": 0,
-              "value": " kann nicht wiederhergestellt werden – die Einstellungen sind mit einem anderen SECRET_KEY verschlüsselt"
+              "value": " kann nicht wiederhergestellt werden – die zugehörigen Einstellungen sind mit einem anderen SECRET_KEY verschlüsselt"
             }
           ]
         },
@@ -13436,7 +13436,7 @@
             },
             {
               "type": 0,
-              "value": " können nicht wiederhergestellt werden – die Einstellungen sind mit einem anderen SECRET_KEY verschlüsselt"
+              "value": " können nicht wiederhergestellt werden – die zugehörigen Einstellungen sind mit einem anderen SECRET_KEY verschlüsselt"
             }
           ]
         }
@@ -13594,7 +13594,7 @@
             },
             {
               "type": 0,
-              "value": " kann nicht wiederhergestellt werden – die Zugriffsgruppe ist nicht auf diesem Server"
+              "value": " kann nicht wiederhergestellt werden – die zugehörige Zugriffsgruppe ist nicht auf diesem Server"
             }
           ]
         },
@@ -13606,7 +13606,7 @@
             },
             {
               "type": 0,
-              "value": " können nicht wiederhergestellt werden – die Zugriffsgruppe ist nicht auf diesem Server"
+              "value": " können nicht wiederhergestellt werden – die zugehörige Zugriffsgruppe ist nicht auf diesem Server"
             }
           ]
         }
@@ -13628,7 +13628,7 @@
             },
             {
               "type": 0,
-              "value": " kann nicht wiederhergestellt werden – der Titel ist nicht im Katalog dieses Servers"
+              "value": " kann nicht wiederhergestellt werden – der zugehörige Titel ist nicht im Katalog dieses Servers"
             }
           ]
         },
@@ -13640,7 +13640,7 @@
             },
             {
               "type": 0,
-              "value": " können nicht wiederhergestellt werden – der Titel ist nicht im Katalog dieses Servers"
+              "value": " können nicht wiederhergestellt werden – der zugehörige Titel ist nicht im Katalog dieses Servers"
             }
           ]
         }
@@ -13662,7 +13662,7 @@
             },
             {
               "type": 0,
-              "value": " kann nicht wiederhergestellt werden – das würde den Zugriff erweitern, daher behält dieser Server seine strengeren Werte"
+              "value": " kann nicht wiederhergestellt werden – das würde den Zugriff erweitern, daher behält dieser Server seine eigenen, strengeren Werte"
             }
           ]
         },
@@ -13696,7 +13696,7 @@
             },
             {
               "type": 0,
-              "value": " kann nicht wiederhergestellt werden – die Mediathek ist nicht auf diesem Server"
+              "value": " kann nicht wiederhergestellt werden – die zugehörige Mediathek ist nicht auf diesem Server"
             }
           ]
         },
@@ -13708,7 +13708,7 @@
             },
             {
               "type": 0,
-              "value": " können nicht wiederhergestellt werden – die Mediathek ist nicht auf diesem Server"
+              "value": " können nicht wiederhergestellt werden – die zugehörige Mediathek ist nicht auf diesem Server"
             }
           ]
         }
@@ -13730,7 +13730,7 @@
             },
             {
               "type": 0,
-              "value": " kann nicht wiederhergestellt werden – die Mediathek kann hier nicht wiederhergestellt werden"
+              "value": " kann nicht wiederhergestellt werden – die zugehörige Mediathek kann hier nicht wiederhergestellt werden"
             }
           ]
         },
@@ -13742,7 +13742,7 @@
             },
             {
               "type": 0,
-              "value": " können nicht wiederhergestellt werden – die Mediathek kann hier nicht wiederhergestellt werden"
+              "value": " können nicht wiederhergestellt werden – die zugehörige Mediathek kann hier nicht wiederhergestellt werden"
             }
           ]
         }
@@ -13900,7 +13900,7 @@
             },
             {
               "type": 0,
-              "value": " kann nicht wiederhergestellt werden – das Hauptprofil muss mit wiederhergestellt werden"
+              "value": " kann nicht wiederhergestellt werden – das zugehörige Hauptprofil muss mit wiederhergestellt werden"
             }
           ]
         },
@@ -13912,7 +13912,7 @@
             },
             {
               "type": 0,
-              "value": " können nicht wiederhergestellt werden – das Hauptprofil muss mit wiederhergestellt werden"
+              "value": " können nicht wiederhergestellt werden – das zugehörige Hauptprofil muss mit wiederhergestellt werden"
             }
           ]
         }
@@ -14821,8 +14821,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Ausblenden"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ausblenden"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ausblenden"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14971,8 +14991,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Anzeigen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Anzeigen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Anzeigen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -60169,6 +60209,12 @@
       "value": "Verbindungsprüfung fehlgeschlagen."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Es konnte nicht geprüft werden, ob die Umgebung des Servers diese Einstellung festlegt. Lade die Seite neu, um sie zu bearbeiten."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60723,6 +60769,30 @@
     {
       "type": 0,
       "value": "Der Kanal konnte nicht aktualisiert werden"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Lade neu, um die aktuellen Werte zu sehen. Deine Änderungen an geänderten Einstellungen sowie an gespeicherten Passwörtern und Schlüsseln werden verworfen; deine übrigen Änderungen bleiben erhalten."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Neu laden"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Die Einstellungen konnten nicht neu geladen werden. Versuche es erneut."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Einstellungen wurden anderswo geändert"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -75447,6 +75517,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Der Speicher kann hier nicht verschoben werden, solange die Umgebung Speichereinstellungen festlegt ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Entferne diese Variablen und starte zuerst jeden API-Server neu."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

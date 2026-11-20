@@ -248,8 +248,9 @@ export default function SearchSettings() {
                   value={form.getValue("catalog.search.meilisearch.index") || "silo_media_items"}
                   onChange={(value) => form.setValue("catalog.search.meilisearch.index", value)}
                   description={t("web.admin.settings.search.meili.index.description")}
-                  disabled={!meiliEnabled}
+                  disabled={!meiliEnabled || connectionUnknown}
                   restartRequired={restartKeys.has("catalog.search.meilisearch.index")}
+                  managedByEnv={form.envVar("catalog.search.meilisearch.index")}
                 />
                 <SettingField
                   label={t("web.admin.settings.search.meili.timeout.label")}

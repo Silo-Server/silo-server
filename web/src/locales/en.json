@@ -13386,7 +13386,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — the collection they show isn't here or in the backup"
+              "value": " can't be restored — the collection it shows isn't here or in the backup"
             }
           ]
         },
@@ -13420,7 +13420,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — their settings are encrypted with a different SECRET_KEY"
+              "value": " can't be restored — its settings are encrypted with a different SECRET_KEY"
             }
           ]
         },
@@ -13454,7 +13454,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — this server can't take them"
+              "value": " can't be restored — this server can't take it"
             }
           ]
         },
@@ -13522,7 +13522,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — their files are missing on this server"
+              "value": " can't be restored — its files are missing on this server"
             }
           ]
         },
@@ -13556,7 +13556,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — their folders aren't on this server"
+              "value": " can't be restored — its folders aren't on this server"
             }
           ]
         },
@@ -13590,7 +13590,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — their access group isn't on this server"
+              "value": " can't be restored — its access group isn't on this server"
             }
           ]
         },
@@ -13624,7 +13624,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — their title isn't in this server's catalog"
+              "value": " can't be restored — its title isn't in this server's catalog"
             }
           ]
         },
@@ -13658,7 +13658,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — they would widen access, so this server keeps its stricter values"
+              "value": " can't be restored — it would widen access, so this server keeps its own stricter values"
             }
           ]
         },
@@ -13692,7 +13692,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — their library isn't on this server"
+              "value": " can't be restored — its library isn't on this server"
             }
           ]
         },
@@ -13726,7 +13726,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — their library can't be restored here"
+              "value": " can't be restored — its library can't be restored here"
             }
           ]
         },
@@ -13828,7 +13828,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — they're encrypted with a different SECRET_KEY"
+              "value": " can't be restored — it's encrypted with a different SECRET_KEY"
             }
           ]
         },
@@ -13862,7 +13862,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — they need to be installed from a plugin catalog first"
+              "value": " can't be restored — it needs to be installed from a plugin catalog first"
             }
           ]
         },
@@ -13896,7 +13896,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — their primary profile has to be restored with them"
+              "value": " can't be restored — its primary profile has to be restored with it"
             }
           ]
         },
@@ -13930,7 +13930,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — the backup doesn't have them"
+              "value": " can't be restored — the backup doesn't have it"
             }
           ]
         },
@@ -14066,7 +14066,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — this server would give them more access than the backup did"
+              "value": " can't be restored — this server would give it more access than the backup did"
             }
           ]
         },
@@ -14134,7 +14134,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — they're already the same here"
+              "value": " can't be restored — it's already the same here"
             }
           ]
         },
@@ -14202,7 +14202,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — the backup's copy of them can't be read"
+              "value": " can't be restored — the backup's copy of it can't be read"
             }
           ]
         },
@@ -14236,7 +14236,7 @@
             },
             {
               "type": 0,
-              "value": " can't be restored — they connect to outside services and this server can't verify the backup"
+              "value": " can't be restored — it connects to outside services and this server can't verify the backup"
             }
           ]
         },
@@ -14817,8 +14817,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Hide them"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hide it"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hide them"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14967,8 +14987,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Show them"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Show it"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Show them"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -60425,6 +60465,12 @@
       "value": "Connection check failed."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Couldn’t check whether the server’s environment sets this. Reload to edit."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60979,6 +61025,30 @@
     {
       "type": 0,
       "value": "Failed to update channel"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Reload to see the current values. Your edits to settings that changed, and to saved passwords and keys, are undone; your other edits are kept."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Reload"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t reload settings. Try again."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Settings changed elsewhere"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -75623,6 +75693,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Storage can’t be moved here while the environment sets storage settings ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Unset those variables and restart every API server first."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [

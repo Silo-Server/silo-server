@@ -12995,7 +12995,7 @@
             },
             {
               "type": 0,
-              "value": "개를 복원할 수 없어요 — 액세스가 넓어지므로 이 서버의 더 엄격한 값을 유지해요"
+              "value": "개를 복원할 수 없어요 — 액세스 범위가 넓어지므로 이 서버의 더 엄격한 값을 유지해요"
             }
           ]
         }
@@ -13838,8 +13838,20 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "숨기기"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "숨기기"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13960,8 +13972,20 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "표시"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "표시"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -54256,6 +54280,12 @@
       "value": "연결 확인에 실패했어요."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "서버 환경에서 이 설정을 지정하는지 확인할 수 없어요. 수정하려면 페이지를 새로고침하세요."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -54794,6 +54824,30 @@
     {
       "type": 0,
       "value": "채널을 업데이트하지 못했어요"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "현재 값을 보려면 새로고침하세요. 변경된 설정과 저장된 비밀번호 및 키에 대한 수정 사항은 취소되고, 나머지 수정 사항은 유지돼요."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "새로고침"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "설정을 새로고침할 수 없어요. 다시 시도해 주세요."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "다른 곳에서 설정이 변경됨"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -69256,6 +69310,20 @@
     {
       "type": 0,
       "value": ")."
+    }
+  ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "환경 변수가 스토리지 설정을 지정하고 있어서("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": ") 스토리지를 이곳으로 이동할 수 없어요. 먼저 해당 변수를 해제하고 모든 API 서버를 다시 시작하세요."
     }
   ],
   "web.admin.settings.storage.transitionsUnavailable": [
