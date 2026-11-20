@@ -131,6 +131,22 @@ Every catalog install, manual or automatic, resolves through
    `loadManifestFromBinary` run the binary, followed by the catalog identity
    check. A first-party binary that fails verification never runs.
 
+A server whose platform differs from the one that installed a plugin goes
+through the same two steps. The stored archive holds only the installing
+server's build, so before running it such a server resolves the installed
+version for its own platform in the catalog the plugin came from and
+downloads it through `downloadBinary`
+(`internal/plugins/platform_archive.go`). The build must also declare the
+installed manifest apart from its checksum and supported platforms, be a
+binary for that platform,
+and, when the installed build's signature was verified, verify from the same
+source repository. It is stored in
+`plugin_platform_archives` for that platform, tied to the stored archive's
+checksum, so other servers on that platform extract it without fetching. A
+plugin that was uploaded, or whose version the catalog no longer lists, fails
+to start on that server with an error naming both platforms, and the server
+tries the catalog again after ten minutes.
+
 The server enforces these refusals: `cmd/silo` builds the one
 `SignatureChecker` that the catalog service and the installer share with
 `SignatureCheckerOptions.Enforce` on. With the option off, which only tests
@@ -152,9 +168,11 @@ not run (trust root or bundle unreachable) for a plugin the check never
 refuses. For a first-party plugin that case is a refusal. A verified
 row also stores `signature_source_repo` and `signature_verified_at`. Replacing
 an installation records the new package's result, so an upload over a verified
-install reads `unsigned`. The bundle is not stored. Verification happens once,
-on the node that runs the install. Plugin loads, and the other nodes that
-extract the stored archive, keep checking only the archive's SHA-256.
+install reads `unsigned`. The bundle is not stored. Verification happens on
+the node that runs the install, and once per other platform on the server that
+fetches that platform's build; the installation records only the install's
+result. Plugin loads, and the other nodes that extract a stored archive, keep
+checking only the archive's SHA-256.
 
 ### Trust root
 

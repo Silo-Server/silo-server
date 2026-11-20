@@ -49,6 +49,9 @@ type ArchiveCache struct {
 	// binary against its manifest checksum. Tests use it to count the bytes a
 	// read hashes.
 	newHash func() hash.Hash
+	// platforms, when set, supplies this host's build of an installation
+	// whose stored archive is for another platform (platform_archive.go).
+	platforms *platformArchives
 }
 
 // verifiedBinary is a binary whose hash matched checksum: its path and the
@@ -207,7 +210,7 @@ func (c *ArchiveCache) ensureFrom(
 		if manifest != nil || err != nil {
 			return manifest, err
 		}
-		return c.load(ctx, installation, trustVerified, archives, true)
+		return c.loadForHostPlatform(ctx, installation, trustVerified, archives)
 	})
 	select {
 	case r := <-result:
@@ -256,9 +259,14 @@ func (c *ArchiveCache) installed(ctx context.Context, installation *Installation
 			return manifest, nil
 		}
 		if info, err := c.validateInstalledFiles(binaryPath, manifest); err == nil {
-			if c.root != "" {
+			if c.checksPlatform(trustVerified) {
 				if err := checkBinaryPlatform(binaryPath); err != nil {
-					return nil, fmt.Errorf("cached plugin for installation %d: %w", installation.ID, err)
+					if c.platforms == nil {
+						return nil, fmt.Errorf("cached plugin for installation %d: %w; %s", installation.ID, err, proxyPlatformNote)
+					}
+					// Rehydrate this host's build in its place.
+					delete(c.verified, installation.ID)
+					return nil, nil
 				}
 			}
 			c.markVerified(installation.ID, binaryPath, manifest, info)
@@ -290,6 +298,10 @@ func (c *ArchiveCache) rehydratedMeanwhile(installation *Installation, trustVeri
 	info, err := c.validateInstalledFiles(binaryPath, manifest)
 	if err != nil {
 		return nil, nil //nolint:nilerr // changed again since: rehydrate
+	}
+	if c.checksPlatform(trustVerified) && checkBinaryPlatform(binaryPath) != nil {
+		// A manifest read verified another platform's build: rehydrate.
+		return nil, nil //nolint:nilerr // another platform's build: rehydrate
 	}
 	c.markVerified(installation.ID, binaryPath, manifest, info)
 	return manifest, nil
@@ -357,12 +369,16 @@ func (c *ArchiveCache) rehydrate(ctx context.Context, installation *Installation
 		}
 		return nil, nil, unreadableArchivef("validate rehydrated plugin cache for installation %d: %w", installation.ID, err)
 	}
-	if c.root != "" {
-		// Proxy caches may contain a binary installed by an API host on a
-		// different platform. Apply the same check to fresh and cached files.
+	if c.checksPlatform(trustVerified) {
+		// The stored archive holds the installing server's build, which may
+		// be for another platform. Apply the same check to fresh and cached
+		// files.
 		if err := checkBinaryPlatform(binaryPath); err != nil {
 			_ = os.RemoveAll(installDir)
-			return nil, nil, fmt.Errorf("rehydrate plugin for installation %d: %w", installation.ID, err)
+			if c.platforms == nil {
+				return nil, nil, fmt.Errorf("rehydrate plugin for installation %d: %w; %s", installation.ID, err, proxyPlatformNote)
+			}
+			return nil, nil, &foreignBuildError{installationID: installation.ID, err: err, stored: archive}
 		}
 	}
 	c.markVerified(installation.ID, binaryPath, manifest, info)

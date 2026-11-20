@@ -196,6 +196,11 @@ func NewService(
 		archiveCache:  NewArchiveCache(installations),
 		host:          host,
 	}
+	if svc.archiveCache != nil && installations != nil && catalog != nil && installer != nil {
+		// A server on another platform than the one that installed a
+		// plugin fetches its own platform's build of it.
+		svc.archiveCache.platforms = &platformArchives{store: installations, fetch: svc.fetchPlatformBuild}
+	}
 	// Self-register the installation-cache invalidation so it can never be
 	// silently forgotten by a new caller: every OnLifecycleChange (install /
 	// enable / disable / update / uninstall) wipes the cache, keeping the

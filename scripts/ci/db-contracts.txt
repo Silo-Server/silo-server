@@ -876,6 +876,10 @@
 # replaces it, and a second create for the same plugin is refused.
 ./internal/plugins TestPluginInstallKeepsOneInstallationPerPluginDB
 
+# A plugin build stored for another platform is served only for the package it
+# was fetched for, and a fetch that an update overtook stores nothing.
+./internal/plugins TestPlatformArchiveFollowsTheInstalledPackageDB
+
 # Cleaning up duplicate installations keeps a break-glass account's local
 # credentials and moves a deleted duplicate's marker provider settings.
 ./migrations TestUniquePluginInstallationCleanupPostgres
