@@ -13406,7 +13406,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — bộ sưu tập mà chúng hiển thị không có ở đây hoặc trong bản sao lưu"
+              "value": " mục không thể khôi phục — bộ sưu tập mà mục này hiển thị không có ở đây hoặc trong bản sao lưu"
             }
           ]
         },
@@ -13418,7 +13418,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — bộ sưu tập mà chúng hiển thị không có ở đây hoặc trong bản sao lưu"
+              "value": " mục không thể khôi phục — bộ sưu tập mà các mục này hiển thị không có ở đây hoặc trong bản sao lưu"
             }
           ]
         }
@@ -13440,7 +13440,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — cài đặt của chúng được mã hóa bằng SECRET_KEY khác"
+              "value": " mục không thể khôi phục — cài đặt của mục này được mã hóa bằng một SECRET_KEY khác"
             }
           ]
         },
@@ -13452,7 +13452,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — cài đặt của chúng được mã hóa bằng SECRET_KEY khác"
+              "value": " mục không thể khôi phục — cài đặt của các mục này được mã hóa bằng một SECRET_KEY khác"
             }
           ]
         }
@@ -13474,7 +13474,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — máy chủ này không thể nhận chúng"
+              "value": " mục không thể khôi phục — máy chủ này không thể nhận mục này"
             }
           ]
         },
@@ -13486,7 +13486,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — máy chủ này không thể nhận chúng"
+              "value": " mục không thể khôi phục — máy chủ này không thể nhận các mục này"
             }
           ]
         }
@@ -13542,7 +13542,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — tệp của chúng bị thiếu trên máy chủ này"
+              "value": " mục không thể khôi phục — tệp của mục này bị thiếu trên máy chủ này"
             }
           ]
         },
@@ -13554,7 +13554,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — tệp của chúng bị thiếu trên máy chủ này"
+              "value": " mục không thể khôi phục — tệp của các mục này bị thiếu trên máy chủ này"
             }
           ]
         }
@@ -13576,7 +13576,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — thư mục của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — thư mục của mục này không có trên máy chủ này"
             }
           ]
         },
@@ -13588,7 +13588,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — thư mục của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — thư mục của các mục này không có trên máy chủ này"
             }
           ]
         }
@@ -13610,7 +13610,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — nhóm quyền truy cập của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — nhóm quyền truy cập của mục này không có trên máy chủ này"
             }
           ]
         },
@@ -13622,7 +13622,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — nhóm quyền truy cập của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — nhóm quyền truy cập của các mục này không có trên máy chủ này"
             }
           ]
         }
@@ -13644,7 +13644,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — nội dung của chúng không có trong danh mục của máy chủ này"
+              "value": " mục không thể khôi phục — nội dung của mục này không có trong danh mục của máy chủ này"
             }
           ]
         },
@@ -13656,7 +13656,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — nội dung của chúng không có trong danh mục của máy chủ này"
+              "value": " mục không thể khôi phục — nội dung của các mục này không có trong danh mục của máy chủ này"
             }
           ]
         }
@@ -13678,7 +13678,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng sẽ mở rộng quyền truy cập, nên máy chủ này giữ các giá trị chặt chẽ hơn của mình"
+              "value": " mục không thể khôi phục — mục này sẽ mở rộng quyền truy cập, nên máy chủ này giữ các giá trị chặt chẽ hơn của mình"
             }
           ]
         },
@@ -13690,7 +13690,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng sẽ mở rộng quyền truy cập, nên máy chủ này giữ các giá trị chặt chẽ hơn của mình"
+              "value": " mục không thể khôi phục — các mục này sẽ mở rộng quyền truy cập, nên máy chủ này giữ các giá trị chặt chẽ hơn của mình"
             }
           ]
         }
@@ -13712,7 +13712,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — thư viện của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — thư viện của mục này không có trên máy chủ này"
             }
           ]
         },
@@ -13724,7 +13724,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — thư viện của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — thư viện của các mục này không có trên máy chủ này"
             }
           ]
         }
@@ -13746,7 +13746,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — không thể khôi phục thư viện của chúng ở đây"
+              "value": " mục không thể khôi phục — không thể khôi phục thư viện của mục này ở đây"
             }
           ]
         },
@@ -13758,7 +13758,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — không thể khôi phục thư viện của chúng ở đây"
+              "value": " mục không thể khôi phục — không thể khôi phục thư viện của các mục này ở đây"
             }
           ]
         }
@@ -13801,6 +13801,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " mục không thể khôi phục — môi trường của máy chủ này đặt các cài đặt khác biệt, hoặc một phần kết nối của chúng"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " mục không thể khôi phục — môi trường của máy chủ này đặt các cài đặt khác biệt, hoặc một phần kết nối của chúng"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13814,7 +13848,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng được mã hóa bằng SECRET_KEY khác"
+              "value": " mục không thể khôi phục — mục này được mã hóa bằng một SECRET_KEY khác"
             }
           ]
         },
@@ -13826,7 +13860,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng được mã hóa bằng SECRET_KEY khác"
+              "value": " mục không thể khôi phục — các mục này được mã hóa bằng một SECRET_KEY khác"
             }
           ]
         }
@@ -13848,7 +13882,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — cần cài đặt chúng từ danh mục plugin trước"
+              "value": " mục không thể khôi phục — cần cài đặt mục này từ danh mục plugin trước"
             }
           ]
         },
@@ -13860,7 +13894,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — cần cài đặt chúng từ danh mục plugin trước"
+              "value": " mục không thể khôi phục — cần cài đặt các mục này từ danh mục plugin trước"
             }
           ]
         }
@@ -13882,7 +13916,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — phải khôi phục hồ sơ chính của chúng cùng lúc"
+              "value": " mục không thể khôi phục — phải khôi phục hồ sơ chính của mục này cùng lúc"
             }
           ]
         },
@@ -13894,7 +13928,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — phải khôi phục hồ sơ chính của chúng cùng lúc"
+              "value": " mục không thể khôi phục — phải khôi phục hồ sơ chính của các mục này cùng lúc"
             }
           ]
         }
@@ -13916,7 +13950,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — bản sao lưu không có chúng"
+              "value": " mục không thể khôi phục — bản sao lưu không có mục này"
             }
           ]
         },
@@ -13928,7 +13962,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — bản sao lưu không có chúng"
+              "value": " mục không thể khôi phục — bản sao lưu không có các mục này"
             }
           ]
         }
@@ -14052,7 +14086,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — máy chủ này sẽ cấp cho chúng nhiều quyền truy cập hơn bản sao lưu"
+              "value": " mục không thể khôi phục — máy chủ này sẽ cấp cho mục này nhiều quyền truy cập hơn bản sao lưu"
             }
           ]
         },
@@ -14064,7 +14098,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — máy chủ này sẽ cấp cho chúng nhiều quyền truy cập hơn bản sao lưu"
+              "value": " mục không thể khôi phục — máy chủ này sẽ cấp cho các mục này nhiều quyền truy cập hơn bản sao lưu"
             }
           ]
         }
@@ -14120,7 +14154,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng đã giống hệt ở đây"
+              "value": " mục không thể khôi phục — mục này ở đây đã giống hệt"
             }
           ]
         },
@@ -14132,7 +14166,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng đã giống hệt ở đây"
+              "value": " mục không thể khôi phục — các mục này ở đây đã giống hệt"
             }
           ]
         }
@@ -14188,7 +14222,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — không thể đọc bản sao của chúng trong bản sao lưu"
+              "value": " mục không thể khôi phục — không thể đọc bản sao của mục này trong bản sao lưu"
             }
           ]
         },
@@ -14200,7 +14234,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — không thể đọc bản sao của chúng trong bản sao lưu"
+              "value": " mục không thể khôi phục — không thể đọc bản sao của các mục này trong bản sao lưu"
             }
           ]
         }
@@ -14222,7 +14256,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng kết nối với dịch vụ bên ngoài và máy chủ này không thể xác minh bản sao lưu"
+              "value": " mục không thể khôi phục — mục này kết nối với dịch vụ bên ngoài và máy chủ này không thể xác minh bản sao lưu"
             }
           ]
         },
@@ -14234,7 +14268,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng kết nối với dịch vụ bên ngoài và máy chủ này không thể xác minh bản sao lưu"
+              "value": " mục không thể khôi phục — các mục này kết nối với dịch vụ bên ngoài và máy chủ này không thể xác minh bản sao lưu"
             }
           ]
         }
@@ -14323,6 +14357,40 @@
     {
       "type": 0,
       "value": "Địa chỉ của một dịch vụ thay đổi nhưng bản sao lưu không có thông tin xác thực đi kèm, nên khi khôi phục, thông tin xác thực ở đây sẽ bị xóa và dịch vụ sẽ tắt cho đến khi nhập lại."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " cài đặt giữ giá trị hiện tại vì môi trường của máy chủ này đặt cài đặt đó, hoặc một phần kết nối của cài đặt đó."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " cài đặt giữ giá trị hiện tại vì môi trường của máy chủ này đặt các cài đặt đó, hoặc một phần kết nối của chúng."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14769,8 +14837,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Ẩn các mục này"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn mục này"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn các mục này"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14919,8 +15007,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Hiển thị các mục này"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị mục này"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị các mục này"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17167,6 +17275,12 @@
       "value": "Một tài khoản khác tại đây đăng nhập bằng tên người dùng hoặc email này."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Môi trường của máy chủ này đặt các cài đặt khác biệt, hoặc một phần kết nối của chúng, nên máy chủ này giữ các giá trị hiện tại."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18253,6 +18367,16 @@
     {
       "type": 0,
       "value": " (giữ lại: chặt chẽ hơn)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (giữ nguyên: môi trường)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -50615,7 +50739,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Được đặt bởi cấu hình triển khai của máy chủ. Gỡ node khỏi cấu hình đó để xóa node tại đây."
+      "value": "Được đặt bởi cấu hình triển khai của máy chủ. Gỡ node khỏi cấu hình đó và khởi động lại các máy chủ API để xóa node tại đây."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -53217,6 +53341,114 @@
       "value": "Đã dừng tạo đề xuất. Các đề xuất đã lưu vẫn hiển thị trong Khám phá cho đến khi máy chủ khởi động lại."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Đang xếp hạng cho hồ sơ… ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Đang tải danh sách TMDB… ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Đang tra cứu và tạo embedding cho tựa… ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Đã xóa "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tựa hết hạn"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Đã xóa "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tựa hết hạn"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53257,6 +53489,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Giải quyết xung đột khóa embedding bên dưới trước khi tạo đề xuất Khám phá."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Chạy công việc Embedding trước để Silo có vector thư viện dùng để so sánh."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Kết nối một nhà cung cấp embedding trong Dịch vụ AI trước khi tạo đề xuất Khám phá."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Chưa có hồ sơ nào có hồ sơ sở thích. Chạy Hồ sơ sở thích khi đã có người xem hoặc đánh giá tựa phim."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -55115,6 +55371,32 @@
       "value": "Sẽ trống cho đến khi bật đề xuất Khám phá trong Quản trị → Đề xuất."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Các hàng đề xuất sẽ trống cho đến khi bật Đề xuất Khám phá trong "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Quản trị → Đề xuất"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Đã tắt trong Đề xuất"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56593,6 +56875,12 @@
       "value": "Hàng mới được thêm vào cuối Khám phá"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Mở cài đặt Đề xuất"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56605,6 +56893,12 @@
       "value": "Nguồn cấp của MDBList không mang theo cách sắp xếp đã lưu trên trang danh sách. Hãy chọn cách sắp xếp mà trang đó hiển thị."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Hồ sơ của bạn chưa có đề xuất Khám phá nào. Chạy Đề xuất Khám phá hoặc xem và đánh giá vài tựa phim để xem trước hàng này."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56615,6 +56909,12 @@
     {
       "type": 0,
       "value": "Chọn một danh sách hoặc dán liên kết của nó để xem các nội dung trong đó."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Bật Đề xuất Khám phá trong Quản trị → Đề xuất để xem trước hàng này."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -60349,6 +60649,12 @@
       "value": "Kiểm tra kết nối không thành công."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Không thể kiểm tra xem môi trường của máy chủ có thiết lập cài đặt này không. Tải lại trang để chỉnh sửa."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60903,6 +61209,30 @@
     {
       "type": 0,
       "value": "Không thể cập nhật kênh"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Tải lại để xem các giá trị hiện tại. Các chỉnh sửa của bạn đối với những cài đặt đã thay đổi, cũng như với mật khẩu và khóa đã lưu, sẽ bị hoàn tác; các chỉnh sửa khác của bạn vẫn được giữ."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Tải lại"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Không thể tải lại cài đặt. Vui lòng thử lại."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Cài đặt đã thay đổi ở nơi khác"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -66373,6 +66703,24 @@
       "value": "Chuyển sang mô hình khác cần đặt lại embedding, thao tác này sẽ xóa toàn bộ embedding. Nhà cung cấp khác phục vụ cùng mô hình sẽ được áp dụng sau khi khởi động lại."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Thêm vào Khám phá"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Không thể thêm các hàng đề xuất vào trang Khám phá."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Đã thêm các hàng đề xuất vào trang Khám phá."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66395,6 +66743,44 @@
     {
       "type": 0,
       "value": "Số tựa chưa có trong thư viện mà máy chủ lưu giữ để đề xuất. Mỗi tựa được tra cứu trên TMDB và tạo embedding. Việc tạo embedding thường rẻ, nhưng con số cao hơn có thể tốn kém hơn hoặc mất nhiều thời gian hơn tùy theo nhà cung cấp embedding của bạn, và dùng nhiều dung lượng lưu trữ hơn."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Trang Khám phá của bạn chưa hiển thị hàng Đề xuất nào."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Bật Bật đề xuất ở trên và khởi động lại máy chủ trước khi Đề xuất Khám phá có thể chạy."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Yêu cầu hiện đang tắt. Bật trong "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Cài đặt yêu cầu"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " để người xem có thể thấy trang Khám phá."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Mở trang Khám phá"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -75605,6 +75991,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Không thể chuyển bộ nhớ đến đây khi môi trường đang đặt cài đặt bộ nhớ ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Hãy bỏ đặt các biến đó và khởi động lại mọi máy chủ API trước."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76747,6 +77147,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Lịch này lấy từ cài đặt sao lưu. Thay đổi lịch trong "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Máy chủ › Sao lưu"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

@@ -13358,7 +13358,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – samlingen de viser, finnes ikke her eller i sikkerhetskopien"
+              "value": " kan ikke gjenopprettes – samlingen den viser, finnes ikke her eller i sikkerhetskopien"
             }
           ]
         },
@@ -13392,7 +13392,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – innstillingene deres er kryptert med en annen SECRET_KEY"
+              "value": " kan ikke gjenopprettes – innstillingene er kryptert med en annen SECRET_KEY"
             }
           ]
         },
@@ -13426,7 +13426,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – denne serveren kan ikke ta imot dem"
+              "value": " kan ikke gjenopprettes – denne serveren kan ikke ta imot den"
             }
           ]
         },
@@ -13494,7 +13494,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – filene deres mangler på denne serveren"
+              "value": " kan ikke gjenopprettes – filene mangler på denne serveren"
             }
           ]
         },
@@ -13528,7 +13528,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – mappene deres finnes ikke på denne serveren"
+              "value": " kan ikke gjenopprettes – mappene finnes ikke på denne serveren"
             }
           ]
         },
@@ -13562,7 +13562,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – tilgangsgruppen deres finnes ikke på denne serveren"
+              "value": " kan ikke gjenopprettes – tilgangsgruppen finnes ikke på denne serveren"
             }
           ]
         },
@@ -13596,7 +13596,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – tittelen deres finnes ikke i denne serverens katalog"
+              "value": " kan ikke gjenopprettes – tittelen finnes ikke i denne serverens katalog"
             }
           ]
         },
@@ -13630,7 +13630,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de ville utvidet tilgangen, så denne serveren beholder sine strengere verdier"
+              "value": " kan ikke gjenopprettes – den ville utvidet tilgangen, så denne serveren beholder sine egne strengere verdier"
             }
           ]
         },
@@ -13664,7 +13664,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – biblioteket deres finnes ikke på denne serveren"
+              "value": " kan ikke gjenopprettes – biblioteket finnes ikke på denne serveren"
             }
           ]
         },
@@ -13698,7 +13698,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – biblioteket deres kan ikke gjenopprettes her"
+              "value": " kan ikke gjenopprettes – biblioteket kan ikke gjenopprettes her"
             }
           ]
         },
@@ -13753,6 +13753,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan ikke gjenopprettes – denne serverens miljø angir innstillingene som er forskjellige, eller en del av tilkoblingen deres"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan ikke gjenopprettes – denne serverens miljø angir innstillingene som er forskjellige, eller en del av tilkoblingen deres"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13766,7 +13800,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de er kryptert med en annen SECRET_KEY"
+              "value": " kan ikke gjenopprettes – den er kryptert med en annen SECRET_KEY"
             }
           ]
         },
@@ -13800,7 +13834,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de må først installeres fra en programtilleggskatalog"
+              "value": " kan ikke gjenopprettes – den må først installeres fra en programtilleggskatalog"
             }
           ]
         },
@@ -13834,7 +13868,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – hovedprofilen deres må gjenopprettes sammen med dem"
+              "value": " kan ikke gjenopprettes – hovedprofilen må gjenopprettes sammen med den"
             }
           ]
         },
@@ -13868,7 +13902,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – sikkerhetskopien inneholder dem ikke"
+              "value": " kan ikke gjenopprettes – sikkerhetskopien inneholder den ikke"
             }
           ]
         },
@@ -14004,7 +14038,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – denne serveren ville gitt dem mer tilgang enn sikkerhetskopien gjorde"
+              "value": " kan ikke gjenopprettes – denne serveren ville gitt den mer tilgang enn sikkerhetskopien gjorde"
             }
           ]
         },
@@ -14072,7 +14106,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de er allerede like her"
+              "value": " kan ikke gjenopprettes – den er allerede lik her"
             }
           ]
         },
@@ -14140,7 +14174,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – sikkerhetskopiens kopi av dem kan ikke leses"
+              "value": " kan ikke gjenopprettes – sikkerhetskopiens kopi av den kan ikke leses"
             }
           ]
         },
@@ -14174,7 +14208,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de kobler til eksterne tjenester, og denne serveren kan ikke bekrefte sikkerhetskopien"
+              "value": " kan ikke gjenopprettes – den kobler til eksterne tjenester, og denne serveren kan ikke bekrefte sikkerhetskopien"
             }
           ]
         },
@@ -14275,6 +14309,40 @@
     {
       "type": 0,
       "value": "Adressen til en tjeneste endres uten at påloggingsinformasjonen er med i sikkerhetskopien, så gjenopprettingen fjerner den her og slår av tjenesten til den legges inn på nytt."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " innstilling beholder gjeldende verdi fordi denne serverens miljø angir den, eller en del av tilkoblingen den hører til."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " innstillinger beholder gjeldende verdier fordi denne serverens miljø angir dem, eller en del av tilkoblingen de hører til."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14721,8 +14789,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Skjul dem"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul den"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul dem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14871,8 +14959,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Vis dem"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis den"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis dem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17103,6 +17211,12 @@
       "value": "En annen konto her logger på med samme brukernavn eller e-postadresse."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Denne serverens miljø angir innstillingene som er forskjellige, eller en del av tilkoblingen deres, så denne serveren beholder gjeldende verdier."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18177,6 +18291,16 @@
     {
       "type": 0,
       "value": " (beholdt: strengere)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (beholdt: miljø)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -50511,7 +50635,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Angitt av serverens distribusjonskonfigurasjon. Fjern den der for å slette den her."
+      "value": "Angitt av serverens distribusjonskonfigurasjon. Fjern den der og start API-serverne på nytt for å slette den her."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -53109,6 +53233,114 @@
       "value": "Genereringen er stoppet. Lagrede anbefalinger vises fortsatt i Utforsk til serveren startes på nytt."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Rangerer profiler ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Henter TMDB-lister ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Slår opp titler og lager embeddinger ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Fjernet "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " utløpt tittel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Fjernet "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " utløpte titler"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53141,6 +53373,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Løs embeddinglåskonflikten nedenfor før Utforsk-anbefalinger bygges."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Kjør Embeddinger-jobben først, slik at Silo har bibliotekvektorer å sammenligne med."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Koble til en embeddingleverandør under AI-tjenester før Utforsk-anbefalinger bygges."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Ingen profiler har smaksprofiler ennå. Kjør Smaksprofiler når noen har sett eller vurdert titler."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54983,6 +55239,32 @@
       "value": "Forblir tom til Utforsk-anbefalinger slås på under Admin → Anbefalinger."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Anbefalte rader forblir tomme til Utforsk-anbefalinger slås på under "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Admin → Anbefalinger"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Av under Anbefalinger"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56461,6 +56743,12 @@
       "value": "Nye rader legges nederst i Utforsk"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Åpne innstillinger for Anbefalinger"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56473,6 +56761,12 @@
       "value": "MDBList-feeden tar ikke med sorteringen som er lagret på listens side. Velg den som vises der."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Profilen din har ingen Utforsk-anbefalinger ennå. Kjør Utforsk-anbefalinger, eller se og vurder noen titler for å forhåndsvise denne raden."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56483,6 +56777,12 @@
     {
       "type": 0,
       "value": "Velg en liste eller lim inn lenken for å se titlene."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Slå på Utforsk-anbefalinger under Admin → Anbefalinger for å forhåndsvise denne raden."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -60141,6 +60441,12 @@
       "value": "Tilkoblingssjekken mislyktes."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Kunne ikke sjekke om serverens miljø angir denne innstillingen. Last inn siden på nytt for å redigere den."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60695,6 +61001,30 @@
     {
       "type": 0,
       "value": "Kunne ikke oppdatere kanalen"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Last inn på nytt for å se de gjeldende verdiene. Endringene dine i innstillinger som er endret, og i lagrede passord og nøkler, blir angret. De andre endringene dine beholdes."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Last inn på nytt"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke laste inn innstillingene på nytt. Prøv igjen."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Innstillingene er endret et annet sted"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -66161,6 +66491,24 @@
       "value": "Bytte til en annen modell krever at embeddingene tilbakestilles, noe som sletter alle sammen. En annen leverandør som tilbyr samme modell, tas i bruk etter en omstart."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Legg til i Utforsk"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke legge til anbefalte rader på Utforsk-siden."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "La til anbefalte rader på Utforsk-siden."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66183,6 +66531,44 @@
     {
       "type": 0,
       "value": "Hvor mange titler utenfor biblioteket serveren skal ha å anbefale fra. Hver av dem slås opp på TMDB og får en embedding. Embedding er vanligvis billig, men et høyere tall kan koste mer eller ta lengre tid, avhengig av embedding-leverandøren din, og bruker mer lagringsplass."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Utforsk-siden din viser ingen Anbefalinger-rader ennå."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Slå på Aktiver anbefalinger ovenfor og start serveren på nytt før Utforsk-anbefalinger kan kjøre."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Forespørsler er slått av nå. Slå dem på i "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "innstillingene for forespørsler"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", slik at seerne kan se Utforsk-siden."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Åpne Utforsk-siden"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -75301,6 +75687,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Lagringen kan ikke flyttes her mens miljøet angir lagringsinnstillinger ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Fjern først disse variablene, og start alle API-servere på nytt."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76435,6 +76835,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Denne tidsplanen kommer fra innstillingene for sikkerhetskopier. Endre den under "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Sikkerhetskopier"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

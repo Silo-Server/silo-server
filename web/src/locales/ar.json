@@ -17209,6 +17209,112 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -18741,6 +18847,80 @@
       "value": "يتغيّر عنوان إحدى الخدمات دون بيانات اعتمادها في النسخة الاحتياطية، لذا تمسح الاستعادة بيانات الاعتماد هنا وتعطّل الخدمة حتى يُعاد إدخالها."
     }
   ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " إعداد تحتفظ بقيمها الحالية لأن بيئة هذا الخادم تضبطها، أو تضبط جزءًا من اتصالها."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إعداد واحد يحتفظ بقيمته الحالية لأن بيئة هذا الخادم تضبطه، أو تضبط جزءًا من اتصاله."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إعدادان يحتفظان بقيمتيهما الحاليتين لأن بيئة هذا الخادم تضبطهما، أو تضبط جزءًا من اتصالهما."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " إعدادات تحتفظ بقيمها الحالية لأن بيئة هذا الخادم تضبطها، أو تضبط جزءًا من اتصالها."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " إعدادًا تحتفظ بقيمها الحالية لأن بيئة هذا الخادم تضبطها، أو تضبط جزءًا من اتصالها."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " إعداد تحتفظ بقيمها الحالية لأن بيئة هذا الخادم تضبطها، أو تضبط جزءًا من اتصالها."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.caveat.filesMissing": [
     {
       "type": 6,
@@ -19625,8 +19805,60 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "إخفاؤها"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاؤها"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاؤه"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاؤهما"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاؤها"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاؤها"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاؤها"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -19903,8 +20135,60 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "عرضها"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرضها"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرضه"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرضهما"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرضها"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرضها"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرضها"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -23631,6 +23915,12 @@
       "value": "يسجّل حساب آخر هنا الدخول باسم المستخدم أو البريد الإلكتروني الخاص به."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها، لذا يحتفظ هذا الخادم بقيمه الحالية."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -25221,6 +25511,16 @@
     {
       "type": 0,
       "value": " (مُبقى: أكثر صرامة)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (دون تغيير: البيئة)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -72528,7 +72828,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "مُعيَّنة من إعدادات نشر الخادم. أزلها من هناك لحذفها من هنا."
+      "value": "تُعيَّن هذه العقدة من إعدادات نشر الخادم. أزلها من هناك وأعد تشغيل خوادم API لحذفها من هنا."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -75809,6 +76109,154 @@
       "value": "توقّف الإنشاء. تبقى التوصيات المخزّنة ظاهرة في «استكشاف» حتى إعادة تشغيل الخادم."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "جارٍ ترتيب الملفات الشخصية ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "جارٍ جلب قوائم TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "جارٍ البحث عن العناوين وتضمينها ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لم يُمسح أي عنوان منتهي الصلاحية"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مُسح عنوان واحد منتهي الصلاحية"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مُسح عنوانان منتهيا الصلاحية"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مُسحت "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عناوين منتهية الصلاحية"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مُسح "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنوانًا منتهي الصلاحية"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مُسح "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنوان منتهي الصلاحية"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -75877,6 +76325,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "احلّ تعارض قفل التضمين أدناه قبل إنشاء توصيات الاستكشاف."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "شغّل عملية «التضمينات» أولًا ليتوفر لدى Silo متجهات للمكتبة يقارن بها."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "اربط مزود تضمين في «خدمات الذكاء الاصطناعي» قبل إنشاء توصيات الاستكشاف."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "لا توجد ملفات شخصية لها ملفات ذوق بعد. شغّل «الملفات الشخصية للذوق» بعد أن يشاهد أحد عناوين أو يقيّمها."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -79083,6 +79555,32 @@
       "value": "يبقى فارغًا حتى تفعيل توصيات الاستكشاف من الإدارة ← التوصيات."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "تبقى صفوف التوصيات فارغة حتى تفعيل «توصيات الاستكشاف» من "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "الإدارة ← التوصيات"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "معطّل في «التوصيات»"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -80962,6 +81460,12 @@
       "value": "تُضاف الصفوف الجديدة إلى أسفل استكشاف"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "فتح إعدادات «التوصيات»"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -80974,6 +81478,12 @@
       "value": "لا تتضمن تغذية MDBList الترتيب المحفوظ في صفحة القائمة. اختر الترتيب الذي تعرضه."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "لا توجد توصيات استكشاف لملفك الشخصي بعد. شغّل «توصيات الاستكشاف» أو شاهد بعض العناوين وقيّمها لمعاينة هذا الصف."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -80984,6 +81494,12 @@
     {
       "type": 0,
       "value": "اختر قائمة أو الصق رابطها لرؤية عناوينها."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "فعّل «توصيات الاستكشاف» من الإدارة ← التوصيات لمعاينة هذا الصف."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -85274,6 +85790,12 @@
       "value": "فشل التحقق من الاتصال."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "تعذّر التحقق مما إذا كانت بيئة الخادم تضبط هذا الخيار. أعد تحميل الصفحة لتعديله."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -85864,6 +86386,30 @@
     {
       "type": 0,
       "value": "تعذّر تحديث القناة"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "أعد التحميل لعرض القيم الحالية. تُلغى تعديلاتك على الإعدادات التي تغيّرت وعلى كلمات المرور والمفاتيح المحفوظة؛ ويُحتفظ بتعديلاتك الأخرى."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "إعادة التحميل"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "تعذّرت إعادة تحميل الإعدادات. حاول مرة أخرى."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "تغيّرت الإعدادات في مكان آخر"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -91730,6 +92276,24 @@
       "value": "يتطلب التبديل إلى نموذج آخر إعادة تعيين التضمينات، مما يحذفها جميعًا. أما استخدام مزود آخر يقدّم النموذج نفسه فيُطبَّق بعد إعادة التشغيل."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "إضافة إلى «استكشاف»"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "تعذّرت إضافة صفوف التوصيات إلى صفحة «استكشاف»."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "تمت إضافة صفوف التوصيات إلى صفحة «استكشاف»."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -91752,6 +92316,44 @@
     {
       "type": 0,
       "value": "عدد العناوين غير الموجودة في المكتبة التي يحتفظ بها الخادم للتوصية منها. يُبحث عن كل عنوان على TMDB ويُنشأ له تضمين. عادةً ما يكون التضمين منخفض التكلفة، لكن الرقم الأعلى قد يكلّف أكثر أو يستغرق وقتًا أطول حسب مزود التضمين لديك، ويستهلك مساحة تخزين أكبر."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "لا تعرض صفحة «استكشاف» أي صفوف «التوصيات» بعد."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "فعّل «تفعيل التوصيات» أعلاه وأعد تشغيل الخادم قبل أن تتمكن «توصيات الاستكشاف» من العمل."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "الطلبات معطّلة حاليًا. فعّلها في "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "إعدادات الطلبات"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ليتمكن المشاهدون من رؤية صفحة «استكشاف»."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "فتح صفحة «استكشاف»"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -101295,6 +101897,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "لا يمكن نقل التخزين إلى هنا ما دامت البيئة تحدد إعدادات التخزين ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). ألغِ تعيين هذه المتغيرات وأعد تشغيل كل خادم API أولًا."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -102692,6 +103308,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "تأتي هذه الجدولة من إعدادات النسخ الاحتياطي. غيّرها في "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "الخادم ← النسخ الاحتياطية"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

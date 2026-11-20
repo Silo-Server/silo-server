@@ -14708,7 +14708,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — kolekce, kterou zobrazují, není zde ani v záloze"
+              "value": " nelze obnovit — kolekce, kterou zobrazuje, není zde ani v záloze"
             }
           ]
         },
@@ -14732,7 +14732,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — kolekce, kterou zobrazují, není zde ani v záloze"
+              "value": " nelze obnovit — kolekce, kterou zobrazuje, není zde ani v záloze"
             }
           ]
         },
@@ -14766,7 +14766,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich nastavení je zašifrované jiným SECRET_KEY"
+              "value": " nelze obnovit — nastavení je zašifrované jiným SECRET_KEY"
             }
           ]
         },
@@ -14790,7 +14790,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich nastavení je zašifrované jiným SECRET_KEY"
+              "value": " nelze obnovit — nastavení je zašifrované jiným SECRET_KEY"
             }
           ]
         },
@@ -14824,7 +14824,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — tento server je nemůže přijmout"
+              "value": " nelze obnovit — tento server to nemůže přijmout"
             }
           ]
         },
@@ -14848,7 +14848,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — tento server je nemůže přijmout"
+              "value": " nelze obnovit — tento server to nemůže přijmout"
             }
           ]
         },
@@ -14940,7 +14940,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich soubory na tomto serveru chybí"
+              "value": " nelze obnovit — soubory na tomto serveru chybí"
             }
           ]
         },
@@ -14964,7 +14964,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich soubory na tomto serveru chybí"
+              "value": " nelze obnovit — soubory na tomto serveru chybí"
             }
           ]
         },
@@ -14998,7 +14998,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich složky nejsou na tomto serveru"
+              "value": " nelze obnovit — složky nejsou na tomto serveru"
             }
           ]
         },
@@ -15022,7 +15022,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich složky nejsou na tomto serveru"
+              "value": " nelze obnovit — složky nejsou na tomto serveru"
             }
           ]
         },
@@ -15056,7 +15056,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich přístupová skupina není na tomto serveru"
+              "value": " nelze obnovit — přístupová skupina není na tomto serveru"
             }
           ]
         },
@@ -15080,7 +15080,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich přístupová skupina není na tomto serveru"
+              "value": " nelze obnovit — přístupová skupina není na tomto serveru"
             }
           ]
         },
@@ -15114,7 +15114,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich titul není v katalogu tohoto serveru"
+              "value": " nelze obnovit — titul není v katalogu tohoto serveru"
             }
           ]
         },
@@ -15138,7 +15138,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich titul není v katalogu tohoto serveru"
+              "value": " nelze obnovit — titul není v katalogu tohoto serveru"
             }
           ]
         },
@@ -15230,7 +15230,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich knihovna není na tomto serveru"
+              "value": " nelze obnovit — knihovna není na tomto serveru"
             }
           ]
         },
@@ -15254,7 +15254,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich knihovna není na tomto serveru"
+              "value": " nelze obnovit — knihovna není na tomto serveru"
             }
           ]
         },
@@ -15288,7 +15288,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich knihovnu zde nelze obnovit"
+              "value": " nelze obnovit — knihovnu, do které patří, zde nelze obnovit"
             }
           ]
         },
@@ -15312,7 +15312,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich knihovnu zde nelze obnovit"
+              "value": " nelze obnovit — knihovnu, do které patří, zde nelze obnovit"
             }
           ]
         },
@@ -15391,6 +15391,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nelze obnovit — rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nelze obnovit — rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nelze obnovit — rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nelze obnovit — rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15404,7 +15462,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jsou zašifrované jiným SECRET_KEY"
+              "value": " nelze obnovit — k dešifrování je potřeba jiný SECRET_KEY"
             }
           ]
         },
@@ -15428,7 +15486,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jsou zašifrované jiným SECRET_KEY"
+              "value": " nelze obnovit — k dešifrování je potřeba jiný SECRET_KEY"
             }
           ]
         },
@@ -15462,7 +15520,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — nejprve je třeba je nainstalovat z katalogu pluginů"
+              "value": " nelze obnovit — nejprve je nutná instalace z katalogu pluginů"
             }
           ]
         },
@@ -15486,7 +15544,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — nejprve je třeba je nainstalovat z katalogu pluginů"
+              "value": " nelze obnovit — nejprve je nutná instalace z katalogu pluginů"
             }
           ]
         },
@@ -15520,7 +15578,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich hlavní profil je nutné obnovit spolu s nimi"
+              "value": " nelze obnovit — současně je nutné obnovit i hlavní profil"
             }
           ]
         },
@@ -15544,7 +15602,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich hlavní profil je nutné obnovit spolu s nimi"
+              "value": " nelze obnovit — současně je nutné obnovit i hlavní profil"
             }
           ]
         },
@@ -15578,7 +15636,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — záloha je neobsahuje"
+              "value": " nelze obnovit — v záloze chybí"
             }
           ]
         },
@@ -15602,7 +15660,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — záloha je neobsahuje"
+              "value": " nelze obnovit — v záloze chybí"
             }
           ]
         },
@@ -15810,7 +15868,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — tento server by jim dal větší přístup než záloha"
+              "value": " nelze obnovit — tento server by přidělil větší přístup než záloha"
             }
           ]
         },
@@ -15834,7 +15892,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — tento server by jim dal větší přístup než záloha"
+              "value": " nelze obnovit — tento server by přidělil větší přístup než záloha"
             }
           ]
         },
@@ -15926,7 +15984,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — zde už jsou stejné"
+              "value": " nelze obnovit — zde se už neliší"
             }
           ]
         },
@@ -15950,7 +16008,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — zde už jsou stejné"
+              "value": " nelze obnovit — zde se už neliší"
             }
           ]
         },
@@ -16042,7 +16100,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich kopii v záloze nelze přečíst"
+              "value": " nelze obnovit — kopii v záloze nelze přečíst"
             }
           ]
         },
@@ -16066,7 +16124,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich kopii v záloze nelze přečíst"
+              "value": " nelze obnovit — kopii v záloze nelze přečíst"
             }
           ]
         },
@@ -16100,7 +16158,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — připojují se k externím službám a tento server nemůže zálohu ověřit"
+              "value": " nelze obnovit — připojuje se k externím službám a tento server nemůže zálohu ověřit"
             }
           ]
         },
@@ -16124,7 +16182,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — připojují se k externím službám a tento server nemůže zálohu ověřit"
+              "value": " nelze obnovit — připojuje se k externím službám a tento server nemůže zálohu ověřit"
             }
           ]
         },
@@ -16249,6 +16307,64 @@
     {
       "type": 0,
       "value": "Adresa služby se mění, ale záloha neobsahuje její přihlašovací údaje. Obnovení je proto zde vymaže a službu vypne, dokud je znovu nezadáte."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechá současnou hodnotu, protože ho nebo část jeho připojení nastavuje prostředí tohoto serveru."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechají současné hodnoty, protože je nebo část jejich připojení nastavuje prostředí tohoto serveru."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechá současné hodnoty, protože je nebo část jejich připojení nastavuje prostředí tohoto serveru."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechá současné hodnoty, protože je nebo část jejich připojení nastavuje prostředí tohoto serveru."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -16927,8 +17043,44 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Skrýt je"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt je"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt je"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt je"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17149,8 +17301,44 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Zobrazit je"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit je"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit je"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit je"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -20257,6 +20445,12 @@
       "value": "Jiný účet na tomto serveru se přihlašuje stejným uživatelským jménem nebo e-mailem."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru, proto tento server ponechává své současné hodnoty."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -21651,6 +21845,16 @@
     {
       "type": 0,
       "value": " (ponecháno: přísnější)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (ponecháno: prostředí)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -62273,7 +62477,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Nastaveno konfigurací nasazení serveru. Odeberte uzel tam, abyste ho mohli smazat zde."
+      "value": "Nastaveno konfigurací nasazení serveru. Odeberte uzel tam a restartujte servery API, abyste ho mohli smazat zde."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -65257,6 +65461,146 @@
       "value": "Generování bylo zastaveno. Uložená doporučení zůstanou v sekci Objevovat viditelná až do restartu serveru."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Řazení řádků profilů ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Načítání seznamů TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Vyhledávání titulů a tvorba embeddingů ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazán "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titul s prošlou platností"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazány "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tituly s prošlou platností"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazáno "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titulu s prošlou platností"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazáno "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titulů s prošlou platností"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -65313,6 +65657,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Před sestavením doporučení pro Objevovat vyřešte níže uvedený konflikt zámku embeddingů."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Nejprve spusťte úlohu Embeddingy, aby měl server Silo k dispozici vektory knihovny pro porovnání."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Před sestavením doporučení pro Objevovat připojte poskytovatele embeddingů v sekci AI služby."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Žádný profil zatím nemá profil vkusu. Jakmile někdo zhlédne nebo ohodnotí nějaké tituly, spusťte úlohu Profily vkusu."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -67923,6 +68291,32 @@
       "value": "Zůstane prázdný, dokud nezapnete doporučení pro Objevovat v nabídce Správa → Doporučení."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Doporučené řádky zůstanou prázdné, dokud nezapnete doporučení pro Objevovat v nabídce "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Správa → Doporučení"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Vypnuto v sekci Doporučení"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -69635,6 +70029,12 @@
       "value": "Nové řádky se přidají na konec stránky Objevovat"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Otevřít nastavení doporučení"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -69647,6 +70047,12 @@
       "value": "Feed MDBListu nenese řazení uložené na stránce seznamu. Vyberte to, které seznam zobrazuje."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Váš profil zatím nemá žádná doporučení pro Objevovat. Pro náhled tohoto řádku spusťte úlohu Doporučení pro Objevovat nebo zhlédněte a ohodnoťte několik titulů."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -69657,6 +70063,12 @@
     {
       "type": 0,
       "value": "Vyberte seznam nebo vložte jeho odkaz a zobrazí se jeho tituly."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Pro náhled tohoto řádku zapněte doporučení pro Objevovat v nabídce Správa → Doporučení."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -73621,6 +74033,12 @@
       "value": "Kontrola připojení selhala."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nepodařilo se ověřit, zda tuto možnost nastavuje prostředí serveru. Chcete-li ji upravit, znovu načtěte stránku."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -74207,6 +74625,30 @@
     {
       "type": 0,
       "value": "Kanál se nepodařilo aktualizovat"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Znovu načtěte aktuální hodnoty. Úpravy nastavení, která se změnila, a uložených hesel a klíčů se zruší; ostatní úpravy zůstanou zachovány."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Načíst znovu"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nastavení se nepodařilo znovu načíst. Zkuste to znovu."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Nastavení se změnilo jinde"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -79889,6 +80331,24 @@
       "value": "Přechod na jiný model vyžaduje resetování embeddingů, které je všechny smaže. Jiný poskytovatel téhož modelu se uplatní po restartu."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Přidat na stránku Objevovat"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Doporučené řádky se nepodařilo přidat na stránku Objevovat."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Doporučené řádky byly přidány na stránku Objevovat."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -79911,6 +80371,44 @@
     {
       "type": 0,
       "value": "Kolik titulů, které nejsou v knihovně, server uchovává k doporučování. Každý z nich se vyhledá na TMDB a vytvoří se pro něj embedding. Vytváření embeddingů je obvykle levné, ale vyšší počet může podle vašeho poskytovatele embeddingů stát více nebo trvat déle a zabere více úložiště."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Vaše stránka Objevovat zatím nezobrazuje žádné řádky Doporučení."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Aby bylo možné spustit doporučení pro Objevovat, zapněte výše možnost „Povolit doporučení“ a restartujte server."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Žádosti jsou momentálně vypnuté. Zapněte je v "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "nastavení žádostí"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", aby diváci viděli stránku Objevovat."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Otevřít stránku Objevovat"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -89301,6 +89799,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Úložiště sem nelze přesunout, dokud nastavení úložiště určuje prostředí ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Nejprve tyto proměnné odstraňte a restartujte všechny servery API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -90559,6 +91071,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Tento plán vychází z nastavení záloh. Změnit ho můžete v části "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Zálohy"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

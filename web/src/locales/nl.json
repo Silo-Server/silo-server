@@ -13630,7 +13630,7 @@
             },
             {
               "type": 0,
-              "value": " kan niet worden hersteld — de toegang zou ruimer worden, dus deze server houdt zijn strengere waarden aan"
+              "value": " kan niet worden hersteld — het zou de toegang verruimen, dus deze server houdt zijn eigen strengere waarden aan"
             }
           ]
         },
@@ -13642,7 +13642,7 @@
             },
             {
               "type": 0,
-              "value": " kunnen niet worden hersteld — de toegang zou ruimer worden, dus deze server houdt zijn strengere waarden aan"
+              "value": " kunnen niet worden hersteld — ze zouden de toegang verruimen, dus deze server houdt zijn strengere waarden aan"
             }
           ]
         }
@@ -13745,6 +13745,40 @@
             {
               "type": 0,
               "value": " kunnen niet worden hersteld — een ander account hier meldt zich aan met die gebruikersnaam of dat e-mailadres"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan niet worden hersteld — de omgeving van deze server stelt de afwijkende instellingen in, of een deel van de verbinding waar ze bij horen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kunnen niet worden hersteld — de omgeving van deze server stelt de afwijkende instellingen in, of een deel van de verbinding waar ze bij horen"
             }
           ]
         }
@@ -14004,7 +14038,7 @@
             },
             {
               "type": 0,
-              "value": " kan niet worden hersteld — deze server zou het meer toegang geven dan de back-up deed"
+              "value": " kan niet worden hersteld — deze server zou het meer toegang geven dan de back-up"
             }
           ]
         },
@@ -14016,7 +14050,7 @@
             },
             {
               "type": 0,
-              "value": " kunnen niet worden hersteld — deze server zou ze meer toegang geven dan de back-up deed"
+              "value": " kunnen niet worden hersteld — deze server zou ze meer toegang geven dan de back-up"
             }
           ]
         }
@@ -14275,6 +14309,40 @@
     {
       "type": 0,
       "value": "Het adres van een dienst verandert zonder de inloggegevens in de back-up, dus bij het herstellen worden ze hier gewist en wordt de dienst uitgeschakeld tot ze opnieuw zijn ingevoerd."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " instelling behoudt de huidige waarde omdat de omgeving van deze server die instelt, of een deel van de verbinding waar die bij hoort."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " instellingen behouden hun huidige waarden omdat de omgeving van deze server ze instelt, of een deel van de verbinding waar ze bij horen."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14729,8 +14797,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Verbergen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Verbergen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Verbergen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14879,8 +14967,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Tonen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tonen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tonen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17043,6 +17151,12 @@
       "value": "Een ander account hier meldt zich aan met dezelfde gebruikersnaam of hetzelfde e-mailadres."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "De omgeving van deze server stelt de afwijkende instellingen in, of een deel van de verbinding waar ze bij horen, dus deze server behoudt de huidige waarden."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18117,6 +18231,16 @@
     {
       "type": 0,
       "value": " (behouden: strenger)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (behouden: omgeving)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -50179,7 +50303,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Ingesteld door de implementatieconfiguratie van de server. Verwijder hem daar om hem hier te kunnen verwijderen."
+      "value": "Ingesteld door de implementatieconfiguratie van de server. Verwijder hem daar en herstart de API-servers om hem hier te kunnen verwijderen."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52769,6 +52893,106 @@
       "value": "Het genereren is gestopt. Opgeslagen aanbevelingen blijven zichtbaar in Ontdek totdat de server opnieuw wordt opgestart."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Profielen rangschikken ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDB-lijsten ophalen ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Titels opzoeken en embeddings maken ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " verlopen titel gewist"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " verlopen titels gewist"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -52801,6 +53025,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Los het conflict met de embeddingvergrendeling hieronder op voordat je Ontdekken-aanbevelingen opbouwt."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Voer eerst de job Embeddings uit, zodat Silo bibliotheekvectoren heeft om mee te vergelijken."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Verbind een embeddingprovider in AI-services voordat je Ontdekken-aanbevelingen opbouwt."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Nog geen enkel profiel heeft een smaakprofiel. Voer Smaakprofielen uit zodra iemand titels heeft bekeken of beoordeeld."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54639,6 +54887,32 @@
       "value": "Blijft leeg totdat Ontdekken-aanbevelingen zijn ingeschakeld in Beheer → Aanbevelingen."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Rijen met aanbevelingen blijven leeg totdat Ontdekken-aanbevelingen zijn ingeschakeld in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Beheer → Aanbevelingen"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Uit in Aanbevelingen"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56117,6 +56391,12 @@
       "value": "Nieuwe rijen komen onderaan Ontdekken"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Instellingen voor Aanbevelingen openen"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56129,6 +56409,12 @@
       "value": "De feed van MDBList bevat niet de sortering die op de pagina van de lijst is opgeslagen. Kies de sortering die daar wordt getoond."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Je profiel heeft nog geen Ontdekken-aanbevelingen. Voer Ontdekken-aanbevelingen uit of bekijk en beoordeel een paar titels om een voorbeeld van deze rij te zien."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56139,6 +56425,12 @@
     {
       "type": 0,
       "value": "Kies een lijst of plak de link om de titels te zien."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Schakel Ontdekken-aanbevelingen in via Beheer → Aanbevelingen om een voorbeeld van deze rij te zien."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -59817,6 +60109,12 @@
       "value": "Verbindingscontrole mislukt."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Kan niet controleren of de omgeving van de server dit instelt. Laad de pagina opnieuw om dit te bewerken."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60371,6 +60669,30 @@
     {
       "type": 0,
       "value": "Kan kanaal niet bijwerken"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Laad opnieuw om de huidige waarden te zien. Je wijzigingen in instellingen die zijn veranderd en in opgeslagen wachtwoorden en sleutels worden ongedaan gemaakt; je andere wijzigingen blijven behouden."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Opnieuw laden"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Kan de instellingen niet opnieuw laden. Probeer het opnieuw."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Instellingen elders gewijzigd"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -65825,6 +66147,24 @@
       "value": "Overschakelen naar een ander model vereist het resetten van de embeddings, waarbij ze allemaal worden verwijderd. Een andere provider die hetzelfde model levert, wordt na een herstart toegepast."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Toevoegen aan Ontdek"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Kan rijen met aanbevelingen niet toevoegen aan de pagina Ontdek."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Rijen met aanbevelingen toegevoegd aan de pagina Ontdek."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -65847,6 +66187,44 @@
     {
       "type": 0,
       "value": "Hoeveel titels die niet in de bibliotheek staan de server bewaart om uit aan te bevelen. Elke titel wordt opgezocht op TMDB en krijgt een embedding. Een embedding maken is meestal goedkoop, maar een hoger aantal kan meer kosten of langer duren, afhankelijk van je embedding-provider, en gebruikt meer opslag."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Je pagina Ontdek toont nog geen rijen met aanbevelingen."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Zet Aanbevelingen inschakelen hierboven aan en start de server opnieuw op voordat Ontdekken-aanbevelingen kunnen worden uitgevoerd."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Aanvragen staan momenteel uit. Zet ze aan in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Aanvraaginstellingen"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " zodat kijkers de pagina Ontdek kunnen zien."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Pagina Ontdek openen"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -74965,6 +75343,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Opslag kan hier niet worden verplaatst zolang de omgeving opslaginstellingen vastlegt ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Verwijder eerst die variabelen en start elke API-server opnieuw."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76099,6 +76491,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Deze planning komt uit de back-upinstellingen. Wijzig die in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Back-ups"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

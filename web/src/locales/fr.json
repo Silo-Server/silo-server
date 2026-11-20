@@ -14381,7 +14381,7 @@
             },
             {
               "type": 0,
-              "value": " ne peut pas être restauré — il élargirait l’accès, donc ce serveur garde ses valeurs plus strictes"
+              "value": " ne peut pas être restauré — il élargirait l’accès, donc ce serveur conserve ses propres valeurs plus strictes"
             }
           ]
         },
@@ -14393,7 +14393,7 @@
             },
             {
               "type": 0,
-              "value": " ne peuvent pas être restaurés — ils élargiraient l’accès, donc ce serveur garde ses valeurs plus strictes"
+              "value": " ne peuvent pas être restaurés — ils élargiraient l’accès, donc ce serveur conserve ses valeurs plus strictes"
             }
           ]
         },
@@ -14405,7 +14405,7 @@
             },
             {
               "type": 0,
-              "value": " ne peuvent pas être restaurés — ils élargiraient l’accès, donc ce serveur garde ses valeurs plus strictes"
+              "value": " ne peuvent pas être restaurés — ils élargiraient l’accès, donc ce serveur conserve ses valeurs plus strictes"
             }
           ]
         }
@@ -14544,6 +14544,52 @@
             {
               "type": 0,
               "value": " ne peuvent pas être restaurés — un autre compte ici se connecte avec ce nom d’utilisateur ou cet e-mail"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ne peut pas être restauré — l’environnement de ce serveur définit les paramètres qui diffèrent, ou une partie de sa connexion"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ne peuvent pas être restaurés — l’environnement de ce serveur définit les paramètres qui diffèrent, ou une partie de leur connexion"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ne peuvent pas être restaurés — l’environnement de ce serveur définit les paramètres qui diffèrent, ou une partie de leur connexion"
             }
           ]
         }
@@ -15244,6 +15290,52 @@
       "value": "L’adresse d’un service change sans ses identifiants dans la sauvegarde : la restauration les efface donc ici et désactive le service jusqu’à ce qu’ils soient saisis de nouveau."
     }
   ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " paramètre conserve sa valeur actuelle, car l’environnement de ce serveur le définit, ou définit une partie de sa connexion."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de paramètres conservent leurs valeurs actuelles, car l’environnement de ce serveur les définit, ou définit une partie de leur connexion."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " paramètres conservent leurs valeurs actuelles, car l’environnement de ce serveur les définit, ou définit une partie de leur connexion."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.caveat.filesMissing": [
     {
       "type": 6,
@@ -15796,8 +15888,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Les masquer"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Le masquer"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Les masquer"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Les masquer"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -15982,8 +16102,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Les afficher"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "L’afficher"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Les afficher"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Les afficher"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -18638,6 +18786,12 @@
       "value": "Un autre compte de ce serveur se connecte avec son nom d’utilisateur ou son e-mail."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "L’environnement de ce serveur définit les paramètres qui diffèrent, ou une partie de leur connexion : ce serveur conserve donc ses valeurs actuelles."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19848,6 +20002,16 @@
     {
       "type": 0,
       "value": " (conservé : plus strict)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (conservé : environnement)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -56054,7 +56218,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Défini par la configuration de déploiement du serveur. Retirez-le à cet endroit pour le supprimer ici."
+      "value": "Défini par la configuration de déploiement du serveur. Retirez-le à cet endroit et redémarrez les serveurs API pour le supprimer ici."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -58817,6 +58981,118 @@
       "value": "La génération est arrêtée. Les recommandations enregistrées restent visibles dans Découvrir jusqu’au redémarrage du serveur."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Classement des profils ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Récupération des listes TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Recherche des titres et création des embeddings ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titre expiré retiré"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de titres expirés retirés"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titres expirés retirés"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -58861,6 +59137,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Résolvez le conflit de verrou d’embedding ci-dessous avant de générer les recommandations Découvrir."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Exécutez d’abord le travail Embeddings afin que Silo dispose de vecteurs de la bibliothèque pour la comparaison."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Connectez un fournisseur d’embeddings dans Services IA avant de générer les recommandations Découvrir."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Aucun profil n’a encore de profil de goûts. Exécutez Profils de goûts dès qu’une personne a regardé ou noté des titres."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -61095,6 +61395,32 @@
       "value": "Reste vide tant que les recommandations Découvrir ne sont pas activées dans Administration → Recommandations."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Les rangées recommandées restent vides tant que les recommandations Découvrir ne sont pas activées dans "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Administration → Recommandations"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Désactivé dans Recommandations"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -62690,6 +63016,12 @@
       "value": "Les nouvelles rangées s’ajoutent en bas de Découvrir"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Ouvrir les paramètres de Recommandations"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -62702,6 +63034,12 @@
       "value": "Le flux de MDBList ne transmet pas le tri enregistré sur la page de la liste. Choisissez celui qu’elle affiche."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Votre profil n’a pas encore de recommandations Découvrir. Exécutez Recommandations Découvrir ou regardez et notez quelques titres pour prévisualiser cette rangée."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -62712,6 +63050,12 @@
     {
       "type": 0,
       "value": "Choisissez une liste ou collez son lien pour voir ses titres."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Activez les recommandations Découvrir dans Administration → Recommandations pour prévisualiser cette rangée."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -66517,6 +66861,12 @@
       "value": "Échec de la vérification de la connexion."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Impossible de vérifier si l’environnement du serveur définit ce paramètre. Rechargez la page pour le modifier."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -67075,6 +67425,30 @@
     {
       "type": 0,
       "value": "Impossible de mettre à jour le canal"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Rechargez pour afficher les valeurs actuelles. Vos modifications des paramètres qui ont changé, ainsi que des mots de passe et clés enregistrés, sont annulées ; vos autres modifications sont conservées."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Recharger"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Impossible de recharger les paramètres. Réessayez."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Paramètres modifiés ailleurs"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -72633,6 +73007,24 @@
       "value": "Passer à un autre modèle nécessite de réinitialiser les embeddings, ce qui les supprime tous. Un autre fournisseur proposant le même modèle s’applique après un redémarrage."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Ajouter à Découvrir"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Impossible d’ajouter les rangées recommandées à la page Découvrir."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Rangées recommandées ajoutées à la page Découvrir."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -72655,6 +73047,44 @@
     {
       "type": 0,
       "value": "Nombre de titres absents de la bibliothèque que le serveur conserve pour ses recommandations. Chacun est recherché sur TMDB puis converti en embedding. La création d’embeddings est généralement peu coûteuse, mais un nombre plus élevé peut coûter plus cher ou prendre plus de temps selon votre fournisseur d’embeddings, et occupe plus d’espace de stockage."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Votre page Découvrir n’affiche encore aucune rangée Recommandations."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Activez l’option « Activer les recommandations » ci-dessus et redémarrez le serveur pour que les recommandations Découvrir puissent s’exécuter."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Les demandes sont actuellement désactivées. Activez-les dans "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Paramètres des demandes"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " pour rendre la page Découvrir visible."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Ouvrir la page Découvrir"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -81875,6 +82305,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Impossible de déplacer le stockage ici tant que l’environnement définit des paramètres de stockage ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Supprimez d’abord ces variables, puis redémarrez tous les serveurs d’API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -83067,6 +83511,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Cette planification provient des paramètres de sauvegarde. Modifiez-la dans "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Serveur › Sauvegardes"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
