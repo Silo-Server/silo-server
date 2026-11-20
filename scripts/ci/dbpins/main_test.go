@@ -38,10 +38,34 @@ func TestParseList(t *testing.T) {
 
 func TestGoTestArgsAnchorsEveryName(t *testing.T) {
 	pins := []pin{{"./internal/b", "TestOne"}, {"./internal/a", "TestOne"}, {"./internal/a", "TestTwo"}}
-	got := goTestArgs(pins)
-	want := []string{"test", "-count=1", "-json", "-run", "^(TestOne|TestTwo)$", "./internal/b", "./internal/a"}
+	got := goTestArgs(pins, false)
+	want := []string{"test", "-count=1", "-json", "-run", "^(TestOne|TestTwo)$", "./internal/a", "./internal/b"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args = %q, want %q", got, want)
+	}
+	if got := goTestArgs(pins, true); !reflect.DeepEqual(got[len(got)-2:], []string{"./internal/b", "./internal/a"}) {
+		t.Fatalf("shared database package order changed: %q", got)
+	}
+}
+
+func TestGoTestArgsPrioritizesSlowPackagesFirst(t *testing.T) {
+	pins := []pin{
+		{"./internal/small", "TestS1"},
+		{"./internal/small", "TestS2"},
+		{"./internal/small", "TestS3"},
+		{"./cmd/silo", "TestCmd"},
+		{"./internal/catalog", "TestC1"},
+		{"./internal/catalog", "TestC2"},
+		{"./internal/backup", "TestB1"},
+	}
+	got := goTestArgs(pins, false)
+	wantDirs := []string{"./internal/backup", "./internal/catalog", "./cmd/silo", "./internal/small"}
+	if dirs := got[len(got)-4:]; !reflect.DeepEqual(dirs, wantDirs) {
+		t.Fatalf("dirs = %q, want %q", dirs, wantDirs)
+	}
+	wantShared := []string{"./internal/small", "./cmd/silo", "./internal/catalog", "./internal/backup"}
+	if dirs := goTestArgs(pins, true); !reflect.DeepEqual(dirs[len(dirs)-4:], wantShared) {
+		t.Fatalf("shared dirs = %q, want %q", dirs[len(dirs)-4:], wantShared)
 	}
 }
 
@@ -137,6 +161,24 @@ func TestCheck(t *testing.T) {
 				event("run", "internal/b", "TestTwo", ""),
 			want: []string{"UNFINISHED ./internal/b TestTwo"},
 		},
+		{
+			name: "package failed outside tests (e.g. clone or TestMain failure)",
+			stream: event("run", "internal/a", "TestOne", "") +
+				event("pass", "internal/a", "TestOne", "") +
+				event("output", "internal/b", "", "dbpins: copy database failed\n") +
+				event("fail", "internal/b", "", ""),
+			want: []string{
+				"MISSING ./internal/b TestTwo",
+				"FAIL " + testModule + "/internal/b (package failed outside tests)",
+			},
+		},
+		{
+			name:   "package failed in TestMain teardown after tests passed",
+			stream: passing + event("fail", "internal/b", "", ""),
+			want: []string{
+				"FAIL " + testModule + "/internal/b (package failed outside tests)",
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var passthrough strings.Builder
@@ -152,6 +194,19 @@ func TestCheck(t *testing.T) {
 				t.Fatalf("report does not show %q:\n%s", tc.reportHas, report)
 			}
 		})
+	}
+}
+
+func TestSummarizeRunReportsNonExitWaitErrorsAlongsideMissingPins(t *testing.T) {
+	res := &results{tests: map[testKey]*testResult{}, failedPackages: map[string]bool{}}
+	pins := []pin{{"./internal/backup", "TestA"}}
+	_, problems := summarizeRun(res, pins, testModule, errors.New("signal: killed"))
+	want := []string{
+		"MISSING ./internal/backup TestA",
+		"go test: signal: killed",
+	}
+	if !reflect.DeepEqual(problems, want) {
+		t.Fatalf("problems = %q, want %q", problems, want)
 	}
 }
 
@@ -231,108 +286,5 @@ func TestExecArg(t *testing.T) {
 	}
 	if _, err := execArg(`/tmp/a'b"c/dbpins`); err == nil {
 		t.Fatal("execArg accepted path with both quote kinds")
-	}
-}
-
-func TestPlanInvocationsSplitsHeavyPackagesAndPrioritizesUnsplit(t *testing.T) {
-	pins := []pin{
-		{"./internal/small", "TestS1"},
-		{"./internal/api/handlers", "TestH1"},
-		{"./internal/api/handlers", "TestH2"},
-		{"./internal/backup", "TestB1"},
-		{"./internal/backup", "TestB2"},
-		{"./internal/backup", "TestB3"},
-		{"./internal/backup", "TestB4"},
-		{"./internal/backup", "TestB5"},
-		{"./internal/catalog", "TestC1"},
-		{"./internal/catalog", "TestC2"},
-		{"./internal/catalog", "TestC3"},
-	}
-	mainInv, shardInvs := planInvocations(pins, "/tmp/dbpins")
-	// Backup (4 shards) comes before catalog (2 shards).
-	if len(shardInvs) != 6 {
-		t.Fatalf("len(shardInvs) = %d, want 6: %+v", len(shardInvs), shardInvs)
-	}
-	for i := range 4 {
-		if shardInvs[i].dir != "./internal/backup" || shardInvs[i].total != 4 {
-			t.Fatalf("shardInvs[%d] = %+v, want backup shard", i, shardInvs[i])
-		}
-	}
-	if shardInvs[4].dir != "./internal/catalog" || shardInvs[5].dir != "./internal/catalog" {
-		t.Fatalf("shardInvs[4..5] = %+v, want catalog shards", shardInvs[4:6])
-	}
-	// Unsplit invocation prioritizes handlers above small and excludes split packages.
-	wantMain := []string{
-		"test", "-count=1", "-json", "-exec", "/tmp/dbpins",
-		"-run", "^(TestS1|TestH1|TestH2)$",
-		"./internal/api/handlers", "./internal/small",
-	}
-	if !reflect.DeepEqual(mainInv.args, wantMain) {
-		t.Fatalf("mainInv.args = %q, want %q", mainInv.args, wantMain)
-	}
-
-	// Every split pin appears in exactly one shard invocation.
-	seen := make(map[pin]int)
-	for _, inv := range shardInvs {
-		for _, test := range inv.tests {
-			seen[pin{dir: inv.dir, test: test}]++
-		}
-	}
-	for _, p := range pins {
-		if packageShards[p.dir] > 1 && seen[p] != 1 {
-			t.Fatalf("split pin %+v appeared %d times across shards", p, seen[p])
-		}
-	}
-}
-
-func TestGoflagsParallelism(t *testing.T) {
-	for _, tc := range []struct {
-		goflags  string
-		defaultP int
-		want     int
-	}{
-		{"", 4, 4},
-		{"-race -v", 4, 4},
-		{"-p=1", 4, 1},
-		{"-v -p 2 -count=1", 4, 2},
-		{"--p=3", 4, 3},
-		{"-p=2 -p=1", 4, 1},
-		{"-p=bad", 4, 4},
-	} {
-		if got := goflagsParallelism(tc.goflags, tc.defaultP); got != tc.want {
-			t.Errorf("goflagsParallelism(%q, %d) = %d, want %d", tc.goflags, tc.defaultP, got, tc.want)
-		}
-	}
-}
-
-func TestSummarizeRunReportsInfraErrorsAlongsideMissingPins(t *testing.T) {
-	res := &results{tests: map[testKey]*testResult{}}
-	pins := []pin{{"./internal/backup", "TestA"}}
-	_, problems := summarizeRun(res, pins, testModule, nil, errors.New("./internal/backup [1/4]: exit status 1"))
-	want := []string{
-		"MISSING ./internal/backup TestA",
-		"runner: ./internal/backup [1/4]: exit status 1",
-	}
-	if !reflect.DeepEqual(problems, want) {
-		t.Fatalf("problems = %q, want %q", problems, want)
-	}
-}
-
-func TestResultsMergeCombinesShardOutputs(t *testing.T) {
-	merged := &results{tests: map[testKey]*testResult{}}
-	s1, err := readEvents(strings.NewReader(event("run", "internal/backup", "TestA", "")+event("pass", "internal/backup", "TestA", "")), func(string) {})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s2, err := readEvents(strings.NewReader(event("run", "internal/backup", "TestB", "")+event("fail", "internal/backup", "TestB", "")), func(string) {})
-	if err != nil {
-		t.Fatal(err)
-	}
-	merged.merge(s1)
-	merged.merge(s2)
-	_, problems := merged.check([]pin{{"./internal/backup", "TestA"}, {"./internal/backup", "TestB"}}, testModule)
-	want := []string{"FAIL ./internal/backup TestB"}
-	if !reflect.DeepEqual(problems, want) {
-		t.Fatalf("problems = %q, want %q", problems, want)
 	}
 }

@@ -7,9 +7,9 @@
 // skips guards nothing, so this command fails on a listed test that is
 // missing, skipped or failing, and on any skipped subtest.
 //
-// Each package or shard runs against its own copy of the database (see
-// clone.go), so the database must have no other sessions; -shared runs every
-// package against it directly instead.
+// Each package runs against its own copy of the database (see clone.go), so
+// the database must have no other sessions; -shared runs every package
+// against it directly instead.
 //
 // Usage (the repository root is the cwd; SILO_TEST_DATABASE_URL names a
 // migrated, disposable database):
@@ -19,6 +19,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,7 +33,24 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 )
+
+// packagePriority starts the longest-running packages first on isolated
+// databases so shorter packages pack beside them instead of launching ahead
+// of them by raw pin count.
+var packagePriority = map[string]int{
+	"./internal/backup":          100,
+	"./internal/catalog":         90,
+	"./internal/scanner":         80,
+	"./cmd/silo":                 75,
+	"./internal/metadata":        70,
+	"./internal/notifications":   60,
+	"./internal/recommendations": 55,
+	"./internal/downloads":       50,
+	"./internal/trickplay":       45,
+	"./internal/api/handlers":    40,
+}
 
 // listFlag collects every -list.
 type listFlag []string
@@ -82,23 +100,19 @@ func runMain() int {
 		return 1
 	}
 
+	args := goTestArgs(pins, *shared)
+	env := os.Environ()
 	template := os.Getenv("SILO_TEST_DATABASE_URL")
-	var (
-		res      *results
-		exitErr  error
-		infraErr error
-	)
+	ctx := context.Background()
 	switch {
 	case template == "":
 		fmt.Println("dbpins: SILO_TEST_DATABASE_URL is not set, so every pin will skip")
-		res, exitErr, infraErr = runDirect(pins)
-	case *shared:
-		res, exitErr, infraErr = runDirect(pins)
-	default:
+	case !*shared:
 		// Keep SIGINT/SIGTERM trapped through dropRunClones so an interrupt
-		// cancels queued shard starts and lets active wrappers finish before
-		// sweeping any leftover database copies.
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		// signals the entire go test process group and waits for active
+		// wrappers to exit before sweeping any leftover database copies.
+		var stop context.CancelFunc
+		ctx, stop = signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 
 		execPath, run, setupErr := setUpClones(ctx, template)
@@ -113,19 +127,17 @@ func runMain() int {
 			fmt.Fprintf(os.Stderr, "dbpins: %v\n", setupErr)
 			return 1
 		}
-		res, exitErr, infraErr = runSharded(ctx, pins, execPath, template, run)
+		args = slices.Insert(args, 1, "-exec", execPath)
+		env = append(env, cloneTemplateEnv+"="+template, cloneRunEnv+"="+run)
 	}
 
-	if res == nil {
-		if infraErr != nil {
-			fmt.Fprintf(os.Stderr, "dbpins: %v\n", infraErr)
-		} else if exitErr != nil {
-			fmt.Fprintf(os.Stderr, "dbpins: %v\n", exitErr)
-		}
+	res, waitErr, readErr := runGoTest(ctx, args, env)
+	if readErr != nil {
+		fmt.Fprintf(os.Stderr, "dbpins: %v\n", readErr)
 		return 1
 	}
 
-	report, problems := summarizeRun(res, pins, strings.TrimSpace(string(module)), exitErr, infraErr)
+	report, problems := summarizeRun(res, pins, strings.TrimSpace(string(module)), waitErr)
 	fmt.Print(report)
 	if len(problems) > 0 {
 		fmt.Printf("\n::error::%d problem(s) running the pins in %s; a missing or skipped test fails like a failing one\n", len(problems), strings.Join(lists, " and "))
@@ -138,21 +150,14 @@ func runMain() int {
 	return 0
 }
 
-func summarizeRun(res *results, pins []pin, module string, exitErr, infraErr error) (string, []string) {
-	report, problems := res.check(pins, module)
-	if infraErr != nil {
-		problems = append(problems, "runner: "+infraErr.Error())
-	} else if exitErr != nil && len(problems) == 0 {
-		// A test binary or go test failed without a failing test to show for it.
-		problems = append(problems, "go test: "+exitErr.Error())
-	}
-	return report, problems
-}
-
-func runDirect(pins []pin) (*results, error, error) {
-	args := goTestArgs(pins)
-	cmd := exec.CommandContext(context.Background(), "go", args...) //nolint:gosec // fixed go executable with separate arguments, no shell
+func runGoTest(ctx context.Context, args, env []string) (*results, error, error) {
+	cmd := exec.CommandContext(ctx, "go", args...) //nolint:gosec // fixed go executable with separate arguments, no shell
+	cmd.Env = env
 	cmd.Stderr = os.Stderr
+	configureProcessGroup(cmd)
+	// Fit forced kill + database clone cleanup inside CI cancel grace windows.
+	cmd.WaitDelay = 5 * time.Second
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, nil, err
@@ -167,10 +172,27 @@ func runDirect(pins []pin) (*results, error, error) {
 		_, _ = io.Copy(io.Discard, stdout)
 	}
 	waitErr := cmd.Wait()
+	if ctx.Err() != nil {
+		// Ensure no wrapper or test binary outlives WaitDelay into dropRunClones.
+		killProcessGroup(cmd)
+	}
 	if readErr != nil {
 		return nil, nil, readErr
 	}
 	return res, waitErr, nil
+}
+
+func summarizeRun(res *results, pins []pin, module string, waitErr error) (string, []string) {
+	report, problems := res.check(pins, module)
+	if waitErr != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(waitErr, &exitErr) || exitErr.ExitCode() < 0 || len(problems) == 0 {
+			// Surface non-exit errors, signal kills (ExitCode < 0), and
+			// unexpected non-zero exits without a failing test to show for them.
+			problems = append(problems, "go test: "+waitErr.Error())
+		}
+	}
+	return report, problems
 }
 
 // readLists parses each list and merges them; a test may be listed once
@@ -223,28 +245,41 @@ func parseList(data string) ([]pin, error) {
 	return pins, nil
 }
 
-// goTestArgs runs exactly the pinned tests in manifest order, uncached: the
-// test cache cannot see the database the results depend on.
-func goTestArgs(pins []pin) []string {
+// goTestArgs runs exactly the pinned tests, uncached: the test cache cannot
+// see the database the results depend on.
+func goTestArgs(pins []pin, shared bool) []string {
 	var names, dirs []string
+	pinCounts := make(map[string]int)
 	for _, p := range pins {
 		if !slices.Contains(names, p.test) {
 			names = append(names, p.test)
 		}
-		if !slices.Contains(dirs, p.dir) {
+		if pinCounts[p.dir] == 0 {
 			dirs = append(dirs, p.dir)
 		}
+		pinCounts[p.dir]++
+	}
+	// Give slower packages and packages with many pins an early slot on their
+	// isolated databases. A caller using a shared database keeps manifest order.
+	if !shared {
+		slices.SortStableFunc(dirs, func(a, b string) int {
+			if c := cmp.Compare(packagePriority[b], packagePriority[a]); c != 0 {
+				return c
+			}
+			return cmp.Compare(pinCounts[b], pinCounts[a])
+		})
 	}
 	return append([]string{"test", "-count=1", "-json", "-run", "^(" + strings.Join(names, "|") + ")$"}, dirs...)
 }
 
 // testEvent is the part of a go test -json event this command reads.
 type testEvent struct {
-	Action  string
-	Package string
-	Test    string
-	Output  string
-	Elapsed float64
+	Action     string
+	Package    string
+	ImportPath string
+	Test       string
+	Output     string
+	Elapsed    float64
 }
 
 type testKey struct{ pkg, test string }
@@ -270,15 +305,20 @@ func (r *testResult) status() string {
 }
 
 type results struct {
-	tests map[testKey]*testResult
-	order []testKey
+	tests          map[testKey]*testResult
+	order          []testKey
+	failedPackages map[string]bool
+	failedPkgOrder []string
 }
 
 // readEvents records the outcome and output of every test in a go test -json
 // stream. Package-level output (build errors, ok and FAIL lines) and lines
 // that are not events go straight to passthrough.
 func readEvents(r io.Reader, passthrough func(string)) (*results, error) {
-	res := &results{tests: map[testKey]*testResult{}}
+	res := &results{
+		tests:          map[testKey]*testResult{},
+		failedPackages: map[string]bool{},
+	}
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
@@ -288,6 +328,16 @@ func readEvents(r io.Reader, passthrough func(string)) (*results, error) {
 			continue
 		}
 		if ev.Test == "" {
+			if ev.Action == "fail" || ev.Action == "build-fail" {
+				pkg := ev.Package
+				if pkg == "" {
+					pkg = ev.ImportPath
+				}
+				if pkg != "" && !res.failedPackages[pkg] {
+					res.failedPackages[pkg] = true
+					res.failedPkgOrder = append(res.failedPkgOrder, pkg)
+				}
+			}
 			passthrough(ev.Output)
 			continue
 		}
@@ -310,10 +360,12 @@ func readEvents(r io.Reader, passthrough func(string)) (*results, error) {
 }
 
 // check reports the status of every pin and the output of every test that
-// did not pass, and returns the problems: each pin that did not pass, and each
+// did not pass, and returns the problems: each pin that did not pass, each
 // other test (a subtest, or another test the name pattern matched) that
-// skipped or failed. A skipped subtest leaves its parent passing, which is why
-// those count on their own.
+// skipped or failed, and any package that failed outside a recorded test
+// (such as a build error, clone failure in -exec, or TestMain crash). A
+// skipped subtest leaves its parent passing, which is why those count on
+// their own.
 func (res *results) check(pins []pin, module string) (string, []string) {
 	var report strings.Builder
 	var problems []string
@@ -330,15 +382,22 @@ func (res *results) check(pins []pin, module string) (string, []string) {
 		problems = append(problems, fmt.Sprintf("%s %s %s", result.status(), p.dir, p.test))
 		fmt.Fprintf(&report, "%-10s %s %s\n", result.status(), p.dir, p.test)
 	}
+	pkgHasNonPassingTest := map[string]bool{}
 	for _, key := range res.order {
 		result := res.tests[key]
 		if result.passed() {
 			continue
 		}
+		pkgHasNonPassingTest[key.pkg] = true
 		if !pinned[key] {
 			problems = append(problems, fmt.Sprintf("%s %s %s", result.status(), key.pkg, key.test))
 		}
 		fmt.Fprintf(&report, "\n--- %s %s %s\n%s", result.status(), key.pkg, key.test, strings.Join(result.output, ""))
+	}
+	for _, pkg := range res.failedPkgOrder {
+		if !pkgHasNonPassingTest[pkg] {
+			problems = append(problems, fmt.Sprintf("FAIL %s (package failed outside tests)", pkg))
+		}
 	}
 	return report.String(), problems
 }

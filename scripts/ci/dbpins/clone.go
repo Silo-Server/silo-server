@@ -21,11 +21,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Every package or shard runs against its own copy of the migrated database.
-// go test runs packages (and dbpins runs shards of heavy packages) in parallel,
-// and on one shared database they saw each other's rows, advisory locks and
-// planner statistics: a MAX(id)+1 seed collided with another package's insert,
-// and a plan test flipped when another package changed the table it read.
+// Every package's tests run against their own copy of the migrated database.
+// go test runs the listed packages in parallel, and on one shared database
+// they saw each other's rows, advisory locks and planner statistics: a
+// MAX(id)+1 seed collided with another package's insert, and a plan test
+// flipped when another package changed the table it read.
 //
 // dbpins passes itself to go test as -exec. go test then starts each test
 // binary through it, with the template's URL in cloneTemplateEnv; the wrapper
