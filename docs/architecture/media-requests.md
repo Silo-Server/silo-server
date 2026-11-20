@@ -305,6 +305,17 @@ plugin, including every one built before the flag existed, ignores the seasons
 and takes the whole series. The host reads the flag from the capability
 metadata stored at install, so checking it never launches the plugin.
 
+Season numbers are TMDB's, and download services number some series
+differently (often anime: one 24-episode TMDB season can be two 12-episode
+seasons on Sonarr). So the request also carries each requested season's TMDB
+first air date and episode count (`RequestDescriptor.season_details`), stored
+with the request when it is made (`media_requests.season_details`). A plugin
+matches the season as the first `episode_count` regular episodes, in airing
+order, that its service lists as airing on or after `first_air_date`. When
+fewer match, it uses the ones it finds; it falls back to the season number
+when the detail has no date or count, or when no episode matches. Requests
+made before the details were kept carry none and are matched by number.
+
 A series in the library can be requested for the seasons it lacks (aired and
 incomplete, or not aired yet) when no download server takes series, in which
 case the library fulfills the request, or when every enabled download server

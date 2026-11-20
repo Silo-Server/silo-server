@@ -52,3 +52,34 @@ func TestRoutingFactsMergeDatabase(t *testing.T) {
 		t.Fatalf("after update: facts = %+v; want the new rating and capture time, the rest kept", f)
 	}
 }
+
+// A season request's season details survive the store: the router gets
+// them on every later submit and status check, not only the first.
+func TestSeasonDetailsRoundTripDatabase(t *testing.T) {
+	repo, _ := lifecycleTestRepository(t)
+	details := []SeasonDetail{{Number: 1, FirstAirDate: "2024-10-04", EpisodeCount: 24}, {Number: 2}}
+	created, err := repo.CreateRequest(t.Context(), CreateRequestRecord{
+		ID:            "dandadan",
+		Input:         CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 240411, Title: "DAN DA DAN", Seasons: []int{1, 2}},
+		Status:        StatusApproved,
+		Outcome:       OutcomeActive,
+		SeasonDetails: details,
+		Requester:     Viewer{UserID: 1, ProfileID: "profile"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := repo.GetRequest(t.Context(), "dandadan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, req := range []*Request{created, read} {
+		if !slices.Equal(req.SeasonDetails, details) {
+			t.Fatalf("season details = %+v, want %+v", req.SeasonDetails, details)
+		}
+	}
+	whole := insertLifecycleRequest(t, repo, "movie", 1, 550, StatusApproved)
+	if len(whole.SeasonDetails) != 0 {
+		t.Fatalf("request without details reads back %+v, want none", whole.SeasonDetails)
+	}
+}
