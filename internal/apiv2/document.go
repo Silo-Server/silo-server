@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -787,18 +786,12 @@ func registerAll(reg *Registry) {
 	registerAPIDocs(reg)
 }
 
-var cachedDeclaredOperations = sync.OnceValue(func() []Declared {
-	reg := &Registry{api: huma.NewAPI(runtimeHumaConfig(), noopAdapter{}), skipBaseChecks: true}
-	registerAll(reg)
-	return reg.Declared()
-})
-
 // DeclaredOperations lists what the domain registrations declare, without a
 // router, database or network: the same registrations GenerateOpenAPI
 // documents. The migration ledger's reconcile test reads the Guarded set
 // from it.
 func DeclaredOperations() []Declared {
-	return slices.Clone(cachedDeclaredOperations())
+	return slices.Clone(sharedRuntimeSchemas().declared)
 }
 
 // GenerateOpenAPI renders the contract document from the registries alone:

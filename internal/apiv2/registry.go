@@ -232,17 +232,22 @@ type Operation struct {
 	Audited bool
 }
 
-// Registry is the deterministic registration surface. Domain files call
-// Register on it at router build; nothing registers later.
 type routeKey struct {
 	method string
 	path   string
 }
 
+// Registry is the deterministic registration surface. Domain files call
+// Register on it at router build; nothing registers later.
 type Registry struct {
-	api            huma.API
-	deps           Dependencies
-	skipBaseChecks bool
+	api  huma.API
+	deps Dependencies
+	// fromSnapshot is true while registering base routes against
+	// sharedRuntimeSchemas: it skips startup validation and base-only OpenAPI
+	// documentation passes (declaredResponseDescriptions,
+	// documentCapabilityScope, documentConcurrencyResponses) that already ran
+	// when building the snapshot and GenerateOpenAPI.
+	fromSnapshot bool
 
 	mu                      sync.Mutex
 	ops                     []Declared
@@ -293,7 +298,7 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	var out O
 	inType := reflect.TypeOf(in)
 	outType := reflect.TypeOf(out)
-	if !reg.skipBaseChecks {
+	if !reg.fromSnapshot {
 		validateRegistration(op, inType, outType)
 	}
 	if op.Metadata == nil {
@@ -340,11 +345,11 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	// the copy it rewrites, so the declared descriptions are read first and
 	// restored after.
 	var descriptions map[string]string
-	if !reg.skipBaseChecks {
+	if !reg.fromSnapshot {
 		descriptions = declaredResponseDescriptions(op)
 	}
 	huma.Register(reg.api, op.Operation, handler)
-	if !reg.skipBaseChecks {
+	if !reg.fromSnapshot {
 		documentCapabilityScope(reg, op, outType)
 		documentDeclaredResponseDescriptions(reg.api.OpenAPI(), op, descriptions)
 		documentConcurrencyResponses(reg.api.OpenAPI(), op)

@@ -564,10 +564,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	api.UseMiddleware(bufferStructuredResponse, observeOperation, defaultHeaders, deprecationHeaders, classGate(deps), observeIdentity, normalizeAccept, encodingGuard, mediaTypeGuard, queryGuard)
 
-	reg := &Registry{api: api, deps: deps, skipBaseChecks: true}
+	reg := &Registry{api: api, deps: deps, fromSnapshot: true}
 	registerAll(reg)
 	if deps.testRegister != nil {
-		reg.skipBaseChecks = false
+		reg.fromSnapshot = false
+		// Materialize handler-owned schema copies and base public-capability
+		// state before test callbacks so neither SchemaFromRef nor Map writes
+		// into sharedRuntimeSchemas and public-capability precedence holds.
+		_ = api.OpenAPI().Components.Schemas.Map()
+		reg.publicCapabilitySchemas = maps.Clone(sharedRuntimeSchemas().publicCapabilitySchemas)
 		deps.testRegister(reg)
 	}
 	// After registration: the 405 answer names the methods the registry
@@ -583,7 +588,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 // humaConfig is the framework configuration the contract ratifies. Nothing
 // here is a Huma default accepted implicitly; each choice is locked by a test
-// in router_test.go.
+// in router_test.go. AllowAdditionalPropertiesByDefault and
+// FieldsOptionalByDefault must remain unset while runtimeSchemaRegistry wraps
+// this config, because Huma only forwards those options to its own unexported
+// mapRegistry type.
 func humaConfig() huma.Config {
 	return huma.Config{
 		OpenAPI: &huma.OpenAPI{
@@ -600,8 +608,10 @@ func humaConfig() huma.Config {
 				},
 			},
 			// The document lists only the request media types the listener
-			// accepts; the generator and the served router share this
-			// config, so the artifact and the runtime document agree.
+			// accepts; GenerateOpenAPI builds the canonical contract document
+			// from humaConfig, while newChiRouter uses runtimeHumaConfig with
+			// fromSnapshot so request validation agrees without repeating
+			// base-only documentation passes.
 			OnAddOperation: []huma.AddOpFunc{documentAcceptedRequestMediaTypes},
 		},
 		// Built-in spec, docs and schema routes are disabled: Silo serves the
