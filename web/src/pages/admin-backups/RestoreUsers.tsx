@@ -195,7 +195,14 @@ export const AccountRow = memo(function AccountRow({
             {item.label}
           </Label>
           {contact ? (
-            <span title={contact} className="text-muted-foreground min-w-0 truncate text-xs">
+            // The line takes its direction from its first letter: an email on its own
+            // reads left to right and keeps its start when cut short, and a line that
+            // opens with the translated pending summary reads in that language.
+            <span
+              title={contact}
+              dir="auto"
+              className="text-muted-foreground min-w-0 truncate text-xs"
+            >
               {contact}
             </span>
           ) : null}
