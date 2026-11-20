@@ -3822,6 +3822,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/plugins/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover plugin administration features. */
+    get: operations["getAdminPluginCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/plugins/catalog": {
     parameters: {
       query?: never;
@@ -4026,6 +4043,23 @@ export interface paths {
     put?: never;
     /** Install the recorded available version from the installation's repository, fetching over the network, and clear the marker. No applicable update is 409, as is an update that another install of the plugin replaced while its package downloaded. There is no replay identity: a lost response may follow a committed update; reconcile from the installation and never automatically retry. */
     post: operations["applyAdminPluginUpdate"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/plugins/provisioning-status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read recorded environment provisioning status, including declarations with no installation. */
+    get: operations["listAdminPluginProvisioningStatus"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -6730,6 +6764,26 @@ export interface paths {
      * @description Sets an HttpOnly, SameSite=Lax browser-binding cookie scoped to the callback path, then redirects to the provider. A browser on another origin than the public URL is first sent (302) to the same start there. A link_ticket is refused with 400: the web links with startAccountIdentityLink. Malformed parameters are plain-text 400s; a provider that cannot start the flow, or a missing public URL, sends the browser (302) to /login?error=oauth_failed&reason=provider_unavailable (login_failed for a server error), where the login page does not redirect to the provider again.
      */
     get: operations["startOAuthLogin"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/oauth/callback": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Continue the OAuth handshake at the provider's redirect back.
+     * @description Accepts only the browser holding the flow's binding cookie. A web sign-in continues to /login/oauth-complete?code=; a failure to /login?error=oauth_failed&reason=<reason> (not_permitted, account_required, email_in_use, identity_linked_elsewhere, account_disabled, provider_unavailable, state_invalid, session_expired, already_linked, login_failed). A web linking flow returns to its next path with linked=1 or error=oauth_link_failed&reason=<reason>; a native flow to the app redirect, which carries iss (see startNativeOAuthLogin).
+     */
+    get: operations["finishStableOAuthCallback"];
     put?: never;
     post?: never;
     delete?: never;
@@ -20208,6 +20262,13 @@ export interface components {
     AdminPluginAuthBinding: {
       auto_provision: boolean;
       /**
+       * @description Redirect URI mode for OAuth sign-in
+       * @enum {string}
+       */
+      callback_mode?: "installation" | "stable";
+      /** @description True when an enabled OAuth binding is waiting for the public URL */
+      callback_pending?: boolean;
+      /**
        * Format: uri-reference
        * @description Redirect URI to register at the OAuth (OIDC) provider for this installation: the v2 callback on the public URL (server.public_url). Empty for a password (LDAP) provider and while no public URL is configured
        * @example https://silo.example.test/api/v2/auth/oauth/3/callback
@@ -20223,6 +20284,8 @@ export interface components {
       /** Format: int64 */
       display_order: number;
       enabled: boolean;
+      /** @description Binding fields owned by the deployment. */
+      env_managed?: string[];
       /**
        * Format: uri-reference
        * @description Post-logout redirect URI to register at the OAuth (OIDC) provider when provider logout is on: the login page on the public URL. Empty for a password (LDAP) provider and while no public URL is configured
@@ -20244,11 +20307,29 @@ export interface components {
     AdminPluginAuthBindingWrite: {
       /** @description Create an account for a person who passes the provider's rules on first sign-in; omitted means true */
       auto_provision?: boolean;
+      /**
+       * @description OAuth only. Omit to preserve the stored mode or to use installation for a new binding
+       * @enum {string}
+       */
+      callback_mode?: "installation" | "stable";
       capability_id: string;
       default_login: boolean;
       /** Format: int64 */
       display_order: number;
       enabled: boolean;
+    };
+    AdminPluginCapabilities: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      /** @description Installation and binding reads can report env_managed ownership, mutations refuse changes to owned fields, and provisioning status is available. */
+      env_declarations: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
     };
     AdminPluginCapability: {
       /**
@@ -20262,6 +20343,8 @@ export interface components {
       default_schedule?: components["schemas"]["AdminTaskTrigger"];
       description: string;
       display_name: string;
+      /** @description On an installed sign-in capability: the binding fields owned by the deployment. May appear before a binding exists. */
+      env_managed?: string[];
       id: string;
       metadata: {
         [key: string]: unknown;
@@ -20420,6 +20503,8 @@ export interface components {
        */
       created_at: string;
       enabled: boolean;
+      /** @description Present when the deployment owns this installation and its package source. */
+      env_managed?: components["schemas"]["AdminPluginProvisionOwnership"];
       global_config_schema: components["schemas"]["AdminPluginConfigSchema"][];
       global_configs: components["schemas"]["AdminPluginConfigValue"][];
       /**
@@ -20498,6 +20583,28 @@ export interface components {
       summary: string;
       /** Format: uri-reference */
       support_url: string;
+    };
+    AdminPluginProvisionOwnership: {
+      /** @description Binding fields owned by the deployment, keyed by capability ID. */
+      binding_fields: {
+        [key: string]: string[];
+      };
+      /** @description Top-level fields owned by the deployment, keyed by global configuration entry. */
+      config_fields: {
+        [key: string]: string[];
+      };
+      /** @description Exact package version the deployment pins, if any. */
+      version_pin?: string;
+    };
+    AdminPluginProvisionStatus: {
+      /** @description Redacted reason or status detail, empty when there is none. */
+      detail: string;
+      /** @description The declared manifest plugin ID. An installation need not exist. */
+      plugin_id: string;
+      /** @description The latest recorded provisioning outcome for the declaration. */
+      state: string;
+      /** @description Installed version when applied. Otherwise the requested version, if any. */
+      version: string;
     };
     AdminPluginRepository: {
       /**
@@ -23885,7 +23992,7 @@ export interface components {
     AuthConnectionTestResult: {
       /**
        * Format: uri-reference
-       * @description Redirect URI to register at an OAuth (OIDC) provider for this installation, on the public URL; empty when no public URL is configured. Password (LDAP) providers do not use it
+       * @description Redirect URI to register at the OAuth provider. Empty for password providers, when the public URL is unset, or when the binding mode is unavailable.
        * @example https://silo.example.test/api/v2/auth/oauth/3/callback
        */
       callback_url: string;
@@ -25499,6 +25606,12 @@ export interface components {
     CollectionAdminPluginInstallation: {
       /** @description The page's items; empty, never null */
       items: components["schemas"]["AdminPluginInstallation"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    CollectionAdminPluginProvisionStatus: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminPluginProvisionStatus"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
     };
@@ -30989,6 +31102,8 @@ export interface components {
       revision: string;
       /** @description Whether startOAuthLogin, initOAuthLogin and startNativeOAuthLogin accept prompt=select_account, which asks the provider to let the person choose another provider account (a Switch account sign-in) */
       select_account: boolean;
+      /** @description Whether finishStableOAuthCallback accepts provider redirects for bindings using the stable callback mode */
+      stable_callback: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -71766,6 +71881,138 @@ export interface operations {
       };
     };
   };
+  getAdminPluginCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminPluginCapabilities"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   listAdminPluginCatalog: {
     parameters: {
       query?: {
@@ -73731,6 +73978,112 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminPluginProvisioningStatus: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionAdminPluginProvisionStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
         headers: {
           [name: string]: unknown;
         };
@@ -98011,6 +98364,50 @@ export interface operations {
         /** @description Positive authentication-plugin installation ID. */
         install_id: string;
       };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Redirect: to the provider, to the same start on the public origin, or to the flow's completion or failure location. */
+      302: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Plain-text handshake failure. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/plain": string;
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  finishStableOAuthCallback: {
+    parameters: {
+      query?: {
+        /** @description Provider redirect value; validated by the owning handshake. */
+        code?: string;
+        /** @description Provider redirect value; validated by the owning handshake. */
+        error?: string;
+        /** @description Provider redirect value; validated by the owning handshake. */
+        state?: string;
+      };
+      header?: never;
+      path?: never;
       cookie?: never;
     };
     requestBody?: never;

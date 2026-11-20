@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Selle määrab sõlme keskkond. Muutke seda seal ja taaskäivitage sõlm."
+      "value": "Selle määrab keskkond. Muutke seda seal ja taaskäivitage asjaomane teenus."
     }
   ],
   "error.field.out_of_range": [
@@ -52669,6 +52669,68 @@
     {
       "type": 0,
       "value": "Pistikprogrammid"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Rakendatud"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Ootele pandud"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Pistikprogrammide ettevalmistamise oleku laadimine ebaõnnestus."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Haldab keskkond"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Ootel"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Tagasi lükatud"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Paketi allikat ja eemaldamist juhib juurutus."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Ettevalmistamise olek"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Juurutus lukustab selle pistikprogrammi versioonile "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [

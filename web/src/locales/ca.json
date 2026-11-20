@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Ho defineix l’entorn del node. Canvia-ho allà i reinicia el node."
+      "value": "Ho defineix l’entorn. Canvia-ho allà i reinicia el servei afectat."
     }
   ],
   "error.field.out_of_range": [
@@ -58185,6 +58185,68 @@
     {
       "type": 0,
       "value": "Connectors"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Aplicat"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Retingut"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "No s’ha pogut carregar l’estat de l’aprovisionament dels connectors."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Gestionat per l’entorn"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Pendent"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Rebutjat"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "El desplegament controla l’origen del paquet i l’eliminació."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Estat de l’aprovisionament"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "El desplegament fixa aquest connector a la versió "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [

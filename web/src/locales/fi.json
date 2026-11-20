@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Asetettu solmun ympäristössä. Muuta asetusta siellä ja käynnistä solmu uudelleen."
+      "value": "Asetettu ympäristössä. Muuta asetusta siellä ja käynnistä kyseinen palvelu uudelleen."
     }
   ],
   "error.field.out_of_range": [
@@ -52173,6 +52173,68 @@
     {
       "type": 0,
       "value": "Laajennukset"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Otettu käyttöön"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Pidätetty"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Laajennusten provisioinnin tilan lataaminen epäonnistui."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Ympäristön hallinnoima"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Odottaa"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Hylätty"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Asennusympäristö määrää paketin lähteen ja poiston."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Provisioinnin tila"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Asennusympäristö lukitsee tämän laajennuksen versioon "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [

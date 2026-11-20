@@ -6623,6 +6623,26 @@
       "body_file": "get_admin_playback_history_capabilities_ok.json"
     },
     {
+      "name": "get_admin_plugin_capabilities_ok",
+      "operation_id": "getAdminPluginCapabilities",
+      "scenario": "An administrator discovers deployment-managed plugin settings.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/plugins/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminPluginCapabilities",
+      "body_file": "get_admin_plugin_capabilities_ok.json"
+    },
+    {
       "name": "get_admin_section_ok",
       "operation_id": "getAdminSection",
       "scenario": "The canonical administrator section editor returns its recipe configuration and a strong validator.",
@@ -9645,6 +9665,26 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminPlaybackHistoryCollection",
       "body_file": "list_admin_playback_history_ok.json"
+    },
+    {
+      "name": "list_admin_plugin_provisioning_status_ok",
+      "operation_id": "listAdminPluginProvisioningStatus",
+      "scenario": "The declaration is pending before the plugin is installed.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/plugins/provisioning-status",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CollectionAdminPluginProvisionStatus",
+      "body_file": "list_admin_plugin_provisioning_status_ok.json"
     },
     {
       "name": "list_admin_trickplay_libraries_ok",

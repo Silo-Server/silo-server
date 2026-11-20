@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "\u200F\u202ESet by the node’s environment. Change it there and restart the node.\u202C"
+      "value": "\u200F\u202ESet by the environment. Change it there and restart the affected service.\u202C"
     }
   ],
   "error.field.out_of_range": [
@@ -55205,6 +55205,68 @@
     {
       "type": 0,
       "value": "\u200F\u202EPlugins\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApplied\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHeld\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t load plugin provisioning status.\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EManaged by the environment\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPending\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERefused\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe deployment controls the package source and removal.\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EProvisioning status\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe deployment pins this plugin to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
     }
   ],
   "web.admin.plugins.rail.about": [

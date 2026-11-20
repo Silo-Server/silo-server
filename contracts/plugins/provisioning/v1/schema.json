@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Silo-Server/silo-server/main/contracts/plugins/provisioning/v1/schema.json",
+  "title": "Silo plugin provisioning",
+  "type": "object",
+  "required": ["apiVersion", "plugins"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": { "type": "integer", "const": 1 },
+    "plugins": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$" },
+      "additionalProperties": { "$ref": "#/$defs/plugin" }
+    }
+  },
+  "$defs": {
+    "plugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "catalog": { "const": "silo", "default": "silo" },
+        "version": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$"
+        },
+        "config": {
+          "type": "object",
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": {
+            "type": "object",
+            "propertyNames": { "minLength": 1 },
+            "additionalProperties": { "$ref": "#/$defs/value" }
+          }
+        },
+        "auth_binding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["capability_id"],
+          "properties": {
+            "capability_id": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" },
+            "enabled": { "type": "boolean" },
+            "default_login": { "type": "boolean" },
+            "auto_provision": { "type": "boolean" },
+            "display_order": { "type": "integer", "minimum": 0, "maximum": 100000 },
+            "callback": { "enum": ["installation", "stable"] }
+          }
+        }
+      }
+    },
+    "value": {
+      "anyOf": [
+        { "type": ["string", "number", "boolean"] },
+        { "type": "array", "items": { "$ref": "#/$defs/value" } },
+        {
+          "type": "object",
+          "propertyNames": { "not": { "enum": ["fromFile", "fromEnv"] } },
+          "additionalProperties": { "$ref": "#/$defs/value" }
+        },
+        {
+          "type": "object", "required": ["fromFile"], "additionalProperties": false,
+          "properties": { "fromFile": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object", "required": ["fromEnv"], "additionalProperties": false,
+          "properties": { "fromEnv": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" } }
+        }
+      ]
+    }
+  }
+}

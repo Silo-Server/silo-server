@@ -13,6 +13,7 @@ import {
 import {
   adminSignInErrorText,
   authBindingOf,
+  authBindingFieldIsManaged,
   authProviderLabel,
   networkSignInInstallations,
   savedAutoProvision,
@@ -22,7 +23,7 @@ import { pluginPagePath } from "@/lib/pluginPresentation";
 import { useT } from "@/i18n";
 
 import { FieldGroup } from "./FieldGroup";
-import { SettingFieldRow } from "./SettingField";
+import { SettingFieldRow, SettingFieldStatus } from "./SettingField";
 
 const GRANT_EXAMPLE = `"grants": [
   {"src": ["group:family-admins"], "dst": ["tag:silo"],
@@ -79,16 +80,21 @@ function NetworkSignInRow({ installation }: { installation: PluginInstallation }
   const feedbackRef = useRef<HTMLParagraphElement>(null);
   const enabledId = useId();
   const autoProvisionId = useId();
+  const enabledNote = useId();
+  const autoProvisionNote = useId();
   const label = authProviderLabel(installation);
   const enabled = authBindingOf(installation)?.enabled === true;
   const autoProvision = savedAutoProvision(installation);
   const pending = bindingWrites > 0;
+  const enabledManaged = authBindingFieldIsManaged(installation, "enabled");
+  const autoProvisionManaged = authBindingFieldIsManaged(installation, "auto_provision");
+  const managed = t("web.admin.plugins.provisioning.managed");
 
   function write(change: { enabled?: boolean; auto_provision?: boolean }, success: string) {
     updateBinding.mutate(
       {
         installationId: installation.id,
-        body: signInBindingWrite(installation, { ...change, default_login: false }),
+        body: signInBindingWrite(installation, change),
       },
       {
         onSuccess: () => setFeedback({ tone: "ok", text: success }),
@@ -111,11 +117,19 @@ function NetworkSignInRow({ installation }: { installation: PluginInstallation }
         label={t("web.admin.settings.signIn.network.enableLabel", { name: label })}
         htmlFor={enabledId}
         description={t("web.admin.settings.signIn.network.enableDescription", { name: label })}
+        status={
+          enabledManaged ? (
+            <SettingFieldStatus>
+              <span id={enabledNote}>{managed}</span>
+            </SettingFieldStatus>
+          ) : null
+        }
       >
         <Switch
           id={enabledId}
           checked={enabled}
-          disabled={pending}
+          disabled={pending || enabledManaged}
+          aria-describedby={enabledManaged ? enabledNote : undefined}
           onCheckedChange={(checked) =>
             write(
               { enabled: checked },
@@ -132,11 +146,19 @@ function NetworkSignInRow({ installation }: { installation: PluginInstallation }
         description={t("web.admin.settings.signIn.network.autoProvisionDescription", {
           name: label,
         })}
+        status={
+          autoProvisionManaged ? (
+            <SettingFieldStatus>
+              <span id={autoProvisionNote}>{managed}</span>
+            </SettingFieldStatus>
+          ) : null
+        }
       >
         <Switch
           id={autoProvisionId}
           checked={autoProvision}
-          disabled={pending}
+          disabled={pending || autoProvisionManaged}
+          aria-describedby={autoProvisionManaged ? autoProvisionNote : undefined}
           onCheckedChange={(checked) =>
             write(
               { auto_provision: checked },

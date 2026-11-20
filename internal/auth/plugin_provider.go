@@ -31,6 +31,7 @@ type PluginProviderConfig struct {
 	CapabilityID   string
 	DisplayName    string
 	AutoProvision  bool
+	CallbackMode   string
 }
 
 type PluginProvider struct {
@@ -149,6 +150,9 @@ func (p *PluginProvider) InstallationID() int { return p.config.InstallationID }
 
 // CapabilityID exposes the bound capability slug (e.g. "whmcs").
 func (p *PluginProvider) CapabilityID() string { return p.config.CapabilityID }
+
+// CallbackMode is the OAuth redirect mode for new flows.
+func (p *PluginProvider) CallbackMode() string { return p.config.CallbackMode }
 
 // OAuthClient returns a host-side gRPC client wrapping the plugin's
 // AuthProvider service. Used by the OAuth handler to call InitAuthorize

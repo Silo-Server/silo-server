@@ -1,9 +1,10 @@
 {
-  "revision": "536468a609e2f1c6316fa61622c8d9fad4b447d965efcf21e5d7c979dfdbd605",
+  "revision": "e99dc8041e638f8e503180660dae50ef92a7243a6738287f15a35e8067900fd9",
   "state": "available",
   "available": true,
   "native": true,
   "linking": true,
   "provider_logout": true,
+  "stable_callback": true,
   "select_account": true
 }

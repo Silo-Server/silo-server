@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Được đặt bởi môi trường của node. Thay đổi giá trị ở đó rồi khởi động lại node."
+      "value": "Được đặt bởi môi trường. Thay đổi giá trị ở đó rồi khởi động lại dịch vụ liên quan."
     }
   ],
   "error.field.out_of_range": [
@@ -52313,6 +52313,68 @@
     {
       "type": 0,
       "value": "Plugin"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Đã áp dụng"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Đang tạm giữ"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Không thể tải trạng thái cấp phát plugin."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Do môi trường quản lý"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Đang chờ"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Đã từ chối"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Bản triển khai kiểm soát nguồn gói và việc gỡ cài đặt."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Trạng thái cấp phát"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Bản triển khai cố định plugin này ở phiên bản "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
