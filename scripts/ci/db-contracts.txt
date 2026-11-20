@@ -1481,6 +1481,21 @@
 ./internal/api/handlers TestLibraryEnabledTogglePublishesCatalogLibraryChangedDB
 ./internal/api/handlers TestLibraryDisableAfterConcurrentEnablePublishesDB
 
+# A book's work ids are claims many editions may share, kept out of the
+# provider IDs: each answer replaces its own source's claims, a failed lookup
+# keeps them, a reset or a book Identify clears them, an answer contradicting
+# the item's edition ids stores none, and the migration moves legacy rows before
+# the CHECK forbids them. All three writers store a plugin answer's claim, and
+# a shared claim makes an opposite-format edition a link candidate.
+./internal/catalog TestWorkClaimsReplacePerSourceDB
+./internal/catalog TestSeparateBookWorkIDsMigrationDB
+./internal/audiobooks TestAudiobookMatchStoresWorkClaimDB
+./internal/ebooks TestEbookEnrichmentStoresWorkClaimsDB
+./internal/metadata TestEbookRefreshStoresWorkClaimsDB
+./internal/metadata TestEbookRefreshDropsWorkClaimsOfAContradictingAnswerDB
+./internal/metadata TestEbookIdentifyClearsOldWorkClaimsDB
+./internal/literaryworks TestCandidatesIncludeEditionsSharingOnlyAWorkIDDB
+
 # Provisioning rolls back an entire conflicting declaration, fences a second
 # writer on a dedicated session, and preserves generations on identical input.
 ./internal/plugins TestProvisionWriterAtomicOfflineDB
