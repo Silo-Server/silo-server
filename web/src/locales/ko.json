@@ -13070,6 +13070,28 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개를 복원할 수 없어요 — 달라진 설정이나 그 연결의 일부를 이 서버의 환경에서 설정해요"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13424,6 +13446,32 @@
     {
       "type": 0,
       "value": "백업에서 서비스 주소가 자격 증명 없이 바뀌므로, 복원하면 여기에 저장된 자격 증명이 지워지고 다시 입력할 때까지 서비스가 꺼져요."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "설정 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개는 이 서버의 환경에서 해당 설정이나 그 연결의 일부를 설정하므로 현재 값을 유지해요."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15716,6 +15764,12 @@
       "value": "이 서버의 다른 계정이 같은 사용자 이름이나 이메일로 로그인해요."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "이 서버의 환경에서 달라진 설정이나 그 연결의 일부를 설정하므로 이 서버의 현재 값을 유지해요."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16662,6 +16716,16 @@
     {
       "type": 0,
       "value": " (유지: 더 엄격함)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (유지됨: 환경)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

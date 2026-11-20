@@ -13785,6 +13785,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kann nicht wiederhergestellt werden – die Umgebung dieses Servers legt die abweichenden Einstellungen oder einen Teil ihrer Verbindung fest"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " können nicht wiederhergestellt werden – die Umgebung dieses Servers legt die abweichenden Einstellungen oder einen Teil ihrer Verbindung fest"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14307,6 +14341,40 @@
     {
       "type": 0,
       "value": "Die Adresse eines Dienstes ändert sich ohne zugehörige Zugangsdaten in der Sicherung. Daher werden sie beim Wiederherstellen hier entfernt, und der Dienst bleibt aus, bis sie erneut eingegeben werden."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Einstellung behält ihren aktuellen Wert, weil die Umgebung dieses Servers sie oder einen Teil ihrer Verbindung festlegt."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Einstellungen behalten ihre aktuellen Werte, weil die Umgebung dieses Servers sie oder einen Teil ihrer Verbindung festlegt."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17103,6 +17171,12 @@
       "value": "Ein anderes Konto hier meldet sich mit demselben Benutzernamen oder derselben E-Mail-Adresse an."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Die Umgebung dieses Servers legt die abweichenden Einstellungen oder einen Teil ihrer Verbindung fest, daher behält dieser Server seine aktuellen Werte."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18177,6 +18251,16 @@
     {
       "type": 0,
       "value": " (beibehalten: strenger)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (beibehalten: Umgebung)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

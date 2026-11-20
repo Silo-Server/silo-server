@@ -13949,6 +13949,48 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ei saa taastada: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " – selle serveri keskkond määrab erinevad seadistused või osa nende ühendusest"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ei saa taastada: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " – selle serveri keskkond määrab erinevad seadistused või osa nende ühendusest"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14583,6 +14625,40 @@
     {
       "type": 0,
       "value": "Teenuse aadress muutub, kuid varukoopias pole selle mandaate, seega tühjendab taastamine need siin ja lülitab teenuse välja, kuni need uuesti sisestatakse."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seadistus jääb praeguse väärtusega, sest selle serveri keskkond määrab selle või osa selle ühendusest."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seadistust jääb praeguste väärtustega, sest selle serveri keskkond määrab need või osa nende ühendusest."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17431,6 +17507,12 @@
       "value": "Siin logib selle kasutajanime või e-posti aadressiga sisse teine konto."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Selle serveri keskkond määrab erinevad seadistused või osa nende ühendusest, seega jätab see server alles oma praegused väärtused."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18521,6 +18603,16 @@
     {
       "type": 0,
       "value": " (säilitatud: rangem)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (alles jäetud: keskkond)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

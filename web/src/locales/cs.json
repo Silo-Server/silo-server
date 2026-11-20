@@ -15391,6 +15391,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nelze obnovit — rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nelze obnovit — rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nelze obnovit — rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nelze obnovit — rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -16249,6 +16307,64 @@
     {
       "type": 0,
       "value": "Adresa služby se mění, ale záloha neobsahuje její přihlašovací údaje. Obnovení je proto zde vymaže a službu vypne, dokud je znovu nezadáte."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechá současnou hodnotu, protože ho nebo část jeho připojení nastavuje prostředí tohoto serveru."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechají současné hodnoty, protože je nebo část jejich připojení nastavuje prostředí tohoto serveru."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechá současné hodnoty, protože je nebo část jejich připojení nastavuje prostředí tohoto serveru."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechá současné hodnoty, protože je nebo část jejich připojení nastavuje prostředí tohoto serveru."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -20257,6 +20373,12 @@
       "value": "Jiný účet na tomto serveru se přihlašuje stejným uživatelským jménem nebo e-mailem."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru, proto tento server ponechává své současné hodnoty."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -21651,6 +21773,16 @@
     {
       "type": 0,
       "value": " (ponecháno: přísnější)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (ponecháno: prostředí)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

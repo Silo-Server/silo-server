@@ -13753,6 +13753,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan ikke gjenopprettes – denne serverens miljø angir innstillingene som er forskjellige, eller en del av tilkoblingen deres"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan ikke gjenopprettes – denne serverens miljø angir innstillingene som er forskjellige, eller en del av tilkoblingen deres"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14275,6 +14309,40 @@
     {
       "type": 0,
       "value": "Adressen til en tjeneste endres uten at påloggingsinformasjonen er med i sikkerhetskopien, så gjenopprettingen fjerner den her og slår av tjenesten til den legges inn på nytt."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " innstilling beholder gjeldende verdi fordi denne serverens miljø angir den, eller en del av tilkoblingen den hører til."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " innstillinger beholder gjeldende verdier fordi denne serverens miljø angir dem, eller en del av tilkoblingen de hører til."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17103,6 +17171,12 @@
       "value": "En annen konto her logger på med samme brukernavn eller e-postadresse."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Denne serverens miljø angir innstillingene som er forskjellige, eller en del av tilkoblingen deres, så denne serveren beholder gjeldende verdier."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18177,6 +18251,16 @@
     {
       "type": 0,
       "value": " (beholdt: strengere)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (beholdt: miljø)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

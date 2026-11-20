@@ -13749,6 +13749,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan ikke gendannes — denne servers miljø angiver de indstillinger, der er forskellige, eller en del af deres forbindelse"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan ikke gendannes — denne servers miljø angiver de indstillinger, der er forskellige, eller en del af deres forbindelse"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14271,6 +14305,40 @@
     {
       "type": 0,
       "value": "En tjenestes adresse ændres uden dens loginoplysninger i backuppen, så gendannelsen rydder dem her og slår tjenesten fra, indtil de indtastes igen."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " indstilling beholder sin nuværende værdi, fordi denne servers miljø angiver den eller en del af dens forbindelse."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " indstillinger beholder deres nuværende værdier, fordi denne servers miljø angiver dem eller en del af deres forbindelse."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17087,6 +17155,12 @@
       "value": "En anden konto her logger ind med samme brugernavn eller e-mail."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Denne servers miljø angiver de indstillinger, der er forskellige, eller en del af deres forbindelse, så denne server beholder sine nuværende værdier."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18161,6 +18235,16 @@
     {
       "type": 0,
       "value": " (beholdt: strengere)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (beholdt: miljø)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

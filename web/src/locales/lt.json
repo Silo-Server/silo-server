@@ -15471,6 +15471,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elemento negalima atkurti – besiskiriančius jo nustatymus arba dalį jo ryšio nustato šio serverio aplinka"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementų negalima atkurti – besiskiriančius jų nustatymus arba dalį jų ryšio nustato šio serverio aplinka"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elemento negalima atkurti – besiskiriančius jo nustatymus arba dalį jo ryšio nustato šio serverio aplinka"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementų negalima atkurti – besiskiriančius jų nustatymus arba dalį jų ryšio nustato šio serverio aplinka"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -16329,6 +16387,64 @@
     {
       "type": 0,
       "value": "Paslaugos adresas keičiasi, o atsarginėje kopijoje nėra jos prisijungimo duomenų, todėl atkuriant jie čia išvalomi, o paslauga išjungiama, kol jie bus įvesti iš naujo."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nustatymas išlaiko dabartinę reikšmę, nes jį arba dalį jo ryšio nustato šio serverio aplinka."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nustatymai išlaiko dabartines reikšmes, nes juos arba dalį jų ryšio nustato šio serverio aplinka."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nustatymo išlaiko dabartines reikšmes, nes juos arba dalį jų ryšio nustato šio serverio aplinka."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nustatymų išlaiko dabartines reikšmes, nes juos arba dalį jų ryšio nustato šio serverio aplinka."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -20477,6 +20593,12 @@
       "value": "Šiame serveryje kita paskyra jau prisijungia jo naudotojo vardu arba el. paštu."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Besiskiriančius nustatymus arba dalį jų ryšio nustato šio serverio aplinka, todėl šis serveris palieka dabartines reikšmes."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -21903,6 +22025,16 @@
     {
       "type": 0,
       "value": " (palikta kaip griežtesnė reikšmė)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (palikta: aplinka)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

@@ -13753,6 +13753,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan niet worden hersteld — de omgeving van deze server stelt de afwijkende instellingen in, of een deel van de verbinding waar ze bij horen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kunnen niet worden hersteld — de omgeving van deze server stelt de afwijkende instellingen in, of een deel van de verbinding waar ze bij horen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14275,6 +14309,40 @@
     {
       "type": 0,
       "value": "Het adres van een dienst verandert zonder de inloggegevens in de back-up, dus bij het herstellen worden ze hier gewist en wordt de dienst uitgeschakeld tot ze opnieuw zijn ingevoerd."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " instelling behoudt de huidige waarde omdat de omgeving van deze server die instelt, of een deel van de verbinding waar die bij hoort."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " instellingen behouden hun huidige waarden omdat de omgeving van deze server ze instelt, of een deel van de verbinding waar ze bij horen."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17043,6 +17111,12 @@
       "value": "Een ander account hier meldt zich aan met dezelfde gebruikersnaam of hetzelfde e-mailadres."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "De omgeving van deze server stelt de afwijkende instellingen in, of een deel van de verbinding waar ze bij horen, dus deze server behoudt de huidige waarden."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18117,6 +18191,16 @@
     {
       "type": 0,
       "value": " (behouden: strenger)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (behouden: omgeving)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

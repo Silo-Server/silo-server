@@ -13773,6 +13773,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " δεν μπορεί να επαναφερθεί – το περιβάλλον αυτού του διακομιστή ορίζει τις ρυθμίσεις που διαφέρουν ή μέρος της σύνδεσής τους"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " δεν μπορούν να επαναφερθούν – το περιβάλλον αυτού του διακομιστή ορίζει τις ρυθμίσεις που διαφέρουν ή μέρος της σύνδεσής τους"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14295,6 +14329,40 @@
     {
       "type": 0,
       "value": "Η διεύθυνση μιας υπηρεσίας αλλάζει χωρίς τα διαπιστευτήριά της στο αντίγραφο ασφαλείας, οπότε η επαναφορά τα διαγράφει εδώ και απενεργοποιεί την υπηρεσία μέχρι να εισαχθούν ξανά."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ρύθμιση διατηρεί την τρέχουσα τιμή της, επειδή την ορίζει το περιβάλλον αυτού του διακομιστή ή αυτό ορίζει μέρος της σύνδεσής της."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ρυθμίσεις διατηρούν τις τρέχουσες τιμές τους, επειδή τις ορίζει το περιβάλλον αυτού του διακομιστή ή αυτό ορίζει μέρος της σύνδεσής τους."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17119,6 +17187,12 @@
       "value": "Ένας άλλος λογαριασμός εδώ συνδέεται με το ίδιο όνομα χρήστη ή email."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Το περιβάλλον αυτού του διακομιστή ορίζει τις ρυθμίσεις που διαφέρουν ή μέρος της σύνδεσής τους, οπότε αυτός ο διακομιστής διατηρεί τις τρέχουσες τιμές του."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18201,6 +18275,16 @@
     {
       "type": 0,
       "value": " (διατηρείται: αυστηρότερη)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (διατηρείται: περιβάλλον)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

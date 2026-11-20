@@ -13014,6 +13014,28 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件は復元できません — 異なる設定、またはその接続の一部がこのサーバーの環境で設定されています"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13368,6 +13390,28 @@
     {
       "type": 0,
       "value": "サービスのアドレスが変わりますが、バックアップに認証情報が含まれていないため、復元するとここの認証情報がクリアされ、再入力するまでサービスはオフになります。"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件の設定は、設定自体またはその接続の一部がこのサーバーの環境で設定されているため、現在の値を維持します。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15744,6 +15788,12 @@
       "value": "このサーバーの別のアカウントが、同じユーザー名またはメールアドレスでサインインしています。"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "異なる設定、またはその接続の一部がこのサーバーの環境で設定されているため、このサーバーは現在の値を維持します。"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16678,6 +16728,16 @@
     {
       "type": 0,
       "value": "（維持：より厳格）"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "（維持：環境）"
     }
   ],
   "web.admin.backups.restore.setting.now": [

@@ -13781,6 +13781,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ei palautettavissa — tämän palvelimen ympäristö määrittää poikkeavat asetukset tai osan niiden yhteydestä"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ei palautettavissa — tämän palvelimen ympäristö määrittää poikkeavat asetukset tai osan niiden yhteydestä"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14303,6 +14337,40 @@
     {
       "type": 0,
       "value": "Palvelun osoite muuttuu, mutta varmuuskopiossa ei ole sen tunnistetietoja, joten palautus tyhjentää ne täällä ja poistaa palvelun käytöstä, kunnes ne syötetään uudelleen."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " asetus säilyttää nykyisen arvonsa, koska tämän palvelimen ympäristö määrittää sen tai osan sen yhteydestä."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " asetusta säilyttää nykyiset arvonsa, koska tämän palvelimen ympäristö määrittää ne tai osan niiden yhteydestä."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17151,6 +17219,12 @@
       "value": "Toinen tili täällä kirjautuu sisään sen käyttäjänimellä tai sähköpostiosoitteella."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Tämän palvelimen ympäristö määrittää poikkeavat asetukset tai osan niiden yhteydestä, joten tämä palvelin säilyttää nykyiset arvonsa."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18241,6 +18315,16 @@
     {
       "type": 0,
       "value": " (säilytetty: tiukempi)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (säilytetty: ympäristö)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

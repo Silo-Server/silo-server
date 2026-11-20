@@ -14584,6 +14584,52 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " no es pot restaurar — l’entorn d’aquest servidor defineix les opcions que són diferents, o part de la seva connexió"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " no es poden restaurar — l’entorn d’aquest servidor defineix les opcions que són diferents, o part de la seva connexió"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " no es poden restaurar — l’entorn d’aquest servidor defineix les opcions que són diferents, o part de la seva connexió"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15274,6 +15320,52 @@
     {
       "type": 0,
       "value": "L’adreça d’un servei canvia sense les seves credencials a la còpia de seguretat, així que la restauració les esborra aquí i desactiva el servei fins que es tornin a introduir."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " opció manté el valor actual perquè l’entorn d’aquest servidor la defineix, o defineix part de la seva connexió."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " d’opcions mantenen els valors actuals perquè l’entorn d’aquest servidor les defineix, o defineix part de la seva connexió."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " opcions mantenen els valors actuals perquè l’entorn d’aquest servidor les defineix, o defineix part de la seva connexió."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -18674,6 +18766,12 @@
       "value": "Un altre compte d’aquí inicia la sessió amb el seu nom d’usuari o correu electrònic."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "L’entorn d’aquest servidor defineix les opcions que són diferents, o part de la seva connexió, així que aquest servidor manté els valors actuals."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19912,6 +20010,16 @@
     {
       "type": 0,
       "value": " (es manté: més estricte)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (es manté: entorn)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

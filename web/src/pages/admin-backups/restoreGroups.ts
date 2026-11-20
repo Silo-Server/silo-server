@@ -113,6 +113,7 @@ const BLOCKED_TITLES: Record<RestoreReason, MessageKey> = {
   unverified_backup: "web.admin.backups.restore.blocked.unverifiedBackup",
   over_restore_budget: "web.admin.backups.restore.blocked.overRestoreBudget",
   needs_primary_profile: "web.admin.backups.restore.blocked.needsPrimaryProfile",
+  managed_by_environment: "web.admin.backups.restore.blocked.managedByEnvironment",
 };
 
 /** For an item the server gave a status but no reason. */

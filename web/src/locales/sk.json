@@ -15395,6 +15395,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položka sa nedá obnoviť – prostredie tohto servera určuje odlišné nastavenia alebo časť jej pripojenia"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položky sa nedajú obnoviť – prostredie tohto servera určuje odlišné nastavenia alebo časť ich pripojenia"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položky sa nedá obnoviť – prostredie tohto servera určuje odlišné nastavenia alebo časť ich pripojenia"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položiek sa nedá obnoviť – prostredie tohto servera určuje odlišné nastavenia alebo časť ich pripojenia"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -16253,6 +16311,64 @@
     {
       "type": 0,
       "value": "Adresa služby sa mení bez jej prihlasovacích údajov v zálohe, preto ich obnovenie tu vymaže a službu vypne, kým sa znova nezadajú."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavenie si ponechá aktuálnu hodnotu, pretože prostredie tohto servera určuje priamo jeho alebo časť jeho pripojenia."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavenia si ponechajú aktuálne hodnoty, pretože prostredie tohto servera určuje priamo ich alebo časť ich pripojenia."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavenia si ponechá aktuálne hodnoty, pretože prostredie tohto servera určuje priamo ich alebo časť ich pripojenia."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechá aktuálne hodnoty, pretože prostredie tohto servera určuje priamo ich alebo časť ich pripojenia."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -20245,6 +20361,12 @@
       "value": "Iný účet na tomto serveri sa prihlasuje rovnakým používateľským menom alebo e-mailom."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Prostredie tohto servera určuje odlišné nastavenia alebo časť ich pripojenia, preto tento server ponecháva svoje aktuálne hodnoty."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -21639,6 +21761,16 @@
     {
       "type": 0,
       "value": " (ponechané: prísnejšie)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (ponechané: prostredie)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

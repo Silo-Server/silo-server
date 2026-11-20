@@ -14625,6 +14625,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "לא ניתן לשחזר: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — הסביבה של השרת הזה קובעת את ההגדרות השונות, או חלק מהחיבור שלהן"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "לא ניתן לשחזר: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — הסביבה של השרת הזה קובעת את ההגדרות השונות, או חלק מהחיבור שלהן"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "לא ניתן לשחזר: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — הסביבה של השרת הזה קובעת את ההגדרות השונות, או חלק מהחיבור שלהן"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15483,6 +15541,56 @@
     {
       "type": 0,
       "value": "הכתובת של שירות משתנה בלי פרטי הכניסה שלו בגיבוי, ולכן השחזור מנקה כאן את פרטי הכניסה ומשבית את השירות עד שהם יוזנו שוב."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נשמר הערך הנוכחי של הגדרה אחת: הסביבה של השרת הזה קובעת אותה, או חלק מהחיבור שלה."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נשמרים הערכים הנוכחיים של "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " הגדרות: הסביבה של השרת הזה קובעת אותן, או חלק מהחיבור שלהן."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נשמרים הערכים הנוכחיים של "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " הגדרות: הסביבה של השרת הזה קובעת אותן, או חלק מהחיבור שלהן."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -18783,6 +18891,12 @@
       "value": "חשבון אחר כאן מתחבר עם שם המשתמש או האימייל שלו."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "הסביבה של השרת הזה קובעת את ההגדרות השונות, או חלק מהחיבור שלהן, ולכן השרת הזה שומר על הערכים הנוכחיים שלו."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -20005,6 +20119,16 @@
     {
       "type": 0,
       "value": " (נשמר: מחמיר יותר)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (נשמר: סביבה)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

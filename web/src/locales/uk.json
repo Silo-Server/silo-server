@@ -15427,6 +15427,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " не можна відновити – параметри, що відрізняються, або частину їхнього з’єднання задає середовище цього сервера"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " не можна відновити – параметри, що відрізняються, або частину їхнього з’єднання задає середовище цього сервера"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " не можна відновити – параметри, що відрізняються, або частину їхнього з’єднання задає середовище цього сервера"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " не можна відновити – параметри, що відрізняються, або частину їхнього з’єднання задає середовище цього сервера"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -16285,6 +16343,64 @@
     {
       "type": 0,
       "value": "Адреса сервісу змінюється, а його облікових даних у резервній копії немає, тож відновлення очистить їх тут і вимкне сервіс, доки їх не буде введено знову."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " параметр зберігає поточне значення: його або частину його з’єднання задає середовище цього сервера."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " параметри зберігають поточні значення: їх або частину їхнього з’єднання задає середовище цього сервера."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " параметрів зберігають поточні значення: їх або частину їхнього з’єднання задає середовище цього сервера."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " параметра зберігають поточні значення: їх або частину їхнього з’єднання задає середовище цього сервера."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -20297,6 +20413,12 @@
       "value": "Інший обліковий запис на цьому сервері вже використовує для входу це ім’я користувача або електронну пошту."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Параметри, що відрізняються, або частину їхнього з’єднання задає середовище цього сервера, тож сервер зберігає поточні значення."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -21659,6 +21781,16 @@
     {
       "type": 0,
       "value": " (залишено: суворіше)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (збережено: середовище)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

@@ -13741,6 +13741,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " не може да се възстанови – средата на този сървър задава различаващите се настройки или част от съответната връзка"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " не могат да се възстановят – средата на този сървър задава различаващите се настройки или част от съответната връзка"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14263,6 +14297,40 @@
     {
       "type": 0,
       "value": "Адресът на услуга се променя без данните ѝ за вход в резервното копие, затова възстановяването ги изчиства тук и изключва услугата, докато не бъдат въведени отново."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " настройка запазва текущата си стойност, защото средата на този сървър я задава или задава част от връзката ѝ."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " настройки запазват текущите си стойности, защото средата на този сървър ги задава или задава част от връзката им."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17095,6 +17163,12 @@
       "value": "Друг акаунт тук влиза със същото потребителско име или имейл."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Средата на този сървър задава различаващите се настройки или част от връзката им, затова този сървър запазва текущите си стойности."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18169,6 +18243,16 @@
     {
       "type": 0,
       "value": " (запазено: по-строго)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (запазено: среда)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

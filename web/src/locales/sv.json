@@ -13733,6 +13733,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan inte återställas — den här serverns miljö anger inställningarna som skiljer sig, eller en del av anslutningen de hör till"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan inte återställas — den här serverns miljö anger inställningarna som skiljer sig, eller en del av anslutningen de hör till"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14255,6 +14289,40 @@
     {
       "type": 0,
       "value": "En tjänsts adress ändras utan att dess inloggningsuppgifter finns i säkerhetskopian, så återställningen rensar dem här och stänger av tjänsten tills de har angetts igen."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " inställning behåller sitt nuvarande värde eftersom den här serverns miljö anger den, eller en del av anslutningen den hör till."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " inställningar behåller sina nuvarande värden eftersom den här serverns miljö anger dem, eller en del av anslutningen de hör till."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17079,6 +17147,12 @@
       "value": "Ett annat konto här loggar in med dess användarnamn eller e-postadress."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Den här serverns miljö anger inställningarna som skiljer sig, eller en del av anslutningen de hör till, så den här servern behåller sina nuvarande värden."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18153,6 +18227,16 @@
     {
       "type": 0,
       "value": " (behålls: striktare)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (behålls: miljö)"
     }
   ],
   "web.admin.backups.restore.setting.now": [

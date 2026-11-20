@@ -85,6 +85,14 @@ function settingValues(t: Translate, setting: RestoreSetting): { now: string; ba
       backup,
     };
   }
+  if (setting.status === "managed_by_environment") {
+    return {
+      now: t("web.admin.backups.restore.setting.managedByEnvironment", {
+        value: setting.masked ? set : current,
+      }),
+      backup: setting.masked ? t("web.admin.backups.restore.setting.differentEncrypted") : backup,
+    };
+  }
   if (setting.masked) {
     return { now: set, backup: t("web.admin.backups.restore.setting.differentEncrypted") };
   }
@@ -135,7 +143,10 @@ function SettingsDiff({ item }: { item: RestoreItem }) {
                     <span className="font-mono text-xs break-words">
                       <BreakableKey value={setting.key} />
                     </span>
-                    {setting.restart_required ? <RestartBadge /> : null}
+                    {setting.restart_required &&
+                    (setting.status === "differs" || setting.status === "cleared") ? (
+                      <RestartBadge />
+                    ) : null}
                   </div>
                   {setting.class === "external_service" ? (
                     <p className="text-muted-foreground mt-0.5 text-xs">

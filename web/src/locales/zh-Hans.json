@@ -13010,6 +13010,28 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "项无法恢复——此服务器的环境设置了存在差异的设置项或其所属连接的一部分"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13364,6 +13386,28 @@
     {
       "type": 0,
       "value": "某个服务的地址发生变化，但备份中没有其凭据，因此恢复会清除此处的凭据并关闭该服务，直到重新输入凭据。"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "项设置保留当前值，因为此服务器的环境设置了这些项或其所属连接的一部分。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15708,6 +15752,12 @@
       "value": "此处另一个账户已使用其用户名或电子邮件登录。"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "此服务器的环境设置了存在差异的设置项或其所属连接的一部分，因此此服务器保留当前值。"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16666,6 +16716,16 @@
     {
       "type": 0,
       "value": "（已保留：更严格）"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "（已保留：环境）"
     }
   ],
   "web.admin.backups.restore.setting.now": [
