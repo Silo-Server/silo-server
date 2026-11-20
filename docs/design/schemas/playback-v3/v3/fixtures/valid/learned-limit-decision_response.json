@@ -17,10 +17,16 @@
     "authorized_media_origins_v1",
     "software_video_decode_v1",
     "plan_invalidated_v1",
+    "default_audio_reconcile_response_v1",
     "plan_source_duration_v1",
+    "audio_track_unverified_v1",
     "buffering_quality_v1",
     "playback_plan_summary_v1",
     "subrip_sidecar_v1",
+    "live_inventory_refresh_v1",
+    "source_committed_event_v1",
+    "inventory_updated_event_v1",
+    "deferred_track_inventory_v1",
     "marker_thumbnails_v1",
     "hls_subtitle_renditions_v1",
     "plan_active_quality_v1",
@@ -30,9 +36,8 @@
     "codec_channel_ceilings_v1",
     "native_embedded_limitations_v1",
     "hls_subtitle_renditions_all_v1",
-    "progressive_range_refusal_v1",
-    "surround_bitstream_conversion_v1",
-    "parallel_range_origin_v1"
+    "subtitle_selection_rejected_v1",
+    "subtitle_inventory_unavailable_v1"
   ],
   "outcome": "playable",
   "session_id": "11111111-1111-4111-8111-111111111111",
@@ -211,6 +216,18 @@
       "audio_channels": 2,
       "audio_layout": "stereo"
     },
-    "subtitle_fidelity_policy": "allow_simplified_rendering"
+    "subtitle_fidelity_policy": "allow_simplified_rendering",
+    "audio_tracks": [
+      {
+        "codec": "aac",
+        "layout": "stereo",
+        "channels": 2,
+        "default": false,
+        "track_id": "file:42:audio:0",
+        "selection_index": 0
+      }
+    ],
+    "inventory_revision": "inv:a86e4bf9866c5db45ba238c903fd9c61",
+    "inventory_status": "declared"
   }
 }

@@ -11,6 +11,119 @@ import (
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
+// A download encode is not watched live, so it takes a slower preset than
+// HLS, lets libx264 choose the level for 4K or 60 fps output, and tags HEVC
+// hvc1 so Apple players open it.
+func TestBuildPrepareFileArgsTunesDownloadEncodes(t *testing.T) {
+	prepared := func(codec, resolution string) string {
+		return strings.Join(buildPrepareFileArgs(TranscodeOpts{
+			InputPath: "/m.mkv", SourceVideoCodec: "hevc", TargetCodecVideo: codec, TargetCodecAudio: "aac",
+			TargetResolution: resolution, TargetBitrateKbps: 20000, HWAccel: "none", AudioTrackIndex: -1,
+		}, "/o.mp4"), " ")
+	}
+	h264 := prepared("h264", "2160p")
+	for _, want := range []string{"-c:v libx264 -preset medium", "-maxrate 20000k", "-vf scale=-2:2160"} {
+		if !strings.Contains(h264, want) {
+			t.Errorf("download H.264 args missing %q: %s", want, h264)
+		}
+	}
+	if strings.Contains(h264, "-level") || strings.Contains(h264, "-tag:v") {
+		t.Errorf("download H.264 args must not pin a level or retag: %s", h264)
+	}
+	hevc := prepared("hevc", "800p")
+	for _, want := range []string{"-c:v libx265 -preset fast", "-tag:v hvc1", "-vf scale=-2:800"} {
+		if !strings.Contains(hevc, want) {
+			t.Errorf("download HEVC args missing %q: %s", want, hevc)
+		}
+	}
+	hls := strings.Join(appendVideoArgs(nil, TranscodeOpts{TargetCodecVideo: "h264", HWAccel: "none"}), " ")
+	if !strings.Contains(hls, "-preset veryfast") || !strings.Contains(hls, "-level 4.1") {
+		t.Errorf("streaming encodes must keep their real-time preset and level: %s", hls)
+	}
+}
+
+func TestBuildPrepareFileArgsSharesHigh10DecodeFallback(t *testing.T) {
+	tests := []struct {
+		name      string
+		hwAccel   string
+		want      []string
+		forbidden []string
+	}{
+		{
+			name:      "qsv keeps hardware encode with software decode upload",
+			hwAccel:   "qsv",
+			want:      []string{"-c:v h264_qsv", "format=nv12,hwupload,hwmap=derive_device=qsv"},
+			forbidden: []string{"-hwaccel qsv", "-hwaccel vaapi"},
+		},
+		{
+			name:      "vaapi keeps hardware encode with software decode upload",
+			hwAccel:   "vaapi",
+			want:      []string{"-c:v h264_vaapi", "scale=-2:720,format=nv12,hwupload"},
+			forbidden: []string{"-hwaccel vaapi"},
+		},
+		{
+			name:      "nvenc falls back to software encode",
+			hwAccel:   "nvenc",
+			want:      []string{"-c:v libx264", "-vf scale=-2:720"},
+			forbidden: []string{"-hwaccel cuda", "h264_nvenc", "scale_cuda"},
+		},
+		{
+			name:      "videotoolbox keeps hardware encode with software decode",
+			hwAccel:   "videotoolbox",
+			want:      []string{"-c:v h264_videotoolbox", "-vf scale=-2:720"},
+			forbidden: []string{"-hwaccel videotoolbox"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := buildPrepareFileArgs(TranscodeOpts{
+				InputPath:           "/media/high10.mkv",
+				SourceVideoCodec:    "h264",
+				SourceVideoProfile:  "High 10",
+				SourceVideoBitDepth: 10,
+				TargetCodecVideo:    "h264",
+				TargetCodecAudio:    "aac",
+				TargetResolution:    "720p",
+				HWAccel:             tt.hwAccel,
+				// Fake VideoToolbox-capable ffmpeg so the encoder probe in
+				// resolveEffectiveTranscodeHWAccel succeeds on Linux CI too.
+				FFmpegPath:      videoToolboxTestFFmpeg(t),
+				AudioTrackIndex: -1,
+			}, "/artifacts/out.mp4")
+			joined := strings.Join(args, " ")
+			for _, want := range tt.want {
+				if !strings.Contains(joined, want) {
+					t.Fatalf("args missing %q: %s", want, joined)
+				}
+			}
+			for _, forbidden := range tt.forbidden {
+				if strings.Contains(joined, forbidden) {
+					t.Fatalf("args unexpectedly contain %q: %s", forbidden, joined)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveRemuxTarget(t *testing.T) {
+	settings := AdminSettings{TranscodeEnabled: true, Allow4KTranscode: true}
+	file := &models.MediaFile{CodecVideo: "h264", CodecAudio: "dts", Container: "mkv", Resolution: "1080p"}
+
+	// remux with an undecodable audio codec → copy video, transcode audio to AAC.
+	caps := ClientCapabilities{CodecsVideo: []string{"h264"}, CodecsAudio: []string{"aac"}, Containers: []string{"mp4"}, MaxResolution: "2160p"}
+	rt := ResolveRemuxTarget(file, caps, settings)
+	if rt.Container != "mp4" || rt.CodecVideo != "copy" || rt.CodecAudio != "aac" || rt.Resolution != "" {
+		t.Fatalf("remux target = %+v, want copy video / aac audio / mp4 at source resolution", rt)
+	}
+
+	// remux with a decodable audio codec → copy both streams.
+	capsAudioOK := ClientCapabilities{CodecsVideo: []string{"h264"}, CodecsAudio: []string{"aac", "dts"}, Containers: []string{"mp4"}, MaxResolution: "2160p"}
+	if rt = ResolveRemuxTarget(file, capsAudioOK, settings); rt.CodecAudio != "copy" {
+		t.Fatalf("remux audio = %q, want copy", rt.CodecAudio)
+	}
+}
+
 func TestPrepareFileResolvesOneDeviceAndReleasesAfterExit(t *testing.T) {
 	resetDeviceLoad(t)
 	devA, devB := "/dev/dri/renderD888", "/dev/dri/renderD889"
@@ -53,83 +166,48 @@ func TestPrepareFileResolvesOneDeviceAndReleasesAfterExit(t *testing.T) {
 	}
 }
 
-// prepareGPUCountSink records the NVENC workload count at each progress
-// reading, which arrives while FFmpeg is still running.
-type prepareGPUCountSink struct{ counts []int }
-
-func (s *prepareGPUCountSink) PrepareProgress(PrepareProgress) {
-	s.counts = append(s.counts, hwDeviceActiveCount(DefaultNVENCDevice))
-}
-
-// A download under explicit NVENC whose NVDEC rejects the source decodes on
-// the CPU with NVENC, and moves on to software only when that attempt failed
-// before writing any output. The software stage holds no GPU reservation.
-func TestPrepareFileRetriesRejectedDecodeOnCPU(t *testing.T) {
-	for _, tt := range []struct {
-		name         string
-		mixedWrites  bool
-		wantErr      bool
-		wantSoftware bool
-	}{
-		{name: "mixed attempt dies while starting", wantSoftware: true},
-		{name: "mixed attempt fails after writing output", mixedWrites: true, wantErr: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			resetDeviceLoad(t)
-			dir := t.TempDir()
-			logPath := filepath.Join(dir, "invocations.log")
-			mixed := "exit 1"
-			if tt.mixedWrites {
-				mixed = "printf partial > \"$last\"; exit 1"
-			}
-			script := filepath.Join(dir, "ffmpeg")
-			fake := "#!/bin/sh\n" +
-				"for last; do :; done\n" +
-				"printf '%s\\n' \"$*\" >> " + logPath + "\n" +
-				"case \"$*\" in\n" +
-				"  *'-hwaccel cuda'*) echo '[hevc @ 0x1] Hardware is lacking required capabilities' >&2; exit 1 ;;\n" +
-				"  *h264_nvenc*) " + mixed + " ;;\n" +
-				"  *) printf 'progress=continue\\n'; printf x > \"$last\"; exit 0 ;;\n" +
-				"esac\n"
-			if err := os.WriteFile(script, []byte(fake), 0o755); err != nil {
-				t.Fatalf("write fake ffmpeg: %v", err)
-			}
-
-			sink := &prepareGPUCountSink{}
-			err := PrepareFile(context.Background(), TranscodeOpts{
-				InputPath:           "/media/movie.mkv",
-				FFmpegPath:          script,
-				PrepareProgressSink: sink,
-				SourceVideoCodec:    "hevc",
-				TargetCodecVideo:    "h264",
-				TargetCodecAudio:    "aac",
-				TargetResolution:    "720p",
-				TargetBitrateKbps:   2000,
-				HWAccel:             transcodeHWNVENC,
-				AudioTrackIndex:     -1,
-			}, filepath.Join(dir, "artifact.mp4"))
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("PrepareFile() error = %v, want error %v", err, tt.wantErr)
-			}
-			log, readErr := os.ReadFile(logPath)
-			if readErr != nil {
-				t.Fatalf("read invocation log: %v", readErr)
-			}
-			attempts := strings.Split(strings.TrimSpace(string(log)), "\n")
-			wantAttempts := 2
-			if tt.wantSoftware {
-				wantAttempts = 3
-			}
-			if len(attempts) != wantAttempts || !strings.Contains(attempts[1], "h264_nvenc") || strings.Contains(attempts[1], "-hwaccel cuda") {
-				t.Fatalf("attempts = %q, want CUDA decode, then CPU decode with NVENC", attempts)
-			}
-			if tt.wantSoftware && !strings.Contains(attempts[2], "libx264") {
-				t.Fatalf("third attempt = %q, want libx264", attempts[2])
-			}
-			if tt.wantSoftware && (len(sink.counts) != 1 || sink.counts[0] != 0) {
-				t.Fatalf("NVENC workloads during the software encode = %v, want [0]", sink.counts)
-			}
-		})
+// TestPrepareFileRemovesFailedPartialOutput verifies that a failed encode
+// publishes neither its temporary bytes nor a final artifact.
+func TestPrepareFileRemovesFailedPartialOutput(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "ffmpeg")
+	writtenPathMarker := filepath.Join(dir, "written-path.txt")
+	partialExistedMarker := filepath.Join(dir, "partial-existed")
+	scriptBody := "#!/bin/sh\n" +
+		"eval \"output=\\\"\\${$#}\\\"\"\n" +
+		"printf '%s\\n' \"$output\" > " + writtenPathMarker + "\n" +
+		"printf partial > \"$output\"\n" +
+		"test -f \"$output\" && touch " + partialExistedMarker + "\n" +
+		"exit 1\n"
+	if err := os.WriteFile(script, []byte(scriptBody), 0o755); err != nil {
+		t.Fatalf("write failing FFmpeg: %v", err)
+	}
+	outputPath := filepath.Join(dir, "artifact.mp4")
+	err := PrepareFile(context.Background(), TranscodeOpts{
+		InputPath:        "/nonexistent/input.mkv",
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		FFmpegPath:       script,
+		HWAccel:          HWAccelNone,
+	}, outputPath)
+	if err == nil {
+		t.Fatal("PrepareFile succeeded with a failing FFmpeg process")
+	}
+	writtenPath, readErr := os.ReadFile(writtenPathMarker)
+	if readErr != nil {
+		t.Fatalf("read fake FFmpeg output marker: %v", readErr)
+	}
+	if got, want := strings.TrimSpace(string(writtenPath)), outputPath+".part"; got != want {
+		t.Fatalf("fake FFmpeg wrote %q, want %q", got, want)
+	}
+	if _, statErr := os.Stat(partialExistedMarker); statErr != nil {
+		t.Fatalf("fake FFmpeg did not observe its partial output before cleanup: %v", statErr)
+	}
+	if _, statErr := os.Stat(outputPath); !os.IsNotExist(statErr) {
+		t.Fatalf("failed prepared output appeared at final path: %v", statErr)
+	}
+	if _, statErr := os.Stat(outputPath + ".part"); !os.IsNotExist(statErr) {
+		t.Fatalf("failed prepared output left a partial file: %v", statErr)
 	}
 }
 
