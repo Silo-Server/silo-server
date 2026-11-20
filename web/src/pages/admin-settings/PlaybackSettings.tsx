@@ -78,14 +78,16 @@ export default function PlaybackSettings() {
   const hwDevice = form.getValue("playback.hw_device");
   const hwDeviceEnv = form.envVar("playback.hw_device");
   const selectedDevices = parseHWDeviceList(hwDevice);
-  // Saved paths keep their rows, in their saved order, when the draft drops
-  // them, so switching off a device that detection doesn't list leaves its row
-  // in place, and switching it back on restores the saved list.
-  const deviceRows = buildHWDeviceRows(
-    hwDetection.data,
-    `${form.getPersistedValue("playback.hw_device")},${hwDevice}`,
-  );
-  const deviceOrder = deviceRows.map((row) => row.path);
+  // Saved paths keep their rows when the draft drops them, so switching off a
+  // device that detection doesn't list leaves its row in place. A toggle orders
+  // the list saved paths first, in their saved order, so switching a device
+  // back on restores the saved list.
+  const savedDevices = parseHWDeviceList(form.getPersistedValue("playback.hw_device"));
+  const deviceRows = buildHWDeviceRows(hwDetection.data, [...savedDevices, hwDevice].join(","));
+  const deviceOrder = [
+    ...savedDevices,
+    ...deviceRows.map((row) => row.path).filter((path) => !savedDevices.includes(path)),
+  ];
   // Balancing is QSV/VAAPI-only: NVENC addresses GPUs by CUDA index/UUID, so
   // the multi-select picker is hidden for it (the server uses the first
   // configured entry).

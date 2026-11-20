@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 
 import CompatibilityProxiesSettings from "./CompatibilityProxiesSettings";
 
@@ -34,6 +34,19 @@ vi.mock("@/hooks/queries/admin/settings", () => ({
 }));
 
 vi.mock("@/hooks/useRestartKeys", () => ({ useRestartKeys: () => ({ has: () => false }) }));
+
+beforeEach(() => {
+  sensitiveStatus.current = { configured: [], managed_by_env: [] };
+});
+
+it("stages nothing when the Jellyfin API is switched off and back on", async () => {
+  render(<CompatibilityProxiesSettings />);
+  const api = screen.getByRole("switch", { name: "Allow Jellyfin apps to connect" });
+  await userEvent.click(api);
+  await userEvent.click(api);
+
+  expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
+});
 
 it("takes back the Jellyfin Web switch-off once the environment sets the API switch", async () => {
   const { rerender } = render(<CompatibilityProxiesSettings />);
