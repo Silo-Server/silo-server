@@ -20,8 +20,9 @@ import (
 // TestWorkClaimsReplacePerSourceDB pins how a book's work ids are stored:
 // every edition of a book may claim the same work, the key never reaches
 // media_item_provider_ids, and an answer replaces only its own source's
-// claims, except for a catalog that could not be asked. An answer holding only
-// a work id leaves the provider IDs alone.
+// claims and those with no source, except for a catalog that could not be
+// asked. An answer holding only a work id, or a work id and keys that are
+// never stored, leaves the provider IDs alone.
 func TestWorkClaimsReplacePerSourceDB(t *testing.T) {
 	pool := newBatchEquivTestPool(t)
 	ctx := context.Background()
@@ -86,6 +87,32 @@ func TestWorkClaimsReplacePerSourceDB(t *testing.T) {
 		t.Fatalf("ReplaceByContentIDWithWorkClaims(%s, work key only): %v", ebookB, err)
 	}
 	assertDurableProviderIDs(t, pool, ebookB, map[string]string{"isbn": "9780306406101"})
+	// So does a map whose other keys are not durable ids.
+	if err := repo.ReplaceByContentIDWithWorkClaims(ctx, ebookB, map[string]string{"hardcover": "6", "_filepath": "/books/b.epub"},
+		answer("ebook-metadata", nil, bookid.WorkClaim{Provider: "hardcover", ProviderID: "6"})); err != nil {
+		t.Fatalf("ReplaceByContentIDWithWorkClaims(%s, work key and non-durable key): %v", ebookB, err)
+	}
+	assertDurableProviderIDs(t, pool, ebookB, map[string]string{"isbn": "9780306406101"})
+	assertWorkClaims(t, pool, ebookB, map[string]string{
+		"openlibrary_work": work + "/isbn/books-metadata",
+		"hardcover":        "6/unknown/ebook-metadata",
+	})
+
+	// A claim with no source (moved by the migration) is replaced by an answer
+	// from any source: deleted when the answer omits its key, kept while the
+	// answer reports its catalog as failed. A named source's claim stays.
+	batchEquivExec(t, pool, `DELETE FROM media_item_work_ids WHERE content_id = $1`, audiobook)
+	batchEquivExec(t, pool, `
+		INSERT INTO media_item_work_ids (content_id, provider, provider_id, evidence, source) VALUES
+			($1, 'openlibrary_work', 'OL1W', 'unknown', ''),
+			($1, 'hardcover', '7', 'unknown', '')`, audiobook)
+	applyWorkClaims(t, pool, audiobook, "audiobook", answer("books-metadata", []string{"hardcover"}))
+	assertWorkClaims(t, pool, audiobook, map[string]string{"hardcover": "7/unknown/"})
+	batchEquivExec(t, pool, `
+		INSERT INTO media_item_work_ids (content_id, provider, provider_id, evidence, source)
+		VALUES ($1, 'openlibrary_work', 'OL1W', 'unknown', 'audiobook-metadata')`, audiobook)
+	applyWorkClaims(t, pool, audiobook, "audiobook", answer("books-metadata", nil))
+	assertWorkClaims(t, pool, audiobook, map[string]string{"openlibrary_work": "OL1W/unknown/audiobook-metadata"})
 }
 
 // TestSeparateBookWorkIDsMigrationDB replays the migration in a scratch

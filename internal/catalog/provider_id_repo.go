@@ -415,11 +415,26 @@ func (r *ProviderIDRepository) ReplaceByContentIDTx(
 	if itemType == "" {
 		return fmt.Errorf("item_type is required")
 	}
-	// A book's work-level keys are claims (media_item_work_ids), never durable
-	// IDs; the table's CHECK rejects them.
-	editionIDs, _ := bookid.SplitWorkIDs(itemType, providerIDs)
-	entries := normalizeDurableProviderIDs(editionIDs)
+	return replaceDurableProviderIDsTx(ctx, tx, contentID, itemType, durableEditionIDs(itemType, providerIDs))
+}
 
+// durableEditionIDs returns the entries of providerIDs that ReplaceByContentIDTx
+// stores for an item of itemType. A book's work-level keys are claims
+// (media_item_work_ids), never durable IDs; the table's CHECK rejects them.
+func durableEditionIDs(itemType string, providerIDs map[string]string) []models.MediaItemProviderID {
+	editionIDs, _ := bookid.SplitWorkIDs(itemType, providerIDs)
+	return normalizeDurableProviderIDs(editionIDs)
+}
+
+// replaceDurableProviderIDsTx replaces the item's managed provider ID rows with
+// entries.
+func replaceDurableProviderIDsTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	contentID string,
+	itemType string,
+	entries []models.MediaItemProviderID,
+) error {
 	// Preserve providers Replace does not manage (see excludedProviderIDs):
 	// query-only inputs and the scanner's manga_series identity anchor.
 	if _, err := tx.Exec(ctx, `

@@ -13,10 +13,12 @@ import (
 
 // ApplyWorkClaimsTx writes the work ids metadata answers claimed for an
 // audiobook or ebook to media_item_work_ids, in the caller's transaction, which
-// must hold the item's row lock. Each answer replaces its source's claims: the
-// keys it holds are upserted, and the item's other rows from that source are
-// deleted unless the answer's work_lookup_failed names the key's catalog.
-// Rows from another source stay. Other item types are left alone.
+// must hold the item's row lock. Each answer replaces its source's claims and
+// the claims that have no source (rows the migration moved from
+// media_item_provider_ids): the keys it holds are upserted, and the item's
+// other rows from that source or from none are deleted unless the answer's
+// work_lookup_failed names the key's catalog. Rows from another named source
+// stay. Other item types are left alone.
 func ApplyWorkClaimsTx(ctx context.Context, tx pgx.Tx, contentID, itemType string, claims []bookid.WorkClaims) error {
 	if !bookid.HasWorkIDs(itemType) || len(claims) == 0 {
 		return nil
@@ -54,7 +56,7 @@ func ApplyWorkClaimsTx(ctx context.Context, tx pgx.Tx, contentID, itemType strin
 		keep = append(keep, answer.KeptKeys()...)
 		if _, err := tx.Exec(ctx, `
 			DELETE FROM media_item_work_ids
-			WHERE content_id = $1 AND source = $2 AND provider <> ALL($3::text[])
+			WHERE content_id = $1 AND source IN ($2, '') AND provider <> ALL($3::text[])
 		`, contentID, source, keep); err != nil {
 			return fmt.Errorf("clearing work ids %s no longer claims for %s: %w", source, contentID, err)
 		}
@@ -73,9 +75,10 @@ func DeleteWorkClaimsTx(ctx context.Context, tx pgx.Tx, contentID string) error 
 
 // ReplaceByContentIDWithWorkClaims replaces the item's durable provider IDs, as
 // ReplaceByContentID does, and applies its work claims (ApplyWorkClaimsTx) in
-// the same transaction. When providerIDs holds no edition identifier once a
-// book's work keys are taken out, the stored provider IDs stay as they are, so
-// an answer that holds only a work id cannot clear them.
+// the same transaction. When providerIDs holds no durable edition identifier
+// once a book's work keys and the keys Replace never stores (such as
+// _filepath) are taken out, the stored provider IDs stay as they are, so an
+// answer that holds only a work id cannot clear them.
 func (r *ProviderIDRepository) ReplaceByContentIDWithWorkClaims(
 	ctx context.Context,
 	contentID string,
@@ -83,8 +86,8 @@ func (r *ProviderIDRepository) ReplaceByContentIDWithWorkClaims(
 	claims []bookid.WorkClaims,
 ) error {
 	return r.inItemLockedTx(ctx, contentID, func(tx pgx.Tx, itemType string) error {
-		if editionIDs, _ := bookid.SplitWorkIDs(itemType, providerIDs); len(editionIDs) > 0 {
-			if err := r.ReplaceByContentIDTx(ctx, tx, contentID, itemType, editionIDs); err != nil {
+		if entries := durableEditionIDs(itemType, providerIDs); len(entries) > 0 {
+			if err := replaceDurableProviderIDsTx(ctx, tx, contentID, itemType, entries); err != nil {
 				return err
 			}
 		}
