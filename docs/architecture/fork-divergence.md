@@ -92,10 +92,13 @@ that before it ships.
      `make install-hooks`), while `Dockerfile`, `docker-compose.yml`, and `.env.example` hunks must be reviewed to keep
      the decoupled `node-base` stage, unshadowed module layer caching, the
      pinned base image versions, and the `:dev` image tags. Floating base image tags (`node:22-slim`,
-      `golang:1.26`, `debian:trixie-slim`) bump silently and invalidate the
-      layer cache and the Go build cache, so the fork pins them to patch/dated
-      tags and bumps them as a deliberate change. CI and
-      `make verify-fork-invariants` enforce both.
+     `golang:1.27`, `debian:trixie-slim`) bump silently and invalidate the
+     layer cache and the Go build cache, so the fork pins them to patch/dated
+     tags and bumps them as a deliberate change. The build stage's `golang`
+     tag must equal the `go` directive in `go.mod`: the Go images and
+     `setup-go` both run with `GOTOOLCHAIN=local`, so a lagging tag cannot
+     build the module at all. CI and `make verify-fork-invariants` enforce
+     both.
 3. Merge with a merge commit so fork history stays readable. Never rebase
    pushed history.
 4. Verify before pushing: `scripts/check-fork-invariants.sh` (includes gofmt

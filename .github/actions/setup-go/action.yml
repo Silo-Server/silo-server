@@ -103,10 +103,12 @@ runs:
     - name: Set up Go
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
-        go-version: '>=1.26 <1.27'
-        # Without check-latest, an older 1.26 cached on the runner image wins
-        # and govulncheck fails on standard library fixes it lacks.
-        check-latest: true
+        # Take the toolchain from go.mod, never a range pinned here. setup-go
+        # exports GOTOOLCHAIN=local, so an installed Go older than the module's
+        # `go` directive cannot switch to the required one and every go command
+        # in the job fails with "go.mod requires go >= ...". A range pinned
+        # here also silently lags a branch that raises the module's version.
+        go-version-file: go.mod
         cache: false
 
     - name: Read the Go version

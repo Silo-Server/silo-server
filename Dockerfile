@@ -31,7 +31,7 @@ FROM scratch AS frontend_dist
 COPY --from=frontend /app/web/dist/. /
 
 # Stage 2: Build Go binary
-FROM golang:1.26.8 AS build
+FROM golang:1.27.4 AS build
 ENV CGO_ENABLED=1
 ENV GOPROXY=https://proxy.golang.org,direct
 ENV GOPRIVATE=github.com/Silo-Server/*

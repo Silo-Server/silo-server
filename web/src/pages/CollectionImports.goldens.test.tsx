@@ -5,7 +5,7 @@
  * Synced list editor for a saved list, both scopes. New synced lists are
  * imported unpinned, and a save never sends `featured`.
  */
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Library } from "@/api/types";
@@ -94,7 +94,7 @@ async function type(label: string, value: string) {
   fireEvent.change(await screen.findByLabelText(label), { target: { value } });
 }
 
-/** Save from the editor page, which then returns to the list. */
+/** Save from the editor page; it stays on the list. */
 async function saveAndWait(count: number) {
   fireEvent.click(within(saveBar()).getByRole("button", { name: "Save" }));
   await vi.waitFor(() => expect(v2Recorder.writes()).toHaveLength(count));
@@ -109,10 +109,12 @@ function answerAdmin(collection: object) {
   v2Recorder.answer("GET /api/v2/admin/collections", adminCollectionList(collection));
 }
 
-/** Create collection, then wait until the editor has left for the list. */
+/** Create collection, then wait until the editor has moved to the new list's edit page. */
 async function createAndLeave() {
   fireEvent.click(screen.getByRole("button", { name: "Create collection" }));
-  await screen.findByText(/^(Admin collections|Collections) page$/);
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Create collection" })).toBeNull(),
+  );
 }
 
 describe("admin Synced list step", () => {
@@ -277,23 +279,22 @@ describe("personal Synced list editor", () => {
     }
 
     async function removePoster() {
-      const router = showEditorPage("/collections/c1/edit");
+      showEditorPage("/collections/c1/edit");
       await chooseArtwork("poster", "Use the collage");
       expect(within(posterSlot()).queryByRole("img")).toBeNull();
       expect(within(saveBar()).getByText(/Poster not saved/)).toBeTruthy();
-      return router;
     }
 
-    it("returns to the list after Save, and opens again from the saved collection", async () => {
-      const router = await removePoster();
+    it("starts again from the saved collection after Save", async () => {
+      await removePoster();
       await saveAndWait(2);
-      expect(router.state.location.pathname).toBe("/collections");
+      expect(within(posterSlot()).queryByRole("img")).toBeNull();
 
-      await act(() => router.navigate("/collections/c1/edit"));
-      await screen.findByLabelText("Name");
-      expect(within(await artworkTile("poster")).queryByRole("img")).toBeNull();
+      await type("Name", "Top Watched");
+      fireEvent.click(within(saveBar()).getByRole("button", { name: "Discard" }));
+      expect(within(posterSlot()).queryByRole("img")).toBeNull();
 
-      // The next save sends the ETag the first one left, so it is not a 412.
+      // The second save sends the ETag the first one left, so it is not a 412.
       const savedETag = v2Recorder.etag("/api/v2/collections/c1");
       await type("Name", "Top Watched");
       await saveAndWait(3);
