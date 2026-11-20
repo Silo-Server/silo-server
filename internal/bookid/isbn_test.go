@@ -23,6 +23,9 @@ func TestCanonicalISBN(t *testing.T) {
 		{"978-0-306-40615-7", "9780306406157"},
 		{"9791090636071", "9791090636071"},
 		{"979-10-90636-07-1", "9791090636071"},
+		// Unicode dashes and non-breaking spaces count as separators.
+		{"978\u20100\u2011306\u201340615\u20147", "9780306406157"},
+		{"0\u2212306\u00a040615\u20152", "9780306406157"},
 		// A valid EAN-13 that is not an ISBN.
 		{"4006381333931", ""},
 		// 979-0 is printed music (ISMN), with a valid check digit.
@@ -39,11 +42,38 @@ func TestCanonicalISBN(t *testing.T) {
 		{"", ""},
 		{"   ", ""},
 		{"not an isbn", ""},
+		// Other identifiers that contain an ISBN's digits are not ISBNs.
+		{"garbage:0306406152", ""},
+		{"not-9780306406157", ""},
+		{"amazon:0306406152", ""},
+		{"9780306406157 (ebook)", ""},
+		{"ISBN 978_0306406157", ""},
 	}
 	for _, tt := range tests {
 		got, ok := CanonicalISBN(tt.raw)
 		if ok != (tt.want != "") || got != tt.want {
 			t.Errorf("CanonicalISBN(%q) = %q, %v; want %q", tt.raw, got, ok, tt.want)
+		}
+	}
+}
+
+// TestISBNInText pins the scanner's reading of a file's metadata field: the
+// text around an ISBN is ignored, and the ISBN rules still apply.
+func TestISBNInText(t *testing.T) {
+	tests := []struct {
+		raw, want string
+	}{
+		{"9780306406157 (ebook)", "9780306406157"},
+		{"fiction, 0-306-40615-2", "9780306406157"},
+		{"ISBN-13: 978-0-306-40615-7", "9780306406157"},
+		{"barcode 4006381333931", ""},
+		{"9790260000438 (score)", ""},
+		{"no digits here", ""},
+	}
+	for _, tt := range tests {
+		got, ok := ISBNInText(tt.raw)
+		if ok != (tt.want != "") || got != tt.want {
+			t.Errorf("ISBNInText(%q) = %q, %v; want %q", tt.raw, got, ok, tt.want)
 		}
 	}
 }

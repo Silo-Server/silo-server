@@ -421,10 +421,10 @@ func uniqueTrimmedStrings(values []string) []string {
 	return out
 }
 
-// normalizeEbookISBN returns value as an ISBN-13 (bookid.CanonicalISBN), or ""
-// when it is not an ISBN.
+// normalizeEbookISBN returns the ISBN-13 in a metadata field of a file
+// (bookid.ISBNInText), or "" when the field holds none.
 func normalizeEbookISBN(value string) string {
-	isbn, _ := bookid.CanonicalISBN(value)
+	isbn, _ := bookid.ISBNInText(value)
 	return isbn
 }
 

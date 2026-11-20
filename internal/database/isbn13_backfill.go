@@ -94,10 +94,15 @@ SELECT DISTINCT provider
 	if len(providers) == 0 {
 		return nil
 	}
+	// A value of 13 digits starting 978 or 979 is already its own ISBN-13 or
+	// is not an ISBN, so it is never rewritten and is not loaded. A row holding
+	// the ISBN-13 is still ranked: isbn13Spellings adds each ISBN-13 to its
+	// own spellings.
 	stored, err := queryStrings(ctx, db, `
 SELECT DISTINCT provider_id
   FROM public.media_item_provider_ids
- WHERE provider = ANY($1)`, providers)
+ WHERE provider = ANY($1)
+   AND provider_id !~ '^97[89][0-9]{10}$'`, providers)
 	if err != nil {
 		return fmt.Errorf("listing stored ISBNs: %w", err)
 	}
