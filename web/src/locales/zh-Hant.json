@@ -79785,25 +79785,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "無法讓電視登入。請再試一次。"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "確認你的 App 顯示的是"
+      "value": "無法核准登入。請再試一次。"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "確認你的電視顯示的是"
+      "value": "請確認此代碼相符"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "輸入電視或 App 上的代碼"
+      "value": "輸入你的裝置上顯示的代碼"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -79815,13 +79809,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "使用你的帳號登入電視或其他裝置。"
+      "value": "登入電視、App 或其他裝置。"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "登入電視"
+      "value": "核准登入"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -79841,13 +79835,13 @@
     },
     {
       "type": 0,
-      "value": " 的身分檢視，才能核准電視。只有該帳號本身能讓電視登入。"
+      "value": " 的身分檢視，才能核准這次登入。只有該帳號本身能核准裝置。"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "請停止以這位使用者的身分檢視，才能核准電視。只有該帳號本身能讓電視登入。"
+      "value": "請停止以這位使用者的身分檢視，才能核准這次登入。只有該帳號本身能核准裝置。"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -79865,39 +79859,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "找不到這組代碼。請檢查電視上的代碼。"
+      "value": "找不到該代碼。請檢查代碼後再試一次。"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "暫時不要"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "舊版電視 App 會改為顯示 "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "。"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "只核准目前就在你面前的裝置。"
+      "value": "拒絕"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "只核准目前就在你面前的電視。"
+      "value": "只有在登入是你本人發起時才核准。"
     }
   ],
   "web.auth.activate.playOn": [
@@ -79923,7 +79897,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "使用這台電視的任何人都能從你的個人檔案中選擇。設有 PIN 的個人檔案會保持鎖定。"
+      "value": "這會讓該裝置存取你的個人檔案。設有 PIN 的個人檔案會保持鎖定。"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -79970,6 +79944,16 @@
       "value": " 請求"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "請求時間："
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -79983,7 +79967,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "這台電視已停止等待。請在電視上重新開始。"
+      "value": "此裝置已停止等待。請在該裝置上重新開始登入。"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -79992,10 +79976,34 @@
       "value": "這次登入已被拒絕。"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "完成。"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 正在登入。"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 已登入。"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "這組代碼已過期。你的電視正顯示新的代碼，請改用該代碼。"
+      "value": "此代碼已過期。請在裝置上取得新代碼，然後再試一次。"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -80029,7 +80037,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "完成。這部裝置正以 "
+      "value": "完成。此裝置正以 "
     },
     {
       "type": 1,
@@ -80079,25 +80087,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "該電視已登入。"
+      "value": "此裝置已登入。"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "這台電視已獲核准，正在完成登入。"
+      "value": "此裝置已獲核准，正在完成登入。"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "完成。你的電視正在登入。"
+      "value": "完成。你的裝置正在登入。"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "你的電視已登入。"
+      "value": "你的裝置已登入。"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -80141,7 +80149,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "要讓 "
+      "value": "要允許 "
     },
     {
       "type": 1,
@@ -80155,7 +80163,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "要讓這部裝置登入嗎？"
+      "value": "要允許此裝置登入嗎？"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -80175,13 +80183,13 @@
     },
     {
       "type": 0,
-      "value": " 以核准這台電視。"
+      "value": " 以核准這次登入。"
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "登入電視"
+      "value": "核准登入"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -81235,7 +81243,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "無法登入裝置。請再試一次。"
+      "value": "無法核准登入。請再試一次。"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -100659,6 +100667,12 @@
       "value": "正在翻譯……"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "隱藏此匯出檔建立後新增的伺服器列："
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -100677,6 +100691,12 @@
     {
       "type": 0,
       "value": "，並取代你先前在此新增的區塊。你對此伺服器區塊所做的變更會保留。"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "此檔案匯出後，此伺服器的列已有變更，請在下方選擇要隱藏的列。"
     }
   ],
   "web.home.layout.checking": [
@@ -100727,6 +100747,26 @@
     {
       "type": 0,
       "value": "開啟「隱藏已觀看的項目」。"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "在以下頁面隱藏所選的列："
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "，不會變更你在這些頁面的其他列。"
     }
   ],
   "web.home.layout.import": [
@@ -100831,6 +100871,24 @@
     {
       "type": 0,
       "value": "。"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": "（"
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "）"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -101032,6 +101090,12 @@
     {
       "type": 0,
       "value": "未命名區塊"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "隱藏此檔案中沒有的伺服器列："
     }
   ],
   "web.home.page.customize": [

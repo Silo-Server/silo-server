@@ -94280,25 +94280,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Impossible de connecter la TV. Réessayez."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Vérifiez que votre application affiche"
+      "value": "Impossible d’approuver la connexion. Réessayez."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Vérifiez que votre TV affiche"
+      "value": "Vérifiez que ce code correspond"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Saisissez le code affiché sur votre TV ou application"
+      "value": "Saisissez le code affiché sur votre appareil"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94310,13 +94304,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Connectez une TV ou un autre appareil avec votre compte."
+      "value": "Connectez une TV, une app ou un autre appareil."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Connecter une TV"
+      "value": "Approuver la connexion"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94336,13 +94330,13 @@
     },
     {
       "type": 0,
-      "value": " pour approuver une TV. Seul le titulaire du compte peut connecter une TV."
+      "value": " pour approuver cette connexion. Seul le titulaire du compte peut approuver des appareils."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Quittez la vue en tant que cet utilisateur pour approuver une TV. Seul le titulaire du compte peut connecter une TV."
+      "value": "Quittez la vue en tant que cet utilisateur pour approuver cette connexion. Seul le titulaire du compte peut approuver des appareils."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94360,39 +94354,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Code introuvable. Vérifiez le code affiché sur votre TV."
+      "value": "Impossible de trouver ce code. Vérifiez le code et réessayez."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Pas maintenant"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Les anciennes applications TV affichent plutôt "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "N’approuvez qu’un appareil qui se trouve devant vous en ce moment."
+      "value": "Refuser"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "N’approuvez qu’une TV qui se trouve devant vous en ce moment."
+      "value": "N’approuvez que si vous avez lancé la connexion vous-même."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94418,7 +94392,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Toute personne utilisant cette TV pourra choisir parmi vos profils. Les profils protégés par un PIN restent verrouillés."
+      "value": "Cela lui donne accès à vos profils. Les profils protégés par un PIN restent verrouillés."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94465,6 +94439,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Demandée "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -94478,7 +94462,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Cette TV a cessé d’attendre. Recommencez sur la TV."
+      "value": "Cet appareil n’attend plus. Relancez la connexion sur celui-ci."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -94487,10 +94471,34 @@
       "value": "Cette connexion a été refusée."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "C’est fait. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se connecte."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " est connecté."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Ce code a expiré. Votre TV en affiche un nouveau. Utilisez plutôt ce code."
+      "value": "Ce code a expiré. Obtenez un nouveau code sur l’appareil et réessayez."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -94524,7 +94532,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "Terminé. Cet appareil se connecte en tant que "
+      "value": "C’est fait. Cet appareil se connecte en tant que "
     },
     {
       "type": 1,
@@ -94574,25 +94582,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Cette TV est déjà connectée."
+      "value": "Cet appareil est déjà connecté."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Cette TV a été approuvée et termine sa connexion."
+      "value": "Cet appareil a été approuvé et termine sa connexion."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Terminé. Votre TV se connecte."
+      "value": "C’est fait. Votre appareil se connecte."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Votre TV est connectée."
+      "value": "Votre appareil est connecté."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -94636,7 +94644,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Connecter "
+      "value": "Autoriser "
     },
     {
       "type": 1,
@@ -94644,13 +94652,13 @@
     },
     {
       "type": 0,
-      "value": " ?"
+      "value": " à se connecter ?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Connecter cet appareil ?"
+      "value": "Autoriser cet appareil à se connecter ?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -94670,13 +94678,13 @@
     },
     {
       "type": 0,
-      "value": " pour approuver cette TV."
+      "value": " pour approuver cette connexion."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Connecter la TV"
+      "value": "Approuver la connexion"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -95722,7 +95730,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Impossible de connecter l’appareil. Réessayez."
+      "value": "Impossible d’approuver la connexion. Réessayez."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -119057,6 +119065,12 @@
       "value": "Traduction…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Masquer les rangées du serveur ajoutées depuis cet export :"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -119075,6 +119089,12 @@
     {
       "type": 0,
       "value": ", en remplaçant les sections que vous aviez ajoutées ici. Vos modifications des sections de ce serveur sont conservées."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Les rangées de ce serveur ont changé depuis l’export de ce fichier. Choisissez ci-dessous les rangées à masquer."
     }
   ],
   "web.home.layout.checking": [
@@ -119125,6 +119145,26 @@
     {
       "type": 0,
       "value": "Active Masquer les éléments vus."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Masque les rangées sélectionnées sur : "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " sans modifier vos autres rangées sur ces pages."
     }
   ],
   "web.home.layout.import": [
@@ -119229,6 +119269,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -119448,6 +119506,12 @@
     {
       "type": 0,
       "value": "Section sans titre"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Masquer les rangées du serveur absentes de ce fichier :"
     }
   ],
   "web.home.page.customize": [

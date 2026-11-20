@@ -94584,25 +94584,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Não foi possível conectar a TV. Tente novamente."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Confira se o seu app mostra"
+      "value": "Não foi possível aprovar o login. Tente novamente."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Confira se a sua TV mostra"
+      "value": "Confira se este código é o mesmo"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Digite o código mostrado na sua TV ou no app"
+      "value": "Digite o código mostrado no seu dispositivo"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94614,13 +94608,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Conecte uma TV ou outro dispositivo com a sua conta."
+      "value": "Conecte uma TV, app ou outro dispositivo."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Conectar uma TV"
+      "value": "Aprovar login"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94640,13 +94634,13 @@
     },
     {
       "type": 0,
-      "value": " para aprovar uma TV. Só a própria conta pode conectar uma TV."
+      "value": " para aprovar este login. Só a própria conta pode aprovar dispositivos."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Pare de ver como este usuário para aprovar uma TV. Só a própria conta pode conectar uma TV."
+      "value": "Pare de ver como este usuário para aprovar este login. Só a própria conta pode aprovar dispositivos."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94664,39 +94658,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Não encontramos esse código. Confira o código na sua TV."
+      "value": "Não encontramos esse código. Confira o código e tente novamente."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Agora não"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Apps de TV mais antigos mostram "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Só aprove um dispositivo que esteja na sua frente agora."
+      "value": "Recusar"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Só aprove uma TV que esteja na sua frente agora."
+      "value": "Só aprove se você mesmo tiver iniciado o login."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94722,7 +94696,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Quem usar esta TV poderá escolher entre os seus perfis. Perfis com PIN continuam bloqueados."
+      "value": "Isso dá a ele acesso aos seus perfis. Perfis com PIN continuam bloqueados."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94769,6 +94743,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Solicitado "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -94782,7 +94766,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Esta TV parou de esperar. Comece de novo na TV."
+      "value": "Este dispositivo parou de aguardar. Inicie o login novamente nele."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -94791,10 +94775,34 @@
       "value": "Este login foi recusado."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Pronto. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " está entrando."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " está conectado."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Este código expirou. Sua TV está mostrando um novo. Use esse código."
+      "value": "Este código expirou. Gere um novo código no dispositivo e tente novamente."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -94878,25 +94886,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Essa TV já está conectada."
+      "value": "Este dispositivo já está conectado."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Esta TV foi aprovada e está concluindo o login."
+      "value": "Este dispositivo foi aprovado e está concluindo o login."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Pronto. Sua TV está entrando."
+      "value": "Pronto. Seu dispositivo está entrando."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Sua TV está conectada."
+      "value": "Seu dispositivo está conectado."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -94940,7 +94948,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Conectar "
+      "value": "Permitir que "
     },
     {
       "type": 1,
@@ -94948,13 +94956,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " entre?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Conectar este dispositivo?"
+      "value": "Permitir que este dispositivo entre?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -94974,13 +94982,13 @@
     },
     {
       "type": 0,
-      "value": " para aprovar esta TV."
+      "value": " para aprovar este login."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Conectar TV"
+      "value": "Aprovar login"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -96026,7 +96034,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Não foi possível conectar o dispositivo. Tente novamente."
+      "value": "Não foi possível aprovar o login. Tente novamente."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -119295,6 +119303,12 @@
       "value": "Traduzindo…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ocultar fileiras do servidor adicionadas desde esta exportação:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -119313,6 +119327,12 @@
     {
       "type": 0,
       "value": ", substituindo as seções que você adicionou aqui antes. Suas alterações nas seções deste servidor são mantidas."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "As fileiras deste servidor mudaram desde que este arquivo foi exportado, então escolha abaixo as fileiras que quer ocultar."
     }
   ],
   "web.home.layout.checking": [
@@ -119363,6 +119383,26 @@
     {
       "type": 0,
       "value": "Ativa Ocultar itens assistidos."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Oculta as fileiras selecionadas em: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " sem alterar suas outras fileiras lá."
     }
   ],
   "web.home.layout.import": [
@@ -119467,6 +119507,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -119686,6 +119744,12 @@
     {
       "type": 0,
       "value": "Seção sem título"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ocultar fileiras do servidor que não estão neste arquivo:"
     }
   ],
   "web.home.page.customize": [

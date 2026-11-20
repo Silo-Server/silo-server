@@ -86562,25 +86562,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Det gick inte att logga in tv:n. Försök igen."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Kontrollera att appen visar"
+      "value": "Det gick inte att godkänna inloggningen. Försök igen."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Kontrollera att tv:n visar"
+      "value": "Kontrollera att den här koden stämmer"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Ange koden som visas på tv:n eller i appen"
+      "value": "Ange koden som visas på din enhet"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86592,13 +86586,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Logga in en tv eller annan enhet med ditt konto."
+      "value": "Logga in en tv, app eller annan enhet."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Logga in en tv"
+      "value": "Godkänn inloggning"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86618,13 +86612,13 @@
     },
     {
       "type": 0,
-      "value": " för att godkänna en tv. Bara kontot självt kan logga in en tv."
+      "value": " för att godkänna den här inloggningen. Bara kontot självt kan godkänna enheter."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Sluta visa som den här användaren för att godkänna en tv. Bara kontot självt kan logga in en tv."
+      "value": "Sluta visa som den här användaren för att godkänna den här inloggningen. Bara kontot självt kan godkänna enheter."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86642,39 +86636,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Vi hittade inte den koden. Kontrollera koden på tv:n."
+      "value": "Vi hittade inte den koden. Kontrollera koden och försök igen."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Inte nu"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Äldre tv-appar visar "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " i stället."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Godkänn bara en enhet som står framför dig just nu."
+      "value": "Avvisa"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Godkänn bara en tv som står framför dig just nu."
+      "value": "Godkänn bara om du själv har startat inloggningen."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86700,7 +86674,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Alla som använder den här tv:n kan välja bland dina profiler. Profiler med PIN-kod förblir låsta."
+      "value": "Det ger enheten åtkomst till dina profiler. Profiler med PIN-kod förblir låsta."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86747,6 +86721,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Begärd "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86760,7 +86744,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Tv:n slutade vänta. Börja om på tv:n."
+      "value": "Enheten slutade vänta. Starta inloggningen igen på enheten."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86769,10 +86753,34 @@
       "value": "Inloggningen avvisades."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Klart. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " loggar in."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " är inloggad."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Koden har gått ut. Tv:n visar en ny kod. Använd den i stället."
+      "value": "Koden har gått ut. Hämta en ny kod på enheten och försök igen."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86856,25 +86864,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Tv:n är redan inloggad."
+      "value": "Den här enheten är redan inloggad."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Tv:n har godkänts och slutför inloggningen."
+      "value": "Enheten har godkänts och slutför inloggningen."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Klart. Tv:n loggar in."
+      "value": "Klart. Din enhet loggar in."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Tv:n är inloggad."
+      "value": "Din enhet är inloggad."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86918,7 +86926,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Logga in "
+      "value": "Tillåt inloggning för "
     },
     {
       "type": 1,
@@ -86932,7 +86940,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Logga in den här enheten?"
+      "value": "Tillåt inloggning för den här enheten?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86952,13 +86960,13 @@
     },
     {
       "type": 0,
-      "value": " för att godkänna den här tv:n."
+      "value": " för att godkänna den här inloggningen."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Logga in tv"
+      "value": "Godkänn inloggning"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88004,7 +88012,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Det gick inte att logga in enheten. Försök igen."
+      "value": "Det gick inte att godkänna inloggningen. Försök igen."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -109368,6 +109376,12 @@
       "value": "Översätter…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Dölj serverrader som lagts till sedan den här exporten:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109386,6 +109400,12 @@
     {
       "type": 0,
       "value": " och ersätter sektioner som du har lagt till här tidigare. Dina ändringar i den här serverns sektioner behålls."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Den här serverns rader har ändrats sedan filen exporterades, så välj nedan vilka rader som ska döljas."
     }
   ],
   "web.home.layout.checking": [
@@ -109436,6 +109456,26 @@
     {
       "type": 0,
       "value": "Slår på Dölj sedda objekt."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Döljer valda rader på: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " utan att ändra dina andra rader där."
     }
   ],
   "web.home.layout.import": [
@@ -109540,6 +109580,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109748,6 +109806,12 @@
     {
       "type": 0,
       "value": "Namnlös sektion"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Dölj serverrader som inte finns i den här filen:"
     }
   ],
   "web.home.page.customize": [

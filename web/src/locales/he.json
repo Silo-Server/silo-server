@@ -93990,25 +93990,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "לא ניתן היה להשלים את ההתחברות בטלוויזיה. אפשר לנסות שוב."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "יש לוודא שהאפליקציה מציגה"
+      "value": "לא ניתן היה לאשר את ההתחברות. אפשר לנסות שוב."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "יש לוודא שהטלוויזיה מציגה"
+      "value": "יש לוודא שהקוד הזה תואם"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "יש להזין את הקוד שמוצג בטלוויזיה או באפליקציה"
+      "value": "יש להזין את הקוד שמוצג במכשיר שלך"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94020,13 +94014,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "התחברות בטלוויזיה או במכשיר אחר עם החשבון שלך."
+      "value": "התחברות בטלוויזיה, באפליקציה או במכשיר אחר."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "התחברות בטלוויזיה"
+      "value": "אישור ההתחברות"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94046,13 +94040,13 @@
     },
     {
       "type": 0,
-      "value": " כדי לאשר טלוויזיה. רק מהחשבון עצמו אפשר להתחבר בטלוויזיה."
+      "value": " כדי לאשר את ההתחברות הזו. רק החשבון עצמו יכול לאשר מכשירים."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "יש להפסיק את הצפייה בתור המשתמש הזה כדי לאשר טלוויזיה. רק מהחשבון עצמו אפשר להתחבר בטלוויזיה."
+      "value": "יש להפסיק את הצפייה בתור המשתמש הזה כדי לאשר את ההתחברות הזו. רק החשבון עצמו יכול לאשר מכשירים."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94070,39 +94064,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "הקוד הזה לא נמצא. יש לבדוק את הקוד בטלוויזיה."
+      "value": "הקוד הזה לא נמצא. יש לבדוק את הקוד ולנסות שוב."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "לא עכשיו"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "אפליקציות טלוויזיה ישנות יותר מציגות במקום זאת את המילים "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "יש לאשר רק מכשיר שנמצא מולך כרגע."
+      "value": "דחייה"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "יש לאשר רק טלוויזיה שנמצאת מולך כרגע."
+      "value": "יש לאשר רק אם התחלת את ההתחברות בעצמך."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94128,7 +94102,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "כל מי שמשתמש בטלוויזיה הזו יכול לבחור מבין הפרופילים שלך. פרופילים עם PIN נשארים נעולים."
+      "value": "האישור נותן למכשיר גישה לפרופילים שלך. פרופילים עם PIN יישארו נעולים."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94175,6 +94149,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "הבקשה נשלחה "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -94188,7 +94172,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "הטלוויזיה הזו הפסיקה להמתין. יש להתחיל מחדש בטלוויזיה."
+      "value": "המכשיר הזה הפסיק להמתין. יש להתחיל את ההתחברות מחדש במכשיר."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -94197,10 +94181,38 @@
       "value": "ההתחברות הזו נדחתה."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "בוצע. המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " מתחבר."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " מחובר."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "פג תוקף הקוד הזה. בטלוויזיה שלך מוצג קוד חדש. יש להשתמש בקוד הזה במקום."
+      "value": "פג תוקף הקוד הזה. יש לקבל קוד חדש במכשיר ולנסות שוב."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -94284,25 +94296,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "הטלוויזיה כבר מחוברת."
+      "value": "המכשיר הזה כבר מחובר."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "הטלוויזיה הזו אושרה ומשלימה את ההתחברות."
+      "value": "המכשיר הזה אושר ומשלים את ההתחברות."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "בוצע. הטלוויזיה שלך מתחברת."
+      "value": "בוצע. המכשיר שלך מתחבר."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "הטלוויזיה שלך מחוברת."
+      "value": "המכשיר שלך מחובר."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -94346,7 +94358,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "לאשר את ההתחברות במכשיר "
+      "value": "לאפשר למכשיר "
     },
     {
       "type": 1,
@@ -94354,13 +94366,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " להתחבר?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "לאשר את ההתחברות במכשיר הזה?"
+      "value": "לאפשר למכשיר הזה להתחבר?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -94380,13 +94392,13 @@
     },
     {
       "type": 0,
-      "value": " כדי לאשר את הטלוויזיה הזו."
+      "value": " כדי לאשר את ההתחברות הזו."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "התחברות בטלוויזיה"
+      "value": "אישור ההתחברות"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -95436,7 +95448,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "לא ניתן היה לחבר את המכשיר. אפשר לנסות שוב."
+      "value": "לא ניתן היה לאשר את ההתחברות. אפשר לנסות שוב."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -118448,6 +118460,12 @@
       "value": "מתבצע תרגום…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "הסתרת שורות שרת שנוספו מאז הייצוא הזה:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -118466,6 +118484,12 @@
     {
       "type": 0,
       "value": ", ויחליפו אזורים שהוספת כאן בעבר. השינויים שביצעת באזורים של השרת הזה יישמרו."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "השורות של השרת הזה השתנו מאז שהקובץ הזה יוצא, ולכן יש לבחור למטה את השורות להסתרה."
     }
   ],
   "web.home.layout.checking": [
@@ -118516,6 +118540,26 @@
     {
       "type": 0,
       "value": "האפשרות ”הסתרת פריטים שנצפו” תופעל."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "השורות שנבחרו יוסתרו בדפים: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", בלי לשנות את השורות האחרות שלך בהם."
     }
   ],
   "web.home.layout.import": [
@@ -118620,6 +118664,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -118836,6 +118898,12 @@
     {
       "type": 0,
       "value": "אזור ללא שם"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "הסתרת שורות שרת שלא נמצאות בקובץ הזה:"
     }
   ],
   "web.home.page.customize": [

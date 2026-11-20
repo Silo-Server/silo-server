@@ -78915,25 +78915,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Tidak dapat log masuk pada TV. Sila cuba lagi."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Pastikan apl anda memaparkan"
+      "value": "Tidak dapat meluluskan log masuk. Sila cuba lagi."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Pastikan TV anda memaparkan"
+      "value": "Pastikan kod ini sepadan"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Masukkan kod pada TV atau apl anda"
+      "value": "Masukkan kod yang dipaparkan pada peranti anda"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -78945,13 +78939,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Log masuk pada TV atau peranti lain dengan akaun anda."
+      "value": "Log masuk TV, apl atau peranti lain."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Log masuk pada TV"
+      "value": "Luluskan log masuk"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -78971,13 +78965,13 @@
     },
     {
       "type": 0,
-      "value": " untuk meluluskan TV. Hanya akaun itu sendiri boleh log masuk pada TV."
+      "value": " untuk meluluskan log masuk ini. Hanya akaun itu sendiri boleh meluluskan peranti."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Berhenti melihat sebagai pengguna ini untuk meluluskan TV. Hanya akaun itu sendiri boleh log masuk pada TV."
+      "value": "Berhenti melihat sebagai pengguna ini untuk meluluskan log masuk ini. Hanya akaun itu sendiri boleh meluluskan peranti."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -78995,39 +78989,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Kod itu tidak ditemui. Semak kod pada TV anda."
+      "value": "Kod itu tidak ditemui. Semak kod dan cuba lagi."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Bukan sekarang"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Apl TV versi lama memaparkan "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " sebagai gantinya."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Luluskan hanya peranti yang berada di hadapan anda sekarang."
+      "value": "Tolak"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Luluskan hanya TV yang berada di hadapan anda sekarang."
+      "value": "Luluskan ini hanya jika anda sendiri yang memulakan log masuk."
     }
   ],
   "web.auth.activate.playOn": [
@@ -79053,7 +79027,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Sesiapa yang menggunakan TV ini boleh memilih daripada profil anda. Profil dengan PIN kekal berkunci."
+      "value": "Ini memberikan peranti itu akses kepada profil anda. Profil dengan PIN kekal dikunci."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -79100,6 +79074,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Diminta "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -79113,7 +79097,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "TV ini berhenti menunggu. Mulakan semula pada TV."
+      "value": "Peranti ini berhenti menunggu. Mulakan log masuk semula pada peranti itu."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -79122,10 +79106,34 @@
       "value": "Log masuk ini telah ditolak."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Selesai. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sedang log masuk."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " telah log masuk."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Kod ini telah tamat tempoh. TV anda kini memaparkan kod baharu. Gunakan kod itu."
+      "value": "Kod ini telah tamat tempoh. Dapatkan kod baharu pada peranti itu dan cuba lagi."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -79209,25 +79217,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "TV itu sudah log masuk."
+      "value": "Peranti ini sudah log masuk."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "TV ini telah diluluskan dan sedang menyelesaikan log masuk."
+      "value": "Peranti ini telah diluluskan dan sedang menyelesaikan log masuk."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Selesai. TV anda sedang log masuk."
+      "value": "Selesai. Peranti anda sedang log masuk."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "TV anda sudah log masuk."
+      "value": "Peranti anda telah log masuk."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -79305,13 +79313,13 @@
     },
     {
       "type": 0,
-      "value": " untuk meluluskan TV ini."
+      "value": " untuk meluluskan log masuk ini."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Log masuk TV"
+      "value": "Luluskan log masuk"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -80357,7 +80365,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Tidak dapat log masuk peranti. Sila cuba lagi."
+      "value": "Tidak dapat meluluskan log masuk. Sila cuba lagi."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -99447,6 +99455,12 @@
       "value": "Menterjemah…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sembunyikan baris pelayan yang ditambah sejak eksport ini:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -99465,6 +99479,12 @@
     {
       "type": 0,
       "value": ", menggantikan bahagian yang anda tambah di sini sebelum ini. Perubahan anda pada bahagian pelayan ini kekal."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Baris pelayan ini telah berubah sejak fail ini dieksport, jadi pilih baris yang mahu disembunyikan di bawah."
     }
   ],
   "web.home.layout.checking": [
@@ -99515,6 +99535,26 @@
     {
       "type": 0,
       "value": "Menghidupkan Sembunyikan item yang telah ditonton."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Menyembunyikan baris yang dipilih pada: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " tanpa mengubah baris anda yang lain di sana."
     }
   ],
   "web.home.layout.import": [
@@ -99619,6 +99659,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -99816,6 +99874,12 @@
     {
       "type": 0,
       "value": "Bahagian tanpa tajuk"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sembunyikan baris pelayan yang tiada dalam fail ini:"
     }
   ],
   "web.home.page.customize": [

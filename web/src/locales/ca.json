@@ -94656,25 +94656,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "No s’ha pogut iniciar la sessió a la TV. Torna-ho a provar."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Comprova que l’aplicació mostri"
+      "value": "No s’ha pogut aprovar l’inici de sessió. Torna-ho a provar."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Comprova que la TV mostri"
+      "value": "Comprova que aquest codi coincideixi"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Introdueix el codi de la TV o l’aplicació"
+      "value": "Introdueix el codi que es mostra al dispositiu"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94686,13 +94680,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Inicia la sessió en una TV o un altre dispositiu amb el teu compte."
+      "value": "Inicia la sessió en una TV, una aplicació o un altre dispositiu."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Inicia la sessió en una TV"
+      "value": "Aprova l’inici de sessió"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94712,13 +94706,13 @@
     },
     {
       "type": 0,
-      "value": " per aprovar una TV. Només el mateix compte pot iniciar la sessió en una TV."
+      "value": " per aprovar aquest inici de sessió. Només el mateix compte pot aprovar dispositius."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Deixa de veure com a aquest usuari per aprovar una TV. Només el mateix compte pot iniciar la sessió en una TV."
+      "value": "Deixa de veure com a aquest usuari per aprovar aquest inici de sessió. Només el mateix compte pot aprovar dispositius."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94736,39 +94730,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "No hem trobat aquest codi. Comprova el codi de la TV."
+      "value": "No hem trobat aquest codi. Comprova el codi i torna-ho a provar."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ara no"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Les aplicacions de TV més antigues mostren "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " en el seu lloc."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Aprova només un dispositiu que tinguis davant ara mateix."
+      "value": "Rebutja"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Aprova només una TV que tinguis davant ara mateix."
+      "value": "Aprova-ho només si l’inici de sessió l’has començat tu."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94794,7 +94768,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Qualsevol persona que utilitzi aquesta TV podrà triar entre els teus perfils. Els perfils amb PIN continuen bloquejats."
+      "value": "Això li dona accés als teus perfils. Els perfils amb PIN continuen bloquejats."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94841,6 +94815,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Sol·licitada "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -94854,7 +94838,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Aquesta TV ha deixat d’esperar. Torna a començar a la TV."
+      "value": "Aquest dispositiu ha deixat d’esperar. Torna a començar l’inici de sessió al dispositiu."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -94863,10 +94847,34 @@
       "value": "S’ha rebutjat aquest inici de sessió."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Fet. Ara "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " inicia la sessió."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ha iniciat la sessió."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Aquest codi ha caducat. La TV en mostra un de nou. Utilitza aquell codi."
+      "value": "Aquest codi ha caducat. Obtén un codi nou al dispositiu i torna-ho a provar."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -94900,7 +94908,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "Fet. Aquest dispositiu està iniciant la sessió amb el perfil "
+      "value": "Fet. Aquest dispositiu inicia la sessió amb el perfil "
     },
     {
       "type": 1,
@@ -94950,25 +94958,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Aquella TV ja té la sessió iniciada."
+      "value": "Aquest dispositiu ja té la sessió iniciada."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "S’ha aprovat aquesta TV i està acabant d’iniciar la sessió."
+      "value": "S’ha aprovat aquest dispositiu i està acabant d’iniciar la sessió."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Fet. La TV està iniciant la sessió."
+      "value": "Fet. Ara el dispositiu inicia la sessió."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "La TV ja té la sessió iniciada."
+      "value": "El dispositiu ha iniciat la sessió."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -95012,7 +95020,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Vols iniciar la sessió a "
+      "value": "Vols permetre a "
     },
     {
       "type": 1,
@@ -95020,13 +95028,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " iniciar la sessió?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Vols iniciar la sessió en aquest dispositiu?"
+      "value": "Vols permetre a aquest dispositiu iniciar la sessió?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -95046,13 +95054,13 @@
     },
     {
       "type": 0,
-      "value": " per aprovar aquesta TV."
+      "value": " per aprovar aquest inici de sessió."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Inicia la sessió a la TV"
+      "value": "Aprova l’inici de sessió"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -96098,7 +96106,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "No s’ha pogut iniciar la sessió al dispositiu. Torna-ho a provar."
+      "value": "No s’ha pogut aprovar l’inici de sessió. Torna-ho a provar."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -119647,6 +119655,12 @@
       "value": "S’està traduint…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Amaga les files del servidor afegides des d’aquesta exportació:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -119665,6 +119679,12 @@
     {
       "type": 0,
       "value": ", i substitueixen les seccions que hi havies afegit abans. Els canvis que has fet a les seccions d’aquest servidor es mantenen."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Les files d’aquest servidor han canviat des que es va exportar aquest fitxer; tria a continuació les files que vulguis amagar."
     }
   ],
   "web.home.layout.checking": [
@@ -119715,6 +119735,26 @@
     {
       "type": 0,
       "value": "Activa l’opció Amaga els elements vistos."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Amaga les files seleccionades a: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " sense canviar-hi les altres files."
     }
   ],
   "web.home.layout.import": [
@@ -119819,6 +119859,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -120038,6 +120096,12 @@
     {
       "type": 0,
       "value": "Secció sense títol"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Amaga les files del servidor que no són en aquest fitxer:"
     }
   ],
   "web.home.page.customize": [

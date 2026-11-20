@@ -86322,25 +86322,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Inloggen van de tv is mislukt. Probeer het opnieuw."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Controleer of je app dit toont"
+      "value": "Kan het inloggen niet goedkeuren. Probeer het opnieuw."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Controleer of je tv dit toont"
+      "value": "Controleer of deze code overeenkomt"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Voer de code van je tv of app in"
+      "value": "Voer de code in die op je apparaat staat"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86352,13 +86346,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Log een tv of ander apparaat in met je account."
+      "value": "Meld een tv, app of ander apparaat aan."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Een tv inloggen"
+      "value": "Inloggen goedkeuren"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86378,13 +86372,13 @@
     },
     {
       "type": 0,
-      "value": " om een tv goed te keuren. Alleen het account zelf kan een tv inloggen."
+      "value": " om deze inlogpoging goed te keuren. Alleen het account zelf kan apparaten goedkeuren."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Stop met bekijken als deze gebruiker om een tv goed te keuren. Alleen het account zelf kan een tv inloggen."
+      "value": "Stop met bekijken als deze gebruiker om deze inlogpoging goed te keuren. Alleen het account zelf kan apparaten goedkeuren."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86402,39 +86396,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "We kunnen die code niet vinden. Controleer de code op je tv."
+      "value": "We kunnen die code niet vinden. Controleer de code en probeer het opnieuw."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Niet nu"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Oudere tv-apps tonen in plaats daarvan "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Keur alleen een apparaat goed dat nu voor je staat."
+      "value": "Weigeren"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Keur alleen een tv goed die nu voor je staat."
+      "value": "Keur dit alleen goed als je zelf bent begonnen met inloggen."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86460,7 +86434,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Iedereen die deze tv gebruikt, kan uit je profielen kiezen. Profielen met een PIN blijven vergrendeld."
+      "value": "Het apparaat krijgt zo toegang tot je profielen. Profielen met een PIN blijven vergrendeld."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86507,6 +86481,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Aangevraagd "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86520,7 +86504,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Deze tv wacht niet meer. Begin opnieuw op de tv."
+      "value": "Dit apparaat wacht niet meer. Begin op het apparaat opnieuw met inloggen."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86529,10 +86513,34 @@
       "value": "Deze inlogpoging is geweigerd."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Klaar. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " logt in."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " is ingelogd."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Deze code is verlopen. Je tv toont een nieuwe. Gebruik die code."
+      "value": "Deze code is verlopen. Vraag op het apparaat een nieuwe code aan en probeer het opnieuw."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86616,25 +86624,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Die tv is al ingelogd."
+      "value": "Dit apparaat is al ingelogd."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Deze tv is goedgekeurd en rondt het inloggen af."
+      "value": "Dit apparaat is goedgekeurd en rondt het inloggen af."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Klaar. Je tv logt in."
+      "value": "Klaar. Je apparaat logt in."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Je tv is ingelogd."
+      "value": "Je apparaat is ingelogd."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86682,13 +86690,13 @@
     },
     {
       "type": 0,
-      "value": " inloggen?"
+      "value": " laten inloggen?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Dit apparaat inloggen?"
+      "value": "Dit apparaat laten inloggen?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86708,13 +86716,13 @@
     },
     {
       "type": 0,
-      "value": " om deze tv goed te keuren."
+      "value": " om deze inlogpoging goed te keuren."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Tv inloggen"
+      "value": "Inloggen goedkeuren"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -87760,7 +87768,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Kan het apparaat niet aanmelden. Probeer het opnieuw."
+      "value": "Kan het inloggen niet goedkeuren. Probeer het opnieuw."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -108744,6 +108752,12 @@
       "value": "Vertalen…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Serverrijen verbergen die sinds deze export zijn toegevoegd:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -108762,6 +108776,12 @@
     {
       "type": 0,
       "value": ", ter vervanging van secties die je hier eerder hebt toegevoegd. Je wijzigingen aan de secties van deze server blijven behouden."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "De rijen van deze server zijn gewijzigd sinds dit bestand is geëxporteerd. Kies hieronder welke rijen je wilt verbergen."
     }
   ],
   "web.home.layout.checking": [
@@ -108812,6 +108832,26 @@
     {
       "type": 0,
       "value": "Zet “Bekeken items verbergen” aan."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Verbergt geselecteerde rijen op: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " zonder je andere rijen daar te wijzigen."
     }
   ],
   "web.home.layout.import": [
@@ -108916,6 +108956,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109124,6 +109182,12 @@
     {
       "type": 0,
       "value": "Naamloze sectie"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Serverrijen verbergen die niet in dit bestand staan:"
     }
   ],
   "web.home.page.customize": [

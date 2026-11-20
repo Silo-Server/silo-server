@@ -86690,25 +86690,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Couldn't sign in the TV. Try again."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Check that your app shows"
+      "value": "Couldn't approve sign-in. Try again."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Check that your TV shows"
+      "value": "Make sure this code matches"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Enter the code on your TV or app"
+      "value": "Enter the code shown on your device"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86720,13 +86714,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Sign in a TV or other device with your account."
+      "value": "Sign in a TV, app, or other device."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Sign in a TV"
+      "value": "Approve sign-in"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86746,13 +86740,13 @@
     },
     {
       "type": 0,
-      "value": " to approve a TV. Only the account itself can sign in a TV."
+      "value": " to approve this sign-in. Only the account itself can approve devices."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Stop viewing as this user to approve a TV. Only the account itself can sign in a TV."
+      "value": "Stop viewing as this user to approve this sign-in. Only the account itself can approve devices."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86770,39 +86764,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "We couldn't find that code. Check the code on your TV."
+      "value": "We couldn't find that code. Check the code and try again."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Not now"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Older TV apps show "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " instead."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Only approve a device that's in front of you right now."
+      "value": "Decline"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Only approve a TV that's in front of you right now."
+      "value": "Only approve this if you started the sign-in yourself."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86828,7 +86802,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Anyone using this TV can pick from your profiles. Profiles with a PIN stay locked."
+      "value": "This gives it access to your profiles. Profiles with a PIN stay locked."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86875,6 +86849,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Requested "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86888,7 +86872,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "This TV stopped waiting. Start again on the TV."
+      "value": "This device stopped waiting. Start sign-in again on it."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86897,10 +86881,34 @@
       "value": "This sign-in was declined."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Done. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " is signing in."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " is signed in."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "This code expired. Your TV is showing a new one. Use that code instead."
+      "value": "This code expired. Get a new code on the device and try again."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86934,7 +86942,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "Done. this device is signing in as "
+      "value": "Done. This device is signing in as "
     },
     {
       "type": 1,
@@ -86984,25 +86992,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "That TV is already signed in."
+      "value": "This device is already signed in."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "This TV was approved and is finishing sign-in."
+      "value": "This device was approved and is finishing sign-in."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Done. Your TV is signing in."
+      "value": "Done. Your device is signing in."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Your TV is signed in."
+      "value": "Your device is signed in."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -87046,7 +87054,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Sign in "
+      "value": "Allow "
     },
     {
       "type": 1,
@@ -87054,13 +87062,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " to sign in?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Sign in this device?"
+      "value": "Allow this device to sign in?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87080,13 +87088,13 @@
     },
     {
       "type": 0,
-      "value": " to approve this TV."
+      "value": " to approve this sign-in."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Sign in TV"
+      "value": "Approve sign-in"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88132,7 +88140,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Couldn't sign in the device. Try again."
+      "value": "Couldn't approve sign-in. Try again."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -109492,6 +109500,12 @@
       "value": "Translating…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Hide server rows added since this export:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109510,6 +109524,12 @@
     {
       "type": 0,
       "value": ", replacing sections you added here before. Your changes to this server's sections stay."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "This server's rows changed since this file was exported, so choose any rows to hide below."
     }
   ],
   "web.home.layout.checking": [
@@ -109560,6 +109580,26 @@
     {
       "type": 0,
       "value": "Turns Hide watched items on."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Hides selected rows on: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " without changing your other rows there."
     }
   ],
   "web.home.layout.import": [
@@ -109664,6 +109704,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109872,6 +109930,12 @@
     {
       "type": 0,
       "value": "Untitled section"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Hide server rows not in this file:"
     }
   ],
   "web.home.page.customize": [

@@ -102818,25 +102818,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Televízor sa nepodarilo prihlásiť. Skúste to znova."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Skontrolujte, či aplikácia zobrazuje"
+      "value": "Nepodarilo sa schváliť prihlásenie. Skúste to znova."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Skontrolujte, či televízor zobrazuje"
+      "value": "Skontrolujte, či sa tento kód zhoduje"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Zadajte kód z televízora alebo aplikácie"
+      "value": "Zadajte kód zobrazený vo vašom zariadení"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -102848,13 +102842,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Prihláste televízor alebo iné zariadenie pomocou svojho účtu."
+      "value": "Prihláste televízor, aplikáciu alebo iné zariadenie."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Prihlásiť televízor"
+      "value": "Schválenie prihlásenia"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -102866,7 +102860,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "Ak chcete schváliť televízor, ukončite zobrazenie ako používateľ "
+      "value": "Ak chcete schváliť toto prihlásenie, ukončite zobrazenie ako používateľ "
     },
     {
       "type": 1,
@@ -102874,13 +102868,13 @@
     },
     {
       "type": 0,
-      "value": ". Televízor môže prihlásiť iba samotný účet."
+      "value": ". Zariadenia môže schváliť iba samotný účet."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Ak chcete schváliť televízor, ukončite zobrazenie ako tento používateľ. Televízor môže prihlásiť iba samotný účet."
+      "value": "Ak chcete schváliť toto prihlásenie, ukončite zobrazenie ako tento používateľ. Zariadenia môže schváliť iba samotný účet."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -102898,39 +102892,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Tento kód sme nenašli. Skontrolujte kód na televízore."
+      "value": "Tento kód sa nenašiel. Skontrolujte kód a skúste to znova."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Teraz nie"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Staršie aplikácie pre TV namiesto toho zobrazujú "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Schváľte iba zariadenie, ktoré máte práve pred sebou."
+      "value": "Zamietnuť"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Schváľte iba televízor, ktorý máte práve pred sebou."
+      "value": "Schváľte to iba vtedy, ak ste prihlásenie začali vy."
     }
   ],
   "web.auth.activate.playOn": [
@@ -102956,7 +102930,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Ktokoľvek, kto používa tento televízor, si môže vybrať z vašich profilov. Profily s PIN kódom zostanú zamknuté."
+      "value": "Zariadenie tak získa prístup k vašim profilom. Profily s PIN kódom zostanú zamknuté."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -103003,6 +102977,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Vyžiadané "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -103016,7 +103000,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Tento televízor prestal čakať. Začnite znova na televízore."
+      "value": "Toto zariadenie prestalo čakať. Spustite na ňom prihlásenie znova."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -103025,10 +103009,38 @@
       "value": "Toto prihlásenie bolo zamietnuté."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Hotovo. Zariadenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sa prihlasuje."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Zariadenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " je prihlásené."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Platnosť tohto kódu vypršala. Televízor zobrazuje nový. Použite ten kód."
+      "value": "Platnosť tohto kódu vypršala. Získajte v zariadení nový kód a skúste to znova."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -103112,25 +103124,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Tento televízor je už prihlásený."
+      "value": "Toto zariadenie je už prihlásené."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Tento televízor bol schválený a dokončuje prihlásenie."
+      "value": "Toto zariadenie bolo schválené a dokončuje prihlásenie."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Hotovo. Televízor sa prihlasuje."
+      "value": "Hotovo. Vaše zariadenie sa prihlasuje."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Televízor je prihlásený."
+      "value": "Vaše zariadenie je prihlásené."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -103174,7 +103186,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Prihlásiť zariadenie "
+      "value": "Povoliť prihlásenie zariadenia "
     },
     {
       "type": 1,
@@ -103188,7 +103200,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Prihlásiť toto zariadenie?"
+      "value": "Povoliť prihlásenie tohto zariadenia?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -103200,7 +103212,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "Prihláste sa na server "
+      "value": "Ak chcete schváliť toto prihlásenie, prihláste sa na server "
     },
     {
       "type": 1,
@@ -103208,13 +103220,13 @@
     },
     {
       "type": 0,
-      "value": " a schváľte tento televízor."
+      "value": "."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Prihlásiť televízor"
+      "value": "Schváliť prihlásenie"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -104264,7 +104276,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Zariadenie sa nepodarilo prihlásiť. Skúste to znova."
+      "value": "Nepodarilo sa schváliť prihlásenie. Skúste to znova."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -130188,6 +130200,12 @@
       "value": "Prekladá sa…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skryť rady servera pridané od tohto exportu:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -130206,6 +130224,12 @@
     {
       "type": 0,
       "value": " a nahradia sekcie, ktoré ste sem pridali predtým. Vaše zmeny sekcií tohto servera zostanú zachované."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Rady tohto servera sa od exportu tohto súboru zmenili, preto nižšie vyberte rady, ktoré chcete skryť."
     }
   ],
   "web.home.layout.checking": [
@@ -130256,6 +130280,26 @@
     {
       "type": 0,
       "value": "Zapne možnosť Skryť pozreté položky."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Skryje vybrané rady na: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " bez zmeny vašich ostatných radov na týchto stránkach."
     }
   ],
   "web.home.layout.import": [
@@ -130360,6 +130404,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -130586,6 +130648,12 @@
     {
       "type": 0,
       "value": "Sekcia bez názvu"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skryť rady servera, ktoré nie sú v tomto súbore:"
     }
   ],
   "web.home.page.customize": [

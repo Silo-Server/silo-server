@@ -79371,25 +79371,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "TV에 로그인하지 못했어요. 다시 시도해 주세요."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "앱에 다음 코드가 표시되는지 확인하세요"
+      "value": "로그인을 승인하지 못했어요. 다시 시도해 주세요."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "TV에 다음 코드가 표시되는지 확인하세요"
+      "value": "이 코드가 일치하는지 확인하세요"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "TV나 앱에 표시된 코드를 입력하세요"
+      "value": "기기에 표시된 코드를 입력하세요"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -79401,13 +79395,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "내 계정으로 TV나 다른 기기에 로그인하세요."
+      "value": "TV, 앱 또는 다른 기기에 로그인하세요."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "TV 로그인"
+      "value": "로그인 승인"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -79419,7 +79413,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "TV를 승인하려면 "
+      "value": "이 로그인을 승인하려면 "
     },
     {
       "type": 1,
@@ -79427,13 +79421,13 @@
     },
     {
       "type": 0,
-      "value": " 계정으로 보기를 중지하세요. TV 로그인은 해당 계정 본인만 승인할 수 있어요."
+      "value": " 계정으로 보기를 중지하세요. 기기는 해당 계정 본인만 승인할 수 있어요."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "TV를 승인하려면 이 사용자로 보기를 중지하세요. TV 로그인은 해당 계정 본인만 승인할 수 있어요."
+      "value": "이 로그인을 승인하려면 이 사용자로 보기를 중지하세요. 기기는 해당 계정 본인만 승인할 수 있어요."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -79451,35 +79445,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "해당 코드를 찾을 수 없어요. TV에 표시된 코드를 확인하세요."
+      "value": "코드를 찾을 수 없어요. 코드를 확인하고 다시 시도해 주세요."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "나중에"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "이전 버전의 TV 앱에는 대신 다음 단어가 표시돼요: "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "지금 눈앞에 있는 기기만 승인하세요."
+      "value": "거절"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "지금 눈앞에 있는 TV만 승인하세요."
+      "value": "직접 시작한 로그인만 승인하세요."
     }
   ],
   "web.auth.activate.playOn": [
@@ -79501,7 +79479,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "이 TV를 사용하는 누구나 내 프로필 중에서 선택할 수 있어요. PIN이 설정된 프로필은 잠긴 상태로 유지돼요."
+      "value": "이 기기에서 내 프로필에 접근할 수 있게 돼요. PIN이 설정된 프로필은 잠긴 상태로 유지돼요."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -79548,6 +79526,16 @@
       "value": " 요청됨"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " 요청됨"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -79561,7 +79549,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "TV에서 대기를 중지했어요. TV에서 다시 시작하세요."
+      "value": "이 기기가 대기를 중단했어요. 기기에서 로그인을 다시 시작하세요."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -79570,10 +79558,34 @@
       "value": "이 로그인은 거절됐어요."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "완료됐어요. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "에서 로그인하는 중이에요."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "에서 로그인됐어요."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "이 코드는 만료됐어요. TV에 새 코드가 표시되고 있으니 그 코드를 사용하세요."
+      "value": "코드가 만료됐어요. 기기에서 새 코드를 받아 다시 시도해 주세요."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -79657,25 +79669,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "해당 TV는 이미 로그인돼 있어요."
+      "value": "이 기기는 이미 로그인되어 있어요."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "이 TV는 승인됐고 로그인을 마무리하는 중이에요."
+      "value": "이 기기는 승인됐고 로그인을 마무리하는 중이에요."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "완료됐어요. TV가 로그인하는 중이에요."
+      "value": "완료됐어요. 기기가 로그인하는 중이에요."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "TV가 로그인됐어요."
+      "value": "기기가 로그인됐어요."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -79719,13 +79731,13 @@
     },
     {
       "type": 0,
-      "value": " 기기에 로그인할까요?"
+      "value": "에서 로그인하도록 허용할까요?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "이 기기에 로그인할까요?"
+      "value": "이 기기에서 로그인하도록 허용할까요?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -79737,7 +79749,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "이 TV를 승인하려면 "
+      "value": "이 로그인을 승인하려면 "
     },
     {
       "type": 1,
@@ -79751,7 +79763,7 @@
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "TV 로그인"
+      "value": "로그인 승인"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -80785,7 +80797,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "기기에 로그인하지 못했어요. 다시 시도해 주세요."
+      "value": "로그인을 승인하지 못했어요. 다시 시도해 주세요."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -100073,6 +100085,12 @@
       "value": "번역 중…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "이 파일을 내보낸 후 추가된 서버 행 숨기기:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -100091,6 +100109,12 @@
     {
       "type": 0,
       "value": ". 이전에 여기에서 추가한 섹션은 대체돼요. 이 서버 섹션에 대한 변경 사항은 그대로 유지돼요."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "이 파일을 내보낸 후 이 서버의 행이 바뀌었어요. 숨길 행을 아래에서 선택하세요."
     }
   ],
   "web.home.layout.checking": [
@@ -100141,6 +100165,26 @@
     {
       "type": 0,
       "value": "시청한 항목 숨기기를 켜요."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "다음 페이지에서 선택한 행을 숨겨요: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ". 해당 페이지의 다른 행은 그대로 유지돼요."
     }
   ],
   "web.home.layout.import": [
@@ -100245,6 +100289,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": "("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -100446,6 +100508,12 @@
     {
       "type": 0,
       "value": "제목 없는 섹션"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "이 파일에 없는 서버 행 숨기기:"
     }
   ],
   "web.home.page.customize": [

@@ -299,12 +299,16 @@ function ActivateDeviceRequest() {
   const deviceName = details?.device_name || "";
   const shownCode = displayDeviceCode(details?.user_code || code);
   const requestedAgo = formatRelativeTime(details?.requested_at);
-  const deviceLine = [
-    details?.device_platform ? platformLabel(details.device_platform) : "",
-    requestedAgo ? t("web.auth.activate.requestedAgo", { time: requestedAgo }) : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const rawPlatform = details?.device_platform ? platformLabel(details.device_platform) : "";
+  const platform =
+    rawPlatform && rawPlatform.toLowerCase() !== deviceName.toLowerCase() ? rawPlatform : "";
+  const deviceLine = platform
+    ? [platform, requestedAgo ? t("web.auth.activate.requestedAgo", { time: requestedAgo }) : ""]
+        .filter(Boolean)
+        .join(" · ")
+    : requestedAgo
+      ? t("web.auth.activate.requestedAgoStandalone", { time: requestedAgo })
+      : "";
 
   let resultMessage = "";
   switch (details?.status) {
@@ -324,10 +328,12 @@ function ActivateDeviceRequest() {
             profile: approvedProfile,
           });
         }
+      } else if (!approvedHere) {
+        resultMessage = t("web.auth.activate.result.tvApproved");
+      } else if (deviceName) {
+        resultMessage = t("web.auth.activate.result.deviceDone", { device: deviceName });
       } else {
-        resultMessage = t(
-          approvedHere ? "web.auth.activate.result.tvDone" : "web.auth.activate.result.tvApproved",
-        );
+        resultMessage = t("web.auth.activate.result.tvDone");
       }
       break;
     case "consumed":
@@ -335,12 +341,12 @@ function ActivateDeviceRequest() {
         resultMessage = t("web.auth.activate.result.remoteApproved");
       } else if (isQuickConnect) {
         resultMessage = t("web.auth.activate.result.quickConnectSignedIn");
+      } else if (!approvedHere) {
+        resultMessage = t("web.auth.activate.result.tvAlreadySignedIn");
+      } else if (deviceName) {
+        resultMessage = t("web.auth.activate.result.deviceSignedIn", { device: deviceName });
       } else {
-        resultMessage = t(
-          approvedHere
-            ? "web.auth.activate.result.tvSignedIn"
-            : "web.auth.activate.result.tvAlreadySignedIn",
-        );
+        resultMessage = t("web.auth.activate.result.tvSignedIn");
       }
       break;
     case "denied":
@@ -460,7 +466,7 @@ function ActivateDeviceRequest() {
               {details.status === "pending" && shownCode ? (
                 <div className="border-border/60 bg-background/50 rounded-md border p-4">
                   <div className="text-muted-foreground text-sm">
-                    {t(isQuickConnect ? "web.auth.activate.checkApp" : "web.auth.activate.checkTv")}
+                    {t("web.auth.activate.checkTv")}
                   </div>
                   <div
                     className="mt-1 font-mono text-3xl font-semibold tracking-[0.12em]"
@@ -469,15 +475,6 @@ function ActivateDeviceRequest() {
                     {shownCode}
                   </div>
                   <span className="sr-only">{spokenDeviceCode(shownCode)}</span>
-                  {details.match_code && !isQuickConnect ? (
-                    // TV apps released before user codes show only these
-                    // words. Remove once both TV apps show the user code.
-                    <div className="text-muted-foreground mt-2 text-xs">
-                      {t("web.auth.activate.olderTvApps", {
-                        words: details.match_code.toUpperCase(),
-                      })}
-                    </div>
-                  ) : null}
                 </div>
               ) : null}
 
@@ -551,13 +548,7 @@ function ActivateDeviceRequest() {
                         {t("web.auth.activate.profilesShared")}
                       </p>
                     )}
-                    <p className="text-sm font-medium">
-                      {t(
-                        isQuickConnect
-                          ? "web.auth.activate.onlyApproveDevice"
-                          : "web.auth.activate.onlyApproveTv",
-                      )}
-                    </p>
+                    <p className="text-sm font-medium">{t("web.auth.activate.onlyApproveTv")}</p>
                     {details.ip_address_hint ? (
                       <p className="text-muted-foreground text-xs">
                         {t("web.auth.activate.requestedFrom", { ip: details.ip_address_hint })}
@@ -618,7 +609,7 @@ function ActivateDeviceRequest() {
               {!token || details.status === "expired" ? (
                 <Button
                   type="button"
-                  variant="outline"
+                  variant={details.status === "pending" ? "ghost" : "outline"}
                   className="w-full"
                   onClick={enterAnotherCode}
                 >

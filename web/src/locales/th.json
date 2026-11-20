@@ -80099,25 +80099,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "ลงชื่อเข้าใช้ทีวีไม่ได้ โปรดลองอีกครั้ง"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "ตรวจสอบว่าแอปแสดง"
+      "value": "อนุมัติการลงชื่อเข้าใช้ไม่ได้ โปรดลองอีกครั้ง"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "ตรวจสอบว่าทีวีแสดง"
+      "value": "ตรวจสอบว่ารหัสนี้ตรงกัน"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "ป้อนรหัสที่แสดงบนทีวีหรือแอป"
+      "value": "ป้อนรหัสที่แสดงบนอุปกรณ์"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -80129,13 +80123,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "ลงชื่อเข้าใช้ทีวีหรืออุปกรณ์อื่นด้วยบัญชีของคุณ"
+      "value": "ลงชื่อเข้าใช้ทีวี แอป หรืออุปกรณ์อื่น"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "ลงชื่อเข้าใช้ทีวี"
+      "value": "อนุมัติการลงชื่อเข้าใช้"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -80155,13 +80149,13 @@
     },
     {
       "type": 0,
-      "value": " เพื่ออนุมัติทีวี ลงชื่อเข้าใช้ทีวีได้ด้วยบัญชีนั้นเองเท่านั้น"
+      "value": " เพื่ออนุมัติการลงชื่อเข้าใช้นี้ บัญชีนั้นเองเท่านั้นที่อนุมัติอุปกรณ์ได้"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "หยุดดูในฐานะผู้ใช้นี้เพื่ออนุมัติทีวี ลงชื่อเข้าใช้ทีวีได้ด้วยบัญชีนั้นเองเท่านั้น"
+      "value": "หยุดดูในฐานะผู้ใช้นี้เพื่ออนุมัติการลงชื่อเข้าใช้นี้ บัญชีนั้นเองเท่านั้นที่อนุมัติอุปกรณ์ได้"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -80179,39 +80173,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "ไม่พบรหัสนั้น โปรดตรวจสอบรหัสบนทีวี"
+      "value": "ไม่พบรหัสนั้น โปรดตรวจสอบรหัสแล้วลองอีกครั้ง"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "ไม่ใช่ตอนนี้"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "แอปทีวีรุ่นเก่าจะแสดง "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " แทน"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "อนุมัติอุปกรณ์ที่อยู่ตรงหน้าคุณในขณะนี้เท่านั้น"
+      "value": "ปฏิเสธ"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "อนุมัติทีวีที่อยู่ตรงหน้าคุณในขณะนี้เท่านั้น"
+      "value": "อนุมัติก็ต่อเมื่อคุณเริ่มการลงชื่อเข้าใช้นี้เองเท่านั้น"
     }
   ],
   "web.auth.activate.playOn": [
@@ -80237,7 +80211,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "ทุกคนที่ใช้ทีวีเครื่องนี้เลือกโปรไฟล์ของคุณได้ โปรไฟล์ที่มี PIN จะยังล็อกอยู่"
+      "value": "การอนุมัตินี้จะทำให้อุปกรณ์เข้าถึงโปรไฟล์ของคุณได้ โปรไฟล์ที่มี PIN จะยังล็อกอยู่"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -80284,6 +80258,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "ขอเมื่อ "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -80297,7 +80281,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "ทีวีเครื่องนี้หยุดรอแล้ว โปรดเริ่มใหม่บนทีวี"
+      "value": "อุปกรณ์นี้หยุดรอแล้ว โปรดเริ่มลงชื่อเข้าใช้อีกครั้งในอุปกรณ์นั้น"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -80306,10 +80290,34 @@
       "value": "ปฏิเสธการลงชื่อเข้าใช้นี้แล้ว"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "เสร็จสิ้น "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " กำลังลงชื่อเข้าใช้"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ลงชื่อเข้าใช้แล้ว"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "รหัสนี้หมดอายุแล้ว ทีวีกำลังแสดงรหัสใหม่ โปรดใช้รหัสนั้นแทน"
+      "value": "รหัสนี้หมดอายุแล้ว โปรดขอรหัสใหม่ในอุปกรณ์แล้วลองอีกครั้ง"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -80385,25 +80393,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "ทีวีเครื่องนั้นลงชื่อเข้าใช้อยู่แล้ว"
+      "value": "อุปกรณ์นี้ลงชื่อเข้าใช้อยู่แล้ว"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "อนุมัติทีวีเครื่องนี้แล้ว และกำลังลงชื่อเข้าใช้ให้เสร็จ"
+      "value": "อนุมัติอุปกรณ์นี้แล้ว และกำลังลงชื่อเข้าใช้ให้เสร็จ"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "เสร็จสิ้น ทีวีกำลังลงชื่อเข้าใช้"
+      "value": "เสร็จสิ้น อุปกรณ์กำลังลงชื่อเข้าใช้"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "ทีวีลงชื่อเข้าใช้แล้ว"
+      "value": "อุปกรณ์ลงชื่อเข้าใช้แล้ว"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -80447,7 +80455,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "ลงชื่อเข้าใช้อุปกรณ์ "
+      "value": "อนุญาตให้ "
     },
     {
       "type": 1,
@@ -80455,13 +80463,13 @@
     },
     {
       "type": 0,
-      "value": " ใช่ไหม"
+      "value": " ลงชื่อเข้าใช้ไหม"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "ลงชื่อเข้าใช้อุปกรณ์นี้ใช่ไหม"
+      "value": "อนุญาตให้อุปกรณ์นี้ลงชื่อเข้าใช้ไหม"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -80481,13 +80489,13 @@
     },
     {
       "type": 0,
-      "value": " เพื่ออนุมัติทีวีเครื่องนี้"
+      "value": " เพื่ออนุมัติการลงชื่อเข้าใช้นี้"
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "ลงชื่อเข้าใช้ทีวี"
+      "value": "อนุมัติการลงชื่อเข้าใช้"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -81533,7 +81541,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "ลงชื่อเข้าใช้อุปกรณ์ไม่ได้ โปรดลองอีกครั้ง"
+      "value": "อนุมัติการลงชื่อเข้าใช้ไม่ได้ โปรดลองอีกครั้ง"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -100753,6 +100761,12 @@
       "value": "กำลังแปล…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "ซ่อนแถวของเซิร์ฟเวอร์ที่เพิ่มหลังจากการส่งออกนี้:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -100771,6 +100785,12 @@
     {
       "type": 0,
       "value": " แทนที่ส่วนที่คุณเพิ่มไว้ที่นี่ก่อนหน้านี้ การเปลี่ยนแปลงที่คุณทำกับส่วนของเซิร์ฟเวอร์นี้จะยังคงอยู่"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "แถวของเซิร์ฟเวอร์นี้เปลี่ยนไปหลังจากส่งออกไฟล์นี้ โปรดเลือกแถวที่ต้องการซ่อนด้านล่าง"
     }
   ],
   "web.home.layout.checking": [
@@ -100821,6 +100841,26 @@
     {
       "type": 0,
       "value": "เปิดซ่อนรายการที่ดูแล้ว"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "ซ่อนแถวที่เลือกใน: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " โดยไม่เปลี่ยนแถวอื่นของคุณในหน้านั้น"
     }
   ],
   "web.home.layout.import": [
@@ -100917,6 +100957,24 @@
           "value": "pages"
         }
       ]
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -101118,6 +101176,12 @@
     {
       "type": 0,
       "value": "ส่วนที่ไม่มีชื่อ"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "ซ่อนแถวของเซิร์ฟเวอร์ที่ไม่มีในไฟล์นี้:"
     }
   ],
   "web.home.page.customize": [

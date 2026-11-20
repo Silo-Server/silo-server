@@ -95823,25 +95823,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Neizdevās pierakstīties televizorā. Mēģiniet vēlreiz."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Pārbaudiet, vai jūsu lietotnē ir redzams"
+      "value": "Neizdevās apstiprināt pierakstīšanos. Mēģiniet vēlreiz."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Pārbaudiet, vai jūsu televizorā ir redzams"
+      "value": "Pārliecinieties, ka šis kods sakrīt"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Ievadiet kodu, kas redzams televizorā vai lietotnē"
+      "value": "Ievadiet ierīcē redzamo kodu"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -95853,13 +95847,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Pierakstieties televizorā vai citā ierīcē ar savu kontu."
+      "value": "Pierakstiet televizoru, lietotni vai citu ierīci."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Pierakstīšanās televizorā"
+      "value": "Pierakstīšanās apstiprināšana"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -95879,13 +95873,13 @@
     },
     {
       "type": 0,
-      "value": ", lai apstiprinātu televizoru. Pierakstīties televizorā var tikai pats konts."
+      "value": ", lai apstiprinātu šo pierakstīšanos. Ierīces var apstiprināt tikai pats konts."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Pārtrauciet skatīšanos kā šis lietotājs, lai apstiprinātu televizoru. Pierakstīties televizorā var tikai pats konts."
+      "value": "Pārtrauciet skatīšanos kā šis lietotājs, lai apstiprinātu šo pierakstīšanos. Ierīces var apstiprināt tikai pats konts."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -95903,39 +95897,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Šo kodu neizdevās atrast. Pārbaudiet kodu televizorā."
+      "value": "Neizdevās atrast šo kodu. Pārbaudiet kodu un mēģiniet vēlreiz."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ne tagad"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Vecākas televizoru lietotnes tā vietā rāda: "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Apstipriniet tikai tādu ierīci, kas pašlaik ir jūsu priekšā."
+      "value": "Noraidīt"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Apstipriniet tikai tādu televizoru, kas pašlaik ir jūsu priekšā."
+      "value": "Apstipriniet tikai tad, ja pierakstīšanos sākāt jūs."
     }
   ],
   "web.auth.activate.playOn": [
@@ -95961,7 +95935,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Ikviens, kas izmanto šo televizoru, var izvēlēties kādu no jūsu profiliem. Ar PIN aizsargātie profili paliek bloķēti."
+      "value": "Tādējādi tai tiek piešķirta piekļuve jūsu profiliem. Profili ar PIN paliek bloķēti."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -96008,6 +95982,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Pieprasīts "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -96021,7 +96005,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Šis televizors pārstāja gaidīt. Sāciet vēlreiz televizorā."
+      "value": "Šī ierīce vairs negaida. Sāciet pierakstīšanos tajā vēlreiz."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -96030,10 +96014,38 @@
       "value": "Šī pierakstīšanās tika noraidīta."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Gatavs. Ierīce „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "” pierakstās."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Ierīce „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "” ir pierakstīta."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Šim kodam beidzās derīguma termiņš. Jūsu televizorā tiek rādīts jauns kods. Izmantojiet to."
+      "value": "Šī koda derīguma termiņš ir beidzies. Iegūstiet ierīcē jaunu kodu un mēģiniet vēlreiz."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -96117,25 +96129,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Šajā televizorā jau ir veikta pierakstīšanās."
+      "value": "Šī ierīce jau ir pierakstīta."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Šis televizors tika apstiprināts un pabeidz pierakstīšanos."
+      "value": "Šī ierīce tika apstiprināta un pabeidz pierakstīšanos."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Gatavs. Jūsu televizors pierakstās."
+      "value": "Gatavs. Jūsu ierīce pierakstās."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Jūsu televizorā ir veikta pierakstīšanās."
+      "value": "Jūsu ierīce ir pierakstīta."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -96179,7 +96191,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Vai pierakstīt ierīci "
+      "value": "Vai atļaut ierīcei „"
     },
     {
       "type": 1,
@@ -96187,13 +96199,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": "” pierakstīties?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Vai pierakstīt šo ierīci?"
+      "value": "Vai atļaut šai ierīcei pierakstīties?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -96213,13 +96225,13 @@
     },
     {
       "type": 0,
-      "value": ", lai apstiprinātu šo televizoru."
+      "value": ", lai apstiprinātu šo pierakstīšanos."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Pierakstīt televizoru"
+      "value": "Apstiprināt pierakstīšanos"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -97273,7 +97285,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Neizdevās pierakstīt ierīci. Mēģiniet vēlreiz."
+      "value": "Neizdevās apstiprināt pierakstīšanos. Mēģiniet vēlreiz."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -121205,6 +121217,12 @@
       "value": "Notiek tulkošana…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Paslēpt servera rindas, kas pievienotas pēc šī eksporta:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -121223,6 +121241,12 @@
     {
       "type": 0,
       "value": ", aizstājot sadaļas, ko iepriekš pievienojāt šeit. Jūsu izmaiņas šī servera sadaļās saglabāsies."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Šī servera rindas ir mainījušās, kopš šis fails tika eksportēts, tāpēc tālāk izvēlieties, kuras rindas paslēpt."
     }
   ],
   "web.home.layout.checking": [
@@ -121273,6 +121297,26 @@
     {
       "type": 0,
       "value": "Ieslēdz iestatījumu „Paslēpt skatītos vienumus”."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Paslēpj atlasītās rindas lapās: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", nemainot pārējās jūsu rindas tajās."
     }
   ],
   "web.home.layout.import": [
@@ -121377,6 +121421,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -121596,6 +121658,12 @@
     {
       "type": 0,
       "value": "Sadaļa bez nosaukuma"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Paslēpt servera rindas, kuru nav šajā failā:"
     }
   ],
   "web.home.page.customize": [
