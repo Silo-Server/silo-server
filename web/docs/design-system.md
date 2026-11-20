@@ -140,7 +140,8 @@ Colors are organized as semantic layers. `app.css` provides the actual values; c
 - `--primary-foreground`: text on primary elements
 - `--secondary`: secondary element backgrounds
 - `--accent`: highlighted and active backgrounds
-- `--destructive`: destructive actions
+- `--destructive`: danger and error text, icons, borders, and status dots
+- `--destructive-fill`: solid danger background for destructive buttons and badges, labelled with `--destructive-foreground`. A white label on `--destructive` doesn't reach 4.5:1, so don't fill with it
 - `--ring`: focus ring
 
 ### Ambient Tokens
