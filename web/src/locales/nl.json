@@ -449,6 +449,12 @@
       "value": "Log in via de aanmelding van je netwerk om door te gaan."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Deze node is ingesteld door de implementatieconfiguratie van de server. Verwijder hem daar en herstart de API-servers om hem hier te beheren."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30366,7 +30372,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Overzicht van recent gestarte afspeelsessies"
+      "value": "Meest recente weergaven van alle accounts"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -31991,6 +31997,80 @@
     {
       "type": 0,
       "value": "Kan de activiteit niet laden."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " heeft "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " afgespeeld"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " heeft "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " afgespeeld"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49172,6 +49252,12 @@
       "value": "Voer het serveradres in om de instellingen te voltooien."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Sleutel ingesteld door de implementatieconfiguratie van de server"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50088,6 +50174,12 @@
     {
       "type": 0,
       "value": " verwijderen"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ingesteld door de implementatieconfiguratie van de server. Verwijder hem daar om hem hier te kunnen verwijderen."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -56845,6 +56937,12 @@
     {
       "type": 0,
       "value": "Bericht verzonden"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "De speler heeft het bericht niet bevestigd. Het kan later of helemaal niet verschijnen."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

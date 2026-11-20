@@ -449,6 +449,12 @@
       "value": "Inicia sesión con el sistema de inicio de sesión de tu red para continuar."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "La configuración de implementación del servidor define este nodo. Quítalo de allí y reinicia los servidores de la API para administrarlo aquí."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -33640,7 +33646,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Lista de las sesiones de reproducción iniciadas recientemente"
+      "value": "Reproducciones más recientes de todas las cuentas"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35440,6 +35446,72 @@
     {
       "type": 0,
       "value": "No se pudo cargar la actividad."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " reprodujo "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " reprodujo "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -55287,6 +55359,12 @@
       "value": "Introduce la dirección del servidor para completar la configuración."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Clave definida por la configuración de implementación del servidor"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -56207,6 +56285,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Lo define la configuración de implementación del servidor. Quítalo de allí para eliminarlo aquí."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -63682,6 +63766,12 @@
     {
       "type": 0,
       "value": "Mensaje enviado"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "El reproductor no confirmó el mensaje. Es posible que se muestre más tarde o que no llegue a mostrarse."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

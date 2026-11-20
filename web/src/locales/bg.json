@@ -449,6 +449,12 @@
       "value": "Влезте чрез входа на вашата мрежа, за да продължите."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Този възел е зададен от конфигурацията за внедряване на сървъра. Премахнете го оттам и рестартирайте API сървърите, за да го управлявате тук."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30510,7 +30516,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Поток от наскоро започнати сесии за възпроизвеждане"
+      "value": "Последните пускания във всички акаунти"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32143,6 +32149,72 @@
     {
       "type": 0,
       "value": "Не можа да се зареди активността."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " пусна "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " пусна "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49576,6 +49648,12 @@
       "value": "Въведете адреса на сървъра, за да завършите настройките."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ключът е зададен от конфигурацията за внедряване на сървъра"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50492,6 +50570,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Възелът е зададен от конфигурацията за внедряване на сървъра. Премахнете го оттам, за да го изтриете тук."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -57369,6 +57453,12 @@
     {
       "type": 0,
       "value": "Съобщението е изпратено"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Плейърът не потвърди получаването на съобщението. То може да се покаже по-късно или изобщо да не се покаже."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

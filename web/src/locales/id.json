@@ -449,6 +449,12 @@
       "value": "Masuk melalui halaman masuk jaringan Anda untuk melanjutkan."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Node ini ditetapkan oleh konfigurasi deployment server. Hapus node ini di sana, lalu mulai ulang server API agar dapat mengelolanya di sini."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -27460,7 +27466,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Daftar sesi pemutaran yang baru dimulai"
+      "value": "Pemutaran terbaru di semua akun"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -28918,6 +28924,72 @@
     {
       "type": 0,
       "value": "Tidak dapat memuat aktivitas."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " memutar "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " memutar "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -43820,6 +43892,12 @@
       "value": "Masukkan alamat server untuk melengkapi pengaturan."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Kunci ditetapkan oleh konfigurasi deployment server"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -44716,6 +44794,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh konfigurasi deployment server. Hapus di sana agar dapat menghapusnya di sini."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -50735,6 +50819,12 @@
     {
       "type": 0,
       "value": "Pesan dikirim"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Pemutar tidak mengonfirmasi pesan. Pesan mungkin muncul terlambat atau tidak muncul sama sekali."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

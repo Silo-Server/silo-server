@@ -449,6 +449,12 @@
       "value": "계속하려면 네트워크의 로그인 절차를 통해 로그인하세요."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "이 노드는 서버의 배포 구성에서 설정됐어요. 여기에서 관리하려면 배포 구성에서 노드를 제거하고 API 서버를 다시 시작하세요."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -27684,7 +27690,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "최근 시작된 재생 세션 피드"
+      "value": "모든 계정의 최근 재생 기록"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -29142,6 +29148,80 @@
     {
       "type": 0,
       "value": "활동을 불러오지 못했어요."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "님이 "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " 작품을 재생했어요"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "님이 "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " 프로필로 "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " 작품을 재생했어요"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -44172,6 +44252,12 @@
       "value": "설정을 완성하려면 서버 주소를 입력하세요."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "서버의 배포 구성에서 설정된 키"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 1,
@@ -45060,6 +45146,12 @@
     {
       "type": 0,
       "value": " 노드 삭제"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "서버의 배포 구성에서 설정됐어요. 여기에서 삭제하려면 배포 구성에서 제거하세요."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -51143,6 +51235,12 @@
     {
       "type": 0,
       "value": "메시지를 보냈어요"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "플레이어에서 메시지 수신을 확인하지 않았어요. 메시지가 늦게 표시되거나 아예 표시되지 않을 수 있어요."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

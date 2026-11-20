@@ -449,6 +449,12 @@
       "value": "Inicia la sessió amb l’inici de sessió de la teva xarxa per continuar."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Aquest node el defineix la configuració de desplegament del servidor. Treu-lo d’allà i reinicia els servidors d’API per gestionar-lo aquí."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -33648,7 +33654,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Llista de les sessions de reproducció iniciades recentment"
+      "value": "Reproduccions més recents de tots els comptes"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35448,6 +35454,72 @@
     {
       "type": 0,
       "value": "No s’ha pogut carregar l’activitat."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ha reproduït "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ha reproduït "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -55327,6 +55399,12 @@
       "value": "Introdueix l’adreça del servidor per completar els paràmetres."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Clau definida per la configuració de desplegament del servidor"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -56247,6 +56325,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Node definit per la configuració de desplegament del servidor. Treu-lo d’allà per eliminar-lo aquí."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -63786,6 +63870,12 @@
     {
       "type": 0,
       "value": "S’ha enviat el missatge"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "El reproductor no ha confirmat el missatge. És possible que es mostri tard o que no es mostri."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

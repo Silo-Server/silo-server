@@ -449,6 +449,12 @@
       "value": "Prijavite se putem prijave svoje mreže da biste nastavili."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Ovaj čvor postavlja konfiguracija implementacije poslužitelja. Uklonite ga ondje i ponovno pokrenite API poslužitelje da biste njime upravljali ovdje."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -33612,7 +33618,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Feed nedavno pokrenutih sesija reprodukcije"
+      "value": "Najnovije reprodukcije na svim računima"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35420,6 +35426,72 @@
     {
       "type": 0,
       "value": "Učitavanje aktivnosti nije uspjelo."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " – reproducirano: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " – reproducirano: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -55335,6 +55407,12 @@
       "value": "Unesite adresu poslužitelja da biste dovršili postavke."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ključ postavlja konfiguracija implementacije poslužitelja"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -56263,6 +56341,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Postavlja konfiguracija implementacije poslužitelja. Uklonite ga ondje da biste ga izbrisali ovdje."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -63798,6 +63882,12 @@
     {
       "type": 0,
       "value": "Poruka je poslana"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Reproduktor nije potvrdio primitak poruke. Možda će se prikazati sa zakašnjenjem ili se uopće neće prikazati."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

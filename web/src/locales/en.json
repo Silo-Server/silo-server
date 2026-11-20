@@ -449,6 +449,12 @@
       "value": "Sign in through your network’s sign-in to continue."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "This node is set by the server’s deployment configuration. Remove it there and restart the API servers to manage it here."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30590,7 +30596,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Feed of recently started playback sessions"
+      "value": "Most recent plays across all accounts"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32219,6 +32225,72 @@
     {
       "type": 0,
       "value": "Failed to load activity."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " played "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " played "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49552,6 +49624,12 @@
       "value": "Enter the server address to complete the settings."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Key set by the server’s deployment configuration"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50460,6 +50538,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Set by the server’s deployment configuration. Remove it there to delete it here."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -57209,6 +57293,12 @@
     {
       "type": 0,
       "value": "Message sent"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "The player didn’t confirm the message. It may show up late or not at all."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -77101,6 +77191,18 @@
     {
       "type": 0,
       "value": "Autoscan webhook retry"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Re-reads the header of MKV files with ASS subtitles scanned before Silo left embedded fonts out of the bitrate, so they are not transcoded for a bitrate they do not stream."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Correct Bitrate of Files with Embedded Fonts"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [

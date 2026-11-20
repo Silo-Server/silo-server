@@ -449,6 +449,12 @@
       "value": "سجّل الدخول عبر تسجيل الدخول الخاص بشبكتك للمتابعة."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "تُعيَّن هذه العقدة من إعدادات نشر الخادم. أزلها من هناك وأعد تشغيل خوادم API لإدارتها من هنا."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -42773,7 +42779,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "موجز بجلسات التشغيل التي بدأت مؤخرًا"
+      "value": "أحدث عمليات التشغيل في جميع الحسابات"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -45034,6 +45040,72 @@
     {
       "type": 0,
       "value": "تعذّر تحميل النشاط."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " شغّل "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " شغّل "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -71489,6 +71561,12 @@
       "value": "أدخل عنوان الخادم لإكمال الإعدادات."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "المفتاح مُعيَّن من إعدادات نشر الخادم"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -72445,6 +72523,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "مُعيَّنة من إعدادات نشر الخادم. أزلها من هناك لحذفها من هنا."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -82042,6 +82126,12 @@
     {
       "type": 0,
       "value": "تم إرسال الرسالة"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "لم يؤكّد المشغّل استلام الرسالة. قد تظهر متأخرة أو لا تظهر إطلاقًا."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
