@@ -59,6 +59,18 @@ that before it ships.
   (`copy_fmp4.go`, `copy_group_assembler.go`, `copy_keyframe_resume_test.go`)
   are not carried. The deferral preserves the fork's segment numbering and
   seek-anchor behavior; porting the assembler is a separate project.
+- The per-node worker key handshake is not adopted either; the fork keeps the
+  shared `auth.jwt_secret` for worker calls. `nodeauth.Sign` and `SignWith`
+  therefore send an unsigned request when no key is configured instead of
+  refusing it, and `nodepool.TranscodePool.HasKey` treats every node as
+  signable while no key check is wired. Do not reintroduce a hard failure
+  there: it would leave every transcode node filtered out of route planning on
+  a deployment without node keys. Node result headers keep the fork's
+  `X-Vio-*` names (see `internal/downloadprepare`).
+- The fork's start-ready pipeline (`transcode_startup.go`, `prepare_file.go`,
+  `prepare_progress.go`) and its tests are the ones to keep on a merge:
+  upstream's rework there changes when a transcode is declared ready and how a
+  hardware start falls back, and the fork's tests pin the older contract.
 
 ## Merge procedure
 
