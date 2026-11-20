@@ -422,14 +422,12 @@ func audiobookTagNarrators(tags map[string]string, authors []string) []string {
 	for _, a := range authors {
 		isAuthor[strings.ToLower(a)] = true
 	}
-	//nolint:goconst // Tag keys are data, matching the names ffprobe reports.
 	for _, key := range []string{"narrator", "narratedby"} {
 		if names := splitAudiobookCredits(tags[key]); len(names) > 0 {
 			return names
 		}
 	}
 	var first []string
-	//nolint:goconst // Tag keys are data, matching the names ffprobe reports.
 	for _, key := range []string{"performer", "composer"} {
 		names := splitAudiobookCredits(tags[key])
 		if len(names) == 0 {
@@ -497,8 +495,6 @@ const maxAudiobookTmpGenres = 20
 // genre tag of files exported from Audible joins categories with ", " too
 // ("Mystery, Thriller & Suspense, Cozy"), so these names are taken out
 // whole before the rest splits on commas.
-//
-//nolint:goconst // Genre names are data.
 var audibleCommaGenres = []string{
 	"Mystery, Thriller & Suspense",
 	"Relationships, Parenting & Personal Development",

@@ -89,6 +89,7 @@ func RunCompletedHistoryPage(t *testing.T, newStore func(*testing.T) userstore.U
 		}
 	}
 	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	//nolint:goconst // Test row ids, written where they are asserted.
 	want := []string{"tie-a", "tie-b", "tie-c", "quarter", "three-quarters", "next-second"}
 	for i, at := range []time.Time{base, base, base, base.Add(250 * time.Millisecond), base.Add(750 * time.Millisecond), base.Add(time.Second)} {
 		add(want[i], at, true)

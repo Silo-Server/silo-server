@@ -46,13 +46,13 @@ func trackInoFor(contentID string, fileIdx int) string {
 // and a ?token= query-param fallback (the iOS streaming variant uses ?token=
 // because AVPlayer doesn't add Authorization on its own subrequests).
 //
-// "ino" in real ABS is the file's filesystem inode. We synthesise an
+// "ino" in real ABS is the file's filesystem inode. We synthesize an
 // MD5-derived inode-shaped string per trackInoFor — the same value emitted by
 // handlePlayStart. To reverse: call GetMediaFiles for the item, then find the
 // file whose index matches the ino. As a fallback we also accept a bare
 // 0-based integer index.
 //
-// Behaviour:
+// Behavior:
 //   - Validate ABS bearer token (bearerAuth middleware has already done this).
 //   - Look up the requested file in silo's media_files table.
 //   - Serve the bytes directly with Range-request support via playback.ServeDirectPlay.
@@ -219,7 +219,7 @@ func downloadRefused(err error) bool {
 //  4. Stream via playback.ServeDirectPlay (handles Range + HEAD).
 //
 // Mounted OUTSIDE bearerAuth: the client sends no Authorization header on
-// this endpoint, and the session ID alone authorises access.
+// this endpoint, and the session ID alone authorizes access.
 func (h *Handler) handlePublicTrack(w http.ResponseWriter, r *http.Request) {
 	sid := chi.URLParam(r, "sid")
 	idxStr := chi.URLParam(r, "idx")

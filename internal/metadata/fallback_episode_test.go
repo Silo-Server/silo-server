@@ -515,15 +515,15 @@ func newFakeEpisodeLinkerFileRepo() *fakeEpisodeLinkerFileRepo {
 }
 
 func (r *fakeEpisodeLinkerFileRepo) addFile(file *models.MediaFile) {
-	r.fakeFileRepo.mu.Lock()
-	defer r.fakeFileRepo.mu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	cp := *file
 	r.files[file.ID] = &cp
 }
 
 func (r *fakeEpisodeLinkerFileRepo) UpdateEpisodeLink(_ context.Context, fileID int, _ string, episodeID string, seasonNum, episodeNum int) error {
-	r.fakeFileRepo.mu.Lock()
-	defer r.fakeFileRepo.mu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.episodeLinks[fileID] = episodeID
 	if file, ok := r.files[fileID]; ok {
 		file.EpisodeID = episodeID
@@ -534,11 +534,11 @@ func (r *fakeEpisodeLinkerFileRepo) UpdateEpisodeLink(_ context.Context, fileID 
 }
 
 func (r *fakeEpisodeLinkerFileRepo) ListBySeriesUnlinked(_ context.Context, seriesContentID string) ([]*models.MediaFile, error) {
-	r.fakeFileRepo.mu.Lock()
-	defer r.fakeFileRepo.mu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	var result []*models.MediaFile
 	for _, file := range r.files {
-		cid := r.fakeFileRepo.contentIDs[file.ID]
+		cid := r.contentIDs[file.ID]
 		if cid != seriesContentID {
 			continue
 		}
@@ -641,7 +641,7 @@ func TestEnsureSeriesEpisodeLinks_SkipsAmbiguousAirDateMatch(t *testing.T) {
 	ctx := context.Background()
 
 	seriesID := "series-daily-ambiguous"
-	h.itemRepo.Upsert(ctx, &models.MediaItem{
+	_ = h.itemRepo.Upsert(ctx, &models.MediaItem{
 		ContentID: seriesID,
 		Title:     "Two A Day",
 		Type:      "series",
@@ -651,7 +651,7 @@ func TestEnsureSeriesEpisodeLinks_SkipsAmbiguousAirDateMatch(t *testing.T) {
 		Countries: []string{},
 		Genres:    []string{},
 	})
-	h.episodeRepo.Upsert(ctx, &models.Episode{
+	_ = h.episodeRepo.Upsert(ctx, &models.Episode{
 		ContentID:      "ep-one",
 		SeriesID:       seriesID,
 		SeasonID:       "season-1",
@@ -660,7 +660,7 @@ func TestEnsureSeriesEpisodeLinks_SkipsAmbiguousAirDateMatch(t *testing.T) {
 		AirDate:        mustDate(t, "2026-04-24"),
 		MetadataSource: "provider",
 	})
-	h.episodeRepo.Upsert(ctx, &models.Episode{
+	_ = h.episodeRepo.Upsert(ctx, &models.Episode{
 		ContentID:      "ep-two",
 		SeriesID:       seriesID,
 		SeasonID:       "season-1",
@@ -853,7 +853,7 @@ func TestFallbackEpisode_PartialProviderCoverageKeepsScannerEpisodes(t *testing.
 	seriesID := "series-partial-1"
 
 	// Create the series item (already matched).
-	h.itemRepo.Upsert(ctx, &models.MediaItem{
+	_ = h.itemRepo.Upsert(ctx, &models.MediaItem{
 		ContentID: seriesID,
 		Title:     "Partial Show",
 		Type:      "series",
@@ -865,14 +865,14 @@ func TestFallbackEpisode_PartialProviderCoverageKeepsScannerEpisodes(t *testing.
 	})
 
 	// Provider supplied S01E01 only.
-	h.seasonRepo.Upsert(ctx, &models.Season{
+	_ = h.seasonRepo.Upsert(ctx, &models.Season{
 		ContentID:      "season-provider-1",
 		SeriesID:       seriesID,
 		SeasonNumber:   1,
 		Title:          "Season 1",
 		MetadataSource: "provider",
 	})
-	h.episodeRepo.Upsert(ctx, &models.Episode{
+	_ = h.episodeRepo.Upsert(ctx, &models.Episode{
 		ContentID:      "ep-provider-s01e01",
 		SeriesID:       seriesID,
 		SeasonID:       "season-provider-1",

@@ -32,13 +32,6 @@ func (p *watchlistBatchProviderStub) FetchWatchlist(context.Context, ServerConfi
 	return p.rows, nil
 }
 
-// watchlistIncrementalProviderStub sends its rows as an incremental batch.
-type watchlistIncrementalProviderStub struct{ watchlistBatchProviderStub }
-
-func (p *watchlistIncrementalProviderStub) FetchWatchlistBatch(context.Context, ServerConfig, Connection) (FavoriteImportBatch, error) {
-	return FavoriteImportBatch{Rows: p.rows, Incremental: true}, nil
-}
-
 // titlesStub keeps one profile's watchlist entries outside the library by
 // TMDB ID, with the TMDB IDs the library carries.
 type titlesStub struct {
@@ -124,29 +117,6 @@ func (s *titlesStub) PromotedWatchlistItems(_ context.Context, _ int, _ string, 
 		}
 	}
 	return nil, nil
-}
-
-// A provider's watchlist title the library doesn't have becomes a watchlist
-// entry outside the library, follows the provider's removals, and a local
-// removal or a promotion onto the library watchlist retires its row.
-// watchlistTitleImportCase is one TestServiceWatchlistImportKeepsTitlesOutsideLibrary case.
-type watchlistTitleImportCase struct {
-	name        string
-	library     map[int]bool
-	promoted    map[int]bool
-	former      map[int][]int
-	entries     map[int]time.Time
-	states      []ListItemState
-	rows        []RemoteFavorite
-	wantEntry   bool
-	wantResult  ImportListResult
-	wantLocal   bool
-	wantRemote  bool
-	wantNoState bool
-	wantQueued  int
-	// synced means an earlier import already kept titles outside the
-	// library, so this one requests the titles it adds.
-	synced bool
 }
 
 // A title the profile removed while it had two rows, one per TMDB ID it was

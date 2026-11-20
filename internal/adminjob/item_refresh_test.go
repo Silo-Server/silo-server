@@ -17,8 +17,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -501,54 +499,6 @@ func TestItemRefreshExecutorFailsScanRunWhenIngestFails(t *testing.T) {
 	if scanRuns.completedID != "" {
 		t.Fatalf("failed scan unexpectedly completed as %q", scanRuns.completedID)
 	}
-}
-
-type itemRefreshTestAudiobooks struct {
-	calls []string
-	err   error
-}
-
-func (a *itemRefreshTestAudiobooks) ClaimRefresh(_ context.Context, contentID string) (string, error) {
-	a.calls = append(a.calls, "claim "+contentID)
-	return "token", nil
-}
-
-func (a *itemRefreshTestAudiobooks) ResetMatchTx(_ context.Context, _ pgx.Tx, contentID, _ string) error {
-	a.calls = append(a.calls, "reset "+contentID)
-	return nil
-}
-
-func (a *itemRefreshTestAudiobooks) Refresh(_ context.Context, contentID, _ string) error {
-	a.calls = append(a.calls, "refresh "+contentID)
-	return a.err
-}
-
-func (a *itemRefreshTestAudiobooks) ReleaseRefresh(_ context.Context, contentID, _ string) {
-	a.calls = append(a.calls, "release "+contentID)
-}
-
-// itemRefreshTestItemStatuses reports no item for its first goneReads reads,
-// every item as pending for its first pendingReads reads, then as matched.
-type itemRefreshTestItemStatuses struct {
-	goneReads    int
-	pendingReads int
-	reads        int
-}
-
-func (r *itemRefreshTestItemStatuses) GetStatusByIDs(_ context.Context, ids []string) (map[string]string, error) {
-	r.reads++
-	if r.reads <= r.goneReads {
-		return map[string]string{}, nil
-	}
-	status := "matched"
-	if r.reads <= r.pendingReads {
-		status = "pending"
-	}
-	out := make(map[string]string, len(ids))
-	for _, id := range ids {
-		out[id] = status
-	}
-	return out, nil
 }
 
 // A complete refresh waits for the whole scope: while a file in it is still

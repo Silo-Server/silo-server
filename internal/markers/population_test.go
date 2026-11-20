@@ -455,6 +455,8 @@ func TestPopulationUsesPriorityChangedDuringFetch(t *testing.T) {
 // expiringContext is a caller context with a read's short deadline, which
 // passes when expire is called, so a test can run it out mid-request without
 // racing a timer.
+//
+//nolint:containedctx // A test context that can be expired by hand; the field is the point.
 type expiringContext struct {
 	context.Context
 	expired chan struct{}
@@ -578,7 +580,7 @@ func TestPopulationSaveDeadline(t *testing.T) {
 	defer cancelNearlyDone()
 	for _, tc := range []struct {
 		name string
-		ctx  context.Context
+		ctx  context.Context //nolint:containedctx // A test table row holding the caller context to run under.
 		want time.Duration
 	}{
 		{"caller waiting", live, time.Minute},

@@ -36,6 +36,12 @@ const (
 	// metadata probe sees the same stream table playback does.
 	probeAnalyzeDuration = "10M" // 10 s (10,000,000 us)
 	probeSizeLimit       = "32M" // 32 MiB
+
+	// ffprobe option names and the error log level, repeated by the probe
+	// builders and the bounded runner.
+	ffprobeErrorLevel        = "error"
+	probeSizeFlag            = "-probesize"
+	probeAnalyzeDurationFlag = "-analyzeduration"
 )
 
 // ErrPrimaryVideoNotFound reports that FFprobe completed successfully but did
@@ -282,13 +288,13 @@ const probeWideFormatBytes = "5242880"
 // deeper window wins, as ffprobe keeps the last value of a repeated option.
 func buildProbeArgs(filePath string, inputOptions ...string) []string {
 	args := []string{
-		"-v", "error",
+		"-v", ffprobeErrorLevel,
 		"-print_format", "json",
 		"-show_format",
 		"-show_streams",
 		"-show_chapters",
-		"-probesize", probeSizeLimit,
-		"-analyzeduration", probeAnalyzeDuration,
+		probeSizeFlag, probeSizeLimit,
+		probeAnalyzeDurationFlag, probeAnalyzeDuration,
 	}
 	args = append(args, inputOptions...)
 	return append(args, filePath)
@@ -338,7 +344,7 @@ func runFFprobeBounded(ctx context.Context, parent context.Context, ffprobePath,
 func runFormatProbe(ctx context.Context, ffprobePath, filePath string, limits probeLimits, inputOptions ...string) ([]byte, error) {
 	runCtx, cancel := context.WithTimeout(ctx, limits.probe)
 	defer cancel()
-	args := append(slices.Clone(inputOptions), "-v", "error", "-print_format", "json", "-show_entries", "format=format_name,probe_score", filePath)
+	args := append(slices.Clone(inputOptions), "-v", ffprobeErrorLevel, "-print_format", "json", "-show_entries", "format=format_name,probe_score", filePath)
 	return runFFprobeBounded(runCtx, ctx, ffprobePath, filePath, args, limits)
 }
 
@@ -1084,7 +1090,7 @@ func probeFirstVideoFramePackets(ctx context.Context, ffprobePath, filePath, str
 	probeCtx, cancel := context.WithTimeout(ctx, frameSideDataProbeTimeout)
 	defer cancel()
 	cmd := fspath.CommandContext(probeCtx, ffprobePath,
-		"-v", "error",
+		"-v", ffprobeErrorLevel,
 		"-read_intervals", "%+#"+strconv.Itoa(packets),
 		"-select_streams", streamSpecifier,
 		"-show_frames",
@@ -1209,7 +1215,7 @@ func probeVideoPacketDuration(
 	packetCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := fspath.CommandContext(packetCtx, ffprobePath,
-		"-v", "error",
+		"-v", ffprobeErrorLevel,
 		"-select_streams", "v:0",
 		"-show_entries", "packet=pts_time",
 		"-of", "csv=p=0",

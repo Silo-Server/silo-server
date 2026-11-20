@@ -58,7 +58,7 @@ func catalogsOnlyVideo(folderType string) bool {
 // seconds or 100 MB.
 var deepProbeLimits = func() probeLimits {
 	limits := defaultProbeLimits
-	limits.inputOptions = []string{"-analyzeduration", "120000000", "-probesize", "100000000"}
+	limits.inputOptions = []string{probeAnalyzeDurationFlag, "120000000", probeSizeFlag, "100000000"}
 	return limits
 }()
 

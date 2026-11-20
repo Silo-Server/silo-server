@@ -16,6 +16,7 @@ func mustParse(t *testing.T, data string) *parsedNFO {
 	return p
 }
 
+//nolint:funlen // One table row per rating source keeps the cases together.
 func TestParseNFOData_Ratings(t *testing.T) {
 	t.Parallel()
 

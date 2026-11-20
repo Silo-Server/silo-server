@@ -76,17 +76,6 @@ func TestLibraryRefreshWithholdsScanCompleteWhenMetadataFails(t *testing.T) {
 	}
 }
 
-type libraryRefreshTestRequeuer struct{ requeued []string }
-
-func (r *libraryRefreshTestRequeuer) RequeueUnmatchedInLibrary(context.Context, int) (int, error) {
-	return 0, nil
-}
-
-func (r *libraryRefreshTestRequeuer) RequeueUnmatched(_ context.Context, contentID string) (bool, error) {
-	r.requeued = append(r.requeued, contentID)
-	return true, nil
-}
-
 type blockingFolderIngester struct{ *itemRefreshTestIngester }
 
 func (b blockingFolderIngester) IngestFolder(ctx context.Context, _ *models.MediaFolder) (*libraryingest.Result, error) {

@@ -104,12 +104,6 @@ func TestPersonRefreshWorkerSkipsClaimedPersonQueuedOnDemand(t *testing.T) {
 	}
 }
 
-// rateLimitErr is a lookup a provider rate limited.
-type rateLimitErr struct{ retryAfter time.Duration }
-
-func (e rateLimitErr) Error() string                      { return "rate limited" }
-func (e rateLimitErr) RateLimitRetryAfter() time.Duration { return e.retryAfter }
-
 // A slow rate claims only the people it can start before the claim's lease
 // runs out.
 func TestPersonRefreshWorkerClaimLimitFitsTheLease(t *testing.T) {

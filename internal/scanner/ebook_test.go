@@ -197,7 +197,7 @@ func TestReadEPUBZipEntryRejectsOversizedEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open zip: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	_, err = readEPUBZipEntry(&reader.Reader, "OPS/content.opf")
 	if err == nil || !strings.Contains(err.Error(), "epub entry too large") {
@@ -345,10 +345,10 @@ func TestEbookPeopleMergePreservesExistingNonAuthorCreditsExceptNarrators(t *tes
 	if len(got) != 2 {
 		t.Fatalf("merged people len = %d, want 2: %+v", len(got), got)
 	}
-	if got[0].Person.ID != 20 || got[0].Kind != models.PersonKindWriter || got[0].Character != "essay" {
+	if got[0].ID != 20 || got[0].Kind != models.PersonKindWriter || got[0].Character != "essay" {
 		t.Fatalf("first preserved non-author = %+v", got[0])
 	}
-	if got[1].Person.ID != 40 || got[1].Kind != models.PersonKindAuthor || got[1].SortOrder != 1 {
+	if got[1].ID != 40 || got[1].Kind != models.PersonKindAuthor || got[1].SortOrder != 1 {
 		t.Fatalf("new author credit = %+v", got[1])
 	}
 }
@@ -593,8 +593,8 @@ func writeTestEPUBWithDescriptionAndMeta(t *testing.T, identifiers []string, des
     <dc:subject>Fiction</dc:subject>
     <dc:subject>Adventure</dc:subject>
     <dc:description>`+description+`</dc:description>
-    <meta name="calibre:series" content="Test Series"/>
-    <meta name="calibre:series_index" content="2"/>
+    <meta name="caliber:series" content="Test Series"/>
+    <meta name="caliber:series_index" content="2"/>
 `+extraMetaXML+`
   </metadata>
 </package>`)

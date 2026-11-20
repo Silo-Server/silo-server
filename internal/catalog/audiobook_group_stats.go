@@ -107,7 +107,7 @@ func buildAudiobookGroupStatsSQL(q AudiobookGroupsQuery, filter AccessFilter, ma
 		return audiobookGroupsSQLPlan{}, fmt.Errorf("audiobook groups: unsupported group_by %q", q.GroupBy)
 	}
 	switch strings.ToLower(strings.TrimSpace(q.Sort)) {
-	case "", "name", audiobookGroupSortCount, audiobookGroupSortDuration:
+	case "", audiobookGroupSortName, audiobookGroupSortCount, audiobookGroupSortDuration:
 	default:
 		return audiobookGroupsSQLPlan{}, fmt.Errorf("audiobook groups: unsupported sort %q", q.Sort)
 	}

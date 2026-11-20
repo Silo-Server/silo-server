@@ -57,20 +57,6 @@ func edition(title, asin, author, narrator string) (metadata.SearchResult, *meta
 	}
 }
 
-// crossIDProvider answers a lone asin lookup with a record that carries its
-// own isbn, like a second provider that maps the ASIN to another record.
-type crossIDProvider struct {
-	slug string
-	rec  *metadata.MetadataResult
-}
-
-func (p *crossIDProvider) Slug() string       { return p.slug }
-func (p *crossIDProvider) Name() string       { return p.slug }
-func (p *crossIDProvider) ForTypes() []string { return []string{"audiobook"} }
-func (p *crossIDProvider) GetMetadata(context.Context, metadata.MetadataRequest) (*metadata.MetadataResult, error) {
-	return p.rec, nil
-}
-
 func TestRedactedErrorMasksNestedCredentials(t *testing.T) {
 	err := errors.New(`rpc error: code = Unavailable desc = api_key=sk-live-123 request failed: GET https://user:pw@example.test/b?token=abc`)
 	got := redactProviderText(err.Error())
@@ -136,18 +122,6 @@ func (l *lookupOnly) GetMetadata(ctx context.Context, req metadata.MetadataReque
 	return l.p.GetMetadata(ctx, req)
 }
 
-type narratorRuleCase struct {
-	name      string
-	item      enrichmentItemRow
-	results   []metadata.SearchResult
-	records   map[string]*metadata.MetadataResult
-	providers []metadata.Provider // overrides results and records
-	wantMatch bool
-	wantID    string // the audiobook-metadata ID matched, when set
-	// wantNarrators are the merged record's narrators, when set.
-	wantNarrators []string
-}
-
 // Candidate retries and the merge's re-asks go through the provider gate: a
 // provider that answers rate limited mid-item is not called again for that
 // item, and a narrator rejection whose only provider errors are pauses leaves
@@ -198,38 +172,6 @@ func (p *throttleSecondFetch) GetMetadata(ctx context.Context, req metadata.Meta
 		return nil, status.Error(codes.ResourceExhausted, "slow down")
 	}
 	return p.editionProvider.GetMetadata(ctx, req)
-}
-
-// searchOnly hides fixedProvider's GetMetadata, as a search-only provider.
-type searchOnly struct{ p *fixedProvider }
-
-func (s *searchOnly) Slug() string       { return s.p.slug }
-func (s *searchOnly) Name() string       { return s.p.slug }
-func (s *searchOnly) ForTypes() []string { return []string{"audiobook"} }
-func (s *searchOnly) Search(ctx context.Context, q metadata.SearchQuery) ([]metadata.SearchResult, error) {
-	return s.p.Search(ctx, q)
-}
-
-// keyedProvider answers GetMetadata only when asked with its own ID, as the
-// plugin adapter does.
-type keyedProvider struct {
-	slug    string
-	results []metadata.SearchResult
-	rec     *metadata.MetadataResult
-}
-
-func (p *keyedProvider) Slug() string       { return p.slug }
-func (p *keyedProvider) Name() string       { return p.slug }
-func (p *keyedProvider) ForTypes() []string { return []string{"audiobook"} }
-func (p *keyedProvider) Search(context.Context, metadata.SearchQuery) ([]metadata.SearchResult, error) {
-	return p.results, nil
-}
-
-func (p *keyedProvider) GetMetadata(_ context.Context, req metadata.MetadataRequest) (*metadata.MetadataResult, error) {
-	if req.ProviderIDs[p.slug] == "" {
-		return nil, nil
-	}
-	return p.rec, nil
 }
 
 // failFirstFetch answers its first GetMetadata call with err.
@@ -289,11 +231,4 @@ func TestFindMatchCandidateFetchErrors(t *testing.T) {
 			}
 		})
 	}
-}
-
-// searchDownProvider is an editionProvider whose title search fails upstream.
-type searchDownProvider struct{ editionProvider }
-
-func (p *searchDownProvider) Search(context.Context, metadata.SearchQuery) ([]metadata.SearchResult, error) {
-	return nil, status.Error(codes.Unavailable, "search upstream down")
 }

@@ -227,7 +227,7 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Serialise.
+	// Serialize.
 	var results any
 	if minified {
 		mins := make([]MinifiedLibraryItem, len(pageSlice))

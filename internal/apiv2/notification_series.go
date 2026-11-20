@@ -152,7 +152,7 @@ func notificationSeriesMatch(in *NotificationSeriesInput, query string) func(not
 		case in.Status == notificationSeriesActive && !s.Notifies(),
 			in.Status == notificationSeriesInactive && s.Notifies():
 			return false
-		case in.Reason != "" && !(in.Reason == "next_up" && s.Reasons.NextUp):
+		case in.Reason != "" && (in.Reason != "next_up" || !s.Reasons.NextUp):
 			return false
 		}
 		return query == "" || strings.Contains(strings.ToLower(s.Title), query) || strings.Contains(s.SortKey, query)

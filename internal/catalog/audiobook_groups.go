@@ -21,6 +21,7 @@ const (
 )
 
 const (
+	audiobookGroupSortName     = "name"
 	audiobookGroupSortCount    = "count"
 	audiobookGroupSortDuration = "duration"
 )
@@ -310,7 +311,7 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 
 	var orderClause string
 	switch strings.ToLower(strings.TrimSpace(q.Sort)) {
-	case "", "name":
+	case "", audiobookGroupSortName:
 		orderClause = "LOWER(name)"
 	case audiobookGroupSortCount:
 		orderClause = "item_count DESC, LOWER(name)"

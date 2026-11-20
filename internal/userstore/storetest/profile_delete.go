@@ -71,6 +71,7 @@ func RunDeleteProfileRemovesProfileState(t *testing.T, newStore func(t *testing.
 	if c, err := store.GetCollection(ctx, ownCollections[keptProfile]); err != nil || c == nil {
 		t.Fatalf("other profile's collection after delete = %v, %v; want it kept", c, err)
 	}
+	//nolint:goconst // The recreated profile's name, asserted below.
 	if err := store.CreateProfile(ctx, userstore.Profile{ID: deletedProfile, Name: "Recreated"}); err != nil {
 		t.Fatalf("CreateProfile(recreate): %v", err)
 	}
@@ -130,6 +131,7 @@ func seedProfileState(t *testing.T, ctx context.Context, store userstore.UserSto
 	if err := store.UpsertOnboardingState(ctx, userstore.OnboardingState{ProfileID: profileID, TourID: deleteTour, LastStep: "subtitles"}); err != nil {
 		t.Fatalf("UpsertOnboardingState %s: %v", profileID, err)
 	}
+	//nolint:goconst // The stored value, asserted below.
 	if err := store.SetDeviceSetting(ctx, userstore.DeviceSettingEntry{ProfileID: profileID, DeviceID: deleteDevice, Key: deleteSetting, Value: "1.25"}); err != nil {
 		t.Fatalf("SetDeviceSetting %s: %v", profileID, err)
 	}

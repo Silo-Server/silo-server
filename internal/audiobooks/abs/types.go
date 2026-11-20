@@ -211,7 +211,7 @@ type CollapsedSeriesV1 struct {
 // Ino / Path / RelPath / MtimeMs / CtimeMs / BirthtimeMs mirror fields the
 // real-ABS filesystem-watcher emits at the item root. The ABS Android
 // client's Kotlin LibraryItem declares all of these as non-nullable —
-// jackson-module-kotlin's behaviour around missing primitives is lenient
+// jackson-module-kotlin's behavior around missing primitives is lenient
 // in some configurations but throws in stricter ones, so we always emit
 // them with safe defaults (ID-derived ino, empty path strings, AddedAt
 // echoed across the three time fields). Costs almost nothing on the wire

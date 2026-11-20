@@ -86,6 +86,7 @@ func TestScanBookFolderKeepsBookIndexedByConcurrentScanDB(t *testing.T) {
 
 				other := NewScanner(NewFileRepository(pool), "ffprobe", nil, 2, false, time.Hour)
 				var indexedMtime time.Time
+				//nolint:nestif // The fake keeps its interleaving in one place.
 				if timing.restored {
 					if err := writeBookFile(second, secondData); err != nil {
 						t.Fatal(err)

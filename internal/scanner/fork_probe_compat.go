@@ -62,13 +62,13 @@ const (
 // out so tests can assert the fast flags without executing a process.
 func buildFastProbeArgs(filePath string) []string {
 	return []string{
-		"-v", "error",
+		"-v", ffprobeErrorLevel,
 		"-print_format", "json",
 		"-show_format",
 		"-show_streams",
 		"-show_chapters",
-		"-probesize", fastProbeSizeLimit,
-		"-analyzeduration", fastProbeAnalyzeDuration,
+		probeSizeFlag, fastProbeSizeLimit,
+		probeAnalyzeDurationFlag, fastProbeAnalyzeDuration,
 		fastProbeFFlagsOption, fastProbeFlags,
 		filePath,
 	}

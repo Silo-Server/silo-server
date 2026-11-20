@@ -422,6 +422,8 @@ func (h *Handler) SetDownloads(d Downloads) {
 
 // SkipMediaCompression reports whether an ABS media route must retain the
 // server's original ResponseWriter for sendfile and optional interface support.
+//
+//nolint:gocyclo // The compression-skip decision tree mirrors the ABS protocol.
 func SkipMediaCompression(r *http.Request) bool {
 	const (
 		apiSegment      = "api"
@@ -604,7 +606,7 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			// PATCH /session/{sid}           — silo-native heartbeat alias
 			// (kept additive for silo's own clients).
 			r.Patch(prefix+"/session/{sid}", h.handleSessionSync)
-			// POST  /session/{sid}/close     — finalise the play session
+			// POST  /session/{sid}/close     — finalize the play session
 			r.Post(prefix+"/session/{sid}/close", h.handleSessionClose)
 			// POST  /session/local          — sync one offline-recorded session
 			r.Post(prefix+"/session/local", h.handleSyncLocalSession)
@@ -953,7 +955,7 @@ func (h *Handler) absBaseURL(r *http.Request) string {
 // Shared response helpers (used by handlers across multiple stages)
 // ---------------------------------------------------------------------------
 
-// writeJSON serialises v as JSON and writes it with the given HTTP status.
+// writeJSON serializes v as JSON and writes it with the given HTTP status.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

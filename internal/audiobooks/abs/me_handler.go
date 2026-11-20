@@ -59,7 +59,7 @@ func audiobookLibraryID(lib AudiobookLibrary) string {
 // /libraries (list) and /libraries/{id} (detail). Plugin parity:
 // {id, name, mediaType} only — the extra folders/displayOrder/icon
 // fields some servers emit are ignored by real ABS clients and adding
-// them risks behaviour drift.
+// them risks behavior drift.
 func audiobookLibraryMap(lib AudiobookLibrary) map[string]any {
 	name := strings.TrimSpace(lib.Name)
 	if name == "" {

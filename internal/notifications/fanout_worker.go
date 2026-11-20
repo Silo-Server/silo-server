@@ -373,6 +373,8 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 // deliveries. highestBelow is the event's HighestListedEpisodeKeyBelow,
 // read during capture. Returns dispatch payloads for the rows actually
 // inserted and the candidate recipient count.
+//
+//nolint:funlen // The fanout step stays one function so its single pass over the event is visible.
 func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event ReleaseEvent, highestBelow *int, capturedProfiles map[profileKey]struct{}) ([]DeliveryRow, int, error) {
 	if len(capturedProfiles) == 0 {
 		return nil, 0, nil

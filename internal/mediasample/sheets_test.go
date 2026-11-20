@@ -159,6 +159,9 @@ func (f *fakeSheets) exec(_ context.Context, _ string, args []string, stdin io.R
 				at := int64(math.Round(key * 1000))
 				timing += fmt.Sprintf("0, %d, %d, 1, 1, 0x00000000\n0, %d, %d, 1, 1, 0x00000000, F=0x0\n", at, at, at+1, at+1)
 			}
+			// The fixture is a comma-separated timing line; formatting it in one
+			// pass is what the test reads back.
+			//nolint:perfsprint // one formatted line, not a concat loop
 			timing += fmt.Sprintf("0, %d, %d, 1, 1, 0x00000000\n", end-1, end-1)
 		}
 		if err := os.WriteFile(args[i+1], []byte(timing), 0o600); err != nil {

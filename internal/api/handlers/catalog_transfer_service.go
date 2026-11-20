@@ -65,7 +65,7 @@ func (h *CatalogSeedHandler) ImportCatalog(ctx context.Context, source CatalogIm
 		var bundle io.ReadCloser
 		bundle, err = catalogseed.DownloadRemoteBundle(ctx, source.RemoteURL)
 		if err == nil {
-			defer bundle.Close()
+			defer func() { _ = bundle.Close() }()
 			data, err = io.ReadAll(bundle)
 		}
 	case source.ArtifactKey != "":

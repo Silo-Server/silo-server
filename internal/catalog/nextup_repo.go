@@ -419,6 +419,7 @@ const nextUpAnchorsCTE = `,
 			) regular ON true
 		)`
 
+//nolint:funlen // The next-up query is one statement with every scope clause; refactor tracked separately.
 func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (string, []interface{}) {
 	args := []interface{}{q.UserID, q.ProfileID, limit}
 	argIdx := 4

@@ -1,4 +1,3 @@
-//nolint:goconst // Repeated titles and provider IDs document each alias scenario.
 package metadata
 
 import (
@@ -77,6 +76,7 @@ func seoulSpringSearchResult(tmdbID string, year int) SearchResult {
 }
 
 func TestValidateMatchByProviderTitleAliases(t *testing.T) {
+	//nolint:funlen // One row per alias scenario keeps the cases together.
 	t.Parallel()
 	hints := &MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}
 

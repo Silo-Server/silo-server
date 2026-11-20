@@ -29,7 +29,7 @@ import (
 // Silo's implementation:
 //   - Looks up the audiobook via MediaStore.GetAudiobookByID.
 //   - Loads all media files via MediaStore.GetMediaFiles (sorted by ID ASC).
-//   - Synthesises a ULID session ID (in-memory; no play-session table yet).
+//   - Synthesizes a ULID session ID (in-memory; no play-session table yet).
 //   - Builds contentUrls that point at the session-scoped public track route,
 //     avoiding bearer tokens in URLs while preserving ABS DirectPlay behavior.
 //   - Returns a JSON playbackSession matching the shape real ABS emits, with
@@ -475,7 +475,7 @@ func nilIfEmpty(s string) any {
 }
 
 // titleIgnorePrefix strips leading articles for sort-key purposes,
-// matching real ABS LibraryItemController behaviour.
+// matching real ABS LibraryItemController behavior.
 func titleIgnorePrefix(title string) string {
 	lower := strings.ToLower(title)
 	for _, p := range []string{"the ", "a ", "an "} {

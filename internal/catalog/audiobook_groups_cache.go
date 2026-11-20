@@ -106,7 +106,7 @@ func sliceGroups(groups []AudiobookGroup, offset, limit int) []AudiobookGroup {
 func audiobookGroupsCacheKey(q AudiobookGroupsQuery, filter AccessFilter) string {
 	sortKey := strings.ToLower(strings.TrimSpace(q.Sort))
 	if sortKey == "" {
-		sortKey = "name"
+		sortKey = audiobookGroupSortName
 	}
 	searchKey := strings.ToLower(strings.TrimSpace(q.SearchPrefix))
 	var b strings.Builder

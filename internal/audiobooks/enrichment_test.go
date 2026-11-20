@@ -98,10 +98,6 @@ func (r *recordingAudiobookItemRepo) UpdateMetadataTx(_ context.Context, _ pgx.T
 	return nil
 }
 
-func (r *recordingAudiobookItemRepo) ReplacePeopleKindsTx(context.Context, pgx.Tx, string, []models.PersonKind, []models.ItemPerson) error {
-	return nil
-}
-
 // countingProvider counts calls so a test can see the gate hold them back.
 type countingProvider struct {
 	fakeAudiobookMetadataProvider

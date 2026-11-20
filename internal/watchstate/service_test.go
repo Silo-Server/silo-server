@@ -120,7 +120,7 @@ func (r testProviderIDRepo) FindContentIDByProviderIDs(_ context.Context, provid
 
 func TestManualMarkWatchedAfterHiddenWatermarkIsVisible(t *testing.T) {
 	store, db := newTestUserStore(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	createWatchstateProfile(t, store)
 
 	hiddenBefore := time.Now().UTC().Add(time.Second).Format(time.RFC3339)
@@ -224,7 +224,7 @@ func TestImportedWatchIfNewerAgainstExistingResume(t *testing.T) {
 
 func TestImportedWatchIfNewerSuppressesHiddenOlderWatch(t *testing.T) {
 	store, db := newTestUserStore(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	createWatchstateProfile(t, store)
 
 	hiddenBefore := time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC)

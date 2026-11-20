@@ -18,6 +18,8 @@ import (
 // package leaves the plugin and its row untouched. An admin who turns the
 // plugin off or on while the update downloads keeps that choice, and the old
 // process is stopped either way.
+//
+//nolint:funlen // The install flow is asserted end to end in one place.
 func TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB(t *testing.T) {
 	pool := builtinGuardTestPool(t)
 	for _, tc := range []struct {

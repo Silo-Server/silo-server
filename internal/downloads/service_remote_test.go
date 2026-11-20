@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 )
 
@@ -35,11 +34,4 @@ func TestServiceDoesNotAppendAPIErrorAfterRemoteBodyIsCommitted(t *testing.T) {
 	if rr.Code != http.StatusOK || rr.Body.String() != "123" {
 		t.Fatalf("response status=%d body=%q", rr.Code, rr.Body.String())
 	}
-}
-
-// keylessKeyring has no key for any transcode node.
-type keylessKeyring struct{}
-
-func (keylessKeyring) KeyFor(nodeauth.Target, string) (string, error) {
-	return "", nodeauth.ErrNoNodeKey
 }

@@ -118,6 +118,8 @@ func (e *Engine) SimilarUsersLiked(ctx context.Context, userID int, profileID st
 // by builder, whose aversion it applies around the profile's taste vector. It
 // answers an empty, non-nil list when the row has nothing to show, so a
 // cached row records that it was built.
+//
+//nolint:funlen,gocyclo // The scorer keeps its passes together; refactor tracked separately.
 func (e *Engine) similarUsersLiked(ctx context.Context, builder rowBuilder, userID int, profileID string, limit int, excluded map[string]struct{}, filter catalog.AccessFilter) ([]ScoredItem, error) {
 	meta, err := e.repo.GetTasteProfileMeta(ctx, userID, profileID)
 	if err != nil {

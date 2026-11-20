@@ -461,6 +461,8 @@ var _ userstore.AuditedProfileDeleter = (*PostgresUserStore)(nil)
 // DeleteProfileAudited is DeleteProfile with audit run in the delete's
 // transaction before it commits; a nil audit records nothing. The profile row
 // is locked before it is read, so audit sees the image that was deleted.
+//
+//nolint:funlen // The audited delete keeps its checks in one transaction.
 func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string, audit func(tx pgx.Tx, deleted *userstore.Profile) error) ([]string, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

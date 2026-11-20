@@ -300,10 +300,6 @@ func remuxClaims(nodeID int, mediaPath string) streamtoken.Claims {
 	}
 }
 
-func (c *resolveCore) authorize(claims streamtoken.Claims) {
-	c.recipes.put(claims.TranscodeTransportID, playback.RecipeCardFromClaims(&claims))
-}
-
 // A node tearing its sessions down for a force reload asks the core to revoke
 // its recipes (revoke-recipes). Afterwards no progressive remux starts and no
 // stored HLS card rebuilds on that node. A session whose client holds a

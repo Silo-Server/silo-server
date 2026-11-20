@@ -16,8 +16,6 @@ import (
 // 8.1) does not expose to the tag keys populateFromTags reads. Audiobook
 // taggers write the series as a movement (©mvn name, ©mvi number), and some
 // write the narrator and publisher to ©nrt and ©pub.
-//
-//nolint:goconst // Tag keys are data, matching the names ffprobe reports.
 var mp4BookAtomTags = map[string]string{
 	"\xa9mvn": "mvnm",
 	"\xa9mvi": "mvin",
@@ -42,7 +40,7 @@ const (
 // values found so far: these tags only add to what ffprobe reported.
 func readMP4BookAtomTags(path string) map[string]string {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".m4b", ".m4a", ".mp4": //nolint:goconst // the MP4 family of audio extensions
+	case ".m4b", ".m4a", ".mp4":
 	default:
 		return nil
 	}

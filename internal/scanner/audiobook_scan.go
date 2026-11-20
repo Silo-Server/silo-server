@@ -351,6 +351,7 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 	discsWhole := true
 	for _, directory := range dir.directories {
 		outcome := audiobookNotDisc
+		//nolint:nestif // The walk keeps each admission check where it is decided.
 		if !inLibraryRoot && !scan.libraryRoots[directory] && isAudiobookDiscDirName(filepath.Base(directory)) {
 			var err error
 			var disc *audiobookDirFiles
@@ -512,6 +513,7 @@ func readAudiobookDirectory(ctx context.Context, path string, scan *audiobookRoo
 		}
 		child := filepath.Join(path, entry.Name())
 		excluded := onlyAdmitted || ignoreRulesMatch(dir.childRules, child, entry.IsDir())
+		//nolint:nestif // The walk keeps each admission check where it is decided.
 		if excluded && !scan.admits(child) {
 			// An unresolved link could be a part or a disc folder; any
 			// other name is never read for parts.
@@ -1923,7 +1925,7 @@ func audiobookPeopleCreditsEqual(existing []models.ItemPerson, desired []audiobo
 	}
 	have := make(map[key]struct{}, len(existing))
 	for _, p := range existing {
-		have[key{strings.ToLower(strings.TrimSpace(p.Person.Name)), p.Kind}] = struct{}{}
+		have[key{strings.ToLower(strings.TrimSpace(p.Name)), p.Kind}] = struct{}{}
 	}
 	for _, d := range desired {
 		k := key{strings.ToLower(strings.TrimSpace(d.Name)), d.Kind}

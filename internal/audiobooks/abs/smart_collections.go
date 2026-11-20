@@ -38,7 +38,7 @@ type SmartCollection struct {
 
 // smartCollectionToABS shapes a SmartCollection in the ABS wire format.
 // QueryDef is emitted as a nested JSON object (decoded once at
-// serialisation time). Empty/nil QueryDef becomes the empty object.
+// serialization time). Empty/nil QueryDef becomes the empty object.
 func smartCollectionToABS(c SmartCollection) map[string]any {
 	var qd any = map[string]any{}
 	if len(c.QueryDef) > 0 {

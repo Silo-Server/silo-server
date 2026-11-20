@@ -114,27 +114,7 @@ func (l staticArtifactOriginLookup) GetByID(context.Context, int) (*nodepool.Nod
 
 type unavailableRemotePreparer struct{}
 
-func (unavailableRemotePreparer) Prepare(context.Context, string, nodeauth.Keyring, downloadprepare.Request) (downloadprepare.Result, error) {
-	return downloadprepare.Result{}, os.ErrNotExist
-}
-func (unavailableRemotePreparer) Stat(context.Context, string, nodeauth.Keyring, string) (downloadprepare.Result, error) {
-	return downloadprepare.Result{}, downloadprepare.ErrArtifactNotFound
-}
-func (unavailableRemotePreparer) Delete(context.Context, string, nodeauth.Keyring, string) error {
-	return nil
-}
-
 type indeterminateRemotePreparer struct{}
-
-func (indeterminateRemotePreparer) Prepare(context.Context, string, nodeauth.Keyring, downloadprepare.Request) (downloadprepare.Result, error) {
-	return downloadprepare.Result{}, context.DeadlineExceeded
-}
-func (indeterminateRemotePreparer) Stat(context.Context, string, nodeauth.Keyring, string) (downloadprepare.Result, error) {
-	return downloadprepare.Result{}, os.ErrDeadlineExceeded
-}
-func (indeterminateRemotePreparer) Delete(context.Context, string, nodeauth.Keyring, string) error {
-	return nil
-}
 
 type attestationRemotePreparer struct {
 	prepareResult downloadprepare.Result

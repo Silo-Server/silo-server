@@ -43,7 +43,7 @@ import (
 // (UpsertProgress) rather than silently dropping the position. Accumulated
 // offline listening time is not persisted: there is no store method to add
 // standalone listening time without an existing session row. Position sync is
-// the client-visible behaviour offline sync exists to restore.
+// the client-visible behavior offline sync exists to restore.
 
 // localPlaybackSession is the subset of the ABS PlaybackSession payload the
 // client POSTs for offline sync that silo acts on. EpisodeID is a pointer so a
