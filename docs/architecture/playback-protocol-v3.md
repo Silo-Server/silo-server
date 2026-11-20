@@ -2701,9 +2701,15 @@ node is judged by that node, which the replica asks with the signed
 fetched when the relay that delivered it acknowledges it, so the answer is the
 same whichever API replica or proxy relays the stream.
 
+A segment counts as fetched once its download completed, and output an
+earlier FFmpeg generation left behind is no lead. A progressive remux has no
+segment lead and is never judged bound.
+
 When the remote answer is unknown, the stall counts as the server's and
 records nothing: the replan found the node unreachable, the node no longer runs
-the transport, or the read failed or took longer than two seconds. Each is a
+the transport, or the read failed or took longer than two seconds. A node
+older than the read answers it as unknown, so its transcodes teach no limit
+until it is upgraded. Each is a
 server-side fault that stalls a client on any link, as a node dying mid-stream
 does. Skipping the record loses only memory, since the replan still plans under
 the estimate and a slow link stalls and is learned again, while a wrong limit

@@ -118,7 +118,7 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 	}
 	if clientSent && req.BandwidthEstimateSource == playback.BandwidthEstimateObservedRebufferV3 && req.BandwidthEstimateKbps != nil && req.QualityPreference == playback.QualityAutoV3 {
 		if outputBound != nil && outputBound() {
-			slog.InfoContext(r.Context(), "learned limit not recorded: transcode output paced playback", "component", "playback",
+			slog.InfoContext(r.Context(), "learned limit not recorded: the stall is the server's transcode, which paced playback or could not say", "component", "playback",
 				"estimate_kbps", *req.BandwidthEstimateKbps)
 		} else if err := h.Connections.Observe(r.Context(), user, device, key, *req.BandwidthEstimateKbps); err != nil {
 			return nil, err
@@ -144,7 +144,8 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 // its client, so a stall the client reports now was paced by the encoder, not
 // the link. A transcode on a remote node is judged by that node; one on this
 // replica by its live session. A session with neither, such as direct play,
-// is not bound.
+// is not bound, and neither is a progressive remux, which has no segment lead
+// wherever it runs.
 //
 // An unknown answer for a remote transcode counts as bound, so no limit is
 // learned. The core cannot reach the node (unreachable lists the nodes the
@@ -162,6 +163,9 @@ func (h *PlaybackHandler) transcodeOutputBoundV3(ctx context.Context, sessionID 
 	if err != nil || session.TranscodeNodeURL == "" {
 		local := h.tm.GetTranscodeSession(sessionID)
 		return local != nil && local.OutputBoundsClient()
+	}
+	if session.OutputProtocol == playback.OutputProtocolHTTP {
+		return false
 	}
 	if _, down := unreachable[session.TranscodeNodeURL]; down {
 		return true

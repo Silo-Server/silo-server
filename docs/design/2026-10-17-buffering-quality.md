@@ -1060,6 +1060,10 @@ The tables above are the test oracle, and
 [`schemas/buffering-quality/v1/vectors.json`](schemas/buffering-quality/v1/vectors.json)
 encodes them. Each case is a list of timed events on one clock, with the
 complete list of outputs it must produce. Timeouts come from the clock. The
+cases carry no throughput: a harness reports every plan's media as measured
+below its delivered bitrate, so each lowering has slow-link evidence (see
+*Slow-link evidence*) and carries `observed_rebuffer`. Each client tests a
+lowering without that evidence in its own tests. The
 events are:
 
 - `plan_adopted`, carrying the plan's delivered bitrate, quality, menu and

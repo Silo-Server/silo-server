@@ -3200,15 +3200,26 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 }
 
 // OutputBoundsClient reports whether the running encoder has no lead over the
-// client: the client has fetched every produced segment but at most the
-// newest. Playback is then paced by how fast the server produces segments,
-// not by the link, so a stall the client reports now is the server's. An
-// encoder that keeps up runs ahead of the client up to the throttle window;
-// one that is slower than real time, such as a heavy subtitle burn-in, never
-// gets ahead.
+// client: the client has completed downloading every produced segment but at
+// most the newest. Playback is then paced by how fast the server produces
+// segments, not by the link, so a stall the client reports now is the
+// server's. An encoder that keeps up runs ahead of the client up to the
+// throttle window; one that is slower than real time, such as a heavy
+// subtitle burn-in, never gets ahead. Output left by an earlier FFmpeg
+// generation is not this encoder's lead: until the running one writes its
+// own, the client is waiting on it.
 func (s *TranscodeSession) OutputBoundsClient() bool {
 	progress := s.SegmentProgress(time.Now())
-	return progress.Running && progress.ProducedHead-progress.LastRequestedSegment <= 1
+	if !progress.Running {
+		return false
+	}
+	if progressPredatesGeneration(progress) {
+		return true
+	}
+	s.mu.Lock()
+	completed := s.lastCompletedSegment
+	s.mu.Unlock()
+	return progress.ProducedHead-completed <= 1
 }
 
 // SegmentRecoveryDecision determines whether a missing segment should briefly

@@ -222,10 +222,12 @@ The transcode `GET /transcode/{session_id}/output-bound` answers
 runs and the client has fetched every produced segment but at most the newest,
 so playback is paced by the encoder. Those fetches are the acknowledgements
 above, so the answer is the same whichever relay delivered the segments. A
-progressive remux answers `false`. A transport the node does not run is 404;
-the read reconstructs nothing and does not refresh the session's idle timer.
-The core reads it before it learns a bandwidth limit from a stall (see
-[learned limits](playback-protocol-v3.md)).
+progressive remux answers `false`, and the core does not ask about one. A
+transport the node does not run is 404; the read reconstructs nothing and does
+not refresh the session's idle timer. The core reads it before it learns a
+bandwidth limit from a stall (see [learned limits](playback-protocol-v3.md)).
+An older node without the route also answers 404, so the core learns no limit
+from stalls on its transcodes until the node is upgraded.
 
 The retained transcode `POST /downloads/prepare` synchronously prepares or reuses
 an MP4 on that node. It requires node bearer authorization and a source grant

@@ -1476,7 +1476,7 @@ func (m *TranscodeManager) RemoteOutputBound(ctx context.Context, transportID, t
 	if err := nodeauth.SignTranscode(req, transcodeNodeURL, m.nodeKeys()); err != nil {
 		return false, fmt.Errorf("sign output-bound read: %w", err)
 	}
-	resp, err := telemetry.DoTrustedNode(remoteTranscodeControlClient, req, "status")
+	resp, err := telemetry.DoTrustedNode(remoteTranscodeControlClient, req, "output_bound")
 	if err != nil {
 		return false, fmt.Errorf("send output-bound read: %w", err)
 	}

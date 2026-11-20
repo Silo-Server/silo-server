@@ -562,6 +562,7 @@ func TestTranscodeOutputBoundAsksTheRemoteNode(t *testing.T) {
 		body        string
 		unreachable bool
 		local       bool
+		progressive bool
 		want        bool
 	}{
 		{name: "node reports the client waiting on the encoder", status: http.StatusOK, body: `{"output_bound":true}`, want: true},
@@ -571,6 +572,9 @@ func TestTranscodeOutputBoundAsksTheRemoteNode(t *testing.T) {
 		{name: "node answers garbage", status: http.StatusOK, body: `not json`, want: true},
 		{name: "replan found the node unreachable", status: http.StatusOK, body: `{"output_bound":false}`, unreachable: true, want: true},
 		{name: "no transcode on this replica or a node", local: true, want: false},
+		// A progressive remux has no segment lead, as on this replica, and
+		// its request may already have ended, so the node is not asked.
+		{name: "remote progressive remux", status: http.StatusNotFound, progressive: true, want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var asked, signed bool
@@ -586,6 +590,9 @@ func TestTranscodeOutputBoundAsksTheRemoteNode(t *testing.T) {
 			if !tc.local {
 				session.TranscodeNodeURL, session.TranscodeTransportID = node.URL, transportID
 			}
+			if tc.progressive {
+				session.OutputContainer, session.OutputProtocol = playback.OutputContainerFMP4, playback.OutputProtocolHTTP
+			}
 			manager.RegisterReconstructed(session)
 			handler := newKeyedPlaybackHandler(manager)
 			var unreachable map[string]struct{}
@@ -596,7 +603,7 @@ func TestTranscodeOutputBoundAsksTheRemoteNode(t *testing.T) {
 			if got := handler.transcodeOutputBoundV3(t.Context(), session.ID, unreachable); got != tc.want {
 				t.Fatalf("output bound = %v, want %v", got, tc.want)
 			}
-			if wantAsked := !tc.local && !tc.unreachable; asked != wantAsked || (asked && !signed) {
+			if wantAsked := !tc.local && !tc.unreachable && !tc.progressive; asked != wantAsked || (asked && !signed) {
 				t.Fatalf("node asked = %v (signed %v), want asked %v and signed", asked, signed, wantAsked)
 			}
 		})
