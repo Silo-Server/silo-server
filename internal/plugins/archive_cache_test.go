@@ -624,8 +624,10 @@ type platformTestStore struct {
 	mu     sync.Mutex
 	stored *InstallationArchive
 	builds map[string]*PlatformArchive
-	// replaced makes every save find the installation replaced.
+	// replaced makes every save find the installation replaced, and saveErr
+	// makes every save fail.
 	replaced bool
+	saveErr  error
 }
 
 func (s *platformTestStore) GetArchive(context.Context, int) (*InstallationArchive, error) {
@@ -648,6 +650,9 @@ func (s *platformTestStore) GetPlatformArchive(_ context.Context, _ int, goos, g
 func (s *platformTestStore) SavePlatformArchive(_ context.Context, in SavePlatformArchiveInput) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.saveErr != nil {
+		return false, s.saveErr
+	}
 	if s.replaced {
 		return false, nil
 	}
@@ -810,6 +815,8 @@ func TestArchiveCacheRefusesAPlatformBuildItCannotTrust(t *testing.T) {
 		// The fetched build is for a release no longer installed, so it
 		// isn't run; the next start fetches for the current one.
 		{name: "installation replaced during the fetch", wantFetches: 2, setup: func(f *platformBuildFixture) { f.store.replaced = true }},
+		// Nothing shows the installation is still the one fetched for.
+		{name: "storing the build fails", wantFetches: 2, setup: func(f *platformBuildFixture) { f.store.saveErr = errors.New("database unavailable") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newPlatformBuildFixture(t)

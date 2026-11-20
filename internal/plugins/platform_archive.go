@@ -146,12 +146,12 @@ func (p *platformArchives) archiveFor(ctx context.Context, installation *Install
 		return nil, err
 	}
 
-	// The write is guarded on the installation the build was fetched for.
-	// When an install or update replaced it meanwhile, this build is for a
-	// release that is no longer installed: refuse it rather than run it. The
-	// caller's next load reads the current installation. A write that failed
-	// for another reason leaves a build for the current release, which only
-	// costs a fetch on the next load.
+	// The write is guarded on the installation the build was fetched for,
+	// and is the only check that the installation is still that one. When an
+	// install or update replaced it meanwhile, or the write failed so nothing
+	// shows it wasn't, this build may be for a release that is no longer
+	// installed: refuse it rather than run it. The caller's next load reads
+	// the current installation and fetches again.
 	saved, err := p.store.SavePlatformArchive(ctx, SavePlatformArchiveInput{
 		Installation: installation,
 		OS:           goos,
@@ -162,9 +162,7 @@ func (p *platformArchives) archiveFor(ctx context.Context, installation *Install
 	})
 	switch {
 	case err != nil:
-		slog.WarnContext(ctx, "failed to store plugin build for this platform; it will be fetched again on the next load",
-			"component", "plugins", "installation_id", installation.ID, "plugin_id", installation.PluginID,
-			"version", installation.Version, "platform", goos+"/"+goarch, "error", err)
+		return nil, fmt.Errorf("store the %s/%s build of plugin %s %s: %w", goos, goarch, installation.PluginID, installation.Version, err)
 	case !saved:
 		return nil, fmt.Errorf("plugin %s %s was replaced while this server fetched its %s/%s build: %w",
 			installation.PluginID, installation.Version, goos, goarch, ErrInstallationChanged)
