@@ -449,6 +449,12 @@
       "value": "जारी रखने के लिए अपने नेटवर्क के साइन इन से साइन इन करें।"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "यह नोड सर्वर के डिप्लॉयमेंट कॉन्फ़िगरेशन में सेट है। इसे यहाँ मैनेज करने के लिए इसे वहाँ से हटाएँ और API सर्वर रीस्टार्ट करें।"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30406,7 +30412,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "हाल ही में शुरू हुए प्लेबैक सेशन की फ़ीड"
+      "value": "सभी खातों के सबसे हाल के प्ले"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32035,6 +32041,80 @@
     {
       "type": 0,
       "value": "गतिविधि लोड नहीं की जा सकी।"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ने "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " को चलाया"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ने "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " को चलाया"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49128,6 +49208,12 @@
       "value": "सेटिंग पूरी करने के लिए सर्वर का पता डालें।"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "कुंजी सर्वर के डिप्लॉयमेंट कॉन्फ़िगरेशन में सेट है"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 1,
@@ -50032,6 +50118,12 @@
     {
       "type": 0,
       "value": " मिटाएँ"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "यह सर्वर के डिप्लॉयमेंट कॉन्फ़िगरेशन में सेट है। इसे यहाँ मिटाने के लिए वहाँ से हटाएँ।"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -56869,6 +56961,12 @@
     {
       "type": 0,
       "value": "मैसेज भेजा गया"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "प्लेयर ने मैसेज मिलने की पुष्टि नहीं की। हो सकता है कि यह देर से दिखे या बिल्कुल न दिखे।"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -108734,6 +108832,12 @@
       "value": "अनुवाद हो रहा है…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "इस एक्सपोर्ट के बाद जोड़ी गई सर्वर पंक्तियाँ छिपाएँ:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -108752,6 +108856,12 @@
     {
       "type": 0,
       "value": ", और ये उन सेक्शन की जगह ले लेते हैं जो आपने यहाँ पहले जोड़े थे। इस सर्वर के सेक्शन में आपके बदलाव बने रहते हैं।"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "यह फ़ाइल एक्सपोर्ट होने के बाद इस सर्वर की पंक्तियाँ बदल गई हैं, इसलिए छिपाने के लिए नीचे से पंक्तियाँ चुनें।"
     }
   ],
   "web.home.layout.checking": [
@@ -108802,6 +108912,26 @@
     {
       "type": 0,
       "value": "“देखे गए आइटम छिपाएँ” चालू करता है।"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "इन पर चुनी गई पंक्तियाँ छिपाता है: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", और वहाँ आपकी दूसरी पंक्तियों को नहीं बदलता।"
     }
   ],
   "web.home.layout.import": [
@@ -108906,6 +109036,24 @@
     {
       "type": 0,
       "value": "।"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109122,6 +109270,12 @@
     {
       "type": 0,
       "value": "बिना नाम का सेक्शन"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "वे सर्वर पंक्तियाँ छिपाएँ जो इस फ़ाइल में नहीं हैं:"
     }
   ],
   "web.home.page.customize": [

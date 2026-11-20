@@ -449,6 +449,12 @@
       "value": "Inicia sesión con el sistema de inicio de sesión de tu red para continuar."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "La configuración de implementación del servidor define este nodo. Quítalo de allí y reinicia los servidores de la API para administrarlo aquí."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -33640,7 +33646,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Lista de las sesiones de reproducción iniciadas recientemente"
+      "value": "Reproducciones más recientes de todas las cuentas"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35440,6 +35446,72 @@
     {
       "type": 0,
       "value": "No se pudo cargar la actividad."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " reprodujo "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " reprodujo "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -55287,6 +55359,12 @@
       "value": "Introduce la dirección del servidor para completar la configuración."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Clave definida por la configuración de implementación del servidor"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -56207,6 +56285,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Lo define la configuración de implementación del servidor. Quítalo de allí para eliminarlo aquí."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -63682,6 +63766,12 @@
     {
       "type": 0,
       "value": "Mensaje enviado"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "El reproductor no confirmó el mensaje. Es posible que se muestre más tarde o que no llegue a mostrarse."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -119263,6 +119353,12 @@
       "value": "Traduciendo…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ocultar las filas del servidor añadidas desde esta exportación:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -119281,6 +119377,12 @@
     {
       "type": 0,
       "value": " y reemplazan las secciones que añadiste aquí antes. Tus cambios en las secciones de este servidor se conservan."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Las filas de este servidor cambiaron desde que se exportó este archivo, así que elige abajo las filas que quieras ocultar."
     }
   ],
   "web.home.layout.checking": [
@@ -119331,6 +119433,26 @@
     {
       "type": 0,
       "value": "Activa Ocultar elementos vistos."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Oculta las filas seleccionadas en: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " sin cambiar tus otras filas allí."
     }
   ],
   "web.home.layout.import": [
@@ -119435,6 +119557,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -119654,6 +119794,12 @@
     {
       "type": 0,
       "value": "Sección sin título"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ocultar las filas del servidor que no están en este archivo:"
     }
   ],
   "web.home.page.customize": [

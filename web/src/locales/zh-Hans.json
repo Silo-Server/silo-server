@@ -449,6 +449,12 @@
       "value": "请通过你所在网络的登录方式登录以继续。"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "此节点由服务器的部署配置设置。请在部署配置中移除它，然后重启API服务器，即可在此处管理它。"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -27684,7 +27690,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "最近启动的播放会话动态"
+      "value": "所有账户中最近的播放记录"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -29134,6 +29140,72 @@
     {
       "type": 0,
       "value": "无法加载活动。"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "播放了"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "播放了"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -44184,6 +44256,12 @@
       "value": "请输入服务器地址以完成设置。"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "密钥由服务器的部署配置设置"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 1,
@@ -45100,6 +45178,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "由服务器的部署配置设置。请在部署配置中移除它，即可在此处删除。"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -51195,6 +51279,12 @@
     {
       "type": 0,
       "value": "消息已发送"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "播放器未确认收到该消息。消息可能稍后显示，也可能完全不显示。"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -100147,6 +100237,12 @@
       "value": "正在翻译……"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "隐藏此导出后新增的服务器行："
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -100165,6 +100261,12 @@
     {
       "type": 0,
       "value": "，并替换你之前在此添加的版块。你对此服务器版块所做的更改会保留。"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "自导出此文件以来，此服务器的行已更改，请在下方选择要隐藏的行。"
     }
   ],
   "web.home.layout.checking": [
@@ -100215,6 +100317,26 @@
     {
       "type": 0,
       "value": "开启隐藏已观看项目。"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "在以下页面隐藏所选行："
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "，不更改你在那里的其他行。"
     }
   ],
   "web.home.layout.import": [
@@ -100319,6 +100441,24 @@
     {
       "type": 0,
       "value": "。"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": "（"
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "）"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -100520,6 +100660,12 @@
     {
       "type": 0,
       "value": "未命名版块"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "隐藏此文件中没有的服务器行："
     }
   ],
   "web.home.page.customize": [

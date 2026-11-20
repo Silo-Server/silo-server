@@ -449,6 +449,12 @@
       "value": "Logg på via nettverkets pålogging for å fortsette."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Denne noden er angitt av serverens distribusjonskonfigurasjon. Fjern den der og start API-serverne på nytt for å administrere den her."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30502,7 +30508,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Liste over nylig startede avspillingsøkter"
+      "value": "Siste avspillinger på tvers av alle kontoer"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32131,6 +32137,72 @@
     {
       "type": 0,
       "value": "Kunne ikke laste inn aktivitet."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " spilte av "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " spilte av "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49520,6 +49592,12 @@
       "value": "Skriv inn serveradressen for å fullføre innstillingene."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nøkkel angitt av serverens distribusjonskonfigurasjon"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50428,6 +50506,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Angitt av serverens distribusjonskonfigurasjon. Fjern den der for å slette den her."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -57181,6 +57265,12 @@
     {
       "type": 0,
       "value": "Meldingen er sendt"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Avspilleren bekreftet ikke meldingen. Den kan bli vist senere eller ikke i det hele tatt."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -109418,6 +109508,12 @@
       "value": "Oversetter …"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skjul serverrader som er lagt til siden denne eksporten:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109436,6 +109532,12 @@
     {
       "type": 0,
       "value": ", og erstatter seksjoner du har lagt til her tidligere. Endringene dine i denne serverens seksjoner beholdes."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Radene på denne serveren er endret siden filen ble eksportert, så velg eventuelle rader du vil skjule nedenfor."
     }
   ],
   "web.home.layout.checking": [
@@ -109486,6 +109588,26 @@
     {
       "type": 0,
       "value": "Slår på Skjul sette elementer."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Skjuler valgte rader på: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " uten å endre de andre radene dine der."
     }
   ],
   "web.home.layout.import": [
@@ -109590,6 +109712,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109798,6 +109938,12 @@
     {
       "type": 0,
       "value": "Seksjon uten navn"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skjul serverrader som ikke er i denne filen:"
     }
   ],
   "web.home.page.customize": [

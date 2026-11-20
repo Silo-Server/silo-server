@@ -48789,6 +48789,96 @@
         ],
         "type": "object"
       },
+      "ProfileSectionBaseline": {
+        "additionalProperties": false,
+        "properties": {
+          "active_section_tokens": {
+            "description": "Opaque server-keyed tokens for the currently active server sections on this page (enabled rows, or fallback defaults when no stored row is enabled), sorted deterministically",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "section_tokens": {
+            "description": "Opaque server-keyed tokens for every server section on this page (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "visible_sections": {
+            "description": "Pre-override active server sections the acting profile's access policy permits, in display order",
+            "items": {
+              "$ref": "#/components/schemas/ProfileSectionBaselineRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "section_tokens",
+          "active_section_tokens",
+          "visible_sections"
+        ],
+        "type": "object"
+      },
+      "ProfileSectionBaselineRow": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "examples": [
+              "s-continue-watching"
+            ],
+            "type": "string"
+          },
+          "section_type": {
+            "description": "The recipe; the set is extensible",
+            "examples": [
+              "continue_watching"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "The server's title for this row before any profile overrides",
+            "examples": [
+              "Continue Watching"
+            ],
+            "type": "string"
+          },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
+            ],
+            "type": "string"
+          },
+          "token": {
+            "description": "Opaque server-keyed token identifying this server section on this page for layout export and import comparisons",
+            "examples": [
+              "m3s9R1pQv8fK2nL7wX4yZA"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "section_type",
+          "title",
+          "token"
+        ],
+        "type": "object"
+      },
       "ProfileSectionFlags": {
         "additionalProperties": false,
         "properties": {
@@ -208393,6 +208483,181 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/profile/sections/baseline": {
+      "get": {
+        "operationId": "getProfileSectionBaseline",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The page the overrides apply to",
+            "explode": false,
+            "in": "query",
+            "name": "scope",
+            "schema": {
+              "default": "home",
+              "description": "The page the overrides apply to",
+              "enum": [
+                "home",
+                "library"
+              ],
+              "examples": [
+                "home"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The library; required when scope is library and refused otherwise",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "The library; required when scope is library and refused otherwise",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileSectionBaseline"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get one page's pre-override server section baseline for home layout export and import.",
+        "tags": [
+          "profile_sections"
+        ],
+        "x-silo-class": "profile_scoped",
         "x-silo-service-backed": true
       }
     },

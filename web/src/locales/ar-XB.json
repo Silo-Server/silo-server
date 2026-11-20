@@ -449,6 +449,12 @@
       "value": "\u200F\u202ESign in through your network’s sign-in to continue.\u202C"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis node is set by the server’s deployment configuration. Remove it there and restart the API servers to manage it here.\u202C"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -32222,7 +32228,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "\u200F\u202EFeed of recently started playback sessions\u202C"
+      "value": "\u200F\u202EMost recent plays across all accounts\u202C"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -33935,6 +33941,80 @@
     {
       "type": 0,
       "value": "\u200F\u202EFailed to load activity.\u202C"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E played \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E played \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -52368,6 +52448,12 @@
       "value": "\u200F\u202EEnter the server address to complete the settings.\u202C"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKey set by the server’s deployment configuration\u202C"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -53328,6 +53414,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESet by the server’s deployment configuration. Remove it there to delete it here.\u202C"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -60441,6 +60533,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EMessage sent\u202C"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe player didn’t confirm the message. It may show up late or not at all.\u202C"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -114910,6 +115008,12 @@
       "value": "\u200F\u202ETranslating…\u202C"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide server rows added since this export:\u202C"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -114928,6 +115032,12 @@
     {
       "type": 0,
       "value": "\u202E, replacing sections you added here before. Your changes to this server's sections stay.\u202C"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis server's rows changed since this file was exported, so choose any rows to hide below.\u202C"
     }
   ],
   "web.home.layout.checking": [
@@ -114978,6 +115088,26 @@
     {
       "type": 0,
       "value": "\u200F\u202ETurns Hide watched items on.\u202C"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHides selected rows on: \u202C"
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E without changing your other rows there.\u202C"
     }
   ],
   "web.home.layout.import": [
@@ -115086,6 +115216,28 @@
     {
       "type": 0,
       "value": "\u202E.\u202C"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": "\u202E (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -115306,6 +115458,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EUntitled section\u202C"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide server rows not in this file:\u202C"
     }
   ],
   "web.home.page.customize": [

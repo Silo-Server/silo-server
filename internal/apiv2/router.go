@@ -912,6 +912,7 @@ type ProfileSectionService interface {
 	SaveProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery, writes []handlers.SectionOverrideWrite) error
 	ResetProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery) error
 	ResolveProfileSectionSettings(ctx context.Context, userID int, profileID, scope string, libraryID *int, filter mediacatalog.AccessFilter) ([]sections.ResolvedSection, error)
+	GetProfileSectionBaseline(ctx context.Context, userID int, scope string, libraryID *int) (handlers.ProfileSectionBaseline, error)
 }
 
 // LibraryService is the slice of *catalog.FolderRepository updateProfile

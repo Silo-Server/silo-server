@@ -3,6 +3,9 @@ package apiv2
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"sort"
@@ -154,6 +157,30 @@ type ProfileSectionFlagsOutput struct {
 	Body ProfileSectionFlags
 }
 
+// ProfileSectionBaselineRow is one active, pre-override server section visible
+// to the acting profile on the addressed page.
+type ProfileSectionBaselineRow struct {
+	ID          string `json:"id" example:"s-continue-watching"`
+	SectionType string `json:"section_type" doc:"The recipe; the set is extensible" example:"continue_watching"`
+	Title       string `json:"title" doc:"The server's title for this row before any profile overrides" example:"Continue Watching"`
+	Token       string `json:"token" doc:"Opaque server-keyed token identifying this server section on this page for layout export and import comparisons" example:"m3s9R1pQv8fK2nL7wX4yZA"`
+	SectionTitleKey
+}
+
+// ProfileSectionBaseline describes one page's server-defined rows before
+// profile overrides are applied, for home layout export snapshots and import
+// previews.
+type ProfileSectionBaseline struct {
+	SectionTokens       []string                    `json:"section_tokens" doc:"Opaque server-keyed tokens for every server section on this page (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically"`
+	ActiveSectionTokens []string                    `json:"active_section_tokens" doc:"Opaque server-keyed tokens for the currently active server sections on this page (enabled rows, or fallback defaults when no stored row is enabled), sorted deterministically"`
+	VisibleSections     []ProfileSectionBaselineRow `json:"visible_sections" doc:"Pre-override active server sections the acting profile's access policy permits, in display order"`
+}
+
+// ProfileSectionBaselineOutput is the getProfileSectionBaseline response.
+type ProfileSectionBaselineOutput struct {
+	Body ProfileSectionBaseline
+}
+
 const (
 	locationScope     = "query.scope"
 	locationLibraryID = "query.library_id"
@@ -207,6 +234,13 @@ func registerProfileSections(reg *Registry) {
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
 	}, reg.getProfileSectionSettings)
+
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodGet, Prefix+"/profile/sections/baseline", "getProfileSectionBaseline", "profile_sections",
+			"Get one page's pre-override server section baseline for home layout export and import."),
+		Class:         ClassProfileScoped,
+		ServiceBacked: true,
+	}, reg.getProfileSectionBaseline)
 
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/profile/sections/flags", "getProfileSectionFlags", "profile_sections",
@@ -387,6 +421,72 @@ func profileSectionSettingsOf(resolved []sections.ResolvedSection) (*ProfileSect
 // profiles may always add rule rows, so the flag is always true.
 func (reg *Registry) getProfileSectionFlags(context.Context, *struct{}) (*ProfileSectionFlagsOutput, error) {
 	return &ProfileSectionFlagsOutput{Body: ProfileSectionFlags{AllowProfileCustomSections: true}}, nil
+}
+
+// getProfileSectionBaseline returns one page's pre-override server section
+// baseline: opaque HMAC tokens for all and active server rows, plus the
+// pre-override active rows visible to the acting profile.
+func (reg *Registry) getProfileSectionBaseline(ctx context.Context, in *SectionOverridesScopeInput) (*ProfileSectionBaselineOutput, error) {
+	if reg.deps.ProfileSections == nil {
+		return nil, unavailable("section")
+	}
+	if len(reg.deps.CursorSecret) == 0 {
+		return nil, NewProblem(TypeDependencyUnavailable, "Layout baseline signing is not configured.")
+	}
+	q, libraryID, p := overridesQuery(ctx, *in)
+	if p != nil {
+		return nil, p
+	}
+	baseline, err := reg.deps.ProfileSections.GetProfileSectionBaseline(ctx, q.UserID, q.Scope, libraryID)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	return &ProfileSectionBaselineOutput{
+		Body: profileSectionBaselineOf(reg.deps.CursorSecret, q.Scope, q.LibraryID, baseline),
+	}, nil
+}
+
+func profileSectionBaselineOf(secret []byte, scope, libraryID string, baseline handlers.ProfileSectionBaseline) ProfileSectionBaseline {
+	allTokens := baselineTokensOf(secret, scope, libraryID, baseline.AllSectionIDs)
+	activeTokens := baselineTokensOf(secret, scope, libraryID, baseline.ActiveSectionIDs)
+	visible := make([]ProfileSectionBaselineRow, 0, len(baseline.VisibleSections))
+	for _, s := range baseline.VisibleSections {
+		visible = append(visible, ProfileSectionBaselineRow{
+			ID:              s.ID,
+			SectionType:     string(s.SectionType),
+			Title:           s.Title,
+			Token:           baselineSectionToken(secret, scope, libraryID, s.ID),
+			SectionTitleKey: sectionTitleKeyOf(s.TitleKey, s.TitleArgs),
+		})
+	}
+	return ProfileSectionBaseline{
+		SectionTokens:       allTokens,
+		ActiveSectionTokens: activeTokens,
+		VisibleSections:     visible,
+	}
+}
+
+func baselineTokensOf(secret []byte, scope, libraryID string, ids []string) []string {
+	tokens := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		tokens = append(tokens, baselineSectionToken(secret, scope, libraryID, id))
+	}
+	sort.Strings(tokens)
+	return tokens
+}
+
+func baselineSectionToken(secret []byte, scope, libraryID, sectionID string) string {
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte("home-layout-baseline\x00"))
+	mac.Write([]byte(scope))
+	mac.Write([]byte{0})
+	mac.Write([]byte(libraryID))
+	mac.Write([]byte{0})
+	mac.Write([]byte(sectionID))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)[:16])
 }
 
 // sectionProblem maps the v1 decision onto problem types: a rejected recipe

@@ -449,6 +449,12 @@
       "value": "請透過你網路的登入方式登入以繼續。"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "此節點由伺服器的部署設定指定。請在該處移除，然後重新啟動 API 伺服器，即可在此管理。"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -27790,7 +27796,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "最近開始的播放工作階段動態"
+      "value": "所有帳號最近的播放紀錄"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -29236,6 +29242,72 @@
     {
       "type": 0,
       "value": "無法載入活動。"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " 播放了 "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " 播放了 "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -44314,6 +44386,12 @@
       "value": "請輸入伺服器位址以完成設定。"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "金鑰由伺服器的部署設定指定"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 1,
@@ -45230,6 +45308,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "由伺服器的部署設定指定。請在該處移除，才能在此刪除。"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -51341,6 +51425,12 @@
     {
       "type": 0,
       "value": "已傳送訊息"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "播放器未確認收到訊息。訊息可能會延遲顯示，或完全不會顯示。"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -100569,6 +100659,12 @@
       "value": "正在翻譯……"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "隱藏此匯出檔建立後新增的伺服器列："
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -100587,6 +100683,12 @@
     {
       "type": 0,
       "value": "，並取代你先前在此新增的區塊。你對此伺服器區塊所做的變更會保留。"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "此檔案匯出後，此伺服器的列已有變更，請在下方選擇要隱藏的列。"
     }
   ],
   "web.home.layout.checking": [
@@ -100637,6 +100739,26 @@
     {
       "type": 0,
       "value": "開啟「隱藏已觀看的項目」。"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "在以下頁面隱藏所選的列："
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "，不會變更你在這些頁面的其他列。"
     }
   ],
   "web.home.layout.import": [
@@ -100741,6 +100863,24 @@
     {
       "type": 0,
       "value": "。"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": "（"
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "）"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -100942,6 +101082,12 @@
     {
       "type": 0,
       "value": "未命名區塊"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "隱藏此檔案中沒有的伺服器列："
     }
   ],
   "web.home.page.customize": [

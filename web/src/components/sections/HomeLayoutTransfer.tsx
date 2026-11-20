@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -24,7 +25,15 @@ import { invalidateSettingValueQueries } from "@/hooks/queries/settingValues";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { useAppLanguage, useT } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
+import {
+  homeLayoutPageKey,
+  planPageHideCandidates,
+  type HomeLayoutBaselineMode,
+  type ProfileSectionBaseline,
+  type ProfileSectionBaselineRow,
+} from "@/lib/homeLayoutBaseline";
 import { fetchRecipeCatalog } from "@/lib/recipes";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { randomUUID } from "@/lib/uuid";
 import {
@@ -35,6 +44,7 @@ import {
   planHomeLayoutImport,
   fileReferences,
   type HomeLayoutImportPlan,
+  type HomeLayoutPlannedPage,
   type HomeLayoutReferences,
 } from "@/lib/homeLayoutTransfer";
 
@@ -44,6 +54,19 @@ const NO_REFERENCES: HomeLayoutReferences = { personalCollections: false, profil
 /** Page or library names as a list: "Home, Movies" in English. */
 function listNames(names: string[]): string {
   return joinList(names);
+}
+
+interface HideRowOption {
+  key: string;
+  pageKey: string;
+  pageLabel: string;
+  row: ProfileSectionBaselineRow;
+  mode: HomeLayoutBaselineMode;
+  checked: boolean;
+}
+
+function hideRowOptionKey(pageKey: string, sectionId: string): string {
+  return `${pageKey}\u0000${sectionId}`;
 }
 
 interface HomeLayoutImportDialogProps {
@@ -57,12 +80,18 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
   const qc = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
+  const [hideOverrides, setHideOverrides] = useState<Record<string, boolean>>({});
   const [applying, setApplying] = useState(false);
   // The profile this dialog imports into. Its reads and writes carry this
   // authority, so a profile switch can't redirect an import in progress.
   const [profileContext] = useState(captureProfileRequestContext);
   // Opened from More, which gets focus back on close.
   const returnFocus = useReturnFocus();
+
+  function updateText(next: string) {
+    setText(next);
+    setHideOverrides({});
+  }
 
   const identityQuery = useQuery({
     queryKey: ["home-layout-import", "server-identity"],
@@ -120,15 +149,6 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
   // Only an admin adds new rows of an admin-only kind (Editor's picks).
   const allowAdminOnlyRecipes = useOptionalAuth()?.user?.role === "admin";
 
-  const targetReady = Boolean(
-    identityQuery.data && personalCollectionIds && profileIds && recipeCatalog,
-  );
-  const targetError =
-    identityQuery.isError ||
-    (refs.personalCollections && collectionsQuery.isError) ||
-    (refs.profiles && profilesQuery.isError) ||
-    recipeCatalogQuery.isError;
-
   const plan = useMemo<HomeLayoutImportPlan | null>(() => {
     if (
       !parsed?.ok ||
@@ -165,8 +185,97 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
     allowAdminOnlyRecipes,
   ]);
 
+  const sameServerPages = useMemo<HomeLayoutPlannedPage[]>(
+    () => (plan?.sameServer ? [...plan.pages, ...plan.unappliedPages] : []),
+    [plan],
+  );
+  const sameServerPageKeys = sameServerPages.map(homeLayoutPageKey);
+  const baselinesQuery = useQuery({
+    queryKey: ["home-layout-import", "section-baselines", ...sameServerPageKeys],
+    queryFn: async () => {
+      const entries = await Promise.all(
+        sameServerPages.map(async (page) => {
+          const baseline = await v2("GET /api/v2/profile/sections/baseline", {
+            query: pageQuery(page.scope, page.libraryId),
+            profileContext: profileContext ?? undefined,
+          });
+          return [homeLayoutPageKey(page), baseline] as const;
+        }),
+      );
+      return new Map<string, ProfileSectionBaseline>(entries);
+    },
+    enabled: Boolean(plan?.sameServer && sameServerPages.length > 0),
+    gcTime: 0,
+  });
+
+  const needsBaselines = Boolean(plan?.sameServer && sameServerPages.length > 0);
+  const baselinesReady = !needsBaselines || Boolean(baselinesQuery.data);
+  const targetReady = Boolean(
+    identityQuery.data && personalCollectionIds && profileIds && recipeCatalog && baselinesReady,
+  );
+  const targetError =
+    identityQuery.isError ||
+    (refs.personalCollections && collectionsQuery.isError) ||
+    (refs.profiles && profilesQuery.isError) ||
+    recipeCatalogQuery.isError ||
+    (needsBaselines && baselinesQuery.isError);
+
+  const { hideOptions, hasUnmatchedBaseline } = useMemo(() => {
+    if (!plan?.sameServer || !baselinesQuery.data) {
+      return { hideOptions: [] as HideRowOption[], hasUnmatchedBaseline: false };
+    }
+    const options: HideRowOption[] = [];
+    let unmatched = false;
+    for (const page of sameServerPages) {
+      const key = homeLayoutPageKey(page);
+      const baseline = baselinesQuery.data.get(key);
+      if (!baseline) continue;
+      const planned = planPageHideCandidates(page, baseline);
+      if (planned.mode === "unmatched" && planned.candidates.length > 0) {
+        unmatched = true;
+      }
+      for (const row of planned.candidates) {
+        const optionKey = hideRowOptionKey(key, row.id);
+        options.push({
+          key: optionKey,
+          pageKey: key,
+          pageLabel: page.label,
+          row,
+          mode: planned.mode,
+          checked: hideOverrides[optionKey] ?? planned.defaultChecked,
+        });
+      }
+    }
+    return { hideOptions: options, hasUnmatchedBaseline: unmatched };
+  }, [plan, sameServerPages, baselinesQuery.data, hideOverrides]);
+
+  const checkedByPage = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const option of hideOptions) {
+      if (!option.checked) continue;
+      const list = map.get(option.pageKey);
+      if (list) list.push(option.row.id);
+      else map.set(option.pageKey, [option.row.id]);
+    }
+    return map;
+  }, [hideOptions]);
+
+  const checkedUnappliedPages = useMemo(
+    () =>
+      plan
+        ? plan.unappliedPages.filter(
+            (page) => (checkedByPage.get(homeLayoutPageKey(page))?.length ?? 0) > 0,
+          )
+        : [],
+    [plan, checkedByPage],
+  );
+
   const hasChanges = Boolean(
-    plan && (plan.pages.length > 0 || plan.hideWatchedItems !== undefined),
+    plan &&
+    baselinesReady &&
+    (plan.pages.length > 0 ||
+      checkedUnappliedPages.length > 0 ||
+      plan.hideWatchedItems !== undefined),
   );
 
   async function handleFile(file: File) {
@@ -175,7 +284,7 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
       return;
     }
     try {
-      setText(await file.text());
+      updateText(await file.text());
     } catch {
       toast.error(t("web.home.layout.readFailed"));
     }
@@ -190,9 +299,10 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
     }
     setApplying(true);
     const failures: string[] = [];
-    for (const page of plan.pages) {
+    for (const page of [...plan.pages, ...checkedUnappliedPages]) {
       try {
         const query = pageQuery(page.scope, page.libraryId);
+        const hideIds = checkedByPage.get(homeLayoutPageKey(page)) ?? [];
         await importPage(
           page,
           plan.sameServer,
@@ -203,8 +313,11 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
               ),
             save: (overrides) =>
               v2("PUT /api/v2/profile/sections", { query, body: { overrides }, profileContext }),
+            getBaseline: () =>
+              v2("GET /api/v2/profile/sections/baseline", { query, profileContext }),
           },
           randomUUID,
+          hideIds,
         );
       } catch (error) {
         failures.push(
@@ -283,7 +396,7 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
           <textarea
             id="home-layout-import-text"
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => updateText(event.target.value)}
             placeholder={t("web.home.layout.pastePlaceholder")}
             spellCheck={false}
             disabled={applying}
@@ -297,7 +410,20 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
           {parsed?.ok && !targetReady && !targetError ? (
             <p className="text-muted-foreground text-sm">{t("web.home.layout.checking")}</p>
           ) : null}
-          {plan ? <HomeLayoutImportSummary plan={plan} hasChanges={hasChanges} /> : null}
+          {plan && targetReady && !targetError ? (
+            <HomeLayoutImportSummary
+              plan={plan}
+              hasChanges={hasChanges}
+              hideOptions={hideOptions}
+              hasUnmatchedBaseline={hasUnmatchedBaseline}
+              hideOnlyPageNames={checkedUnappliedPages.map((page) => page.label)}
+              showPageInRowLabel={sameServerPages.length > 1}
+              disabled={applying}
+              onToggleRow={(optionKey, checked) =>
+                setHideOverrides((prev) => ({ ...prev, [optionKey]: checked }))
+              }
+            />
+          ) : null}
         </div>
 
         <DialogFooter>
@@ -313,21 +439,83 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
   );
 }
 
+function HideRowsChecklist({
+  heading,
+  options,
+  showPageInRowLabel,
+  disabled,
+  onToggleRow,
+}: {
+  heading: string;
+  options: HideRowOption[];
+  showPageInRowLabel: boolean;
+  disabled: boolean;
+  onToggleRow: (optionKey: string, checked: boolean) => void;
+}) {
+  const t = useT();
+  const sectionTitle = useSectionTitle();
+  if (options.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      <p className="font-medium">{heading}</p>
+      <ul className="space-y-1.5">
+        {options.map((option) => {
+          const title = sectionTitle(option.row);
+          const label =
+            showPageInRowLabel || option.pageKey !== "home:"
+              ? t("web.home.layout.rowWithPage", { section: title, page: option.pageLabel })
+              : title;
+          return (
+            <li key={option.key} className="flex items-center gap-2">
+              <Checkbox
+                id={`hide-row-${option.key}`}
+                checked={option.checked}
+                disabled={disabled}
+                onCheckedChange={(value) => onToggleRow(option.key, value === true)}
+              />
+              <Label htmlFor={`hide-row-${option.key}`} className="cursor-pointer font-normal">
+                {label}
+              </Label>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function HomeLayoutImportSummary({
   plan,
   hasChanges,
+  hideOptions,
+  hasUnmatchedBaseline,
+  hideOnlyPageNames,
+  showPageInRowLabel,
+  disabled,
+  onToggleRow,
 }: {
   plan: HomeLayoutImportPlan;
   hasChanges: boolean;
+  hideOptions: HideRowOption[];
+  hasUnmatchedBaseline: boolean;
+  hideOnlyPageNames: string[];
+  showPageInRowLabel: boolean;
+  disabled: boolean;
+  onToggleRow: (optionKey: string, checked: boolean) => void;
 }) {
   const t = useT();
   const pageNames = plan.pages.map((page) => page.label);
   const strong = (chunks: ReactNode[]) => <strong>{chunks}</strong>;
+  const addedOptions = hideOptions.filter((option) => option.mode === "baseline");
+  const unlistedOptions = hideOptions.filter((option) => option.mode !== "baseline");
   return (
     <div className="surface-panel-subtle space-y-2 rounded-lg p-3 text-sm">
       {!hasChanges ? <p>{t("web.home.layout.nothingApplies")}</p> : null}
       {pageNames.length > 0 && plan.sameServer ? (
         <p>{t("web.home.layout.replacesOn", { pages: listNames(pageNames), strong })}</p>
+      ) : null}
+      {hideOnlyPageNames.length > 0 && plan.sameServer ? (
+        <p>{t("web.home.layout.hidesOnlyOn", { pages: listNames(hideOnlyPageNames), strong })}</p>
       ) : null}
       {pageNames.length > 0 && !plan.sameServer ? (
         <p>{t("web.home.layout.addsFromOtherServer", { pages: listNames(pageNames), strong })}</p>
@@ -339,6 +527,23 @@ function HomeLayoutImportSummary({
             : t("web.home.layout.hideWatchedOff")}
         </p>
       ) : null}
+      {hasUnmatchedBaseline ? (
+        <p className="text-muted-foreground">{t("web.home.layout.baselineUnmatched")}</p>
+      ) : null}
+      <HideRowsChecklist
+        heading={t("web.home.layout.addedRowsHeading")}
+        options={addedOptions}
+        showPageInRowLabel={showPageInRowLabel}
+        disabled={disabled}
+        onToggleRow={onToggleRow}
+      />
+      <HideRowsChecklist
+        heading={t("web.home.layout.unlistedRowsHeading")}
+        options={unlistedOptions}
+        showPageInRowLabel={showPageInRowLabel}
+        disabled={disabled}
+        onToggleRow={onToggleRow}
+      />
       {plan.skippedServerSectionChanges > 0 ? (
         <p className="text-muted-foreground">
           {t("web.home.layout.skippedServerChanges", {

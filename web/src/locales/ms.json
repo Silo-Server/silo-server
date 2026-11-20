@@ -449,6 +449,12 @@
       "value": "Log masuk melalui log masuk rangkaian anda untuk meneruskan."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Nod ini ditetapkan oleh konfigurasi penggunaan pelayan. Alih keluar nod itu di sana dan mulakan semula pelayan API untuk mengurusnya di sini."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -27456,7 +27462,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Suapan sesi main balik yang baru dimulakan"
+      "value": "Main balik terkini merentas semua akaun"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -28914,6 +28920,72 @@
     {
       "type": 0,
       "value": "Tidak dapat memuatkan aktiviti."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " memainkan "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " memainkan "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -43808,6 +43880,12 @@
       "value": "Masukkan alamat pelayan untuk melengkapkan tetapan."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Kunci ditetapkan oleh konfigurasi penggunaan pelayan"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -44704,6 +44782,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh konfigurasi penggunaan pelayan. Alih keluar nod itu di sana untuk memadamnya di sini."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -50723,6 +50807,12 @@
     {
       "type": 0,
       "value": "Mesej dihantar"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Pemain tidak mengesahkan mesej itu. Mesej itu mungkin dipaparkan lewat atau tidak dipaparkan sama sekali."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -99357,6 +99447,12 @@
       "value": "Menterjemah…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sembunyikan baris pelayan yang ditambah sejak eksport ini:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -99375,6 +99471,12 @@
     {
       "type": 0,
       "value": ", menggantikan bahagian yang anda tambah di sini sebelum ini. Perubahan anda pada bahagian pelayan ini kekal."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Baris pelayan ini telah berubah sejak fail ini dieksport, jadi pilih baris yang mahu disembunyikan di bawah."
     }
   ],
   "web.home.layout.checking": [
@@ -99425,6 +99527,26 @@
     {
       "type": 0,
       "value": "Menghidupkan Sembunyikan item yang telah ditonton."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Menyembunyikan baris yang dipilih pada: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " tanpa mengubah baris anda yang lain di sana."
     }
   ],
   "web.home.layout.import": [
@@ -99529,6 +99651,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -99726,6 +99866,12 @@
     {
       "type": 0,
       "value": "Bahagian tanpa tajuk"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sembunyikan baris pelayan yang tiada dalam fail ini:"
     }
   ],
   "web.home.page.customize": [

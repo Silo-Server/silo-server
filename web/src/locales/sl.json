@@ -449,6 +449,12 @@
       "value": "Za nadaljevanje se prijavite prek prijavnega sistema svojega omrežja."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "To vozlišče je nastavljeno v konfiguraciji namestitve strežnika. Odstranite ga tam in znova zaženite strežnike API, da ga boste lahko upravljali tukaj."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -36774,7 +36780,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Vir nedavno začetih sej predvajanja"
+      "value": "Najnovejša predvajanja v vseh računih"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -38749,6 +38755,80 @@
     {
       "type": 0,
       "value": "Dejavnosti ni bilo mogoče naložiti."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "Uporabnik "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " je predvajal "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "Uporabnik "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " je predvajal "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -60977,6 +61057,12 @@
       "value": "Vnesite naslov strežnika, da dokončate nastavitve."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ključ je nastavljen v konfiguraciji namestitve strežnika"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -61917,6 +62003,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nastavljeno v konfiguraciji namestitve strežnika. Odstranite ga tam, da ga boste lahko izbrisali tukaj."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -70278,6 +70370,12 @@
     {
       "type": 0,
       "value": "Sporočilo je poslano"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Predvajalnik ni potrdil prejema sporočila. Morda bo prikazano pozneje ali pa sploh ne."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -129482,6 +129580,12 @@
       "value": "Prevajanje …"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skrij vrstice strežnika, dodane po tem izvozu:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -129500,6 +129604,12 @@
     {
       "type": 0,
       "value": " in bodo nadomestili razdelke, ki ste jih tu dodali prej. Vaše spremembe razdelkov tega strežnika ostanejo."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Vrstice tega strežnika so se od izvoza te datoteke spremenile, zato spodaj izberite vrstice, ki jih želite skriti."
     }
   ],
   "web.home.layout.checking": [
@@ -129550,6 +129660,26 @@
     {
       "type": 0,
       "value": "Vklopi možnost „Skrij ogledane elemente“."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Skrije izbrane vrstice na straneh: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", ne da bi spremenil vaše druge vrstice tam."
     }
   ],
   "web.home.layout.import": [
@@ -129654,6 +129784,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -129884,6 +130032,12 @@
     {
       "type": 0,
       "value": "Razdelek brez naslova"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skrij vrstice strežnika, ki jih ni v tej datoteki:"
     }
   ],
   "web.home.page.customize": [

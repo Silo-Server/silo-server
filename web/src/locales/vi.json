@@ -449,6 +449,12 @@
       "value": "Đăng nhập qua hệ thống đăng nhập của mạng bạn để tiếp tục."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Node này được đặt bởi cấu hình triển khai của máy chủ. Gỡ node khỏi cấu hình đó rồi khởi động lại các máy chủ API để quản lý node tại đây."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30594,7 +30600,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Danh sách các phiên phát mới bắt đầu gần đây"
+      "value": "Lượt phát gần đây nhất trên tất cả tài khoản"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32223,6 +32229,72 @@
     {
       "type": 0,
       "value": "Không thể tải hoạt động."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " đã phát "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " đã phát "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49616,6 +49688,12 @@
       "value": "Nhập địa chỉ máy chủ để hoàn tất cài đặt."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Khóa được đặt bởi cấu hình triển khai của máy chủ"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50532,6 +50610,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Được đặt bởi cấu hình triển khai của máy chủ. Gỡ node khỏi cấu hình đó để xóa node tại đây."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -57385,6 +57469,12 @@
     {
       "type": 0,
       "value": "Đã gửi tin nhắn"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Trình phát không xác nhận đã nhận tin nhắn. Tin nhắn có thể hiển thị muộn hoặc hoàn toàn không hiển thị."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -109748,6 +109838,12 @@
       "value": "Đang dịch…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ẩn các hàng của máy chủ được thêm sau lần xuất này:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109766,6 +109862,12 @@
     {
       "type": 0,
       "value": ", thay thế các phần bạn đã thêm ở đây trước đó. Các thay đổi của bạn đối với các phần của máy chủ này vẫn được giữ nguyên."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Các hàng của máy chủ này đã thay đổi kể từ khi tệp này được xuất, vì vậy hãy chọn bên dưới những hàng cần ẩn."
     }
   ],
   "web.home.layout.checking": [
@@ -109816,6 +109918,26 @@
     {
       "type": 0,
       "value": "Bật Ẩn mục đã xem."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Ẩn các hàng đã chọn trên: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " mà không thay đổi các hàng khác của bạn ở đó."
     }
   ],
   "web.home.layout.import": [
@@ -109920,6 +110042,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -110128,6 +110268,12 @@
     {
       "type": 0,
       "value": "Phần chưa đặt tên"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ẩn các hàng của máy chủ không có trong tệp này:"
     }
   ],
   "web.home.page.customize": [

@@ -449,6 +449,12 @@
       "value": "Logga in via nätverkets inloggning för att fortsätta."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Den här noden anges av serverns driftsättningskonfiguration. Ta bort den där och starta om API-servrarna för att hantera den här."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30458,7 +30464,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Flöde med nyligen startade uppspelningssessioner"
+      "value": "Senaste uppspelningarna från alla konton"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32087,6 +32093,72 @@
     {
       "type": 0,
       "value": "Det gick inte att läsa in aktiviteten."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " spelade upp "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " spelade upp "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49408,6 +49480,12 @@
       "value": "Ange serveradressen för att slutföra inställningarna."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nyckeln anges av serverns driftsättningskonfiguration"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50316,6 +50394,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Anges av serverns driftsättningskonfiguration. Ta bort den där för att kunna radera den här."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -57065,6 +57149,12 @@
     {
       "type": 0,
       "value": "Meddelandet har skickats"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Spelaren bekräftade inte meddelandet. Det kan visas senare eller inte alls."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -109278,6 +109368,12 @@
       "value": "Översätter…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Dölj serverrader som lagts till sedan den här exporten:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109296,6 +109392,12 @@
     {
       "type": 0,
       "value": " och ersätter sektioner som du har lagt till här tidigare. Dina ändringar i den här serverns sektioner behålls."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Den här serverns rader har ändrats sedan filen exporterades, så välj nedan vilka rader som ska döljas."
     }
   ],
   "web.home.layout.checking": [
@@ -109346,6 +109448,26 @@
     {
       "type": 0,
       "value": "Slår på Dölj sedda objekt."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Döljer valda rader på: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " utan att ändra dina andra rader där."
     }
   ],
   "web.home.layout.import": [
@@ -109450,6 +109572,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109658,6 +109798,12 @@
     {
       "type": 0,
       "value": "Namnlös sektion"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Dölj serverrader som inte finns i den här filen:"
     }
   ],
   "web.home.page.customize": [

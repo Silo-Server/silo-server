@@ -1,0 +1,18 @@
+{
+  "section_tokens": [
+    "JJCuATASZNkHWhXxVIzNtQ",
+    "swuu975wnHbdix1ektLR6w"
+  ],
+  "active_section_tokens": [
+    "swuu975wnHbdix1ektLR6w"
+  ],
+  "visible_sections": [
+    {
+      "id": "s-continue",
+      "section_type": "continue_watching",
+      "title": "Continue Watching",
+      "token": "swuu975wnHbdix1ektLR6w",
+      "title_key": "home.section.continueWatching"
+    }
+  ]
+}
