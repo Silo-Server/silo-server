@@ -406,8 +406,11 @@ here. It refuses, before anything is moved into place, when:
   `config/postgres/data` aside and start again if it holds nothing needed, or
   to delete the earlier stack's directories to keep it.
 - An earlier install is here and `.env` sets `DATABASE_URL_FILE` or
-  `REDIS_URL_FILE`, which hides the URL this step has to check; the URL goes
-  in `DATABASE_URL` or `REDIS_URL` while the install moves.
+  `REDIS_URL_FILE`, which hides the URL this step has to check. The variable
+  comes out of `.env` while the install moves. When the earlier stack's own
+  PostgreSQL or Redis held the data, nothing goes in its place, since the image
+  runs that service; when an external service did, its URL goes in
+  `DATABASE_URL` or `REDIS_URL`, where this step checks it.
 - An earlier install is here and `.env` holds a `DATABASE_URL` or `REDIS_URL`
   naming the old services or `localhost` (the old file overrode them for Silo,
   and this one passes `.env` through), or a `SILO_MEILISEARCH_URL` naming the

@@ -157,7 +157,7 @@ fi
 # them, and the earlier stack never read one.
 for name in DATABASE_URL_FILE REDIS_URL_FILE; do
   if [[ -n "${!name:-}" ]]; then
-    fail "$name is set in .env, and this step needs to read the URL to move the earlier install. Put the URL in ${name%_FILE} in .env instead while it moves; this step checks it there"
+    fail "$name is set in .env, and this step needs to read the URL to move the earlier install. Remove it from .env while the install moves. If the earlier stack's own service held the data, set nothing in its place; the image runs that service now. If an external service did, put its URL in ${name%_FILE} instead, where this step checks it"
   fi
 done
 
