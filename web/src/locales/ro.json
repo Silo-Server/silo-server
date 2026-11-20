@@ -63792,6 +63792,12 @@
       "value": "Mesajul a fost trimis"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Playerul nu a confirmat primirea mesajului. Este posibil ca mesajul să apară mai târziu sau deloc."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

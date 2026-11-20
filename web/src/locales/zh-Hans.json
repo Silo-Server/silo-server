@@ -51197,6 +51197,12 @@
       "value": "消息已发送"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "播放器未确认收到该消息。消息可能稍后显示，也可能完全不显示。"
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

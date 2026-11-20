@@ -71338,6 +71338,12 @@
       "value": "Сообщение отправлено"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Плеер не подтвердил получение сообщения. Оно может появиться с задержкой или не появиться вовсе."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

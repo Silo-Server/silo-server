@@ -15453,10 +15453,11 @@
             "type": "string"
           },
           "delivery": {
-            "description": "dispatched: sent on the session's realtime lane. fallback_scheduled: no lane; the server ends the session after the deadline (stop only)",
+            "description": "dispatched: written to the session's realtime lane; the receipt does not say whether the player confirmed it, and a lane whose player went away without closing it still takes the write. fallback_scheduled: no lane; the server ends the session after the deadline (stop only). acknowledged: the player answered that it received the message within the server's short wait (message only); a player may answer before showing it",
             "enum": [
               "dispatched",
-              "fallback_scheduled"
+              "fallback_scheduled",
+              "acknowledged"
             ],
             "type": "string"
           },

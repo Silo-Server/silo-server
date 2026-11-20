@@ -56847,6 +56847,12 @@
       "value": "Bericht verzonden"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "De speler heeft het bericht niet bevestigd. Het kan later of helemaal niet verschijnen."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

@@ -63500,6 +63500,12 @@
       "value": "Message envoyé"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Le lecteur n’a pas confirmé la réception du message. Il pourrait s’afficher en retard, voire pas du tout."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

@@ -63788,6 +63788,12 @@
       "value": "S’ha enviat el missatge"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "El reproductor no ha confirmat el missatge. És possible que es mostri tard o que no es mostri."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

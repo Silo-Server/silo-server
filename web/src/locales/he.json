@@ -63143,6 +63143,12 @@
       "value": "ההודעה נשלחה"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "הנגן לא אישר את קבלת ההודעה. ייתכן שהיא תוצג באיחור או שלא תוצג בכלל."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

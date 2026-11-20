@@ -57719,6 +57719,12 @@
       "value": "Sõnum saadetud"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Mängija ei kinnitanud sõnumi kättesaamist. Sõnum võib ilmuda hilinemisega või jääda üldse näitamata."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

@@ -56871,6 +56871,12 @@
       "value": "मैसेज भेजा गया"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "प्लेयर ने मैसेज मिलने की पुष्टि नहीं की। हो सकता है कि यह देर से दिखे या बिल्कुल न दिखे।"
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

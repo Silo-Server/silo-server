@@ -70585,6 +70585,12 @@
       "value": "Správa bola odoslaná"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Prehrávač nepotvrdil prijatie správy. Môže sa zobraziť s oneskorením alebo sa nezobrazí vôbec."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

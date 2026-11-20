@@ -63996,6 +63996,12 @@
       "value": "Mensagem enviada"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "O leitor não confirmou a receção da mensagem. Pode ser mostrada com atraso ou nem chegar a ser mostrada."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

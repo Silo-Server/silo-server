@@ -70517,6 +70517,12 @@
       "value": "Zpráva odeslána"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Přehrávač nepotvrdil přijetí zprávy. Může se zobrazit se zpožděním, nebo vůbec ne."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

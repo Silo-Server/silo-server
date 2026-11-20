@@ -50737,6 +50737,12 @@
       "value": "Pesan dikirim"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Pemutar tidak mengonfirmasi pesan. Pesan mungkin muncul terlambat atau tidak muncul sama sekali."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

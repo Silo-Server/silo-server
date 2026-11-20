@@ -82044,6 +82044,12 @@
       "value": "تم إرسال الرسالة"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "لم يؤكّد المشغّل استلام الرسالة. قد تظهر متأخرة أو لا تظهر إطلاقًا."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

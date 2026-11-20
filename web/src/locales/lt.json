@@ -71176,6 +71176,12 @@
       "value": "Žinutė išsiųsta"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Leistuvas nepatvirtino, kad gavo žinutę. Ji gali būti parodyta vėliau arba visai neparodyta."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

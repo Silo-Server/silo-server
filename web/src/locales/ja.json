@@ -50869,6 +50869,12 @@
       "value": "メッセージを送信しました"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "プレーヤーからメッセージの受信確認がありませんでした。メッセージの表示が遅れるか、表示されない可能性があります。"
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

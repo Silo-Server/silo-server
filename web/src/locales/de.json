@@ -56947,6 +56947,12 @@
       "value": "Nachricht gesendet"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Der Player hat die Nachricht nicht bestätigt. Sie wird möglicherweise verspätet oder gar nicht angezeigt."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

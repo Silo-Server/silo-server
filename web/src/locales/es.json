@@ -63684,6 +63684,12 @@
       "value": "Mensaje enviado"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "El reproductor no confirmó el mensaje. Es posible que se muestre más tarde o que no llegue a mostrarse."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

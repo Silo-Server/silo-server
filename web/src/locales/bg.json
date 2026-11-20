@@ -57371,6 +57371,12 @@
       "value": "Съобщението е изпратено"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Плейърът не потвърди получаването на съобщението. То може да се покаже по-късно или изобщо да не се покаже."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

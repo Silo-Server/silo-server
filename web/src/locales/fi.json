@@ -57171,6 +57171,12 @@
       "value": "Viesti lähetetty"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Soitin ei vahvistanut viestin vastaanottamista. Viesti voi näkyä myöhässä tai jäädä kokonaan näkymättä."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

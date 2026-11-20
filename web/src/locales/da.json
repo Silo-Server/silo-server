@@ -57123,6 +57123,12 @@
       "value": "Beskeden er sendt"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Afspilleren bekræftede ikke beskeden. Den vises muligvis sent eller slet ikke."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

@@ -71131,6 +71131,12 @@
       "value": "Wysłano wiadomość"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Odtwarzacz nie potwierdził odebrania wiadomości. Może pojawić się z opóźnieniem albo wcale się nie pojawić."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

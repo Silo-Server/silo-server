@@ -51673,6 +51673,12 @@
       "value": "ส่งข้อความแล้ว"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "เครื่องเล่นไม่ได้ยืนยันว่าได้รับข้อความ ข้อความอาจแสดงช้าหรืออาจไม่แสดง"
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

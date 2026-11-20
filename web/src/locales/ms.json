@@ -50725,6 +50725,12 @@
       "value": "Mesej dihantar"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Pemain tidak mengesahkan mesej itu. Mesej itu mungkin dipaparkan lewat atau tidak dipaparkan sama sekali."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

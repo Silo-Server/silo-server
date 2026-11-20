@@ -63784,6 +63784,12 @@
       "value": "Mensagem enviada"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "O player não confirmou a mensagem. Ela pode aparecer com atraso ou nem aparecer."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

@@ -63556,6 +63556,12 @@
       "value": "Messaggio inviato"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Il lettore non ha confermato il messaggio. Potrebbe essere mostrato in ritardo o non essere mostrato affatto."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

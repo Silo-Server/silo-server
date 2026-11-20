@@ -60443,6 +60443,12 @@
       "value": "\u200F\u202EMessage sent\u202C"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe player didn’t confirm the message. It may show up late or not at all.\u202C"
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

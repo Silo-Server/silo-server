@@ -51343,6 +51343,12 @@
       "value": "已傳送訊息"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "播放器未確認收到訊息。訊息可能會延遲顯示，或完全不會顯示。"
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

@@ -56995,6 +56995,12 @@
       "value": "Üzenet elküldve"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "A lejátszó nem erősítette meg az üzenet fogadását. Lehet, hogy az üzenet később jelenik meg, vagy egyáltalán nem."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

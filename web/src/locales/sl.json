@@ -70280,6 +70280,12 @@
       "value": "Sporočilo je poslano"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Predvajalnik ni potrdil prejema sporočila. Morda bo prikazano pozneje ali pa sploh ne."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

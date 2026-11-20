@@ -70280,6 +70280,12 @@
       "value": "Повідомлення надіслано"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Програвач не підтвердив отримання повідомлення. Воно може з’явитися пізніше або не з’явитися взагалі."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

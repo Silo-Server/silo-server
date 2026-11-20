@@ -57211,6 +57211,12 @@
       "value": "Message sent"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "The player didn’t confirm the message. It may show up late or not at all."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

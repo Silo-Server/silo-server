@@ -57183,6 +57183,12 @@
       "value": "Meldingen er sendt"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Avspilleren bekreftet ikke meldingen. Den kan bli vist senere eller ikke i det hele tatt."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

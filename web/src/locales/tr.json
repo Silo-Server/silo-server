@@ -56623,6 +56623,12 @@
       "value": "Mesaj gönderildi"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Oynatıcı mesajı onaylamadı. Mesaj geç gösterilebilir veya hiç gösterilmeyebilir."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

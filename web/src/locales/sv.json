@@ -57067,6 +57067,12 @@
       "value": "Meddelandet har skickats"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Spelaren bekräftade inte meddelandet. Det kan visas senare eller inte alls."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

@@ -57387,6 +57387,12 @@
       "value": "Đã gửi tin nhắn"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Trình phát không xác nhận đã nhận tin nhắn. Tin nhắn có thể hiển thị muộn hoặc hoàn toàn không hiển thị."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

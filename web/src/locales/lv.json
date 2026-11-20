@@ -64791,6 +64791,12 @@
       "value": "Ziņojums nosūtīts"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Atskaņotājs neapstiprināja ziņojuma saņemšanu. Ziņojums var parādīties ar aizkavi vai neparādīties nemaz."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

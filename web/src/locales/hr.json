@@ -63800,6 +63800,12 @@
       "value": "Poruka je poslana"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Reproduktor nije potvrdio primitak poruke. Možda će se prikazati sa zakašnjenjem ili se uopće neće prikazati."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,

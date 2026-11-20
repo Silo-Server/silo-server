@@ -57427,6 +57427,12 @@
       "value": "Το μήνυμα στάλθηκε"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Το πρόγραμμα αναπαραγωγής δεν επιβεβαίωσε τη λήψη του μηνύματος. Μπορεί να εμφανιστεί με καθυστέρηση ή να μην εμφανιστεί καθόλου."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,
