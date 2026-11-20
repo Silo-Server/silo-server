@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Anges av nodens miljö. Ändra det där och starta om noden."
+      "value": "Anges av miljön. Ändra det där och starta om den berörda tjänsten."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "Logga in via nätverkets inloggning för att fortsätta."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Den här noden anges av serverns driftsättningskonfiguration. Ta bort den där och starta om API-servrarna för att hantera den här."
     }
   ],
   "error.not_acceptable": [
@@ -30458,7 +30464,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Flöde med nyligen startade uppspelningssessioner"
+      "value": "Senaste uppspelningarna från alla konton"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32087,6 +32093,72 @@
     {
       "type": 0,
       "value": "Det gick inte att läsa in aktiviteten."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " spelade upp "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " spelade upp "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49408,6 +49480,12 @@
       "value": "Ange serveradressen för att slutföra inställningarna."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nyckeln anges av serverns driftsättningskonfiguration"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50316,6 +50394,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Anges av serverns driftsättningskonfiguration. Ta bort den där för att kunna radera den här."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52085,6 +52169,68 @@
     {
       "type": 0,
       "value": "Plugins"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Tillämpat"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Kvarhållet"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Det gick inte att läsa in etableringsstatus för plugins."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Hanteras av miljön"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Väntar"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Avvisat"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Driftsättningen styr paketkällan och borttagningen."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Etableringsstatus"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Driftsättningen låser det här pluginet till version "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -57003,6 +57149,12 @@
     {
       "type": 0,
       "value": "Meddelandet har skickats"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Spelaren bekräftade inte meddelandet. Det kan visas senare eller inte alls."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -63501,136 +63653,10 @@
       "value": "Det gick inte att läsa in aviseringsinställningarna"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Nytt innehåll registreras inte, så ingenting kan skickas. Slå på det igen under Bearbetning."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Utskicket är pausat och nytt innehåll väntar i kön. Slå på det igen under Bearbetning."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Av skickar den dagliga sammanfattningen i stället."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Hur Silo upptäcker nytt innehåll, grupperar det i meddelanden och hur länge meddelandena sparas."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Ta reda på vem som vill ha det"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Matcha varje objekt mot allas inställningar."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Gruppering och flödesbegränsning"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Bearbetning"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Maximal ålder på innehåll"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Äldre objekt hoppas över i stället för att komma fram som gamla nyheter."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Max antal meddelanden per serie"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Allt utöver detta hoppas över för den omgången."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Upptäck nytt innehåll"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Registrera nya objekt vid biblioteksgenomsökningar."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Pipeline"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Lästa aviseringar"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Lagringstid"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Utskickshistorik"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Register över vad Silo redan har aviserat om."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Väntetid"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Objekt som genomsöks klart samtidigt kommer som en enda avisering."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Olästa aviseringar"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64535,18 +64561,6 @@
     {
       "type": 0,
       "value": "Aviseringar"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dagar"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "timmar"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -71132,7 +71146,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Leveranskanaler, serverkanaler och hur nytt innehåll blir aviseringar."
+      "value": "Leveranskanaler och serverkanaler."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -71231,12 +71245,6 @@
       "value": "E-post"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Gruppering och flödeskontroll"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71255,28 +71263,10 @@
       "value": "Låt personer välja ett e-postmeddelande per avsnitt"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Max ålder på innehåll"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Max antal meddelanden per serie"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Nämn den som begärde på Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Upptäck nytt innehåll"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -71285,46 +71275,16 @@
       "value": "Personliga webhooks"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Bearbetning"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Lästa aviseringar"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Relä-URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Lagringstid"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Historik över skickade"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Serverkanaler"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Väntefönster"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71339,12 +71299,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Olästa aviseringar"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71355,12 +71309,6 @@
     {
       "type": 0,
       "value": "Webhooks per person"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Ta reda på vem som vill ha det"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -86614,25 +86562,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Det gick inte att logga in tv:n. Försök igen."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Kontrollera att appen visar"
+      "value": "Det gick inte att godkänna inloggningen. Försök igen."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Kontrollera att tv:n visar"
+      "value": "Kontrollera att den här koden stämmer"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Ange koden som visas på tv:n eller i appen"
+      "value": "Ange koden som visas på din enhet"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86644,13 +86586,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Logga in en tv eller annan enhet med ditt konto."
+      "value": "Logga in en tv, app eller annan enhet."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Logga in en tv"
+      "value": "Godkänn inloggning"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86670,13 +86612,13 @@
     },
     {
       "type": 0,
-      "value": " för att godkänna en tv. Bara kontot självt kan logga in en tv."
+      "value": " för att godkänna den här inloggningen. Bara kontot självt kan godkänna enheter."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Sluta visa som den här användaren för att godkänna en tv. Bara kontot självt kan logga in en tv."
+      "value": "Sluta visa som den här användaren för att godkänna den här inloggningen. Bara kontot självt kan godkänna enheter."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86694,39 +86636,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Vi hittade inte den koden. Kontrollera koden på tv:n."
+      "value": "Vi hittade inte den koden. Kontrollera koden och försök igen."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Inte nu"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Äldre tv-appar visar "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " i stället."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Godkänn bara en enhet som står framför dig just nu."
+      "value": "Avvisa"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Godkänn bara en tv som står framför dig just nu."
+      "value": "Godkänn bara om du själv har startat inloggningen."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86752,7 +86674,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Alla som använder den här tv:n kan välja bland dina profiler. Profiler med PIN-kod förblir låsta."
+      "value": "Det ger enheten åtkomst till dina profiler. Profiler med PIN-kod förblir låsta."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86799,6 +86721,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Begärd "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86812,7 +86744,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Tv:n slutade vänta. Börja om på tv:n."
+      "value": "Enheten slutade vänta. Starta inloggningen igen på enheten."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86821,10 +86753,34 @@
       "value": "Inloggningen avvisades."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Klart. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " loggar in."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " är inloggad."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Koden har gått ut. Tv:n visar en ny kod. Använd den i stället."
+      "value": "Koden har gått ut. Hämta en ny kod på enheten och försök igen."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86908,25 +86864,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Tv:n är redan inloggad."
+      "value": "Den här enheten är redan inloggad."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Tv:n har godkänts och slutför inloggningen."
+      "value": "Enheten har godkänts och slutför inloggningen."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Klart. Tv:n loggar in."
+      "value": "Klart. Din enhet loggar in."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Tv:n är inloggad."
+      "value": "Din enhet är inloggad."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86970,7 +86926,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Logga in "
+      "value": "Tillåt inloggning för "
     },
     {
       "type": 1,
@@ -86984,7 +86940,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Logga in den här enheten?"
+      "value": "Tillåt inloggning för den här enheten?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87004,13 +86960,13 @@
     },
     {
       "type": 0,
-      "value": " för att godkänna den här tv:n."
+      "value": " för att godkänna den här inloggningen."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Logga in tv"
+      "value": "Godkänn inloggning"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88056,7 +88012,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Det gick inte att logga in enheten. Försök igen."
+      "value": "Det gick inte att godkänna inloggningen. Försök igen."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -109420,6 +109376,12 @@
       "value": "Översätter…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Dölj serverrader som lagts till sedan den här exporten:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109438,6 +109400,12 @@
     {
       "type": 0,
       "value": " och ersätter sektioner som du har lagt till här tidigare. Dina ändringar i den här serverns sektioner behålls."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Den här serverns rader har ändrats sedan filen exporterades, så välj nedan vilka rader som ska döljas."
     }
   ],
   "web.home.layout.checking": [
@@ -109488,6 +109456,26 @@
     {
       "type": 0,
       "value": "Slår på Dölj sedda objekt."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Döljer valda rader på: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " utan att ändra dina andra rader där."
     }
   ],
   "web.home.layout.import": [
@@ -109592,6 +109580,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109800,6 +109806,12 @@
     {
       "type": 0,
       "value": "Namnlös sektion"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Dölj serverrader som inte finns i den här filen:"
     }
   ],
   "web.home.page.customize": [

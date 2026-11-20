@@ -282,6 +282,7 @@ type Dependencies struct {
 	WatchProviderRegistry   handlers.WatchProviderLister
 	WatchCompletionObserver watchstate.CompletionObserver
 	PluginService           *plugins.Service
+	PluginProvisionStatus   func(context.Context) ([]plugins.ProvisionStatus, error)
 	PluginHTTPProxy         *plugins.HTTPProxy
 	PluginUserConfig        *plugins.UserConfigStore
 	AuthProviders           []auth.RegisteredProvider
@@ -764,6 +765,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		authHandler = handlers.NewAuthHandler(authService, jwtService, deviceLoginService)
 		authHandler.SetPrimaryProfileChecker(checkPrimaryProfile)
+		authService.OnAuthProvidersChanged(deps.OnAuthProvidersChanged)
 		if accessGroupStore != nil {
 			authHandler.SetAccessGroupProvider(accessGroupStore)
 		}
@@ -2677,16 +2679,16 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil && authService != nil && jwtService != nil {
 			stateSecret := auth.DeriveOAuthStateSecret([]byte(deps.Config.Auth.JWTSecret))
 			oauthStore := auth.NewPGOAuthStore(deps.DB, stateSecret)
-			resolveClient := func(ctx context.Context, installationID int) (auth.OAuthClient, string, error) {
+			resolveClient := func(ctx context.Context, installationID int) (auth.OAuthClient, string, string, error) {
 				pp := authService.FindOAuthInstallation(installationID)
 				if pp == nil {
-					return nil, "", auth.ErrUnknownAuthInstallation
+					return nil, "", "", auth.ErrUnknownAuthInstallation
 				}
 				c, err := pp.OAuthClient(ctx)
 				if err != nil {
-					return nil, "", err
+					return nil, "", "", err
 				}
-				return c, pp.CapabilityID(), nil
+				return c, pp.CapabilityID(), pp.CallbackMode(), nil
 			}
 			identity := serveridentity.New(catalog.NewServerSettingsRepo(deps.DB))
 			oauthHandler = auth.NewOAuthHandler(auth.OAuthHandlerDeps{
@@ -3232,10 +3234,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if itemRepo != nil {
 		v2deps.AdminCatalogItems = itemRepo
 	}
+	// Catalog poster links and request posters share one fetcher, so its
+	// download slots and result memory bound both.
+	v2deps.RemotePosters = imagecache.NewRemoteFetcher()
 	if itemPosters != nil && deps.DB != nil {
 		v2deps.ItemPosters = itemPosters
 		v2deps.ItemPosterSource = metadata.NewImageCacheJobRepository(deps.DB)
-		v2deps.RemotePosters = imagecache.NewRemoteFetcher()
 	}
 	if adminImageHandler != nil {
 		v2deps.AdminCatalogImages = adminImageHandler
@@ -3255,7 +3259,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminDiagnosticReads = diagnosticsHandler
 		v2deps.AdminDiagnosticDeletes = diagnosticsHandler
 	}
+	v2deps.AdminPluginProvisionStatus = deps.PluginProvisionStatus
 	if deps.DB != nil {
+		if v2deps.AdminPluginProvisionStatus == nil {
+			v2deps.AdminPluginProvisionStatus = func(ctx context.Context) ([]plugins.ProvisionStatus, error) {
+				return plugins.ListProvisionStatus(ctx, deps.DB)
+			}
+		}
 		v2deps.AdminPluginCatalogSettings = plugins.NewRepositoryStore(deps.DB)
 		v2deps.AdminPluginRepositories = plugins.NewRepositoryStore(deps.DB)
 		v2deps.AdminPluginRepositoryCreation = plugins.NewRepositoryStore(deps.DB)

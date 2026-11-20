@@ -589,7 +589,7 @@ export default function AdminTaskDetail() {
             link: (chunks) => (
               <Link
                 to="/admin/libraries"
-                className="text-foreground hover:text-primary font-medium"
+                className="text-foreground hover:text-primary font-medium hover:underline"
               >
                 {chunks}
               </Link>

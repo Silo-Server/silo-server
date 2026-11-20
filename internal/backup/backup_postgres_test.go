@@ -29,6 +29,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mail"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/s3client/s3test"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
@@ -581,14 +582,15 @@ func checkStricterSettings(t *testing.T, loader PGLoader, pool *pgxpool.Pool, ds
 	set(restored, settingTrustedProxies, "10.0.0.0/8, 0.0.0.0/0")
 	set(pool, config.AuthRefreshTokenExpirySettingKey, "30d")
 	set(restored, config.AuthRefreshTokenExpirySettingKey, "7d")
-	set(pool, settingReleaseEvents, "false")
-	set(restored, settingReleaseEvents, "true")
+	const uiEnabled = "notifications.ui_enabled"
+	set(pool, uiEnabled, "false")
+	set(restored, uiEnabled, "true")
 	kept, err := loader.KeepStricterSettings(ctx, into, dsn, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for key, want := range map[string]string{settingLocalPasswordLogin: "false", settingTrustedProxies: "10.0.0.0/8",
-		config.AuthRefreshTokenExpirySettingKey: "7d", settingReleaseEvents: "false"} {
+		config.AuthRefreshTokenExpirySettingKey: "7d", uiEnabled: "false"} {
 		var got string
 		if err := restored.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&got); err != nil || got != want {
 			t.Fatalf("restored %s = %q (%v), want %q", key, got, err, want)
@@ -1758,7 +1760,7 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 		}
 		_, rotated := rotatedSettings[key]
 		switch {
-		case rotated:
+		case rotated || key == plugins.ProvisionRestoreHoldKey:
 			if got == nil || *got != "backup" {
 				t.Errorf("%s = %v, want the restore's own value kept", key, got)
 			}

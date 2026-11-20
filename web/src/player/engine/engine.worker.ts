@@ -42,6 +42,8 @@ import {
 } from "./ffmpegAudioDecoder";
 import { avcLengthSize } from "./h264";
 import { type HevcPreparation, prepareHevcAccessUnit, prepareHevcTrack } from "./hevc";
+import { createMeteredFetch } from "./mediaFetch";
+import { ParallelRangeSource } from "./parallelRangeSource";
 import { IMPORT_COLOR_TAG, pictureColorOf } from "./pictureColor";
 import {
   ENGINE_READ_FAILED,
@@ -69,8 +71,6 @@ const AUDIO_AHEAD_SECONDS = 1.5;
  */
 const FFMPEG_PREROLL_SECONDS = 0.5;
 const URL_CACHE_BYTES = 96 * 1024 * 1024;
-/** How long a read's newest data may wait before the page hears of it. */
-const MEDIA_DATA_REPORT_MS = 250;
 /** Audio sent to the worklet before the page may report the position playable. */
 const AUDIO_BUFFERED_SECONDS = 0.25;
 
@@ -119,6 +119,10 @@ interface AudioDecoderAdapter {
 }
 
 let source: EngineSourceSpec | null = null;
+/** The striped reader, when the page named a stripe URL; null for the stock source. */
+let parallelSource: ParallelRangeSource | null = null;
+/** The `start` messages seen; the first is the initial one, a later one a seek. */
+let startsSeen = 0;
 let input: Input | null = null;
 let videoTrack: InputVideoTrack | null = null;
 let audioTrack: InputAudioTrack | null = null;
@@ -150,40 +154,7 @@ function post(message: WorkerToPageMessage, transfer: Transferable[] = []): void
   scope.postMessage(message, transfer);
 }
 
-let nextMediaRequest = 0;
-
-/**
- * Fetches for the source and tells the page what each response body
- * receives, so it can tell a slow link, whose data keeps arriving, from a
- * silent one, and measure the plan's throughput.
- */
-async function meteredFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const response = await fetch(input, init);
-  if (!response.body) return response;
-  const request = nextMediaRequest++;
-  let bytes = 0;
-  let first = 0;
-  let last = 0;
-  let report: ReturnType<typeof setTimeout> | null = null;
-  const counted = response.body.pipeThrough(
-    new TransformStream<Uint8Array, Uint8Array>({
-      transform(chunk, controller) {
-        last = performance.timeOrigin + performance.now();
-        if (bytes === 0) first = last;
-        bytes += chunk.byteLength;
-        report ??= setTimeout(() => {
-          report = null;
-          post({ type: "media-data", request, bytes, first, last });
-        }, MEDIA_DATA_REPORT_MS);
-        controller.enqueue(chunk);
-      },
-    }),
-  );
-  // Mediabunny also reads the response's url, type and redirect flag, which a
-  // new Response around the counted body would lose.
-  Object.defineProperty(response, "body", { value: counted });
-  return response;
-}
+const metered = createMeteredFetch(post);
 
 function fail(run: number | null, error: unknown, fallback: string): void {
   if (run !== null && run !== generation) return;
@@ -214,19 +185,22 @@ async function serverAudioCodec(track: InputAudioTrack): Promise<string> {
 
 async function open(spec: EngineSourceSpec): Promise<void> {
   source = spec;
+  const options = {
+    requestInit: { headers: spec.headers },
+    maxCacheSize: URL_CACHE_BYTES,
+    getRetryDelay: (attempts: number) => {
+      // A failed read is the transport failing; the page treats it as an
+      // outage rather than a slow link.
+      post({ type: "read-failed" });
+      return attempts < 4 ? Math.min(4, 0.5 * 2 ** attempts) : null;
+    },
+  };
+  parallelSource = spec.parallelRangeUrl
+    ? new ParallelRangeSource(spec.url, spec.parallelRangeUrl, options, metered)
+    : null;
   input = new Input({
     formats: ALL_FORMATS,
-    source: new UrlSource(spec.url, {
-      requestInit: { headers: spec.headers },
-      maxCacheSize: URL_CACHE_BYTES,
-      fetchFn: meteredFetch,
-      getRetryDelay: (attempts) => {
-        // A failed read is the transport failing; the page treats it as an
-        // outage rather than a slow link.
-        post({ type: "read-failed" });
-        return attempts < 4 ? Math.min(4, 0.5 * 2 ** attempts) : null;
-      },
-    }),
+    source: parallelSource ?? new UrlSource(spec.url, { ...options, fetchFn: metered.fetch }),
   });
   try {
     videoTrack = await input.getPrimaryVideoTrack();
@@ -772,6 +746,9 @@ scope.onmessage = (event: MessageEvent<PageToWorkerMessage>) => {
       };
       return;
     case "start":
+      // The warm head covers the open; a later start is a seek, after which
+      // the stripes' connections are warm.
+      if (startsSeen++ > 0) parallelSource?.endWarmHead();
       start(message.generation, message.position);
       return;
     case "frame-released":

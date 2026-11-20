@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Lo define el entorno del nodo. Cámbialo allí y reinicia el nodo."
+      "value": "Lo define el entorno. Cámbialo allí y reinicia el servicio afectado."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "Inicia sesión con el sistema de inicio de sesión de tu red para continuar."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "La configuración de implementación del servidor define este nodo. Quítalo de allí y reinicia los servidores de la API para administrarlo aquí."
     }
   ],
   "error.not_acceptable": [
@@ -33640,7 +33646,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Lista de las sesiones de reproducción iniciadas recientemente"
+      "value": "Reproducciones más recientes de todas las cuentas"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35440,6 +35446,72 @@
     {
       "type": 0,
       "value": "No se pudo cargar la actividad."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " reprodujo "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " reprodujo "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -55287,6 +55359,12 @@
       "value": "Introduce la dirección del servidor para completar la configuración."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Clave definida por la configuración de implementación del servidor"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -56207,6 +56285,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Lo define la configuración de implementación del servidor. Quítalo de allí para eliminarlo aquí."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -58145,6 +58229,68 @@
     {
       "type": 0,
       "value": "Complementos"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Aplicado"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Retenido"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "No se pudo cargar el estado de aprovisionamiento de los complementos."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Administrado por el entorno"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Pendiente"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Rechazado"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "La implementación controla el origen del paquete y su eliminación."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Estado de aprovisionamiento"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "La implementación fija este complemento en la versión "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -63620,6 +63766,12 @@
     {
       "type": 0,
       "value": "Mensaje enviado"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "El reproductor no confirmó el mensaje. Es posible que se muestre más tarde o que no llegue a mostrarse."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -70257,136 +70409,10 @@
       "value": "No se pudo cargar la configuración de notificaciones"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "No se está registrando el contenido nuevo, así que no se puede enviar nada. Vuelve a activarlo en Procesamiento."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "El envío está en pausa; el contenido nuevo espera en la cola. Vuelve a activarlo en Procesamiento."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Si está desactivado, se envía el resumen diario en su lugar."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Cómo detecta Silo el contenido nuevo, cómo lo agrupa en mensajes y cuánto tiempo los conserva."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Determinar a quién le interesa"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Compara cada elemento con las preferencias de todos."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Agrupación y control de saturación"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Procesamiento"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Antigüedad máxima del contenido"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Los elementos más antiguos se descartan en lugar de llegar como noticias desfasadas."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Máximo de mensajes por serie"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Lo que supere este límite se omite en ese lote."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Detectar contenido nuevo"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Registra los elementos nuevos durante los análisis de la biblioteca."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Canalización"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notificaciones leídas"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Retención"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Historial de envíos"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Registro de lo que Silo ya notificó."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Ventana de espera"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Los elementos que terminan de analizarse juntos llegan como una sola notificación."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notificaciones no leídas"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -71315,18 +71341,6 @@
     {
       "type": 0,
       "value": "Notificaciones"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "días"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "horas"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -78007,7 +78021,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Canales de entrega, canales del servidor y cómo el contenido nuevo se convierte en notificaciones."
+      "value": "Canales de entrega y canales del servidor."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -78106,12 +78120,6 @@
       "value": "Correo electrónico"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Agrupación y control de saturación"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -78130,28 +78138,10 @@
       "value": "Permitir elegir un correo electrónico por episodio"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Antigüedad máxima del contenido"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Máximo de mensajes por serie"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Mencionar en Discord a quien hizo la solicitud"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Detectar contenido nuevo"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -78160,46 +78150,16 @@
       "value": "Webhooks personales"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Procesamiento"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notificaciones leídas"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL del relé"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Retención"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Historial de envíos"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Canales del servidor"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Intervalo de estabilización"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -78214,12 +78174,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notificaciones no leídas"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -78230,12 +78184,6 @@
     {
       "type": 0,
       "value": "Webhooks por persona"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Determinar a quién le interesa"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -94556,25 +94504,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "No se pudo iniciar sesión en la TV. Vuelve a intentarlo."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Comprueba que tu app muestre"
+      "value": "No se pudo aprobar el inicio de sesión. Vuelve a intentarlo."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Comprueba que tu TV muestre"
+      "value": "Comprueba que este código coincida"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Escribe el código que aparece en tu TV o app"
+      "value": "Introduce el código que aparece en tu dispositivo"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94586,13 +94528,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Inicia sesión con tu cuenta en una TV u otro dispositivo."
+      "value": "Inicia sesión en una TV, app u otro dispositivo."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Iniciar sesión en una TV"
+      "value": "Aprobar inicio de sesión"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94612,13 +94554,13 @@
     },
     {
       "type": 0,
-      "value": " para aprobar una TV. Solo la propia cuenta puede iniciar sesión en una TV."
+      "value": " para aprobar este inicio de sesión. Solo la propia cuenta puede aprobar dispositivos."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Deja de ver como este usuario para aprobar una TV. Solo la propia cuenta puede iniciar sesión en una TV."
+      "value": "Deja de ver como este usuario para aprobar este inicio de sesión. Solo la propia cuenta puede aprobar dispositivos."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94636,39 +94578,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "No encontramos ese código. Comprueba el código en tu TV."
+      "value": "No encontramos ese código. Revisa el código y vuelve a intentarlo."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ahora no"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Las apps de TV más antiguas muestran "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " en su lugar."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Aprueba solo un dispositivo que tengas delante en este momento."
+      "value": "Rechazar"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Aprueba solo una TV que tengas delante en este momento."
+      "value": "Aprueba esto solo si el inicio de sesión lo empezaste tú."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94694,7 +94616,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Cualquier persona que use esta TV podrá elegir entre tus perfiles. Los perfiles con PIN siguen bloqueados."
+      "value": "Esto le da acceso a tus perfiles. Los perfiles con PIN siguen bloqueados."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94741,6 +94663,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Solicitada "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -94754,7 +94686,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Esta TV dejó de esperar. Vuelve a empezar en la TV."
+      "value": "Este dispositivo dejó de esperar. Vuelve a iniciar sesión en él."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -94763,10 +94695,34 @@
       "value": "Se rechazó este inicio de sesión."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Listo. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " está iniciando sesión."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " tiene la sesión iniciada."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Este código caducó. Tu TV muestra uno nuevo. Usa ese código."
+      "value": "Este código caducó. Obtén un código nuevo en el dispositivo y vuelve a intentarlo."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -94850,25 +94806,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Esa TV ya inició sesión."
+      "value": "Este dispositivo ya tiene la sesión iniciada."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Se aprobó esta TV y está terminando de iniciar sesión."
+      "value": "Se aprobó este dispositivo y está terminando de iniciar sesión."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Listo. Tu TV está iniciando sesión."
+      "value": "Listo. Tu dispositivo está iniciando sesión."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Tu TV ya inició sesión."
+      "value": "Tu dispositivo tiene la sesión iniciada."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -94912,7 +94868,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "¿Iniciar sesión en "
+      "value": "¿Permitir que "
     },
     {
       "type": 1,
@@ -94920,13 +94876,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " inicie sesión?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "¿Iniciar sesión en este dispositivo?"
+      "value": "¿Permitir que este dispositivo inicie sesión?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -94946,13 +94902,13 @@
     },
     {
       "type": 0,
-      "value": " para aprobar esta TV."
+      "value": " para aprobar este inicio de sesión."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Iniciar sesión en la TV"
+      "value": "Aprobar inicio de sesión"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -95998,7 +95954,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "No se pudo iniciar sesión en el dispositivo. Vuelve a intentarlo."
+      "value": "No se pudo aprobar el inicio de sesión. Vuelve a intentarlo."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -119405,6 +119361,12 @@
       "value": "Traduciendo…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ocultar las filas del servidor añadidas desde esta exportación:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -119423,6 +119385,12 @@
     {
       "type": 0,
       "value": " y reemplazan las secciones que añadiste aquí antes. Tus cambios en las secciones de este servidor se conservan."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Las filas de este servidor cambiaron desde que se exportó este archivo, así que elige abajo las filas que quieras ocultar."
     }
   ],
   "web.home.layout.checking": [
@@ -119473,6 +119441,26 @@
     {
       "type": 0,
       "value": "Activa Ocultar elementos vistos."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Oculta las filas seleccionadas en: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " sin cambiar tus otras filas allí."
     }
   ],
   "web.home.layout.import": [
@@ -119577,6 +119565,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -119796,6 +119802,12 @@
     {
       "type": 0,
       "value": "Sección sin título"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ocultar las filas del servidor que no están en este archivo:"
     }
   ],
   "web.home.page.customize": [

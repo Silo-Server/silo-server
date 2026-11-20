@@ -17,6 +17,7 @@ import {
 import {
   buildSchemaValues,
   fieldIsVisible,
+  ownValue,
   parseFieldTypes,
 } from "@/components/admin/plugins/schemaFormUtils";
 import { authCapabilityOf } from "@/lib/externalSignInAdmin";
@@ -40,6 +41,7 @@ export interface SignInConfigEntry {
   descriptor: PluginAdminForm;
   saved: Record<string, unknown> | undefined;
   configuredSecrets: string[];
+  managedFields: readonly string[];
 }
 
 /** A run of fields from one config entry, shown as a step or an Advanced section. */
@@ -104,6 +106,7 @@ export function signInSetupLayout(installation: PluginInstallation): SignInSetup
       descriptor,
       saved: saved?.value,
       configuredSecrets: saved?.configured_secrets ?? [],
+      managedFields: ownValue(installation.env_managed?.config_fields, schema.key) ?? [],
     });
 
     const nameField =
@@ -228,12 +231,15 @@ export function fieldChanged(
   draft: ConfigDraft | undefined,
   field: PluginAdminFormField,
 ): boolean {
-  if (!draft) return false;
+  if (!draft || entry.managedFields.includes(field.key)) return false;
   if (isSecret(field)) {
     const typed = draft.values[field.key];
     return (typeof typed === "string" && typed !== "") || draft.clearSecrets.includes(field.key);
   }
-  return draft.values[field.key] !== savedFormValues(entry)[field.key];
+  return (
+    Object.hasOwn(draft.values, field.key) &&
+    draft.values[field.key] !== savedFormValues(entry)[field.key]
+  );
 }
 
 /** How many fields of a draft differ from what is saved. */
@@ -244,10 +250,12 @@ export function changedFieldCount(entry: SignInConfigEntry, draft: ConfigDraft |
 
 /** The entry a draft would save, as the config and connection-test endpoints take it. */
 export function stagedEntry(entry: SignInConfigEntry, values: Record<string, unknown>) {
-  return buildSchemaValues(
+  const value = buildSchemaValues(
     entry.descriptor,
     values,
     parseFieldTypes(entry.schema.json_schema),
     SAVE_OPTIONS,
   );
+  for (const key of entry.managedFields) delete value[key];
+  return value;
 }

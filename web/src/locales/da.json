@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Angivet af nodens miljø. Skift det dér, og genstart noden."
+      "value": "Angivet af miljøet. Skift det dér, og genstart den berørte tjeneste."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "Log ind via dit netværks login for at fortsætte."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Denne node er angivet af serverens udrulningskonfiguration. Fjern den dér, og genstart API-serverne for at administrere den her."
     }
   ],
   "error.not_acceptable": [
@@ -30470,7 +30476,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Oversigt over nyligt startede afspilningssessioner"
+      "value": "Seneste afspilninger på tværs af alle konti"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32099,6 +32105,72 @@
     {
       "type": 0,
       "value": "Kunne ikke indlæse aktivitet."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " afspillede "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " afspillede "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49464,6 +49536,12 @@
       "value": "Angiv serveradressen for at fuldføre indstillingerne."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nøgle angivet af serverens udrulningskonfiguration"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50372,6 +50450,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Angivet af serverens udrulningskonfiguration. Fjern den dér for at slette den her."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52141,6 +52225,68 @@
     {
       "type": 0,
       "value": "Plugins"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Anvendt"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Tilbageholdt"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Kunne ikke indlæse status for pluginprovisionering."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Administreres af miljøet"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Afventer"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Afvist"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Udrulningen styrer pakkekilden og fjernelsen."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Provisioneringsstatus"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Udrulningen fastlåser dette plugin til "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -57059,6 +57205,12 @@
     {
       "type": 0,
       "value": "Beskeden er sendt"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Afspilleren bekræftede ikke beskeden. Den vises muligvis sent eller slet ikke."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -63561,136 +63713,10 @@
       "value": "Kunne ikke indlæse notifikationsindstillingerne"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Nyt indhold registreres ikke, så intet kan sendes. Slå det til igen under Behandling."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Afsendelse er sat på pause; nyt indhold venter i køen. Slå det til igen under Behandling."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Fra sender dem den daglige oversigt i stedet."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Hvordan Silo opdager nyt indhold, samler det i beskeder, og hvor længe de gemmes."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Find ud af, hvem der vil have det"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Match hvert element mod alles præferencer."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Gruppering og begrænsning af beskedmængde"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Behandling"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Maks. alder for indhold"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Ældre elementer kasseres i stedet for at ankomme som forældede nyheder."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Maks. beskeder pr. serie"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Alt ud over dette springes over i den pågældende batch."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Opdag nyt indhold"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Registrer nye elementer under biblioteksscanninger."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Pipeline"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Læste notifikationer"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Opbevaring"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Afsendelseshistorik"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Oversigt over, hvad Silo allerede har sendt notifikationer om."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Samlevindue"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Elementer, der bliver færdigscannet samtidig, kommer som én notifikation."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Ulæste notifikationer"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64595,18 +64621,6 @@
     {
       "type": 0,
       "value": "Notifikationer"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dage"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "timer"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -71176,7 +71190,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Leveringskanaler, serverkanaler, og hvordan nyt indhold bliver til notifikationer."
+      "value": "Leveringskanaler og serverkanaler."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -71275,12 +71289,6 @@
       "value": "E-mail"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Gruppering og flodkontrol"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71299,28 +71307,10 @@
       "value": "Lad personer vælge en e-mail pr. afsnit"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Maks. alder for indhold"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Maks. beskeder pr. serie"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Nævn anmoderen på Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Registrer nyt indhold"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -71329,46 +71319,16 @@
       "value": "Personlige webhooks"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Behandling"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Læste notifikationer"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Relay-URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Opbevaring"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Afsendelseshistorik"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Serverkanaler"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Stabiliseringsvindue"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71383,12 +71343,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Ulæste notifikationer"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71399,12 +71353,6 @@
     {
       "type": 0,
       "value": "Webhooks pr. person"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Find ud af, hvem der vil have det"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -86678,25 +86626,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Kunne ikke logge ind på tv’et. Prøv igen."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Kontrollér, at din app viser"
+      "value": "Kunne ikke godkende login. Prøv igen."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Kontrollér, at dit tv viser"
+      "value": "Kontrollér, at denne kode stemmer overens"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Indtast koden fra dit tv eller din app"
+      "value": "Indtast koden, der vises på din enhed"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86708,13 +86650,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Log ind på et tv eller en anden enhed med din konto."
+      "value": "Log et tv, en app eller en anden enhed ind."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Log ind på et tv"
+      "value": "Godkend login"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86734,13 +86676,13 @@
     },
     {
       "type": 0,
-      "value": " for at godkende et tv. Kun kontoen selv kan logge ind på et tv."
+      "value": " for at godkende dette login. Kun kontoen selv kan godkende enheder."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Stop med at se som denne bruger for at godkende et tv. Kun kontoen selv kan logge ind på et tv."
+      "value": "Stop med at se som denne bruger for at godkende dette login. Kun kontoen selv kan godkende enheder."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86758,39 +86700,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Vi kunne ikke finde den kode. Tjek koden på dit tv."
+      "value": "Vi kunne ikke finde den kode. Tjek koden, og prøv igen."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ikke nu"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Ældre tv-apps viser "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " i stedet."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Godkend kun en enhed, der står foran dig lige nu."
+      "value": "Afvis"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Godkend kun et tv, der står foran dig lige nu."
+      "value": "Godkend kun dette, hvis du selv har startet login."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86816,7 +86738,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Alle, der bruger dette tv, kan vælge mellem dine profiler. Profiler med en PIN-kode forbliver låst."
+      "value": "Det giver den adgang til dine profiler. Profiler med PIN-kode forbliver låst."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86863,6 +86785,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Anmodet "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86876,7 +86808,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Dette tv holdt op med at vente. Start forfra på tv’et."
+      "value": "Denne enhed holdt op med at vente. Start login igen på den."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86885,10 +86817,34 @@
       "value": "Dette login blev afvist."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Færdig. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " logger ind."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " er logget ind."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Denne kode er udløbet. Dit tv viser en ny. Brug den kode i stedet."
+      "value": "Denne kode er udløbet. Hent en ny kode på enheden, og prøv igen."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86972,25 +86928,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Det tv er allerede logget ind."
+      "value": "Denne enhed er allerede logget ind."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Dette tv blev godkendt og er ved at logge ind."
+      "value": "Denne enhed blev godkendt og er ved at logge ind."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Færdig. Dit tv logger ind."
+      "value": "Færdig. Din enhed logger ind."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Dit tv er logget ind."
+      "value": "Din enhed er logget ind."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -87034,7 +86990,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Log ind på "
+      "value": "Tillad "
     },
     {
       "type": 1,
@@ -87042,13 +86998,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " at logge ind?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Log ind på denne enhed?"
+      "value": "Tillad denne enhed at logge ind?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87068,13 +87024,13 @@
     },
     {
       "type": 0,
-      "value": " for at godkende dette tv."
+      "value": " for at godkende dette login."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Log ind på tv"
+      "value": "Godkend login"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88120,7 +88076,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Kunne ikke logge enheden ind. Prøv igen."
+      "value": "Kunne ikke godkende login. Prøv igen."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -109406,6 +109362,12 @@
       "value": "Oversætter…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skjul serverrækker, der er tilføjet siden denne eksport:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109424,6 +109386,12 @@
     {
       "type": 0,
       "value": " og erstatter sektioner, du tidligere har tilføjet her. Dine ændringer af denne servers sektioner bevares."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Denne servers rækker er ændret, siden filen blev eksporteret, så vælg de rækker, du vil skjule, nedenfor."
     }
   ],
   "web.home.layout.checking": [
@@ -109474,6 +109442,26 @@
     {
       "type": 0,
       "value": "Slår Skjul sete elementer til."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Skjuler valgte rækker på: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " uden at ændre dine andre rækker der."
     }
   ],
   "web.home.layout.import": [
@@ -109578,6 +109566,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109786,6 +109792,12 @@
     {
       "type": 0,
       "value": "Unavngivet sektion"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skjul serverrækker, der ikke er i denne fil:"
     }
   ],
   "web.home.page.customize": [

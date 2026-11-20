@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Задаётся в окружении узла. Измените значение там и перезапустите узел."
+      "value": "Задаётся в окружении. Измените значение там и перезапустите соответствующую службу."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "Войдите через систему входа вашей сети, чтобы продолжить."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Этот узел задан в конфигурации развёртывания сервера. Удалите его там и перезапустите API-серверы, чтобы управлять им здесь."
     }
   ],
   "error.not_acceptable": [
@@ -37476,7 +37482,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Лента недавно начатых сеансов воспроизведения"
+      "value": "Последние воспроизведения во всех аккаунтах"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -39459,6 +39465,88 @@
     {
       "type": 0,
       "value": "Не удалось загрузить активность."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "Пользователь "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " воспроизвёл «"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "»"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "Пользователь "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " воспроизвёл «"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "»"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -61903,6 +61991,12 @@
       "value": "Введите адрес сервера, чтобы завершить настройку."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ключ задан в конфигурации развёртывания сервера"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -62847,6 +62941,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Задаётся в конфигурации развёртывания сервера. Удалите узел там, чтобы удалить его здесь."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -65006,6 +65106,68 @@
     {
       "type": 0,
       "value": "Плагины"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Применено"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Удержано"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Не удалось загрузить статус подготовки плагинов."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Управляется окружением"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Ожидание"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Отклонено"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Источник пакета и удаление контролируются развёртыванием."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Статус подготовки"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Развёртывание закрепляет этот плагин на версии "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -71274,6 +71436,12 @@
     {
       "type": 0,
       "value": "Сообщение отправлено"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Плеер не подтвердил получение сообщения. Оно может появиться с задержкой или не появиться вовсе."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -78046,136 +78214,10 @@
       "value": "Не удалось загрузить настройки уведомлений"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Новый контент не регистрируется, поэтому отправлять нечего. Снова включите регистрацию в разделе «Обработка»."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Отправка приостановлена; новый контент ждёт в очереди. Снова включите её в разделе «Обработка»."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Если выключено, вместо этого отправляется ежедневная сводка."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Как Silo обнаруживает новый контент, группирует его в сообщения и как долго их хранит."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Определять, кому это интересно"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Сопоставлять каждый элемент с предпочтениями всех пользователей."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Группировка и ограничение потока"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Обработка"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Максимальный возраст контента"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Более старые элементы отбрасываются, а не приходят как устаревшие новости."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Максимум сообщений на сериал"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Всё сверх этого числа в данном пакете пропускается."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Отслеживать новый контент"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Регистрировать новые элементы при сканировании медиатек."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Конвейер"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Прочитанные уведомления"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Хранение"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "История отправок"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Запись о том, о чём Silo уже уведомил."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Окно ожидания"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Элементы, сканирование которых завершилось одновременно, приходят одним уведомлением."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Непрочитанные уведомления"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -79128,18 +79170,6 @@
     {
       "type": 0,
       "value": "Уведомления"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "дн."
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "ч"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -85971,7 +86001,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Каналы доставки, серверные каналы и то, как новый контент превращается в уведомления."
+      "value": "Каналы доставки и серверные каналы."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -86070,12 +86100,6 @@
       "value": "Электронная почта"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Группировка и защита от флуда"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -86094,28 +86118,10 @@
       "value": "Разрешить выбирать письмо для каждой серии"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Максимальный возраст контента"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Максимум сообщений на сериал"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Упоминать автора запроса в Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Обнаружить новый контент"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -86124,46 +86130,16 @@
       "value": "Личные вебхуки"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Обработка"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Прочитанные уведомления"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL ретранслятора"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Хранение"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "История отправленных"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Серверные каналы"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Окно ожидания"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -86178,12 +86154,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Непрочитанные уведомления"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -86194,12 +86164,6 @@
     {
       "type": 0,
       "value": "Вебхуки на пользователя"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Определить, кому это нужно"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -103691,25 +103655,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Не удалось выполнить вход на телевизоре. Повторите попытку."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Убедитесь, что приложение показывает"
+      "value": "Не удалось подтвердить вход. Повторите попытку."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Убедитесь, что телевизор показывает"
+      "value": "Убедитесь, что код совпадает"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Введите код с телевизора или из приложения"
+      "value": "Введите код, показанный на устройстве"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -103721,13 +103679,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Войдите в свой аккаунт на телевизоре или другом устройстве."
+      "value": "Вход на телевизоре, в приложении или на другом устройстве."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Вход на телевизоре"
+      "value": "Подтвердить вход"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -103747,13 +103705,13 @@
     },
     {
       "type": 0,
-      "value": ", чтобы одобрить телевизор. Выполнить вход на телевизоре может только владелец этого аккаунта."
+      "value": ", чтобы подтвердить этот вход. Подтверждать устройства может только владелец аккаунта."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Прекратите просмотр от имени этого пользователя, чтобы одобрить телевизор. Выполнить вход на телевизоре может только владелец этого аккаунта."
+      "value": "Прекратите просмотр от имени этого пользователя, чтобы подтвердить этот вход. Подтверждать устройства может только владелец аккаунта."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -103771,39 +103729,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Код не найден. Проверьте код на телевизоре."
+      "value": "Не удалось найти этот код. Проверьте код и повторите попытку."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Не сейчас"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "В старых версиях приложения для телевизора вместо кода показаны слова "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Одобряйте только устройство, которое прямо сейчас находится перед вами."
+      "value": "Отклонить"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Одобряйте только телевизор, который прямо сейчас находится перед вами."
+      "value": "Подтверждайте, только если вы сами начали вход."
     }
   ],
   "web.auth.activate.playOn": [
@@ -103829,7 +103767,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Любой, кто пользуется этим телевизором, сможет выбрать любой из ваших профилей. Профили с PIN-кодом останутся заблокированными."
+      "value": "Устройство получит доступ к вашим профилям. Профили с PIN останутся заблокированными."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -103876,6 +103814,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Запрошено: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -103889,7 +103837,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Телевизор перестал ожидать. Начните заново на телевизоре."
+      "value": "Это устройство перестало ожидать. Начните вход на нём заново."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -103898,10 +103846,38 @@
       "value": "Этот запрос на вход отклонён."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Готово. Устройство «"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "» выполняет вход."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "На устройстве «"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "» выполнен вход."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Срок действия кода истёк. На телевизоре показан новый код — используйте его."
+      "value": "Срок действия кода истёк. Получите новый код на устройстве и повторите попытку."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -103985,25 +103961,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "На этом телевизоре уже выполнен вход."
+      "value": "На этом устройстве уже выполнен вход."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Телевизор одобрен и завершает вход."
+      "value": "Это устройство одобрено и завершает вход."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Готово. Телевизор выполняет вход."
+      "value": "Готово. Ваше устройство выполняет вход."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Вход на телевизоре выполнен."
+      "value": "Вход на вашем устройстве выполнен."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -104047,7 +104023,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Выполнить вход на устройстве «"
+      "value": "Разрешить вход на устройстве «"
     },
     {
       "type": 1,
@@ -104061,7 +104037,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Выполнить вход на этом устройстве?"
+      "value": "Разрешить вход на этом устройстве?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -104073,7 +104049,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "Войдите на сервер "
+      "value": "Войдите на сервер «"
     },
     {
       "type": 1,
@@ -104081,13 +104057,13 @@
     },
     {
       "type": 0,
-      "value": ", чтобы одобрить этот телевизор."
+      "value": "», чтобы подтвердить этот вход."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Войти на телевизоре"
+      "value": "Подтвердить вход"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -105133,7 +105109,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Не удалось выполнить вход на устройстве. Повторите попытку."
+      "value": "Не удалось подтвердить вход. Повторите попытку."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -130886,6 +130862,12 @@
       "value": "Перевод…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Скрыть ряды сервера, добавленные после этого экспорта:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -130904,6 +130886,12 @@
     {
       "type": 0,
       "value": " — вместо разделов, которые вы добавили здесь ранее. Ваши изменения разделов этого сервера сохранятся."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Ряды этого сервера изменились после экспорта файла, поэтому выберите ниже ряды, которые нужно скрыть."
     }
   ],
   "web.home.layout.checking": [
@@ -130954,6 +130942,26 @@
     {
       "type": 0,
       "value": "Включает параметр «Скрывать просмотренное»."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Скрывает выбранные ряды на страницах: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", не меняя другие ваши ряды на них."
     }
   ],
   "web.home.layout.import": [
@@ -131058,6 +131066,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -131288,6 +131314,12 @@
     {
       "type": 0,
       "value": "Раздел без названия"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Скрыть ряды сервера, которых нет в этом файле:"
     }
   ],
   "web.home.page.customize": [

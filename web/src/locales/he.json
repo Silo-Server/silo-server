@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "הערך נקבע בסביבה של הצומת. יש לשנות אותו שם ולהפעיל מחדש את הצומת."
+      "value": "הערך נקבע בסביבה. יש לשנות אותו שם ולהפעיל מחדש את השירות המושפע."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "יש להתחבר דרך מערכת ההתחברות של הרשת כדי להמשיך."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "הצומת הזה מוגדר בתצורת הפריסה של השרת. כדי לנהל אותו כאן, יש להסיר אותו משם ולהפעיל מחדש את שרתי ה-API."
     }
   ],
   "error.not_acceptable": [
@@ -33463,7 +33469,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "פיד של סשני הפעלה שהתחילו לאחרונה"
+      "value": "ההפעלות האחרונות בכל החשבונות"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35211,6 +35217,80 @@
     {
       "type": 0,
       "value": "לא ניתן היה לטעון את הפעילות."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "הפריט "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " הופעל על ידי "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "הפריט "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " הופעל על ידי "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -54662,6 +54742,12 @@
       "value": "יש להזין את כתובת השרת כדי להשלים את ההגדרות."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "המפתח מוגדר בתצורת הפריסה של השרת"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -55618,6 +55704,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "הצומת מוגדר בתצורת הפריסה של השרת. כדי למחוק אותו כאן, יש להסיר אותו משם."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -57525,6 +57617,68 @@
     {
       "type": 0,
       "value": "תוספים"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "הוחל"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "מושהה"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לטעון את סטטוס ההקצאה של התוספים."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "מנוהל על ידי הסביבה"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "ממתין"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "נדחה"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "הפריסה קובעת את מקור החבילה ואת ההסרה."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "סטטוס הקצאה"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "הפריסה מקבעת את התוסף הזה לגרסה "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -63079,6 +63233,12 @@
     {
       "type": 0,
       "value": "ההודעה נשלחה"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "הנגן לא אישר את קבלת ההודעה. ייתכן שהיא תוצג באיחור או שלא תוצג בכלל."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -69716,136 +69876,10 @@
       "value": "לא ניתן היה לטעון את הגדרות ההתראות"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "תוכן חדש לא נרשם, ולכן אי אפשר לשלוח דבר. אפשר להפעיל את הרישום מחדש בקטע ”עיבוד”."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "השליחה מושהית; תוכן חדש ממתין בתור. אפשר להפעיל אותה מחדש בקטע ”עיבוד”."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "כשהאפשרות כבויה, נשלח במקומה הסיכום היומי."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "האופן שבו Silo מזהה תוכן חדש ומקבץ אותו להודעות, וכמה זמן הוא שומר אותן."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "זיהוי מי מעוניין בתוכן"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "התאמה של כל פריט להעדפות של כל המשתמשים."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "קיבוץ ובקרת הצפה"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "עיבוד"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "גיל מרבי של תוכן"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "פריטים ישנים יותר מושמטים במקום להגיע כחדשות לא עדכניות."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "מספר הודעות מרבי לסדרה"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "כל מה שמעבר לזה מדולג באצווה הזו."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "זיהוי תוכן חדש"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "רישום פריטים חדשים במהלך סריקות של הספרייה."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "צינור עיבוד"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "התראות שנקראו"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "שמירת נתונים"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "היסטוריית שליחה"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "רישום של מה ש-Silo כבר שלח עליו התראות."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "חלון התייצבות"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "פריטים שהסריקה שלהם מסתיימת יחד מגיעים כהתראה אחת."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "התראות שלא נקראו"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -70774,18 +70808,6 @@
     {
       "type": 0,
       "value": "התראות"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "ימים"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "שעות"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -77526,7 +77548,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "ערוצי מסירה, ערוצי שרת, ואיך תוכן חדש הופך להתראות."
+      "value": "ערוצי מסירה וערוצי שרת."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -77625,12 +77647,6 @@
       "value": "אימייל"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "קיבוץ ובקרת הצפה"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -77649,28 +77665,10 @@
       "value": "אפשרות לבחור אימייל לכל פרק"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "גיל מרבי של התוכן"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "מספר מרבי של הודעות לכל סדרה"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "תיוג מגיש הבקשה ב-Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "זיהוי תוכן חדש"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -77679,46 +77677,16 @@
       "value": "webhooks אישיים"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "עיבוד"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "התראות שנקראו"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "כתובת URL של הממסר"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "שמירה"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "היסטוריית השליחה"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "ערוצי שרת"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "חלון התייצבות"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -77733,12 +77701,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "התראות שלא נקראו"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -77749,12 +77711,6 @@
     {
       "type": 0,
       "value": "webhooks לכל משתמש"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "זיהוי מי מעוניין בתוכן"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -94034,25 +93990,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "לא ניתן היה להשלים את ההתחברות בטלוויזיה. אפשר לנסות שוב."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "יש לוודא שהאפליקציה מציגה"
+      "value": "לא ניתן היה לאשר את ההתחברות. אפשר לנסות שוב."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "יש לוודא שהטלוויזיה מציגה"
+      "value": "יש לוודא שהקוד הזה תואם"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "יש להזין את הקוד שמוצג בטלוויזיה או באפליקציה"
+      "value": "יש להזין את הקוד שמוצג במכשיר שלך"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94064,13 +94014,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "התחברות בטלוויזיה או במכשיר אחר עם החשבון שלך."
+      "value": "התחברות בטלוויזיה, באפליקציה או במכשיר אחר."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "התחברות בטלוויזיה"
+      "value": "אישור ההתחברות"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94090,13 +94040,13 @@
     },
     {
       "type": 0,
-      "value": " כדי לאשר טלוויזיה. רק מהחשבון עצמו אפשר להתחבר בטלוויזיה."
+      "value": " כדי לאשר את ההתחברות הזו. רק החשבון עצמו יכול לאשר מכשירים."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "יש להפסיק את הצפייה בתור המשתמש הזה כדי לאשר טלוויזיה. רק מהחשבון עצמו אפשר להתחבר בטלוויזיה."
+      "value": "יש להפסיק את הצפייה בתור המשתמש הזה כדי לאשר את ההתחברות הזו. רק החשבון עצמו יכול לאשר מכשירים."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94114,39 +94064,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "הקוד הזה לא נמצא. יש לבדוק את הקוד בטלוויזיה."
+      "value": "הקוד הזה לא נמצא. יש לבדוק את הקוד ולנסות שוב."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "לא עכשיו"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "אפליקציות טלוויזיה ישנות יותר מציגות במקום זאת את המילים "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "יש לאשר רק מכשיר שנמצא מולך כרגע."
+      "value": "דחייה"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "יש לאשר רק טלוויזיה שנמצאת מולך כרגע."
+      "value": "יש לאשר רק אם התחלת את ההתחברות בעצמך."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94172,7 +94102,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "כל מי שמשתמש בטלוויזיה הזו יכול לבחור מבין הפרופילים שלך. פרופילים עם PIN נשארים נעולים."
+      "value": "האישור נותן למכשיר גישה לפרופילים שלך. פרופילים עם PIN יישארו נעולים."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94219,6 +94149,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "הבקשה נשלחה "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -94232,7 +94172,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "הטלוויזיה הזו הפסיקה להמתין. יש להתחיל מחדש בטלוויזיה."
+      "value": "המכשיר הזה הפסיק להמתין. יש להתחיל את ההתחברות מחדש במכשיר."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -94241,10 +94181,38 @@
       "value": "ההתחברות הזו נדחתה."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "בוצע. המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " מתחבר."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " מחובר."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "פג תוקף הקוד הזה. בטלוויזיה שלך מוצג קוד חדש. יש להשתמש בקוד הזה במקום."
+      "value": "פג תוקף הקוד הזה. יש לקבל קוד חדש במכשיר ולנסות שוב."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -94328,25 +94296,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "הטלוויזיה כבר מחוברת."
+      "value": "המכשיר הזה כבר מחובר."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "הטלוויזיה הזו אושרה ומשלימה את ההתחברות."
+      "value": "המכשיר הזה אושר ומשלים את ההתחברות."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "בוצע. הטלוויזיה שלך מתחברת."
+      "value": "בוצע. המכשיר שלך מתחבר."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "הטלוויזיה שלך מחוברת."
+      "value": "המכשיר שלך מחובר."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -94390,7 +94358,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "לאשר את ההתחברות במכשיר "
+      "value": "לאפשר למכשיר "
     },
     {
       "type": 1,
@@ -94398,13 +94366,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " להתחבר?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "לאשר את ההתחברות במכשיר הזה?"
+      "value": "לאפשר למכשיר הזה להתחבר?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -94424,13 +94392,13 @@
     },
     {
       "type": 0,
-      "value": " כדי לאשר את הטלוויזיה הזו."
+      "value": " כדי לאשר את ההתחברות הזו."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "התחברות בטלוויזיה"
+      "value": "אישור ההתחברות"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -95480,7 +95448,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "לא ניתן היה לחבר את המכשיר. אפשר לנסות שוב."
+      "value": "לא ניתן היה לאשר את ההתחברות. אפשר לנסות שוב."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -118492,6 +118460,12 @@
       "value": "מתבצע תרגום…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "הסתרת שורות שרת שנוספו מאז הייצוא הזה:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -118510,6 +118484,12 @@
     {
       "type": 0,
       "value": ", ויחליפו אזורים שהוספת כאן בעבר. השינויים שביצעת באזורים של השרת הזה יישמרו."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "השורות של השרת הזה השתנו מאז שהקובץ הזה יוצא, ולכן יש לבחור למטה את השורות להסתרה."
     }
   ],
   "web.home.layout.checking": [
@@ -118560,6 +118540,26 @@
     {
       "type": 0,
       "value": "האפשרות ”הסתרת פריטים שנצפו” תופעל."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "השורות שנבחרו יוסתרו בדפים: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", בלי לשנות את השורות האחרות שלך בהם."
     }
   ],
   "web.home.layout.import": [
@@ -118664,6 +118664,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -118880,6 +118898,12 @@
     {
       "type": 0,
       "value": "אזור ללא שם"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "הסתרת שורות שרת שלא נמצאות בקובץ הזה:"
     }
   ],
   "web.home.page.customize": [

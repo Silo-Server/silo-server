@@ -31,6 +31,7 @@ interface SignInConfigFieldProps {
   values: Record<string, unknown>;
   idPrefix: string;
   dirty: boolean;
+  managed?: boolean;
   /** A secret saved on the server; the input stays blank to keep it. */
   secretSaved?: boolean;
   /** The saved secret is staged to be cleared. */
@@ -51,6 +52,7 @@ export function SignInConfigField({
   values,
   idPrefix,
   dirty,
+  managed = false,
   secretSaved = false,
   clearing = false,
   onChange,
@@ -63,7 +65,11 @@ export function SignInConfigField({
   const descriptionId = useId();
   const value = effectiveValue(field, values);
   const secret = field.secret || field.control === "PASSWORD";
-  const describedBy = (description ?? field.description) ? descriptionId : undefined;
+  const hint = description ?? field.description;
+  const noteId = useId();
+  const describedBy =
+    [hint ? descriptionId : undefined, managed ? noteId : undefined].filter(Boolean).join(" ") ||
+    undefined;
 
   let control: React.ReactNode;
   if (field.control === "SWITCH") {
@@ -71,6 +77,7 @@ export function SignInConfigField({
       <Switch
         id={id}
         checked={Boolean(value)}
+        disabled={managed}
         onCheckedChange={onChange}
         aria-describedby={describedBy}
       />
@@ -82,6 +89,7 @@ export function SignInConfigField({
     control = (
       <Select
         value={toItem(current)}
+        disabled={managed}
         onValueChange={(next) => onChange(next === EMPTY_OPTION_VALUE ? "" : next)}
       >
         <SelectTrigger id={id} className={SETTINGS_CONTROL_WIDTH} aria-describedby={describedBy}>
@@ -102,6 +110,7 @@ export function SignInConfigField({
     control = (
       <textarea
         id={id}
+        disabled={managed}
         rows={field.rows && field.rows > 0 ? field.rows : 3}
         value={String(value ?? "")}
         placeholder={field.placeholder}
@@ -118,11 +127,12 @@ export function SignInConfigField({
     control = (
       <Input
         id={id}
+        disabled={managed}
         type={secret ? "password" : field.control === "NUMBER" ? "number" : "text"}
         autoComplete={secret ? "new-password" : "off"}
         value={String(value ?? "")}
         placeholder={
-          secret && secretSaved && !clearing
+          secret && secretSaved && (managed || !clearing)
             ? t("web.admin.settings.signIn.configField.secretSavedPlaceholder")
             : field.placeholder
         }
@@ -141,7 +151,11 @@ export function SignInConfigField({
       description={description ?? field.description}
       descriptionId={descriptionId}
       status={
-        secret && secretSaved && onToggleClear && !field.required ? (
+        managed ? (
+          <SettingFieldStatus>
+            <span id={noteId}>{t("web.admin.plugins.provisioning.managed")}</span>
+          </SettingFieldStatus>
+        ) : secret && secretSaved && onToggleClear && !field.required ? (
           <span className="inline-flex items-center gap-2">
             <SettingFieldStatus tone={clearing ? "warn" : "muted"}>
               {clearing

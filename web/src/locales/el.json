@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Ορίζεται από το περιβάλλον του κόμβου. Αλλάξτε το εκεί και επανεκκινήστε τον κόμβο."
+      "value": "Ορίζεται από το περιβάλλον. Αλλάξτε το εκεί και επανεκκινήστε την υπηρεσία που επηρεάζεται."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "Συνδεθείτε μέσω της υπηρεσίας σύνδεσης του δικτύου σας για να συνεχίσετε."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Αυτός ο κόμβος ορίζεται από τη διαμόρφωση ανάπτυξης του διακομιστή. Αφαιρέστε τον από εκεί και επανεκκινήστε τους διακομιστές API για να τον διαχειρίζεστε εδώ."
     }
   ],
   "error.not_acceptable": [
@@ -30606,7 +30612,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Λίστα συνεδριών αναπαραγωγής που ξεκίνησαν πρόσφατα"
+      "value": "Οι πιο πρόσφατες αναπαραγωγές σε όλους τους λογαριασμούς"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32239,6 +32245,72 @@
     {
       "type": 0,
       "value": "Δεν ήταν δυνατή η φόρτωση της δραστηριότητας."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " αναπαρήγαγε το στοιχείο "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " αναπαρήγαγε το στοιχείο "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49708,6 +49780,12 @@
       "value": "Εισαγάγετε τη διεύθυνση του διακομιστή για να ολοκληρωθούν οι ρυθμίσεις."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Κλειδί ορισμένο από τη διαμόρφωση ανάπτυξης του διακομιστή"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50620,6 +50698,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ορίζεται από τη διαμόρφωση ανάπτυξης του διακομιστή. Αφαιρέστε τον κόμβο από εκεί για να τον διαγράψετε εδώ."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52417,6 +52501,68 @@
     {
       "type": 0,
       "value": "Πρόσθετα"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Εφαρμόστηκε"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Σε αναστολή"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η φόρτωση της κατάστασης παροχής πρόσθετων."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Διαχειρίζεται από το περιβάλλον"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Σε εκκρεμότητα"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Απορρίφθηκε"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Η πηγή του πακέτου και η αφαίρεσή του ελέγχονται από τη διαμόρφωση ανάπτυξης."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Κατάσταση παροχής"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Η διαμόρφωση ανάπτυξης κλειδώνει αυτό το πρόσθετο στην έκδοση "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -57363,6 +57509,12 @@
     {
       "type": 0,
       "value": "Το μήνυμα στάλθηκε"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Το πρόγραμμα αναπαραγωγής δεν επιβεβαίωσε τη λήψη του μηνύματος. Μπορεί να εμφανιστεί με καθυστέρηση ή να μην εμφανιστεί καθόλου."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -63865,136 +64017,10 @@
       "value": "Δεν ήταν δυνατή η φόρτωση των ρυθμίσεων ειδοποιήσεων"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Το νέο περιεχόμενο δεν καταγράφεται, οπότε δεν μπορεί να σταλεί τίποτα. Ενεργοποιήστε την καταγραφή ξανά στην ενότητα «Επεξεργασία»."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Η αποστολή έχει τεθεί σε παύση. Το νέο περιεχόμενο περιμένει στην ουρά. Ενεργοποιήστε την ξανά στην ενότητα «Επεξεργασία»."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Αν είναι ανενεργό, λαμβάνουν την ημερήσια σύνοψη."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Πώς το Silo εντοπίζει νέο περιεχόμενο, πώς το ομαδοποιεί σε μηνύματα και για πόσο καιρό τα διατηρεί."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Εύρεση ενδιαφερόμενων"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Αντιστοίχιση κάθε στοιχείου με τις προτιμήσεις όλων."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Ομαδοποίηση και έλεγχος υπερφόρτωσης"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Επεξεργασία"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Μέγιστη ηλικία περιεχομένου"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Τα παλαιότερα στοιχεία απορρίπτονται αντί να φτάνουν ως ξεπερασμένα νέα."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Μέγιστα μηνύματα ανά σειρά"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Ό,τι υπερβαίνει αυτό το όριο παραλείπεται για τη συγκεκριμένη παρτίδα."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Εντοπισμός νέου περιεχομένου"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Καταγραφή νέων στοιχείων κατά τις σαρώσεις βιβλιοθηκών."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Ροή επεξεργασίας"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Αναγνωσμένες ειδοποιήσεις"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Διατήρηση"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Ιστορικό αποστολών"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Καταγραφή των στοιχείων για τα οποία το Silo έχει ήδη στείλει ειδοποίηση."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Διάστημα αναμονής"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Τα στοιχεία που ολοκληρώνουν τη σάρωση μαζί φτάνουν ως μία ειδοποίηση."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Μη αναγνωσμένες ειδοποιήσεις"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64899,18 +64925,6 @@
     {
       "type": 0,
       "value": "Ειδοποιήσεις"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "ημέρες"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "ώρες"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -71532,7 +71546,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Κανάλια παράδοσης, κανάλια διακομιστή και πώς το νέο περιεχόμενο γίνεται ειδοποιήσεις."
+      "value": "Κανάλια παράδοσης και κανάλια διακομιστή."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -71631,12 +71645,6 @@
       "value": "Email"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Ομαδοποίηση και έλεγχος υπερφόρτωσης"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71655,28 +71663,10 @@
       "value": "Να επιτρέπεται η επιλογή email ανά επεισόδιο"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Μέγιστη ηλικία περιεχομένου"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Μέγιστος αριθμός μηνυμάτων ανά σειρά"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Αναφορά του χρήστη που υπέβαλε το αίτημα στο Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Εντοπισμός νέου περιεχομένου"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -71685,46 +71675,16 @@
       "value": "Προσωπικά webhook"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Επεξεργασία"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Αναγνωσμένες ειδοποιήσεις"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL αναμεταδότη"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Διατήρηση"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Ιστορικό απεσταλμένων"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Κανάλια διακομιστή"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Παράθυρο σταθεροποίησης"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71739,12 +71699,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Μη αναγνωσμένες ειδοποιήσεις"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71755,12 +71709,6 @@
     {
       "type": 0,
       "value": "Webhook ανά άτομο"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Εντοπισμός ενδιαφερόμενων"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -87122,25 +87070,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Δεν ήταν δυνατή η σύνδεση της τηλεόρασης. Δοκιμάστε ξανά."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Ελέγξτε ότι η εφαρμογή σας εμφανίζει"
+      "value": "Δεν ήταν δυνατή η έγκριση της σύνδεσης. Δοκιμάστε ξανά."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Ελέγξτε ότι η τηλεόρασή σας εμφανίζει"
+      "value": "Βεβαιωθείτε ότι αυτός ο κωδικός ταιριάζει"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Εισαγάγετε τον κωδικό που εμφανίζεται στην τηλεόραση ή στην εφαρμογή σας"
+      "value": "Εισαγάγετε τον κωδικό που εμφανίζεται στη συσκευή σας"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -87152,13 +87094,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Συνδέστε μια τηλεόραση ή άλλη συσκευή με τον λογαριασμό σας."
+      "value": "Σύνδεση τηλεόρασης, εφαρμογής ή άλλης συσκευής."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Σύνδεση τηλεόρασης"
+      "value": "Έγκριση σύνδεσης"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -87178,13 +87120,13 @@
     },
     {
       "type": 0,
-      "value": " για να εγκρίνετε μια τηλεόραση. Μόνο ο ίδιος ο λογαριασμός μπορεί να συνδέσει μια τηλεόραση."
+      "value": " για να εγκρίνετε αυτή τη σύνδεση. Μόνο ο ίδιος ο λογαριασμός μπορεί να εγκρίνει συσκευές."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Σταματήστε την προβολή ως αυτός ο χρήστης για να εγκρίνετε μια τηλεόραση. Μόνο ο ίδιος ο λογαριασμός μπορεί να συνδέσει μια τηλεόραση."
+      "value": "Σταματήστε την προβολή ως αυτός ο χρήστης για να εγκρίνετε αυτή τη σύνδεση. Μόνο ο ίδιος ο λογαριασμός μπορεί να εγκρίνει συσκευές."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -87202,39 +87144,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Δεν βρέθηκε αυτός ο κωδικός. Ελέγξτε τον κωδικό στην τηλεόρασή σας."
+      "value": "Δεν ήταν δυνατή η εύρεση αυτού του κωδικού. Ελέγξτε τον κωδικό και δοκιμάστε ξανά."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Όχι τώρα"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Οι παλαιότερες εφαρμογές τηλεόρασης εμφανίζουν στη θέση του τις λέξεις "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Εγκρίνετε μόνο μια συσκευή που βρίσκεται μπροστά σας αυτή τη στιγμή."
+      "value": "Απόρριψη"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Εγκρίνετε μόνο μια τηλεόραση που βρίσκεται μπροστά σας αυτή τη στιγμή."
+      "value": "Εγκρίνετε μόνο αν ξεκινήσατε εσείς τη σύνδεση."
     }
   ],
   "web.auth.activate.playOn": [
@@ -87260,7 +87182,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Όποιος χρησιμοποιεί αυτή την τηλεόραση μπορεί να επιλέξει από τα προφίλ σας. Τα προφίλ με PIN παραμένουν κλειδωμένα."
+      "value": "Έτσι αποκτά πρόσβαση στα προφίλ σας. Τα προφίλ με PIN παραμένουν κλειδωμένα."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -87307,6 +87229,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Ζητήθηκε "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -87320,7 +87252,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Αυτή η τηλεόραση σταμάτησε να περιμένει. Ξεκινήστε ξανά από την τηλεόραση."
+      "value": "Αυτή η συσκευή σταμάτησε να περιμένει. Ξεκινήστε ξανά τη σύνδεση σε αυτήν."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -87329,10 +87261,38 @@
       "value": "Αυτή η σύνδεση απορρίφθηκε."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Ολοκληρώθηκε. Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " συνδέεται."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " συνδέθηκε."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Αυτός ο κωδικός έληξε. Η τηλεόρασή σας εμφανίζει έναν νέο. Χρησιμοποιήστε εκείνον τον κωδικό."
+      "value": "Αυτός ο κωδικός έληξε. Λάβετε νέο κωδικό στη συσκευή και δοκιμάστε ξανά."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -87416,25 +87376,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Η τηλεόραση έχει ήδη συνδεθεί."
+      "value": "Αυτή η συσκευή έχει ήδη συνδεθεί."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Αυτή η τηλεόραση εγκρίθηκε και ολοκληρώνει τη σύνδεση."
+      "value": "Αυτή η συσκευή εγκρίθηκε και ολοκληρώνει τη σύνδεση."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Ολοκληρώθηκε. Η τηλεόρασή σας συνδέεται."
+      "value": "Ολοκληρώθηκε. Η συσκευή σας συνδέεται."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Η τηλεόρασή σας συνδέθηκε."
+      "value": "Η συσκευή σας συνδέθηκε."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -87478,7 +87438,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Σύνδεση της συσκευής "
+      "value": "Να επιτραπεί η σύνδεση της συσκευής "
     },
     {
       "type": 1,
@@ -87492,7 +87452,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Σύνδεση αυτής της συσκευής;"
+      "value": "Να επιτραπεί η σύνδεση αυτής της συσκευής;"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87512,13 +87472,13 @@
     },
     {
       "type": 0,
-      "value": " για να εγκρίνετε αυτή την τηλεόραση."
+      "value": " για να εγκρίνετε αυτή τη σύνδεση."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Σύνδεση τηλεόρασης"
+      "value": "Έγκριση σύνδεσης"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88568,7 +88528,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Δεν ήταν δυνατή η σύνδεση της συσκευής. Δοκιμάστε ξανά."
+      "value": "Δεν ήταν δυνατή η έγκριση της σύνδεσης. Δοκιμάστε ξανά."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -109996,6 +109956,12 @@
       "value": "Μετάφραση…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Απόκρυψη γραμμών του διακομιστή που προστέθηκαν μετά από αυτή την εξαγωγή:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -110014,6 +109980,12 @@
     {
       "type": 0,
       "value": " και αντικαθιστούν ενότητες που είχατε προσθέσει εδώ παλαιότερα. Οι αλλαγές σας στις ενότητες αυτού του διακομιστή παραμένουν."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Οι γραμμές αυτού του διακομιστή άλλαξαν από τότε που εξήχθη αυτό το αρχείο, οπότε επιλέξτε παρακάτω όποιες γραμμές θέλετε να αποκρύψετε."
     }
   ],
   "web.home.layout.checking": [
@@ -110064,6 +110036,26 @@
     {
       "type": 0,
       "value": "Ενεργοποιεί την επιλογή «Απόκρυψη στοιχείων που έχετε δει»."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Αποκρύπτει τις επιλεγμένες γραμμές στις σελίδες: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " χωρίς να αλλάζει τις άλλες γραμμές σας εκεί."
     }
   ],
   "web.home.layout.import": [
@@ -110168,6 +110160,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -110376,6 +110386,12 @@
     {
       "type": 0,
       "value": "Ενότητα χωρίς τίτλο"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Απόκρυψη γραμμών του διακομιστή που δεν υπάρχουν σε αυτό το αρχείο:"
     }
   ],
   "web.home.page.customize": [

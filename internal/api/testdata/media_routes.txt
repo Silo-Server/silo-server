@@ -347,6 +347,7 @@ POST /api/v2/admin/people/{id}/refresh	non-media
 GET /api/v2/admin/playback-history	non-media
 GET /api/v2/admin/playback-history/capabilities	non-media
 GET /api/v2/admin/playback-routing/capabilities	non-media
+GET /api/v2/admin/plugins/capabilities	non-media
 GET /api/v2/admin/plugins/catalog	non-media
 GET /api/v2/admin/plugins/catalog-settings	non-media
 PUT /api/v2/admin/plugins/catalog-settings	non-media
@@ -362,6 +363,7 @@ POST /api/v2/admin/plugins/installations/{id}/config/test	non-media
 POST /api/v2/admin/plugins/installations/{id}/restart	non-media
 PUT /api/v2/admin/plugins/installations/{id}/task-bindings/{capability_id}	non-media
 POST /api/v2/admin/plugins/installations/{id}/update	non-media
+GET /api/v2/admin/plugins/provisioning-status	non-media
 GET /api/v2/admin/plugins/repositories	non-media
 POST /api/v2/admin/plugins/repositories	non-media
 DELETE /api/v2/admin/plugins/repositories/{id}	non-media
@@ -432,6 +434,7 @@ POST /api/v2/admin/requests/{id}/approve	non-media
 POST /api/v2/admin/requests/{id}/cancel	non-media
 POST /api/v2/admin/requests/{id}/decline	non-media
 GET /api/v2/admin/requests/{id}/events	non-media
+GET /api/v2/admin/requests/{id}/poster	non-media
 POST /api/v2/admin/requests/{id}/retry	non-media
 GET /api/v2/admin/sections	non-media
 POST /api/v2/admin/sections	non-media
@@ -554,6 +557,7 @@ POST /api/v2/auth/impersonation/end	non-media
 POST /api/v2/auth/login	non-media
 POST /api/v2/auth/logout	non-media
 POST /api/v2/auth/network/{id}/sign-in	non-media
+GET /api/v2/auth/oauth/callback	non-media
 GET /api/v2/auth/oauth/capabilities	non-media
 POST /api/v2/auth/oauth/complete	non-media
 GET /api/v2/auth/oauth/{install_id}/callback	non-media
@@ -888,6 +892,7 @@ POST /api/v2/profile/import	non-media
 DELETE /api/v2/profile/sections	non-media
 GET /api/v2/profile/sections	non-media
 PUT /api/v2/profile/sections	non-media
+GET /api/v2/profile/sections/baseline	non-media
 GET /api/v2/profile/sections/flags	non-media
 GET /api/v2/profile/sections/settings	non-media
 GET /api/v2/profiles	non-media
@@ -1418,6 +1423,7 @@ POST /api/v2/admin/people/{id}/refresh	non-media
 GET /api/v2/admin/playback-history	non-media
 GET /api/v2/admin/playback-history/capabilities	non-media
 GET /api/v2/admin/playback-routing/capabilities	non-media
+GET /api/v2/admin/plugins/capabilities	non-media
 GET /api/v2/admin/plugins/catalog	non-media
 GET /api/v2/admin/plugins/catalog-settings	non-media
 PUT /api/v2/admin/plugins/catalog-settings	non-media
@@ -1433,6 +1439,7 @@ POST /api/v2/admin/plugins/installations/{id}/config/test	non-media
 POST /api/v2/admin/plugins/installations/{id}/restart	non-media
 PUT /api/v2/admin/plugins/installations/{id}/task-bindings/{capability_id}	non-media
 POST /api/v2/admin/plugins/installations/{id}/update	non-media
+GET /api/v2/admin/plugins/provisioning-status	non-media
 GET /api/v2/admin/plugins/repositories	non-media
 POST /api/v2/admin/plugins/repositories	non-media
 DELETE /api/v2/admin/plugins/repositories/{id}	non-media
@@ -1503,6 +1510,7 @@ POST /api/v2/admin/requests/{id}/approve	non-media
 POST /api/v2/admin/requests/{id}/cancel	non-media
 POST /api/v2/admin/requests/{id}/decline	non-media
 GET /api/v2/admin/requests/{id}/events	non-media
+GET /api/v2/admin/requests/{id}/poster	non-media
 POST /api/v2/admin/requests/{id}/retry	non-media
 GET /api/v2/admin/sections	non-media
 POST /api/v2/admin/sections	non-media
@@ -1625,6 +1633,7 @@ POST /api/v2/auth/impersonation/end	non-media
 POST /api/v2/auth/login	non-media
 POST /api/v2/auth/logout	non-media
 POST /api/v2/auth/network/{id}/sign-in	non-media
+GET /api/v2/auth/oauth/callback	non-media
 GET /api/v2/auth/oauth/capabilities	non-media
 POST /api/v2/auth/oauth/complete	non-media
 GET /api/v2/auth/oauth/{install_id}/callback	non-media
@@ -1959,6 +1968,7 @@ POST /api/v2/profile/import	non-media
 DELETE /api/v2/profile/sections	non-media
 GET /api/v2/profile/sections	non-media
 PUT /api/v2/profile/sections	non-media
+GET /api/v2/profile/sections/baseline	non-media
 GET /api/v2/profile/sections/flags	non-media
 GET /api/v2/profile/sections/settings	non-media
 GET /api/v2/profiles	non-media

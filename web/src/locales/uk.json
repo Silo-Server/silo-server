@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Задається середовищем вузла. Змініть це значення там і перезапустіть вузол."
+      "value": "Задається середовищем. Змініть це значення там і перезапустіть відповідну службу."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "Увійдіть через систему входу вашої мережі, щоб продовжити."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Цей вузол задається конфігурацією розгортання сервера. Вилучіть його там і перезапустіть API-сервери, щоб керувати ним тут."
     }
   ],
   "error.not_acceptable": [
@@ -36706,7 +36712,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Стрічка нещодавно розпочатих сеансів відтворення"
+      "value": "Останні відтворення з усіх облікових записів"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -38681,6 +38687,72 @@
     {
       "type": 0,
       "value": "Не вдалося завантажити активність."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ": відтворено "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ": відтворено "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -60961,6 +61033,12 @@
       "value": "Введіть адресу сервера, щоб завершити налаштування."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ключ задається конфігурацією розгортання сервера"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -61905,6 +61983,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Задається конфігурацією розгортання сервера. Вилучіть його там, щоб видалити тут."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -64064,6 +64148,68 @@
     {
       "type": 0,
       "value": "Плагіни"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Застосовано"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Утримано"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Не вдалося завантажити стан розгортання плагінів."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Керується середовищем"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Очікує"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Відхилено"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Джерелом пакета та видаленням керує середовище розгортання."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Стан розгортання"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Середовище розгортання закріплює цей плагін на версії "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -70216,6 +70362,12 @@
     {
       "type": 0,
       "value": "Повідомлення надіслано"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Програвач не підтвердив отримання повідомлення. Воно може з’явитися пізніше або не з’явитися взагалі."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -76980,136 +77132,10 @@
       "value": "Не вдалося завантажити налаштування сповіщень"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Новий вміст не записується, тож нічого не можна надіслати. Увімкніть це знову в розділі «Обробка»."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Надсилання призупинено; новий вміст чекає в черзі. Увімкніть його знову в розділі «Обробка»."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Якщо вимкнено, натомість надсилається щоденний підсумок."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Як Silo помічає новий вміст, групує його в повідомлення та скільки часу їх зберігає."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Визначати, кому це цікаво"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Зіставляти кожен елемент із вподобаннями всіх користувачів."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Групування й захист від надміру повідомлень"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Обробка"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Макс. вік вмісту"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Старіші елементи відкидаються, щоб не надходити як застарілі новини."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Макс. повідомлень на серіал"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Усе понад це значення пропускається в цьому пакеті."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Помічати новий вміст"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Записувати нові елементи під час сканування бібліотек."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Конвеєр"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Прочитані сповіщення"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Зберігання"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Історія надсилання"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Запис того, про що Silo вже сповістив."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Вікно очікування"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Елементи, сканування яких завершилося одночасно, надходять одним сповіщенням."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Непрочитані сповіщення"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -78062,18 +78088,6 @@
     {
       "type": 0,
       "value": "Сповіщення"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "дн."
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "год"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -84849,7 +84863,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Канали доставки, канали сервера й те, як новий вміст стає сповіщеннями."
+      "value": "Канали доставки й канали сервера."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -84948,12 +84962,6 @@
       "value": "Ел. пошта"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Групування й захист від надмірних сповіщень"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -84972,28 +84980,10 @@
       "value": "Дозволити вибирати лист для кожного епізоду"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Максимальний вік вмісту"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Максимум повідомлень на серіал"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Згадувати автора запиту в Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Виявлення нового вмісту"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -85002,46 +84992,16 @@
       "value": "Особисті вебхуки"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Обробка"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Прочитані сповіщення"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL-адреса ретранслятора"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Зберігання"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Історія надісланих"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Канали сервера"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Вікно стабілізації"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -85056,12 +85016,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Непрочитані сповіщення"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -85072,12 +85026,6 @@
     {
       "type": 0,
       "value": "Вебхуків на особу"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Визначення зацікавлених"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -102501,25 +102449,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Не вдалося виконати вхід на телевізорі. Спробуйте ще раз."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Переконайтеся, що застосунок показує"
+      "value": "Не вдалося схвалити вхід. Спробуйте ще раз."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Переконайтеся, що телевізор показує"
+      "value": "Переконайтеся, що цей код збігається"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Введіть код із телевізора або застосунку"
+      "value": "Введіть код, показаний на вашому пристрої"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -102531,13 +102473,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Увійдіть на телевізорі або іншому пристрої за допомогою свого облікового запису."
+      "value": "Вхід на телевізорі, у застосунку чи на іншому пристрої."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Вхід на телевізорі"
+      "value": "Схвалити вхід"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -102557,13 +102499,13 @@
     },
     {
       "type": 0,
-      "value": ", щоб схвалити телевізор. Виконати вхід на телевізорі можна лише з власного облікового запису."
+      "value": ", щоб схвалити цей вхід. Схвалювати пристрої можна лише з власного облікового запису."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Припиніть перегляд від імені цього користувача, щоб схвалити телевізор. Виконати вхід на телевізорі можна лише з власного облікового запису."
+      "value": "Припиніть перегляд від імені цього користувача, щоб схвалити цей вхід. Схвалювати пристрої можна лише з власного облікового запису."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -102581,39 +102523,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Не вдалося знайти цей код. Перевірте код на телевізорі."
+      "value": "Не вдалося знайти цей код. Перевірте код і спробуйте ще раз."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Не зараз"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Старіші застосунки для телевізора натомість показують "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Схвалюйте лише пристрій, який зараз перед вами."
+      "value": "Відхилити"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Схвалюйте лише телевізор, який зараз перед вами."
+      "value": "Схвалюйте, лише якщо ви самі почали вхід."
     }
   ],
   "web.auth.activate.playOn": [
@@ -102639,7 +102561,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Будь-хто, хто користується цим телевізором, зможе вибрати один із ваших профілів. Профілі з PIN-кодом залишаються заблокованими."
+      "value": "Так пристрій отримає доступ до ваших профілів. Профілі з PIN-кодом залишаться заблокованими."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -102686,6 +102608,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Запит надіслано "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -102699,7 +102631,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Цей телевізор перестав чекати. Почніть знову на телевізорі."
+      "value": "Цей пристрій перестав чекати. Почніть вхід на ньому знову."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -102708,10 +102640,34 @@
       "value": "Цей вхід відхилено."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Готово. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " виконує вхід."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": ": вхід виконано."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Термін дії цього коду минув. На телевізорі показано новий код. Використайте його."
+      "value": "Термін дії цього коду минув. Отримайте новий код на пристрої та спробуйте ще раз."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -102795,25 +102751,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "На цьому телевізорі вже виконано вхід."
+      "value": "На цьому пристрої вже виконано вхід."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Цей телевізор схвалено, вхід завершується."
+      "value": "Цей пристрій схвалено, вхід завершується."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Готово. Телевізор виконує вхід."
+      "value": "Готово. Ваш пристрій виконує вхід."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Вхід на телевізорі виконано."
+      "value": "На вашому пристрої виконано вхід."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -102857,7 +102813,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Увійти на пристрої "
+      "value": "Дозволити вхід для "
     },
     {
       "type": 1,
@@ -102871,7 +102827,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Увійти на цьому пристрої?"
+      "value": "Дозволити вхід на цьому пристрої?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -102891,13 +102847,13 @@
     },
     {
       "type": 0,
-      "value": ", щоб схвалити цей телевізор."
+      "value": ", щоб схвалити цей вхід."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Увійти на телевізорі"
+      "value": "Схвалити вхід"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -103943,7 +103899,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Не вдалося виконати вхід на пристрої. Спробуйте ще раз."
+      "value": "Не вдалося схвалити вхід. Спробуйте ще раз."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -129576,6 +129532,12 @@
       "value": "Перекладається…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Приховати ряди сервера, додані після цього експорту:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -129594,6 +129556,12 @@
     {
       "type": 0,
       "value": " замість розділів, які ви додали тут раніше. Ваші зміни в розділах цього сервера збережуться."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Відколи цей файл експортовано, ряди цього сервера змінилися, тож виберіть нижче ряди, які потрібно приховати."
     }
   ],
   "web.home.layout.checking": [
@@ -129644,6 +129612,26 @@
     {
       "type": 0,
       "value": "Вмикає параметр «Приховувати переглянуте»."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Приховує вибрані ряди на: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", не змінюючи інших ваших рядів там."
     }
   ],
   "web.home.layout.import": [
@@ -129748,6 +129736,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -129978,6 +129984,12 @@
     {
       "type": 0,
       "value": "Розділ без назви"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Приховати ряди сервера, яких немає в цьому файлі:"
     }
   ],
   "web.home.page.customize": [

@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Ditetapkan oleh lingkungan node. Ubah di sana, lalu mulai ulang node."
+      "value": "Ditetapkan oleh lingkungan. Ubah di sana, lalu mulai ulang layanan yang terdampak."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "Masuk melalui halaman masuk jaringan Anda untuk melanjutkan."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Node ini ditetapkan oleh konfigurasi deployment server. Hapus node ini di sana, lalu mulai ulang server API agar dapat mengelolanya di sini."
     }
   ],
   "error.not_acceptable": [
@@ -27460,7 +27466,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Daftar sesi pemutaran yang baru dimulai"
+      "value": "Pemutaran terbaru di semua akun"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -28918,6 +28924,72 @@
     {
       "type": 0,
       "value": "Tidak dapat memuat aktivitas."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " memutar "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " memutar "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -43820,6 +43892,12 @@
       "value": "Masukkan alamat server untuk melengkapi pengaturan."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Kunci ditetapkan oleh konfigurasi deployment server"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -44716,6 +44794,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh konfigurasi deployment server. Hapus di sana agar dapat menghapusnya di sini."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -46316,6 +46400,68 @@
     {
       "type": 0,
       "value": "Plugin"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Diterapkan"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Ditahan"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuat status penyediaan plugin."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Dikelola oleh lingkungan"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Tertunda"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Ditolak"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Deployment mengontrol sumber paket dan penghapusan."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Status penyediaan"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Deployment mengunci plugin ini ke versi "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -50673,6 +50819,12 @@
     {
       "type": 0,
       "value": "Pesan dikirim"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Pemutar tidak mengonfirmasi pesan. Pesan mungkin muncul terlambat atau tidak muncul sama sekali."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -57032,136 +57184,10 @@
       "value": "Tidak dapat memuat pengaturan notifikasi"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Konten baru tidak sedang dicatat, jadi tidak ada yang dapat dikirim. Aktifkan kembali di Pemrosesan."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Pengiriman dijeda; konten baru menunggu di antrean. Aktifkan kembali di Pemrosesan."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Jika nonaktif, pengguna menerima ringkasan harian sebagai gantinya."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Cara Silo mendeteksi konten baru, mengelompokkannya menjadi pesan, dan berapa lama pesan disimpan."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Tentukan siapa yang menginginkannya"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Cocokkan setiap item dengan preferensi semua pengguna."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Pengelompokan dan pengendalian banjir pesan"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Pemrosesan"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Usia konten maksimum"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Item yang lebih lama dibuang alih-alih tiba sebagai berita usang."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Pesan maksimum per serial"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Apa pun yang melebihi batas ini dilewati untuk batch tersebut."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Deteksi konten baru"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Catat item baru selama pemindaian perpustakaan."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Pipeline"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notifikasi yang sudah dibaca"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Retensi"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Riwayat pengiriman"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Catatan hal yang sudah diberitahukan Silo."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Jendela tunggu"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Item yang selesai dipindai bersamaan tiba sebagai satu notifikasi."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notifikasi yang belum dibaca"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -58042,18 +58068,6 @@
     {
       "type": 0,
       "value": "Notifikasi"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "hari"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "jam"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -64548,7 +64562,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Saluran pengiriman, saluran server, dan cara konten baru menjadi notifikasi."
+      "value": "Saluran pengiriman dan saluran server."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -64647,12 +64661,6 @@
       "value": "Email"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Pengelompokan dan kontrol banjir"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -64671,28 +64679,10 @@
       "value": "Izinkan pengguna memilih email per episode"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Usia konten maksimum"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Pesan maksimum per serial"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Sebut peminta di Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Deteksi konten baru"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -64701,46 +64691,16 @@
       "value": "Webhook pribadi"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Pemrosesan"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notifikasi yang sudah dibaca"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Retensi"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Riwayat terkirim"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Saluran server"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Jendela penyelesaian"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -64755,12 +64715,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notifikasi yang belum dibaca"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -64771,12 +64725,6 @@
     {
       "type": 0,
       "value": "Webhook per orang"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Tentukan siapa yang menginginkannya"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -78999,25 +78947,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Tidak dapat mengizinkan TV masuk. Coba lagi."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Pastikan aplikasi Anda menampilkan"
+      "value": "Tidak dapat menyetujui proses masuk. Coba lagi."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Pastikan TV Anda menampilkan"
+      "value": "Pastikan kode ini cocok"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Masukkan kode yang tampil di TV atau aplikasi Anda"
+      "value": "Masukkan kode yang ditampilkan di perangkat Anda"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -79029,13 +78971,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Izinkan TV atau perangkat lain masuk dengan akun Anda."
+      "value": "Masuk di TV, aplikasi, atau perangkat lain."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Izinkan TV masuk"
+      "value": "Setujui proses masuk"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -79055,13 +78997,13 @@
     },
     {
       "type": 0,
-      "value": " untuk menyetujui TV. Hanya pemilik akun itu sendiri yang dapat mengizinkan TV masuk."
+      "value": " untuk menyetujui proses masuk ini. Hanya pemilik akun itu sendiri yang dapat menyetujui perangkat."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Berhenti melihat sebagai pengguna ini untuk menyetujui TV. Hanya pemilik akun itu sendiri yang dapat mengizinkan TV masuk."
+      "value": "Berhenti melihat sebagai pengguna ini untuk menyetujui proses masuk ini. Hanya pemilik akun itu sendiri yang dapat menyetujui perangkat."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -79079,39 +79021,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Kode itu tidak ditemukan. Periksa kode di TV Anda."
+      "value": "Kode itu tidak ditemukan. Periksa kode, lalu coba lagi."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Lain kali"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Aplikasi TV versi lama menampilkan "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " sebagai gantinya."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Hanya setujui perangkat yang ada di depan Anda saat ini."
+      "value": "Tolak"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Hanya setujui TV yang ada di depan Anda saat ini."
+      "value": "Setujui hanya jika Anda sendiri yang memulai proses masuk ini."
     }
   ],
   "web.auth.activate.playOn": [
@@ -79137,7 +79059,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Siapa pun yang menggunakan TV ini dapat memilih dari profil Anda. Profil dengan PIN tetap terkunci."
+      "value": "Ini memberinya akses ke profil Anda. Profil dengan PIN tetap terkunci."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -79184,6 +79106,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Diminta "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -79197,7 +79129,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "TV ini berhenti menunggu. Mulai lagi di TV."
+      "value": "Perangkat ini berhenti menunggu. Mulai proses masuk lagi di perangkat itu."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -79206,10 +79138,34 @@
       "value": "Permintaan masuk ini ditolak."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Selesai. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sedang masuk."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sudah masuk."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Kode ini kedaluwarsa. TV Anda menampilkan kode baru. Gunakan kode itu."
+      "value": "Kode ini kedaluwarsa. Dapatkan kode baru di perangkat, lalu coba lagi."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -79293,25 +79249,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "TV itu sudah masuk."
+      "value": "Perangkat ini sudah masuk."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "TV ini telah disetujui dan sedang menyelesaikan proses masuk."
+      "value": "Perangkat ini telah disetujui dan sedang menyelesaikan proses masuk."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Selesai. TV Anda sedang masuk."
+      "value": "Selesai. Perangkat Anda sedang masuk."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "TV Anda sudah masuk."
+      "value": "Perangkat Anda sudah masuk."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -79389,13 +79345,13 @@
     },
     {
       "type": 0,
-      "value": " untuk menyetujui TV ini."
+      "value": " untuk menyetujui proses masuk ini."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Izinkan TV masuk"
+      "value": "Setujui proses masuk"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -80441,7 +80397,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Perangkat tidak dapat masuk. Coba lagi."
+      "value": "Tidak dapat menyetujui proses masuk. Coba lagi."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -99613,6 +99569,12 @@
       "value": "Menerjemahkan…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sembunyikan baris server yang ditambahkan sejak ekspor ini:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -99631,6 +99593,12 @@
     {
       "type": 0,
       "value": ", menggantikan bagian yang sebelumnya Anda tambahkan di sini. Perubahan Anda pada bagian server ini tetap dipertahankan."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Baris server ini berubah sejak file ini diekspor, jadi pilih baris yang ingin disembunyikan di bawah."
     }
   ],
   "web.home.layout.checking": [
@@ -99681,6 +99649,26 @@
     {
       "type": 0,
       "value": "Mengaktifkan Sembunyikan item yang sudah ditonton."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Menyembunyikan baris yang dipilih di: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " tanpa mengubah baris Anda yang lain di sana."
     }
   ],
   "web.home.layout.import": [
@@ -99785,6 +99773,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -99982,6 +99988,12 @@
     {
       "type": 0,
       "value": "Bagian tanpa judul"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sembunyikan baris server yang tidak ada di file ini:"
     }
   ],
   "web.home.page.customize": [

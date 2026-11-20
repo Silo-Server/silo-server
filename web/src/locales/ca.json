@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Ho defineix l’entorn del node. Canvia-ho allà i reinicia el node."
+      "value": "Ho defineix l’entorn. Canvia-ho allà i reinicia el servei afectat."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "Inicia la sessió amb l’inici de sessió de la teva xarxa per continuar."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Aquest node el defineix la configuració de desplegament del servidor. Treu-lo d’allà i reinicia els servidors d’API per gestionar-lo aquí."
     }
   ],
   "error.not_acceptable": [
@@ -33648,7 +33654,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Llista de les sessions de reproducció iniciades recentment"
+      "value": "Reproduccions més recents de tots els comptes"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35448,6 +35454,72 @@
     {
       "type": 0,
       "value": "No s’ha pogut carregar l’activitat."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ha reproduït "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ha reproduït "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -55327,6 +55399,12 @@
       "value": "Introdueix l’adreça del servidor per completar els paràmetres."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Clau definida per la configuració de desplegament del servidor"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -56247,6 +56325,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Node definit per la configuració de desplegament del servidor. Treu-lo d’allà per eliminar-lo aquí."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -58185,6 +58269,68 @@
     {
       "type": 0,
       "value": "Connectors"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Aplicat"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Retingut"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "No s’ha pogut carregar l’estat de l’aprovisionament dels connectors."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Gestionat per l’entorn"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Pendent"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Rebutjat"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "El desplegament controla l’origen del paquet i l’eliminació."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Estat de l’aprovisionament"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "El desplegament fixa aquest connector a la versió "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -63724,6 +63870,12 @@
     {
       "type": 0,
       "value": "S’ha enviat el missatge"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "El reproductor no ha confirmat el missatge. És possible que es mostri tard o que no es mostri."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -70361,136 +70513,10 @@
       "value": "No s’ha pogut carregar la configuració de les notificacions"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "No s’està registrant el contingut nou, així que no es pot enviar res. Torna-ho a activar a Processament."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "L’enviament està en pausa; el contingut nou espera a la cua. Torna’l a activar a Processament."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Si està desactivat, se’ls envia el resum diari."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Com detecta Silo el contingut nou, com l’agrupa en missatges i quant de temps els conserva."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Determina qui el vol"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Compara cada element amb les preferències de tothom."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Agrupació i control d’allaus"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Processament"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Antiguitat màxima del contingut"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Els elements més antics es descarten en lloc d’arribar com a notícies antigues."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Màxim de missatges per sèrie"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "El que superi aquest límit s’omet en aquest lot."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Detecta el contingut nou"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Registra els elements nous durant les anàlisis de la biblioteca."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Flux de processament"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notificacions llegides"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Conservació"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Historial d’enviaments"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Registre del que Silo ja ha notificat."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Finestra d’espera"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Els elements que acaben l’anàlisi alhora arriben en una sola notificació."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notificacions no llegides"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -71419,18 +71445,6 @@
     {
       "type": 0,
       "value": "Notificacions"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dies"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "hores"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -78135,7 +78149,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Canals d’entrega, canals del servidor i com el contingut nou es converteix en notificacions."
+      "value": "Canals d’entrega i canals del servidor."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -78234,12 +78248,6 @@
       "value": "Correu electrònic"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Agrupació i control d’excés de missatges"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -78258,28 +78266,10 @@
       "value": "Permet triar un correu electrònic per episodi"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Antiguitat màxima del contingut"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Nombre màxim de missatges per sèrie"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Menciona qui ha fet la sol·licitud a Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Detecta el contingut nou"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -78288,46 +78278,16 @@
       "value": "Webhooks personals"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Processament"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notificacions llegides"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL del relé"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Conservació"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Historial d’enviaments"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Canals del servidor"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Interval d’estabilització"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -78342,12 +78302,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notificacions no llegides"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -78358,12 +78312,6 @@
     {
       "type": 0,
       "value": "Webhooks per persona"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Determina qui ho vol"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -94708,25 +94656,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "No s’ha pogut iniciar la sessió a la TV. Torna-ho a provar."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Comprova que l’aplicació mostri"
+      "value": "No s’ha pogut aprovar l’inici de sessió. Torna-ho a provar."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Comprova que la TV mostri"
+      "value": "Comprova que aquest codi coincideixi"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Introdueix el codi de la TV o l’aplicació"
+      "value": "Introdueix el codi que es mostra al dispositiu"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94738,13 +94680,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Inicia la sessió en una TV o un altre dispositiu amb el teu compte."
+      "value": "Inicia la sessió en una TV, una aplicació o un altre dispositiu."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Inicia la sessió en una TV"
+      "value": "Aprova l’inici de sessió"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94764,13 +94706,13 @@
     },
     {
       "type": 0,
-      "value": " per aprovar una TV. Només el mateix compte pot iniciar la sessió en una TV."
+      "value": " per aprovar aquest inici de sessió. Només el mateix compte pot aprovar dispositius."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Deixa de veure com a aquest usuari per aprovar una TV. Només el mateix compte pot iniciar la sessió en una TV."
+      "value": "Deixa de veure com a aquest usuari per aprovar aquest inici de sessió. Només el mateix compte pot aprovar dispositius."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94788,39 +94730,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "No hem trobat aquest codi. Comprova el codi de la TV."
+      "value": "No hem trobat aquest codi. Comprova el codi i torna-ho a provar."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ara no"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Les aplicacions de TV més antigues mostren "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " en el seu lloc."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Aprova només un dispositiu que tinguis davant ara mateix."
+      "value": "Rebutja"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Aprova només una TV que tinguis davant ara mateix."
+      "value": "Aprova-ho només si l’inici de sessió l’has començat tu."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94846,7 +94768,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Qualsevol persona que utilitzi aquesta TV podrà triar entre els teus perfils. Els perfils amb PIN continuen bloquejats."
+      "value": "Això li dona accés als teus perfils. Els perfils amb PIN continuen bloquejats."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94893,6 +94815,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Sol·licitada "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -94906,7 +94838,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Aquesta TV ha deixat d’esperar. Torna a començar a la TV."
+      "value": "Aquest dispositiu ha deixat d’esperar. Torna a començar l’inici de sessió al dispositiu."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -94915,10 +94847,34 @@
       "value": "S’ha rebutjat aquest inici de sessió."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Fet. Ara "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " inicia la sessió."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ha iniciat la sessió."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Aquest codi ha caducat. La TV en mostra un de nou. Utilitza aquell codi."
+      "value": "Aquest codi ha caducat. Obtén un codi nou al dispositiu i torna-ho a provar."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -94952,7 +94908,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "Fet. Aquest dispositiu està iniciant la sessió amb el perfil "
+      "value": "Fet. Aquest dispositiu inicia la sessió amb el perfil "
     },
     {
       "type": 1,
@@ -95002,25 +94958,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Aquella TV ja té la sessió iniciada."
+      "value": "Aquest dispositiu ja té la sessió iniciada."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "S’ha aprovat aquesta TV i està acabant d’iniciar la sessió."
+      "value": "S’ha aprovat aquest dispositiu i està acabant d’iniciar la sessió."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Fet. La TV està iniciant la sessió."
+      "value": "Fet. Ara el dispositiu inicia la sessió."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "La TV ja té la sessió iniciada."
+      "value": "El dispositiu ha iniciat la sessió."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -95064,7 +95020,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Vols iniciar la sessió a "
+      "value": "Vols permetre a "
     },
     {
       "type": 1,
@@ -95072,13 +95028,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " iniciar la sessió?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Vols iniciar la sessió en aquest dispositiu?"
+      "value": "Vols permetre a aquest dispositiu iniciar la sessió?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -95098,13 +95054,13 @@
     },
     {
       "type": 0,
-      "value": " per aprovar aquesta TV."
+      "value": " per aprovar aquest inici de sessió."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Inicia la sessió a la TV"
+      "value": "Aprova l’inici de sessió"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -96150,7 +96106,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "No s’ha pogut iniciar la sessió al dispositiu. Torna-ho a provar."
+      "value": "No s’ha pogut aprovar l’inici de sessió. Torna-ho a provar."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -119699,6 +119655,12 @@
       "value": "S’està traduint…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Amaga les files del servidor afegides des d’aquesta exportació:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -119717,6 +119679,12 @@
     {
       "type": 0,
       "value": ", i substitueixen les seccions que hi havies afegit abans. Els canvis que has fet a les seccions d’aquest servidor es mantenen."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Les files d’aquest servidor han canviat des que es va exportar aquest fitxer; tria a continuació les files que vulguis amagar."
     }
   ],
   "web.home.layout.checking": [
@@ -119767,6 +119735,26 @@
     {
       "type": 0,
       "value": "Activa l’opció Amaga els elements vistos."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Amaga les files seleccionades a: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " sense canviar-hi les altres files."
     }
   ],
   "web.home.layout.import": [
@@ -119871,6 +119859,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -120090,6 +120096,12 @@
     {
       "type": 0,
       "value": "Secció sense títol"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Amaga les files del servidor que no són en aquest fitxer:"
     }
   ],
   "web.home.page.customize": [

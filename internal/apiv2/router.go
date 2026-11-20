@@ -32,6 +32,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
@@ -234,6 +235,7 @@ type Dependencies struct {
 	AdminPluginRepositoryUpdates  AdminPluginRepositoryUpdateService
 	AdminPluginRepositoryDeletes  AdminPluginRepositoryDeleteService
 	AdminPluginInventory          AdminPluginInventoryService
+	AdminPluginProvisionStatus    func(context.Context) ([]plugins.ProvisionStatus, error)
 	AdminPluginConfiguration      AdminPluginConfigurationService
 	AdminPluginLifecycle          AdminPluginLifecycleService
 	AdminPluginUploads            AdminPluginUploadService
@@ -549,6 +551,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.Use(joinPreconditionFields)
 	r.Use(rejectMalformedDeviceHeader)
 	r.Use(withRequest)
+	r.Use(playbackMediaCORS)
 	if deps.ActingAdmin != nil {
 		r.Use(apimw.ProvideActingAdmin(deps.ActingAdmin))
 	}
@@ -853,6 +856,11 @@ func (reg *Registry) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 	if len(methods) == 0 {
 		methods = pluginContentAllowedMethods(r.URL.Path)
 	}
+	// playbackMediaCORS answers OPTIONS on the media path before routing, so the
+	// registry does not declare it.
+	if isPlaybackMediaPath(r.URL.Path) {
+		methods = append(methods, http.MethodOptions)
+	}
 	if allow := strings.Join(methods, ", "); allow != "" {
 		p = p.WithHeader("Allow", allow)
 	}
@@ -904,6 +912,7 @@ type ProfileSectionService interface {
 	SaveProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery, writes []handlers.SectionOverrideWrite) error
 	ResetProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery) error
 	ResolveProfileSectionSettings(ctx context.Context, userID int, profileID, scope string, libraryID *int, filter mediacatalog.AccessFilter) ([]sections.ResolvedSection, error)
+	GetProfileSectionBaseline(ctx context.Context, userID int, scope string, libraryID *int) (handlers.ProfileSectionBaseline, error)
 }
 
 // LibraryService is the slice of *catalog.FolderRepository updateProfile
@@ -1268,7 +1277,7 @@ var externalSignInProblemTypes = map[string]ProblemType{
 // tickets and provider logout.
 type OAuthService interface {
 	Complete(ctx context.Context, code, verifier, browser string) (auth.OAuthCompletion, error)
-	CallbackURL(prefix string, installID int) string
+	CallbackURL(prefix string, installID int, mode string) string
 	PublicURL(path string, query url.Values) string
 	NativeSignInAvailable() bool
 	ServeStart(w http.ResponseWriter, r *http.Request, req auth.OAuthStartRequest, bounceURL string, bounceStatus int)

@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "\u200F\u202ESet by the node’s environment. Change it there and restart the node.\u202C"
+      "value": "\u200F\u202ESet by the environment. Change it there and restart the affected service.\u202C"
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ESign in through your network’s sign-in to continue.\u202C"
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis node is set by the server’s deployment configuration. Remove it there and restart the API servers to manage it here.\u202C"
     }
   ],
   "error.not_acceptable": [
@@ -32222,7 +32228,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "\u200F\u202EFeed of recently started playback sessions\u202C"
+      "value": "\u200F\u202EMost recent plays across all accounts\u202C"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -33935,6 +33941,80 @@
     {
       "type": 0,
       "value": "\u200F\u202EFailed to load activity.\u202C"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E played \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E played \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -52368,6 +52448,12 @@
       "value": "\u200F\u202EEnter the server address to complete the settings.\u202C"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKey set by the server’s deployment configuration\u202C"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -53328,6 +53414,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESet by the server’s deployment configuration. Remove it there to delete it here.\u202C"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -55205,6 +55297,68 @@
     {
       "type": 0,
       "value": "\u200F\u202EPlugins\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApplied\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHeld\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t load plugin provisioning status.\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EManaged by the environment\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPending\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERefused\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe deployment controls the package source and removal.\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EProvisioning status\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe deployment pins this plugin to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -60379,6 +60533,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EMessage sent\u202C"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe player didn’t confirm the message. It may show up late or not at all.\u202C"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -67049,136 +67209,10 @@
       "value": "\u200F\u202ECouldn't load notification settings\u202C"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENew content is not being recorded, so nothing can be sent. Turn it back on under Processing.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESending is paused; new content waits in the queue. Turn it back on under Processing.\u202C"
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "\u200F\u202EOff sends them the daily summary instead.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHow Silo notices new content, groups it into messages, and how long it keeps them.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWork out who wants it\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMatch each item against everyone's preferences.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EGrouping and flood control\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EProcessing\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMax content age\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EOlder items are dropped instead of arriving as stale news.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMax messages per show\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAnything past this is skipped for that batch.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENotice new content\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERecord new items during library scans.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPipeline\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERead notifications\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERetention\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESent history\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERecord of what Silo already notified about.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESettle window\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EItems that finish scanning together arrive as one notification.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUnread notifications\u202C"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -68107,18 +68141,6 @@
     {
       "type": 0,
       "value": "\u200F\u202ENotifications\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Edays\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Ehours\u202C"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -75004,7 +75026,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "\u200F\u202EDelivery channels, server channels, and how new content becomes notifications.\u202C"
+      "value": "\u200F\u202EDelivery channels and server channels.\u202C"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -75103,12 +75125,6 @@
       "value": "\u200F\u202EEmail\u202C"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EGrouping and flood control\u202C"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -75127,28 +75143,10 @@
       "value": "\u200F\u202ELet people pick an email per episode\u202C"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMax content age\u202C"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMax messages per show\u202C"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "\u200F\u202EMention the requester on Discord\u202C"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENotice new content\u202C"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -75157,46 +75155,16 @@
       "value": "\u200F\u202EPersonal Webhooks\u202C"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EProcessing\u202C"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERead notifications\u202C"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "\u200F\u202ERelay URL\u202C"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERetention\u202C"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESent history\u202C"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "\u200F\u202EServer Channels\u202C"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESettle window\u202C"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -75211,12 +75179,6 @@
       "value": "\u200F\u202ESilo Push Relay\u202C"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUnread notifications\u202C"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -75227,12 +75189,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EWebhooks per person\u202C"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWork out who wants it\u202C"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -91146,25 +91102,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "\u200F\u202ECouldn't sign in the TV. Try again.\u202C"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECheck that your app shows\u202C"
+      "value": "\u200F\u202ECouldn't approve sign-in. Try again.\u202C"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "\u200F\u202ECheck that your TV shows\u202C"
+      "value": "\u200F\u202EMake sure this code matches\u202C"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "\u200F\u202EEnter the code on your TV or app\u202C"
+      "value": "\u200F\u202EEnter the code shown on your device\u202C"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -91176,13 +91126,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in a TV or other device with your account.\u202C"
+      "value": "\u200F\u202ESign in a TV, app, or other device.\u202C"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in a TV\u202C"
+      "value": "\u200F\u202EApprove sign-in\u202C"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -91202,13 +91152,13 @@
     },
     {
       "type": 0,
-      "value": "\u202E to approve a TV. Only the account itself can sign in a TV.\u202C"
+      "value": "\u202E to approve this sign-in. Only the account itself can approve devices.\u202C"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "\u200F\u202EStop viewing as this user to approve a TV. Only the account itself can sign in a TV.\u202C"
+      "value": "\u200F\u202EStop viewing as this user to approve this sign-in. Only the account itself can approve devices.\u202C"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -91226,39 +91176,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "\u200F\u202EWe couldn't find that code. Check the code on your TV.\u202C"
+      "value": "\u200F\u202EWe couldn't find that code. Check the code and try again.\u202C"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "\u200F\u202ENot now\u202C"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EOlder TV apps show \u202C"
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "\u202E instead.\u202C"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EOnly approve a device that's in front of you right now.\u202C"
+      "value": "\u200F\u202EDecline\u202C"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "\u200F\u202EOnly approve a TV that's in front of you right now.\u202C"
+      "value": "\u200F\u202EOnly approve this if you started the sign-in yourself.\u202C"
     }
   ],
   "web.auth.activate.playOn": [
@@ -91284,7 +91214,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "\u200F\u202EAnyone using this TV can pick from your profiles. Profiles with a PIN stay locked.\u202C"
+      "value": "\u200F\u202EThis gives it access to your profiles. Profiles with a PIN stay locked.\u202C"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -91331,6 +91261,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequested \u202C"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -91344,7 +91284,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "\u200F\u202EThis TV stopped waiting. Start again on the TV.\u202C"
+      "value": "\u200F\u202EThis device stopped waiting. Start sign-in again on it.\u202C"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -91353,10 +91293,38 @@
       "value": "\u200F\u202EThis sign-in was declined.\u202C"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDone. \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E is signing in.\u202C"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E is signed in.\u202C"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "\u200F\u202EThis code expired. Your TV is showing a new one. Use that code instead.\u202C"
+      "value": "\u200F\u202EThis code expired. Get a new code on the device and try again.\u202C"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -91390,7 +91358,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "\u200F\u202EDone. this device is signing in as \u202C"
+      "value": "\u200F\u202EDone. This device is signing in as \u202C"
     },
     {
       "type": 1,
@@ -91440,25 +91408,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "\u200F\u202EThat TV is already signed in.\u202C"
+      "value": "\u200F\u202EThis device is already signed in.\u202C"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "\u200F\u202EThis TV was approved and is finishing sign-in.\u202C"
+      "value": "\u200F\u202EThis device was approved and is finishing sign-in.\u202C"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "\u200F\u202EDone. Your TV is signing in.\u202C"
+      "value": "\u200F\u202EDone. Your device is signing in.\u202C"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "\u200F\u202EYour TV is signed in.\u202C"
+      "value": "\u200F\u202EYour device is signed in.\u202C"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -91502,7 +91470,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in \u202C"
+      "value": "\u200F\u202EAllow \u202C"
     },
     {
       "type": 1,
@@ -91510,13 +91478,13 @@
     },
     {
       "type": 0,
-      "value": "\u202E?\u202C"
+      "value": "\u202E to sign in?\u202C"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in this device?\u202C"
+      "value": "\u200F\u202EAllow this device to sign in?\u202C"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -91536,13 +91504,13 @@
     },
     {
       "type": 0,
-      "value": "\u202E to approve this TV.\u202C"
+      "value": "\u202E to approve this sign-in.\u202C"
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in TV\u202C"
+      "value": "\u200F\u202EApprove sign-in\u202C"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -92596,7 +92564,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "\u200F\u202ECouldn't sign in the device. Try again.\u202C"
+      "value": "\u200F\u202ECouldn't approve sign-in. Try again.\u202C"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -115052,6 +115020,12 @@
       "value": "\u200F\u202ETranslating…\u202C"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide server rows added since this export:\u202C"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -115070,6 +115044,12 @@
     {
       "type": 0,
       "value": "\u202E, replacing sections you added here before. Your changes to this server's sections stay.\u202C"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis server's rows changed since this file was exported, so choose any rows to hide below.\u202C"
     }
   ],
   "web.home.layout.checking": [
@@ -115120,6 +115100,26 @@
     {
       "type": 0,
       "value": "\u200F\u202ETurns Hide watched items on.\u202C"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHides selected rows on: \u202C"
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E without changing your other rows there.\u202C"
     }
   ],
   "web.home.layout.import": [
@@ -115228,6 +115228,28 @@
     {
       "type": 0,
       "value": "\u202E.\u202C"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": "\u202E (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -115448,6 +115470,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EUntitled section\u202C"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide server rows not in this file:\u202C"
     }
   ],
   "web.home.page.customize": [

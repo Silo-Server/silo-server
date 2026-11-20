@@ -1973,6 +1973,21 @@ that holds a bearer secret or a public capability, each one way:
   every installation of another deployment's backup or a separate
   restore, comes back off and is listed; one only the backup has is off
   by its stricter switch. The trusted proxies are a stricter-of setting.
+- Plugin config, sign-in credentials, and deployment ownership
+  (`plugin_provision_ownership`) carry only when the live and restored
+  installation IDs and plugin IDs match. Sign-in bindings carry their
+  live callback mode and retain the stricter account creation decision.
+  Restore prepares the ownership table and callback column for an older
+  schema when it needs to carry live values. Transient provisioning
+  status is excluded from the dump and cleared during full restore.
+- A full restore that restricts a plugin release or sign-in authority
+  writes a fresh deployment-wide hold to `server_settings` before the
+  restored database takes over. A current destination hold also gets
+  a fresh ID. The declarative writer checks the hold at startup and in
+  its commit transaction. A writer that observes a hold stays held for the
+  lifetime of that process. Acknowledgment clears only the matching hold ID.
+  The [user manual](https://siloserver.org/docs/restore#resume-plugin-provisioning-after-a-restore)
+  covers recovery.
 - Custom access policies only tighten decisions, so a newer one lost to
   the backup would widen access: their documents and versions
   (`liveTables`) are taken from the live server as one unit, with the

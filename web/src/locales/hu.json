@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "A csomópont környezete állítja be. Ott módosítsa, majd indítsa újra a csomópontot."
+      "value": "A környezet állítja be. Ott módosítsa, majd indítsa újra az érintett szolgáltatást."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "A folytatáshoz jelentkezzen be a hálózat saját bejelentkezésén keresztül."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Ezt a csomópontot a szerver telepítési konfigurációja állítja be. Távolítsa el onnan, és indítsa újra az API-szervereket, hogy itt kezelhesse."
     }
   ],
   "error.not_acceptable": [
@@ -30518,7 +30524,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "A nemrég elindított lejátszási munkamenetek listája"
+      "value": "Legutóbbi lejátszások az összes fiókban"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32135,6 +32141,72 @@
     {
       "type": 0,
       "value": "Nem sikerült betölteni a tevékenységet."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " lejátszotta: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " lejátszotta: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49300,6 +49372,12 @@
       "value": "A beállítások kiegészítéséhez adja meg a szervercímet."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "A kulcsot a szerver telepítési konfigurációja állítja be"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50212,6 +50290,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "A szerver telepítési konfigurációja állítja be. Távolítsa el onnan, hogy itt törölhesse."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52009,6 +52093,68 @@
     {
       "type": 0,
       "value": "Bővítmények"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Alkalmazva"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Visszatartva"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Nem sikerült betölteni a bővítmények kiépítési állapotát."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "A környezet kezeli"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Függőben"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Elutasítva"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "A csomag forrását és eltávolítását a telepítési környezet szabályozza."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Kiépítési állapot"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "A telepítési környezet ehhez a verzióhoz rögzíti a bővítményt: "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -56931,6 +57077,12 @@
     {
       "type": 0,
       "value": "Üzenet elküldve"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "A lejátszó nem erősítette meg az üzenet fogadását. Lehet, hogy az üzenet később jelenik meg, vagy egyáltalán nem."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -63421,136 +63573,10 @@
       "value": "Nem sikerült betölteni az értesítési beállításokat"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Az új tartalmak rögzítése ki van kapcsolva, ezért semmi sem küldhető el. Kapcsolja vissza a Feldolgozás alatt."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "A küldés szüneteltetve van; az új tartalmak a várólistán várakoznak. Kapcsolja vissza a Feldolgozás alatt."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Kikapcsolva helyette a napi összefoglalót kapják."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Hogyan észleli a Silo az új tartalmakat, hogyan csoportosítja őket üzenetekbe, és meddig őrzi meg azokat."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Érdeklődők meghatározása"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Minden elem összevetése mindenki beállításaival."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Csoportosítás és elárasztás elleni védelem"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Feldolgozás"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Tartalom maximális kora"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "A régebbi elemeket a rendszer elveti, hogy ne elavult hírként érkezzenek."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Üzenetek maximális száma sorozatonként"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Az ezen felülieket a rendszer kihagyja az adott kötegből."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Új tartalmak észlelése"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Új elemek rögzítése a könyvtárak átvizsgálásakor."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Folyamat"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Olvasott értesítések"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Megőrzés"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Küldési előzmények"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Annak nyilvántartása, amiről a Silo már értesített."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Várakozási ablak"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Az együtt átvizsgált elemek egyetlen értesítésként érkeznek."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Olvasatlan értesítések"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64455,18 +64481,6 @@
     {
       "type": 0,
       "value": "Értesítések"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "nap"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "óra"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -71068,7 +71082,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Kézbesítési csatornák, szervercsatornák, valamint az, hogy az új tartalomból hogyan lesznek értesítések."
+      "value": "Kézbesítési csatornák és szervercsatornák."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -71167,12 +71181,6 @@
       "value": "E-mail"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Csoportosítás és elárasztás elleni védelem"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71191,28 +71199,10 @@
       "value": "Epizódonkénti e-mail választásának engedélyezése"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Tartalom maximális kora"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Üzenetek maximális száma sorozatonként"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Az igénylő megemlítése a Discordon"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Új tartalom észlelése"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -71221,46 +71211,16 @@
       "value": "Személyes webhookok"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Feldolgozás"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Olvasott értesítések"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Továbbítási URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Megőrzés"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Elküldött előzmények"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Szervercsatornák"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Várakozási időablak"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71275,12 +71235,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Olvasatlan értesítések"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71291,12 +71245,6 @@
     {
       "type": 0,
       "value": "Webhookok személyenként"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Érdeklődők meghatározása"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -86510,25 +86458,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Nem sikerült bejelentkeztetni a TV-t. Próbálja újra."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Ellenőrizze, hogy az alkalmazás ezt mutatja-e"
+      "value": "Nem sikerült jóváhagyni a bejelentkezést. Próbálja újra."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Ellenőrizze, hogy a TV ezt mutatja-e"
+      "value": "Ellenőrizze, hogy egyezik-e ez a kód"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Adja meg a TV-n vagy az alkalmazásban látható kódot"
+      "value": "Adja meg az eszközön látható kódot"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86540,13 +86482,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "TV vagy más eszköz bejelentkeztetése a fiókjával."
+      "value": "TV, alkalmazás vagy más eszköz bejelentkeztetése."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "TV bejelentkeztetése"
+      "value": "Bejelentkezés jóváhagyása"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86558,7 +86500,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "A TV jóváhagyásához fejezze be a megtekintést "
+      "value": "A bejelentkezés jóváhagyásához fejezze be a megtekintést "
     },
     {
       "type": 1,
@@ -86566,13 +86508,13 @@
     },
     {
       "type": 0,
-      "value": " nevében. TV bejelentkeztetésére csak maga a fiók jogosult."
+      "value": " nevében. Eszközöket csak maga a fiók hagyhat jóvá."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "A TV jóváhagyásához fejezze be a megtekintést ennek a felhasználónak a nevében. TV bejelentkeztetésére csak maga a fiók jogosult."
+      "value": "A bejelentkezés jóváhagyásához fejezze be a megtekintést ennek a felhasználónak a nevében. Eszközöket csak maga a fiók hagyhat jóvá."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86590,39 +86532,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Ez a kód nem található. Ellenőrizze a TV-n látható kódot."
+      "value": "Nem találjuk ezt a kódot. Ellenőrizze a kódot, és próbálja újra."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Most nem"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "A régebbi TV-alkalmazások helyette ezt mutatják: "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Csak olyan eszközt hagyjon jóvá, amely most Ön előtt van."
+      "value": "Elutasítás"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Csak olyan TV-t hagyjon jóvá, amely most Ön előtt van."
+      "value": "Csak akkor hagyja jóvá, ha a bejelentkezést Ön indította el."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86648,7 +86570,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Aki ezt a TV-t használja, választhat a profiljai közül. A PIN-kóddal védett profilok zárolva maradnak."
+      "value": "Ezzel az eszköz hozzáférést kap a profiljaihoz. A PIN-kóddal védett profilok zárolva maradnak."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86695,6 +86617,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Igényelve: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86708,7 +86640,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Ez a TV már nem várakozik. Kezdje újra a TV-n."
+      "value": "Ez az eszköz már nem várakozik. Indítsa újra rajta a bejelentkezést."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86717,10 +86649,38 @@
       "value": "Ezt a bejelentkezést elutasították."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Kész. Bejelentkezés folyamatban: "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Bejelentkezett: "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Ez a kód lejárt. A TV már egy újat mutat. Használja azt a kódot."
+      "value": "Ez a kód lejárt. Kérjen új kódot az eszközön, és próbálja újra."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86754,7 +86714,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "Kész. Ez az eszköz bejelentkezik a(z) "
+      "value": "Kész. Ez az eszköz a(z) "
     },
     {
       "type": 1,
@@ -86762,7 +86722,7 @@
     },
     {
       "type": 0,
-      "value": " nevű profillal."
+      "value": " nevű profillal jelentkezik be."
     }
   ],
   "web.auth.activate.result.quickConnectExpired": [
@@ -86804,25 +86764,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Ez a TV már bejelentkezett."
+      "value": "Ez az eszköz már bejelentkezett."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Ez a TV jóváhagyást kapott, és befejezi a bejelentkezést."
+      "value": "Ez az eszköz jóváhagyást kapott, és befejezi a bejelentkezést."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Kész. A TV bejelentkezik."
+      "value": "Kész. Az eszköz most jelentkezik be."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "A TV bejelentkezett."
+      "value": "Az eszköz bejelentkezett."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86866,7 +86826,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Bejelentkezteti a(z) "
+      "value": "Engedélyezi a(z) "
     },
     {
       "type": 1,
@@ -86874,13 +86834,13 @@
     },
     {
       "type": 0,
-      "value": " eszközt?"
+      "value": " eszköz bejelentkezését?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Bejelentkezteti ezt az eszközt?"
+      "value": "Engedélyezi ennek az eszköznek a bejelentkezését?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86900,13 +86860,13 @@
     },
     {
       "type": 0,
-      "value": " szerverre a TV jóváhagyásához."
+      "value": " szerverre ennek a bejelentkezésnek a jóváhagyásához."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "TV bejelentkeztetése"
+      "value": "Bejelentkezés jóváhagyása"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -87968,7 +87928,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Nem sikerült bejelentkeztetni az eszközt. Próbálja újra."
+      "value": "Nem sikerült jóváhagyni a bejelentkezést. Próbálja újra."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -109090,6 +109050,12 @@
       "value": "Fordítás…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Az export óta hozzáadott szerversorok elrejtése:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109108,6 +109074,12 @@
     {
       "type": 0,
       "value": ", és felváltják az itt korábban hozzáadott szakaszokat. Az ezen a szerveren lévő szakaszokon végzett módosítások megmaradnak."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "A szerver sorai megváltoztak a fájl exportálása óta, ezért alább válassza ki az elrejtendő sorokat."
     }
   ],
   "web.home.layout.checking": [
@@ -109158,6 +109130,26 @@
     {
       "type": 0,
       "value": "Bekapcsolja a Megtekintett elemek elrejtése beállítást."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Elrejti a kijelölt sorokat a következő oldalakon: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", az ottani többi sor módosítása nélkül."
     }
   ],
   "web.home.layout.import": [
@@ -109262,6 +109254,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109470,6 +109480,12 @@
     {
       "type": 0,
       "value": "Névtelen szakasz"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "A fájlban nem szereplő szerversorok elrejtése:"
     }
   ],
   "web.home.page.customize": [

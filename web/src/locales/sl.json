@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Nastavljeno v okolju vozlišča. Spremenite ga tam in znova zaženite vozlišče."
+      "value": "Nastavljeno v okolju. Spremenite nastavitev tam in znova zaženite prizadeto storitev."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "Za nadaljevanje se prijavite prek prijavnega sistema svojega omrežja."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "To vozlišče je nastavljeno v konfiguraciji namestitve strežnika. Odstranite ga tam in znova zaženite strežnike API, da ga boste lahko upravljali tukaj."
     }
   ],
   "error.not_acceptable": [
@@ -36774,7 +36780,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Vir nedavno začetih sej predvajanja"
+      "value": "Najnovejša predvajanja v vseh računih"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -38749,6 +38755,80 @@
     {
       "type": 0,
       "value": "Dejavnosti ni bilo mogoče naložiti."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "Uporabnik "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " je predvajal "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "Uporabnik "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " je predvajal "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -60977,6 +61057,12 @@
       "value": "Vnesite naslov strežnika, da dokončate nastavitve."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ključ je nastavljen v konfiguraciji namestitve strežnika"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -61917,6 +62003,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nastavljeno v konfiguraciji namestitve strežnika. Odstranite ga tam, da ga boste lahko izbrisali tukaj."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -64076,6 +64168,68 @@
     {
       "type": 0,
       "value": "Vtičniki"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Uveljavljeno"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Zadržano"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Stanja zagotavljanja vtičnikov ni bilo mogoče naložiti."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Upravlja okolje"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Na čakanju"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Zavrnjeno"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Vir paketa in odstranitev določa uvedba."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Stanje zagotavljanja"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Uvedba ta vtičnik zaklene na različico "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -70216,6 +70370,12 @@
     {
       "type": 0,
       "value": "Sporočilo je poslano"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Predvajalnik ni potrdil prejema sporočila. Morda bo prikazano pozneje ali pa sploh ne."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -76980,136 +77140,10 @@
       "value": "Nastavitev obvestil ni bilo mogoče naložiti"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Nova vsebina se ne beleži, zato ni mogoče poslati ničesar. Beleženje znova vklopite v razdelku Obdelava."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Pošiljanje je zaustavljeno; nova vsebina čaka v čakalni vrsti. Pošiljanje znova vklopite v razdelku Obdelava."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Ko je izklopljeno, namesto tega prejmejo dnevni povzetek."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Kako Silo zazna novo vsebino, jo združi v sporočila in kako dolgo jih hrani."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Določanje prejemnikov"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Vsak element se primerja z nastavitvami vseh uporabnikov."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Združevanje in zaščita pred poplavo sporočil"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Obdelava"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Največja starost vsebine"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Starejši elementi se zavržejo, namesto da bi prispeli kot zastarele novice."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Največ sporočil na serijo"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Vse nad to mejo se v tem paketu preskoči."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Zaznavanje nove vsebine"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Beleži nove elemente med pregledovanjem knjižnic."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Cevovod"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Prebrana obvestila"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Hramba"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Zgodovina poslanih"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Zapis o tem, o čem je Silo že poslal obvestila."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Čas umiritve"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Elementi, katerih pregledovanje se konča hkrati, prispejo kot eno obvestilo."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Neprebrana obvestila"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -78062,18 +78096,6 @@
     {
       "type": 0,
       "value": "Obvestila"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dni"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "ur"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -84885,7 +84907,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Kanali za dostavo, kanali strežnika in kako nova vsebina postane obvestilo."
+      "value": "Kanali za dostavo in kanali strežnika."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -84984,12 +85006,6 @@
       "value": "E-pošta"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Združevanje in nadzor poplave sporočil"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -85008,28 +85024,10 @@
       "value": "Dovoli izbiro e-poštnega sporočila za vsako epizodo"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Največja starost vsebine"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Največ sporočil na serijo"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Omeni vlagatelja zahteve v Discordu"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Zaznavanje nove vsebine"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -85038,46 +85036,16 @@
       "value": "Osebni webhooki"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Obdelava"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Prebrana obvestila"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL posrednika"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Hramba"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Zgodovina poslanih"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Kanali strežnika"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Časovno okno umiritve"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -85092,12 +85060,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Neprebrana obvestila"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -85108,12 +85070,6 @@
     {
       "type": 0,
       "value": "Webhooki na osebo"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Ugotavljanje, kdo to želi"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -102565,25 +102521,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Televizorja ni bilo mogoče prijaviti. Poskusite znova."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Preverite, ali aplikacija prikazuje"
+      "value": "Prijave ni bilo mogoče odobriti. Poskusite znova."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Preverite, ali televizor prikazuje"
+      "value": "Preverite, ali se ta koda ujema"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Vnesite kodo s televizorja ali iz aplikacije"
+      "value": "Vnesite kodo, prikazano na vaši napravi"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -102595,13 +102545,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Prijavite televizor ali drugo napravo s svojim računom."
+      "value": "Prijavite televizor, aplikacijo ali drugo napravo."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Prijava televizorja"
+      "value": "Odobritev prijave"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -102613,7 +102563,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "Za odobritev televizorja prenehajte z ogledom kot uporabnik "
+      "value": "Za odobritev te prijave prenehajte z ogledom kot uporabnik "
     },
     {
       "type": 1,
@@ -102621,13 +102571,13 @@
     },
     {
       "type": 0,
-      "value": ". Televizor lahko prijavi samo lastnik tega računa."
+      "value": ". Naprave lahko odobri samo lastnik računa."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Za odobritev televizorja prenehajte z ogledom kot ta uporabnik. Televizor lahko prijavi samo lastnik tega računa."
+      "value": "Za odobritev te prijave prenehajte z ogledom kot ta uporabnik. Naprave lahko odobri samo lastnik računa."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -102645,39 +102595,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Te kode ni bilo mogoče najti. Preverite kodo na televizorju."
+      "value": "Te kode ni bilo mogoče najti. Preverite kodo in poskusite znova."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ne zdaj"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Starejše aplikacije za TV namesto tega prikažejo "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Odobrite samo napravo, ki je ta trenutek pred vami."
+      "value": "Zavrni"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Odobrite samo televizor, ki je ta trenutek pred vami."
+      "value": "To odobrite samo, če ste prijavo začeli sami."
     }
   ],
   "web.auth.activate.playOn": [
@@ -102703,7 +102633,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Kdor uporablja ta televizor, lahko izbira med vašimi profili. Profili s PIN-kodo ostanejo zaklenjeni."
+      "value": "S tem ji omogočite dostop do vaših profilov. Profili s PIN-kodo ostanejo zaklenjeni."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -102750,6 +102680,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Zahtevano: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -102763,7 +102703,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Ta televizor je prenehal čakati. Začnite znova na televizorju."
+      "value": "Ta naprava ne čaka več. V njej znova začnite prijavo."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -102772,10 +102712,38 @@
       "value": "Ta prijava je bila zavrnjena."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Končano. Naprava "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se prijavlja."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Naprava "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " je prijavljena."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Ta koda je potekla. Televizor prikazuje novo. Uporabite to kodo."
+      "value": "Ta koda je potekla. V napravi pridobite novo kodo in poskusite znova."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -102859,25 +102827,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Ta televizor je že prijavljen."
+      "value": "Ta naprava je že prijavljena."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Ta televizor je bil odobren in zaključuje prijavo."
+      "value": "Ta naprava je bila odobrena in zaključuje prijavo."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Končano. Televizor se prijavlja."
+      "value": "Končano. Vaša naprava se prijavlja."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Televizor je prijavljen."
+      "value": "Vaša naprava je prijavljena."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -102921,7 +102889,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Želite prijaviti napravo "
+      "value": "Želite dovoliti prijavo naprave "
     },
     {
       "type": 1,
@@ -102935,7 +102903,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Želite prijaviti to napravo?"
+      "value": "Želite dovoliti prijavo te naprave?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -102955,13 +102923,13 @@
     },
     {
       "type": 0,
-      "value": ", da odobrite ta televizor."
+      "value": ", da odobrite to prijavo."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Prijavi televizor"
+      "value": "Odobri prijavo"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -104011,7 +103979,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Naprave ni bilo mogoče prijaviti. Poskusite znova."
+      "value": "Prijave ni bilo mogoče odobriti. Poskusite znova."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -129624,6 +129592,12 @@
       "value": "Prevajanje …"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skrij vrstice strežnika, dodane po tem izvozu:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -129642,6 +129616,12 @@
     {
       "type": 0,
       "value": " in bodo nadomestili razdelke, ki ste jih tu dodali prej. Vaše spremembe razdelkov tega strežnika ostanejo."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Vrstice tega strežnika so se od izvoza te datoteke spremenile, zato spodaj izberite vrstice, ki jih želite skriti."
     }
   ],
   "web.home.layout.checking": [
@@ -129692,6 +129672,26 @@
     {
       "type": 0,
       "value": "Vklopi možnost „Skrij ogledane elemente“."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Skrije izbrane vrstice na straneh: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", ne da bi spremenil vaše druge vrstice tam."
     }
   ],
   "web.home.layout.import": [
@@ -129796,6 +129796,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -130026,6 +130044,12 @@
     {
       "type": 0,
       "value": "Razdelek brez naslova"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skrij vrstice strežnika, ki jih ni v tej datoteki:"
     }
   ],
   "web.home.page.customize": [

@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Nastaveno prostředím uzlu. Změňte to tam a restartujte uzel."
+      "value": "Nastaveno prostředím. Změňte to tam a restartujte dotčenou službu."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "Pro pokračování se přihlaste přes přihlašovací službu vaší sítě."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Tento uzel je nastaven konfigurací nasazení serveru. Odeberte ho tam a restartujte servery API, abyste ho mohli spravovat zde."
     }
   ],
   "error.not_acceptable": [
@@ -36882,7 +36888,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Přehled nedávno zahájených relací přehrávání"
+      "value": "Nejnovější přehrání ze všech účtů"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -38861,6 +38867,80 @@
     {
       "type": 0,
       "value": "Nepodařilo se načíst aktivitu."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "Uživatel "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " přehrál "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "Uživatel "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " přehrál "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -61238,6 +61318,12 @@
       "value": "Pro dokončení nastavení zadejte adresu serveru."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Klíč je nastaven konfigurací nasazení serveru"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -62182,6 +62268,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nastaveno konfigurací nasazení serveru. Odeberte uzel tam, abyste ho mohli smazat zde."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -64341,6 +64433,68 @@
     {
       "type": 0,
       "value": "Pluginy"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Použito"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Pozdrženo"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Nepodařilo se načíst stav zřizování pluginů."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Spravováno prostředím"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Čeká na dokončení"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Odmítnuto"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Zdroj balíčku a jeho odebrání řídí nasazení."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Stav zřizování"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Nasazení tento plugin uzamyká na verzi "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -70453,6 +70607,12 @@
     {
       "type": 0,
       "value": "Zpráva odeslána"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Přehrávač nepotvrdil přijetí zprávy. Může se zobrazit se zpožděním, nebo vůbec ne."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -77217,136 +77377,10 @@
       "value": "Nastavení oznámení se nepodařilo načíst"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Nový obsah se nezaznamenává, takže nelze nic odeslat. Znovu to zapněte v sekci Zpracování."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Odesílání je pozastaveno; nový obsah čeká ve frontě. Znovu ho zapněte v sekci Zpracování."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Při vypnutí dostanou místo toho denní souhrn."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Jak Silo zjišťuje nový obsah, seskupuje ho do zpráv a jak dlouho je uchovává."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Zjistit, kdo o obsah stojí"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Porovnat každou položku s předvolbami všech uživatelů."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Seskupování a omezení zahlcení"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Zpracování"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Maximální stáří obsahu"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Starší položky se zahodí, místo aby dorazily jako zastaralé novinky."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Maximum zpráv na seriál"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Vše nad tento limit se v dané dávce přeskočí."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Zjišťovat nový obsah"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Zaznamenávat nové položky během prohledávání knihoven."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Pipeline"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Přečtená oznámení"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Uchovávání"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Historie odeslaných"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Záznam toho, o čem už Silo poslalo oznámení."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Okno ustálení"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Položky, jejichž prohledávání skončí současně, dorazí jako jedno oznámení."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Nepřečtená oznámení"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -78299,18 +78333,6 @@
     {
       "type": 0,
       "value": "Oznámení"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dní"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "hodin"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -85090,7 +85112,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Kanály doručení, kanály serveru a způsob, jak se z nového obsahu stávají oznámení."
+      "value": "Kanály doručení a kanály serveru."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -85189,12 +85211,6 @@
       "value": "E-mail"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Seskupování a ochrana před zahlcením"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -85213,28 +85229,10 @@
       "value": "Povolit uživatelům volbu e-mailu pro každý díl"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Maximální stáří obsahu"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Maximum zpráv na seriál"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Zmínit žadatele na Discordu"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Zachytit nový obsah"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -85243,46 +85241,16 @@
       "value": "Osobní webhooky"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Zpracování"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Přečtená oznámení"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL přenosového serveru"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Uchovávání"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Historie odeslaných"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Kanály serveru"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Okno ustálení"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -85297,12 +85265,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Nepřečtená oznámení"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -85313,12 +85275,6 @@
     {
       "type": 0,
       "value": "Webhooky na osobu"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Zjistit, kdo o něj má zájem"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -102770,25 +102726,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Televizi se nepodařilo přihlásit. Zkuste to znovu."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Zkontrolujte, že aplikace zobrazuje"
+      "value": "Přihlášení se nepodařilo schválit. Zkuste to znovu."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Zkontrolujte, že televize zobrazuje"
+      "value": "Zkontrolujte, že se tento kód shoduje"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Zadejte kód z televize nebo aplikace"
+      "value": "Zadejte kód zobrazený na zařízení"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -102800,13 +102750,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Přihlaste televizi nebo jiné zařízení ke svému účtu."
+      "value": "Přihlaste televizi, aplikaci nebo jiné zařízení."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Přihlášení televize"
+      "value": "Schválit přihlášení"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -102818,7 +102768,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "Chcete-li schválit televizi, ukončete zobrazení jako uživatel "
+      "value": "Chcete-li toto přihlášení schválit, ukončete zobrazení jako uživatel "
     },
     {
       "type": 1,
@@ -102826,13 +102776,13 @@
     },
     {
       "type": 0,
-      "value": ". Televizi může přihlásit jen samotný účet."
+      "value": ". Zařízení může schválit jen samotný účet."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Chcete-li schválit televizi, ukončete zobrazení jako tento uživatel. Televizi může přihlásit jen samotný účet."
+      "value": "Chcete-li toto přihlášení schválit, ukončete zobrazení jako tento uživatel. Zařízení může schválit jen samotný účet."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -102850,39 +102800,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Tento kód jsme nenašli. Zkontrolujte kód na televizi."
+      "value": "Tento kód se nepodařilo najít. Zkontrolujte ho a zkuste to znovu."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Teď ne"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Starší aplikace pro televize místo toho zobrazují "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Schvalujte jen zařízení, které máte právě před sebou."
+      "value": "Odmítnout"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Schvalujte jen televizi, kterou máte právě před sebou."
+      "value": "Schvalujte jen přihlášení, které sami zahajujete."
     }
   ],
   "web.auth.activate.playOn": [
@@ -102908,7 +102838,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Kdokoli, kdo tuto televizi používá, si může vybrat z vašich profilů. Profily s PIN zůstanou zamčené."
+      "value": "Zařízení tak získá přístup k vašim profilům. Profily s PIN zůstanou zamčené."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -102955,6 +102885,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Vyžádáno "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -102968,7 +102908,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Tato televize přestala čekat. Začněte znovu na televizi."
+      "value": "Toto zařízení přestalo čekat. Zahajte na něm přihlášení znovu."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -102977,10 +102917,38 @@
       "value": "Toto přihlášení bylo odmítnuto."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Hotovo. Zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se přihlašuje."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " je přihlášeno."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Platnost tohoto kódu vypršela. Televize zobrazuje nový kód. Použijte ten."
+      "value": "Platnost kódu vypršela. Na zařízení získejte nový kód a zkuste to znovu."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -103064,25 +103032,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Tato televize už je přihlášená."
+      "value": "Toto zařízení už je přihlášeno."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Tato televize byla schválena a dokončuje přihlášení."
+      "value": "Toto zařízení bylo schváleno a dokončuje přihlášení."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Hotovo. Televize se přihlašuje."
+      "value": "Hotovo. Zařízení se přihlašuje."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Televize je přihlášená."
+      "value": "Zařízení je přihlášeno."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -103126,7 +103094,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Přihlásit zařízení "
+      "value": "Povolit přihlášení zařízení "
     },
     {
       "type": 1,
@@ -103140,7 +103108,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Přihlásit toto zařízení?"
+      "value": "Povolit přihlášení tohoto zařízení?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -103152,7 +103120,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "Přihlaste se k serveru "
+      "value": "Chcete-li toto přihlášení schválit, přihlaste se k serveru "
     },
     {
       "type": 1,
@@ -103160,13 +103128,13 @@
     },
     {
       "type": 0,
-      "value": " a schvalte tuto televizi."
+      "value": "."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Přihlásit televizi"
+      "value": "Schválit přihlášení"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -104216,7 +104184,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Zařízení se nepodařilo přihlásit. Zkuste to znovu."
+      "value": "Přihlášení se nepodařilo schválit. Zkuste to znovu."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -129890,6 +129858,12 @@
       "value": "Překládání…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skrýt řádky serveru přidané od tohoto exportu:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -129908,6 +129882,12 @@
     {
       "type": 0,
       "value": " a nahradí sekce, které sem byly přidány dříve. Vaše změny sekcí tohoto serveru zůstanou zachovány."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Řádky tohoto serveru se od exportu souboru změnily, proto níže vyberte řádky, které chcete skrýt."
     }
   ],
   "web.home.layout.checking": [
@@ -129958,6 +129938,26 @@
     {
       "type": 0,
       "value": "Zapne možnost „Skrýt zhlédnuté položky“."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Skryje vybrané řádky na stránkách: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " beze změny vašich ostatních řádků na nich."
     }
   ],
   "web.home.layout.import": [
@@ -130062,6 +130062,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -130292,6 +130310,12 @@
     {
       "type": 0,
       "value": "Sekce bez názvu"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skrýt řádky serveru, které nejsou v tomto souboru:"
     }
   ],
   "web.home.page.customize": [

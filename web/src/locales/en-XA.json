@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "⟦Šéţ ƀý ţĥé ñöđé’š éñṽîŕöñɱéñţ. Çĥåñĝé îţ ţĥéŕé åñđ ŕéšţåŕţ ţĥé ñöđé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Šéţ ƀý ţĥé éñṽîŕöñɱéñţ. Çĥåñĝé îţ ţĥéŕé åñđ ŕéšţåŕţ ţĥé åƒƒéçţéđ šéŕṽîçé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "⟦Šîĝñ îñ ţĥŕöûĝĥ ýöûŕ ñéţŵöŕķ’š šîĝñ-îñ ţö çöñţîñûé.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš ñöđé îš šéţ ƀý ţĥé šéŕṽéŕ’š đéþļöýɱéñţ çöñƒîĝûŕåţîöñ. Ŕéɱöṽé îţ ţĥéŕé åñđ ŕéšţåŕţ ţĥé ÅÞÎ šéŕṽéŕš ţö ɱåñåĝé îţ ĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "error.not_acceptable": [
@@ -33186,7 +33192,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "⟦Ƒééđ öƒ ŕéçéñţļý šţåŕţéđ þļåýƀåçķ šéššîöñš~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ṁöšţ ŕéçéñţ þļåýš åçŕöšš åļļ åççöûñţš~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -34971,6 +34977,88 @@
     {
       "type": 0,
       "value": "⟦Ƒåîļéđ ţö ļöåđ åçţîṽîţý.~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " þļåýéđ "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " þļåýéđ "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -54064,6 +54152,12 @@
       "value": "⟦Éñţéŕ ţĥé šéŕṽéŕ åđđŕéšš ţö çöɱþļéţé ţĥé šéţţîñĝš.~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "⟦Ķéý šéţ ƀý ţĥé šéŕṽéŕ’š đéþļöýɱéñţ çöñƒîĝûŕåţîöñ~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -55096,6 +55190,12 @@
     {
       "type": 0,
       "value": "~~~⟧"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "⟦Šéţ ƀý ţĥé šéŕṽéŕ’š đéþļöýɱéñţ çöñƒîĝûŕåţîöñ. Ŕéɱöṽé îţ ţĥéŕé ţö đéļéţé îţ ĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -57041,6 +57141,68 @@
     {
       "type": 0,
       "value": "⟦Þļûĝîñš~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "⟦Åþþļîéđ~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "⟦Ĥéļđ~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ’ţ ļöåđ þļûĝîñ þŕöṽîšîöñîñĝ šţåţûš.~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "⟦Ṁåñåĝéđ ƀý ţĥé éñṽîŕöñɱéñţ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "⟦Þéñđîñĝ~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéƒûšéđ~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé đéþļöýɱéñţ çöñţŕöļš ţĥé þåçķåĝé šöûŕçé åñđ ŕéɱöṽåļ.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöṽîšîöñîñĝ šţåţûš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé đéþļöýɱéñţ þîñš ţĥîš þļûĝîñ ţö "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -62391,6 +62553,12 @@
     {
       "type": 0,
       "value": "⟦Ṁéššåĝé šéñţ~~~~~⟧"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé þļåýéŕ đîđñ’ţ çöñƒîŕɱ ţĥé ɱéššåĝé. Îţ ɱåý šĥöŵ ûþ ļåţé öŕ ñöţ åţ åļļ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -69249,136 +69417,10 @@
       "value": "⟦Çöûļđñ'ţ ļöåđ ñöţîƒîçåţîöñ šéţţîñĝš~~~~~~~~~~~~~~⟧"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "⟦Ñéŵ çöñţéñţ îš ñöţ ƀéîñĝ ŕéçöŕđéđ, šö ñöţĥîñĝ çåñ ƀé šéñţ. Ţûŕñ îţ ƀåçķ öñ ûñđéŕ Þŕöçéššîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "⟦Šéñđîñĝ îš þåûšéđ; ñéŵ çöñţéñţ ŵåîţš îñ ţĥé ǫûéûé. Ţûŕñ îţ ƀåçķ öñ ûñđéŕ Þŕöçéššîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "⟦Öƒƒ šéñđš ţĥéɱ ţĥé đåîļý šûɱɱåŕý îñšţéåđ.~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "⟦Ĥöŵ Šîļö ñöţîçéš ñéŵ çöñţéñţ, ĝŕöûþš îţ îñţö ɱéššåĝéš, åñđ ĥöŵ ļöñĝ îţ ķééþš ţĥéɱ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "⟦Ŵöŕķ öûţ ŵĥö ŵåñţš îţ~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "⟦Ṁåţçĥ éåçĥ îţéɱ åĝåîñšţ éṽéŕýöñé'š þŕéƒéŕéñçéš.~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "⟦Ĝŕöûþîñĝ åñđ ƒļööđ çöñţŕöļ~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "⟦Þŕöçéššîñĝ~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "⟦Ṁåẋ çöñţéñţ åĝé~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "⟦Öļđéŕ îţéɱš åŕé đŕöþþéđ îñšţéåđ öƒ åŕŕîṽîñĝ åš šţåļé ñéŵš.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "⟦Ṁåẋ ɱéššåĝéš þéŕ šĥöŵ~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "⟦Åñýţĥîñĝ þåšţ ţĥîš îš šķîþþéđ ƒöŕ ţĥåţ ƀåţçĥ.~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "⟦Ñöţîçé ñéŵ çöñţéñţ~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéçöŕđ ñéŵ îţéɱš đûŕîñĝ ļîƀŕåŕý šçåñš.~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "⟦Þîþéļîñé~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéåđ ñöţîƒîçåţîöñš~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéţéñţîöñ~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "⟦Šéñţ ĥîšţöŕý~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéçöŕđ öƒ ŵĥåţ Šîļö åļŕéåđý ñöţîƒîéđ åƀöûţ.~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "⟦Šéţţļé ŵîñđöŵ~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "⟦Îţéɱš ţĥåţ ƒîñîšĥ šçåññîñĝ ţöĝéţĥéŕ åŕŕîṽé åš öñé ñöţîƒîçåţîöñ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "⟦Ûñŕéåđ ñöţîƒîçåţîöñš~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -70347,18 +70389,6 @@
     {
       "type": 0,
       "value": "⟦Ñöţîƒîçåţîöñš~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "⟦đåýš~~⟧"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "⟦ĥöûŕš~~⟧"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -77644,7 +77674,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "⟦Đéļîṽéŕý çĥåññéļš, šéŕṽéŕ çĥåññéļš, åñđ ĥöŵ ñéŵ çöñţéñţ ƀéçöɱéš ñöţîƒîçåţîöñš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Đéļîṽéŕý çĥåññéļš åñđ šéŕṽéŕ çĥåññéļš.~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -77743,12 +77773,6 @@
       "value": "⟦Éɱåîļ~~⟧"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "⟦Ĝŕöûþîñĝ åñđ ƒļööđ çöñţŕöļ~~~~~~~~~~~⟧"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -77767,28 +77791,10 @@
       "value": "⟦Ļéţ þéöþļé þîçķ åñ éɱåîļ þéŕ éþîšöđé~~~~~~~~~~~~~~~⟧"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "⟦Ṁåẋ çöñţéñţ åĝé~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "⟦Ṁåẋ ɱéššåĝéš þéŕ šĥöŵ~~~~~~~~~⟧"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "⟦Ṁéñţîöñ ţĥé ŕéǫûéšţéŕ öñ Đîšçöŕđ~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "⟦Ñöţîçé ñéŵ çöñţéñţ~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -77797,46 +77803,16 @@
       "value": "⟦Þéŕšöñåļ Ŵéƀĥööķš~~~~~~~⟧"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "⟦Þŕöçéššîñĝ~~~~⟧"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéåđ ñöţîƒîçåţîöñš~~~~~~~~⟧"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "⟦Ŕéļåý ÛŔĻ~~~~⟧"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéţéñţîöñ~~~~⟧"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "⟦Šéñţ ĥîšţöŕý~~~~~⟧"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "⟦Šéŕṽéŕ Çĥåññéļš~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "⟦Šéţţļé ŵîñđöŵ~~~~~~⟧"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -77851,12 +77827,6 @@
       "value": "⟦Šîļö Þûšĥ Ŕéļåý~~~~~~⟧"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "⟦Ûñŕéåđ ñöţîƒîçåţîöñš~~~~~~~~⟧"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -77867,12 +77837,6 @@
     {
       "type": 0,
       "value": "⟦Ŵéƀĥööķš þéŕ þéŕšöñ~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "⟦Ŵöŕķ öûţ ŵĥö ŵåñţš îţ~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -94242,25 +94206,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "⟦Çöûļđñ'ţ šîĝñ îñ ţĥé ŢṼ. Ţŕý åĝåîñ.~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "⟦Çĥéçķ ţĥåţ ýöûŕ åþþ šĥöŵš~~~~~~~~~~⟧"
+      "value": "⟦Çöûļđñ'ţ åþþŕöṽé šîĝñ-îñ. Ţŕý åĝåîñ.~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "⟦Çĥéçķ ţĥåţ ýöûŕ ŢṼ šĥöŵš~~~~~~~~~~⟧"
+      "value": "⟦Ṁåķé šûŕé ţĥîš çöđé ɱåţçĥéš~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "⟦Éñţéŕ ţĥé çöđé öñ ýöûŕ ŢṼ öŕ åþþ~~~~~~~~~~~~~⟧"
+      "value": "⟦Éñţéŕ ţĥé çöđé šĥöŵñ öñ ýöûŕ đéṽîçé~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94272,13 +94230,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "⟦Šîĝñ îñ å ŢṼ öŕ öţĥéŕ đéṽîçé ŵîţĥ ýöûŕ åççöûñţ.~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Šîĝñ îñ å ŢṼ, åþþ, öŕ öţĥéŕ đéṽîçé.~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "⟦Šîĝñ îñ å ŢṼ~~~~~⟧"
+      "value": "⟦Åþþŕöṽé šîĝñ-îñ~~~~~~⟧"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94298,13 +94256,13 @@
     },
     {
       "type": 0,
-      "value": " ţö åþþŕöṽé å ŢṼ. Öñļý ţĥé åççöûñţ îţšéļƒ çåñ šîĝñ îñ å ŢṼ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": " ţö åþþŕöṽé ţĥîš šîĝñ-îñ. Öñļý ţĥé åççöûñţ îţšéļƒ çåñ åþþŕöṽé đéṽîçéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "⟦Šţöþ ṽîéŵîñĝ åš ţĥîš ûšéŕ ţö åþþŕöṽé å ŢṼ. Öñļý ţĥé åççöûñţ îţšéļƒ çåñ šîĝñ îñ å ŢṼ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Šţöþ ṽîéŵîñĝ åš ţĥîš ûšéŕ ţö åþþŕöṽé ţĥîš šîĝñ-îñ. Öñļý ţĥé åççöûñţ îţšéļƒ çåñ åþþŕöṽé đéṽîçéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94322,39 +94280,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "⟦Ŵé çöûļđñ'ţ ƒîñđ ţĥåţ çöđé. Çĥéçķ ţĥé çöđé öñ ýöûŕ ŢṼ.~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ŵé çöûļđñ'ţ ƒîñđ ţĥåţ çöđé. Çĥéçķ ţĥé çöđé åñđ ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "⟦Ñöţ ñöŵ~~~⟧"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "⟦Öļđéŕ ŢṼ åþþš šĥöŵ "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " îñšţéåđ.~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "⟦Öñļý åþþŕöṽé å đéṽîçé ţĥåţ'š îñ ƒŕöñţ öƒ ýöû ŕîĝĥţ ñöŵ.~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Đéçļîñé~~~⟧"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "⟦Öñļý åþþŕöṽé å ŢṼ ţĥåţ'š îñ ƒŕöñţ öƒ ýöû ŕîĝĥţ ñöŵ.~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Öñļý åþþŕöṽé ţĥîš îƒ ýöû šţåŕţéđ ţĥé šîĝñ-îñ ýöûŕšéļƒ.~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.playOn": [
@@ -94380,7 +94318,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "⟦Åñýöñé ûšîñĝ ţĥîš ŢṼ çåñ þîçķ ƒŕöɱ ýöûŕ þŕöƒîļéš. Þŕöƒîļéš ŵîţĥ å ÞÎÑ šţåý ļöçķéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ţĥîš ĝîṽéš îţ åççéšš ţö ýöûŕ þŕöƒîļéš. Þŕöƒîļéš ŵîţĥ å ÞÎÑ šţåý ļöçķéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94431,6 +94369,20 @@
       "value": "~~~~⟧"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţéđ "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -94448,7 +94400,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "⟦Ţĥîš ŢṼ šţöþþéđ ŵåîţîñĝ. Šţåŕţ åĝåîñ öñ ţĥé ŢṼ.~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ţĥîš đéṽîçé šţöþþéđ ŵåîţîñĝ. Šţåŕţ šîĝñ-îñ åĝåîñ öñ îţ.~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -94457,10 +94409,38 @@
       "value": "⟦Ţĥîš šîĝñ-îñ ŵåš đéçļîñéđ.~~~~~~~~~~~⟧"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "⟦Đöñé. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " îš šîĝñîñĝ îñ.~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " îš šîĝñéđ îñ.~~~~~~⟧"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "⟦Ţĥîš çöđé éẋþîŕéđ. Ýöûŕ ŢṼ îš šĥöŵîñĝ å ñéŵ öñé. Ûšé ţĥåţ çöđé îñšţéåđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ţĥîš çöđé éẋþîŕéđ. Ĝéţ å ñéŵ çöđé öñ ţĥé đéṽîçé åñđ ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -94494,7 +94474,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "⟦Đöñé. ţĥîš đéṽîçé îš šîĝñîñĝ îñ åš "
+      "value": "⟦Đöñé. Ţĥîš đéṽîçé îš šîĝñîñĝ îñ åš "
     },
     {
       "type": 1,
@@ -94544,25 +94524,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "⟦Ţĥåţ ŢṼ îš åļŕéåđý šîĝñéđ îñ.~~~~~~~~~~~~⟧"
+      "value": "⟦Ţĥîš đéṽîçé îš åļŕéåđý šîĝñéđ îñ.~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "⟦Ţĥîš ŢṼ ŵåš åþþŕöṽéđ åñđ îš ƒîñîšĥîñĝ šîĝñ-îñ.~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ţĥîš đéṽîçé ŵåš åþþŕöṽéđ åñđ îš ƒîñîšĥîñĝ šîĝñ-îñ.~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "⟦Đöñé. Ýöûŕ ŢṼ îš šîĝñîñĝ îñ.~~~~~~~~~~~~⟧"
+      "value": "⟦Đöñé. Ýöûŕ đéṽîçé îš šîĝñîñĝ îñ.~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "⟦Ýöûŕ ŢṼ îš šîĝñéđ îñ.~~~~~~~~~⟧"
+      "value": "⟦Ýöûŕ đéṽîçé îš šîĝñéđ îñ.~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -94610,7 +94590,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "⟦Šîĝñ îñ "
+      "value": "⟦Åļļöŵ "
     },
     {
       "type": 1,
@@ -94618,13 +94598,13 @@
     },
     {
       "type": 0,
-      "value": "?~~~~⟧"
+      "value": " ţö šîĝñ îñ?~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "⟦Šîĝñ îñ ţĥîš đéṽîçé?~~~~~~~~⟧"
+      "value": "⟦Åļļöŵ ţĥîš đéṽîçé ţö šîĝñ îñ?~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -94644,13 +94624,13 @@
     },
     {
       "type": 0,
-      "value": " ţö åþþŕöṽé ţĥîš ŢṼ.~~~~~~~~~~~~~⟧"
+      "value": " ţö åþþŕöṽé ţĥîš šîĝñ-îñ.~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "⟦Šîĝñ îñ ŢṼ~~~~⟧"
+      "value": "⟦Åþþŕöṽé šîĝñ-îñ~~~~~~⟧"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -95756,7 +95736,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "⟦Çöûļđñ'ţ šîĝñ îñ ţĥé đéṽîçé. Ţŕý åĝåîñ.~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Çöûļđñ'ţ åþþŕöṽé šîĝñ-îñ. Ţŕý åĝåîñ.~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -119092,6 +119072,12 @@
       "value": "⟦Ţŕåñšļåţîñĝ…~~~~~⟧"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîđé šéŕṽéŕ ŕöŵš åđđéđ šîñçé ţĥîš éẋþöŕţ:~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -119110,6 +119096,12 @@
     {
       "type": 0,
       "value": ", ŕéþļåçîñĝ šéçţîöñš ýöû åđđéđ ĥéŕé ƀéƒöŕé. Ýöûŕ çĥåñĝéš ţö ţĥîš šéŕṽéŕ'š šéçţîöñš šţåý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš šéŕṽéŕ'š ŕöŵš çĥåñĝéđ šîñçé ţĥîš ƒîļé ŵåš éẋþöŕţéđ, šö çĥööšé åñý ŕöŵš ţö ĥîđé ƀéļöŵ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.home.layout.checking": [
@@ -119160,6 +119152,26 @@
     {
       "type": 0,
       "value": "⟦Ţûŕñš Ĥîđé ŵåţçĥéđ îţéɱš öñ.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîđéš šéļéçţéđ ŕöŵš öñ: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ŵîţĥöûţ çĥåñĝîñĝ ýöûŕ öţĥéŕ ŕöŵš ţĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.home.layout.import": [
@@ -119272,6 +119284,28 @@
     {
       "type": 0,
       "value": ".~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")~~⟧"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -119504,6 +119538,12 @@
     {
       "type": 0,
       "value": "⟦Ûñţîţļéđ šéçţîöñ~~~~~~~⟧"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîđé šéŕṽéŕ ŕöŵš ñöţ îñ ţĥîš ƒîļé:~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.home.page.customize": [

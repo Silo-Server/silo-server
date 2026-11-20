@@ -54,7 +54,7 @@ func TestAutoUpdateDefaultsInstallTheIntroDBWithoutReenablingExistingInstallatio
 				},
 			}
 			installer := &fakeAutoUpdateInstaller{}
-			service := NewAutoUpdateService(&fakeAutoUpdateRepositories{}, installations, catalog, installer, nil, nil, nil)
+			service := NewAutoUpdateService(&fakeAutoUpdateRepositories{}, installations, catalog, installer, nil, nil)
 			summary, err := service.Check(t.Context(), AutoUpdateOptions{AutoInstallDefaults: true})
 			if err != nil {
 				t.Fatal(err)

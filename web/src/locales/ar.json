@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "يُعيَّن هذا الخيار من بيئة العقدة. غيّره هناك وأعد تشغيل العقدة."
+      "value": "يُعيَّن هذا الخيار من البيئة. غيّره هناك وأعد تشغيل الخدمة المتأثرة."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "سجّل الدخول عبر تسجيل الدخول الخاص بشبكتك للمتابعة."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "تُعيَّن هذه العقدة من إعدادات نشر الخادم. أزلها من هناك وأعد تشغيل خوادم API لإدارتها من هنا."
     }
   ],
   "error.not_acceptable": [
@@ -42773,7 +42779,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "موجز بجلسات التشغيل التي بدأت مؤخرًا"
+      "value": "أحدث عمليات التشغيل في جميع الحسابات"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -45034,6 +45040,72 @@
     {
       "type": 0,
       "value": "تعذّر تحميل النشاط."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " شغّل "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " شغّل "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -71489,6 +71561,12 @@
       "value": "أدخل عنوان الخادم لإكمال الإعدادات."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "المفتاح مُعيَّن من إعدادات نشر الخادم"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -72445,6 +72523,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "مُعيَّنة من إعدادات نشر الخادم. أزلها من هناك لحذفها من هنا."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -74905,6 +74989,68 @@
     {
       "type": 0,
       "value": "المكونات الإضافية"
+    }
+  ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "مطبَّق"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "معلّق"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "تعذّر تحميل حالة تهيئة المكونات الإضافية."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "تديره البيئة"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "قيد الانتظار"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "مرفوض"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "يتحكم النشر في مصدر الحزمة وإزالتها."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "حالة التهيئة"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "يقيّد النشر هذا المكون الإضافي بالإصدار "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.plugins.rail.about": [
@@ -81982,6 +82128,12 @@
       "value": "تم إرسال الرسالة"
     }
   ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "لم يؤكّد المشغّل استلام الرسالة. قد تظهر متأخرة أو لا تظهر إطلاقًا."
+    }
+  ],
   "web.admin.sessions.playback.toast.pauseFallback": [
     {
       "type": 0,
@@ -88966,136 +89118,10 @@
       "value": "تعذّر تحميل إعدادات الإشعارات"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "لا يُسجَّل المحتوى الجديد، لذا لا يمكن إرسال أي شيء. أعد تفعيله ضمن «المعالجة»."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "الإرسال متوقف مؤقتًا؛ ينتظر المحتوى الجديد في قائمة الانتظار. أعد تفعيله ضمن «المعالجة»."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "عند تعطيله، يُرسَل إليهم الملخص اليومي بدلًا من ذلك."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "كيف يلاحظ Silo المحتوى الجديد، ويجمعه في رسائل، ومدة احتفاظه بها."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "تحديد المهتمين به"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "مطابقة كل عنصر مع تفضيلات الجميع."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "التجميع والحد من الإغراق"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "المعالجة"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "الحد الأقصى لعمر المحتوى"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "تُتجاهل العناصر الأقدم بدلًا من وصولها كأخبار قديمة."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "الحد الأقصى للرسائل لكل مسلسل"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "يُتخطى ما يتجاوز ذلك في تلك الدفعة."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "ملاحظة المحتوى الجديد"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "تسجيل العناصر الجديدة أثناء فحص المكتبات."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "مسار المعالجة"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "الإشعارات المقروءة"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "الاحتفاظ"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "سجل المُرسَل"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "سجل بما سبق أن أرسل Silo إشعارًا عنه."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "مهلة الاستقرار"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "العناصر التي ينتهي فحصها معًا تصل في إشعار واحد."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "الإشعارات غير المقروءة"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -90088,18 +90114,6 @@
     {
       "type": 0,
       "value": "الإشعارات"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "أيام"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "ساعات"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -97012,7 +97026,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "قنوات التسليم، وقنوات الخادم، وكيف يتحول المحتوى الجديد إلى إشعارات."
+      "value": "قنوات التسليم وقنوات الخادم."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -97111,12 +97125,6 @@
       "value": "البريد الإلكتروني"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "التجميع والتحكم في الإغراق"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -97135,28 +97143,10 @@
       "value": "السماح للأشخاص باختيار رسالة بريد إلكتروني لكل حلقة"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "أقصى عمر للمحتوى"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "أقصى عدد للرسائل لكل مسلسل"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "الإشارة إلى صاحب الطلب على Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "رصد المحتوى الجديد"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -97165,46 +97155,16 @@
       "value": "خطافات الويب الشخصية"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "المعالجة"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "الإشعارات المقروءة"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "عنوان URL للمُرحِّل"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "الاحتفاظ"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "سجل المُرسَل"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "قنوات الخادم"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "نافذة الاستقرار"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -97219,12 +97179,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "الإشعارات غير المقروءة"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -97235,12 +97189,6 @@
     {
       "type": 0,
       "value": "خطافات الويب لكل شخص"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "تحديد من يريده"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -116386,25 +116334,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "تعذّر تسجيل الدخول على التلفزيون. حاول مرة أخرى."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "تحقق من أن تطبيقك يعرض"
+      "value": "تعذّرت الموافقة على تسجيل الدخول. حاول مرة أخرى."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "تحقق من أن التلفزيون يعرض"
+      "value": "تأكّد من تطابق هذا الرمز"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "أدخل الرمز الظاهر على التلفزيون أو التطبيق"
+      "value": "أدخل الرمز المعروض على جهازك"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -116416,13 +116358,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "سجل الدخول على تلفزيون أو جهاز آخر باستخدام حسابك."
+      "value": "تسجيل الدخول على تلفزيون أو تطبيق أو جهاز آخر."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "تسجيل الدخول على التلفزيون"
+      "value": "الموافقة على تسجيل الدخول"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -116442,13 +116384,13 @@
     },
     {
       "type": 0,
-      "value": " للموافقة على التلفزيون. لا يمكن تسجيل الدخول على التلفزيون إلا من الحساب نفسه."
+      "value": " للموافقة على تسجيل الدخول هذا. لا يمكن الموافقة على الأجهزة إلا من الحساب نفسه."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "أوقف العرض باسم هذا المستخدم للموافقة على التلفزيون. لا يمكن تسجيل الدخول على التلفزيون إلا من الحساب نفسه."
+      "value": "أوقف العرض باسم هذا المستخدم للموافقة على تسجيل الدخول هذا. لا يمكن الموافقة على الأجهزة إلا من الحساب نفسه."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -116466,39 +116408,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "لم نعثر على هذا الرمز. تحقق من الرمز على التلفزيون."
+      "value": "لم نعثر على هذا الرمز. تحقّق من الرمز وحاول مرة أخرى."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "ليس الآن"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "تعرض تطبيقات التلفزيون الأقدم "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " بدلًا من ذلك."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "لا توافق إلا على جهاز موجود أمامك الآن."
+      "value": "رفض"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "لا توافق إلا على تلفزيون موجود أمامك الآن."
+      "value": "لا توافق على هذا إلا إذا بدأت تسجيل الدخول بنفسك."
     }
   ],
   "web.auth.activate.playOn": [
@@ -116524,7 +116446,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "يمكن لأي شخص يستخدم هذا التلفزيون الاختيار من ملفاتك الشخصية. تبقى الملفات الشخصية المحمية برمز PIN مقفلة."
+      "value": "يمنحه هذا الوصول إلى ملفاتك الشخصية. تبقى الملفات الشخصية المحمية برمز PIN مقفلة."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -116571,6 +116493,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "تم الطلب "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -116584,7 +116516,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "توقف هذا التلفزيون عن الانتظار. ابدأ من جديد على التلفزيون."
+      "value": "توقف هذا الجهاز عن الانتظار. ابدأ تسجيل الدخول مجددًا عليه."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -116593,10 +116525,38 @@
       "value": "تم رفض تسجيل الدخول هذا."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "تم. يسجّل "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " الدخول الآن."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "تم تسجيل دخول "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "انتهت صلاحية هذا الرمز. يعرض التلفزيون رمزًا جديدًا. استخدم ذلك الرمز بدلًا منه."
+      "value": "انتهت صلاحية هذا الرمز. احصل على رمز جديد على الجهاز وحاول مرة أخرى."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -116630,7 +116590,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "تم. هذا الجهاز يسجل الدخول باسم "
+      "value": "تم. يسجّل هذا الجهاز الدخول باسم "
     },
     {
       "type": 1,
@@ -116680,25 +116640,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "تم تسجيل الدخول على ذلك التلفزيون بالفعل."
+      "value": "تم تسجيل دخول هذا الجهاز بالفعل."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "تمت الموافقة على هذا التلفزيون وهو يُكمل تسجيل الدخول."
+      "value": "تمت الموافقة على هذا الجهاز وهو يُكمل تسجيل الدخول."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "تم. يجري تسجيل الدخول على التلفزيون."
+      "value": "تم. يسجّل جهازك الدخول الآن."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "تم تسجيل الدخول على التلفزيون."
+      "value": "تم تسجيل دخول جهازك."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -116742,7 +116702,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "تسجيل الدخول على "
+      "value": "هل تسمح لـ "
     },
     {
       "type": 1,
@@ -116750,13 +116710,13 @@
     },
     {
       "type": 0,
-      "value": "؟"
+      "value": " بتسجيل الدخول؟"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "تسجيل الدخول على هذا الجهاز؟"
+      "value": "هل تسمح لهذا الجهاز بتسجيل الدخول؟"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -116768,7 +116728,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "سجل الدخول إلى "
+      "value": "سجّل الدخول إلى "
     },
     {
       "type": 1,
@@ -116776,13 +116736,13 @@
     },
     {
       "type": 0,
-      "value": " للموافقة على هذا التلفزيون."
+      "value": " للموافقة على تسجيل الدخول هذا."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "تسجيل الدخول على التلفزيون"
+      "value": "الموافقة على تسجيل الدخول"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -117832,7 +117792,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "تعذّر تسجيل الدخول على الجهاز. حاول مرة أخرى."
+      "value": "تعذّرت الموافقة على تسجيل الدخول. حاول مرة أخرى."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -147272,6 +147232,12 @@
       "value": "جارٍ الترجمة…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "إخفاء صفوف الخادم المضافة منذ هذا التصدير:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -147290,6 +147256,12 @@
     {
       "type": 0,
       "value": "، لتحل محل الأقسام التي أضفتها هنا سابقًا. تبقى تغييراتك على أقسام هذا الخادم كما هي."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "تغيّرت صفوف هذا الخادم منذ تصدير هذا الملف، لذا اختر أدناه الصفوف التي تريد إخفاءها."
     }
   ],
   "web.home.layout.checking": [
@@ -147340,6 +147312,26 @@
     {
       "type": 0,
       "value": "يفعّل خيار إخفاء العناصر المُشاهَدة."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "يخفي الصفوف المحددة في: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " دون تغيير صفوفك الأخرى هناك."
     }
   ],
   "web.home.layout.import": [
@@ -147444,6 +147436,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -147687,6 +147697,12 @@
     {
       "type": 0,
       "value": "قسم بلا عنوان"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "إخفاء صفوف الخادم غير الموجودة في هذا الملف:"
     }
   ],
   "web.home.page.customize": [
