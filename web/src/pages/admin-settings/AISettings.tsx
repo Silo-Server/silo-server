@@ -89,9 +89,10 @@ const KEYS: string[] = Array.from(
 const CHATGPT_PROVIDER = "chatgpt";
 /**
  * A provider select's value for no provider. Choosing it releases the
- * provider, so it can be removed once no job uses it.
+ * provider, so it can be removed once no job uses it. No provider id can
+ * contain an underscore, so a deployment's chosen ids never collide with it.
  */
-const NO_PROVIDER = "none";
+const NO_PROVIDER = "__none__";
 
 /** Example model ids for the text model field; they read the same in every language. */
 const TEXT_MODEL_PLACEHOLDER = "gpt-6-luna, gemini-2.5-flash, llama3.1";

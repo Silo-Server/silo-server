@@ -703,9 +703,11 @@ function ProviderPanel({
 // Embedding provider
 // ---------------------------------------------------------------------------
 
-const ADD_PROVIDER = "add";
+// The select's own choices use underscores, which no provider id can contain
+// (a deployment chooses its providers' ids), so they never collide with one.
+const ADD_PROVIDER = "__add__";
 /** Releases the embedding provider, so it can be removed once nothing uses it. */
-const NO_EMBEDDING_PROVIDER = "none";
+const NO_EMBEDDING_PROVIDER = "__none__";
 
 /**
  * Chooses the provider recommendation embeddings use, and connects a new one
