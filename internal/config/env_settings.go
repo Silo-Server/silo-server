@@ -28,6 +28,10 @@ type EnvSettingVar struct {
 	Scope EnvScope
 }
 
+// BackupEnabledEnvVar sets backup.enabled. A migration job reads it alone,
+// for the backup before migrations.
+const BackupEnabledEnvVar = "SILO_BACKUP_ENABLED"
+
 // envSettingVars is the one list of settings an operator can set from the
 // environment. API servers (integrated and api mode) read it; proxies and
 // transcode nodes do not. A key belongs here only when setting it needs
@@ -101,7 +105,7 @@ var envSettingVars = []EnvSettingVar{
 
 	{"SILO_SCANNER_REALTIME_MONITORING", "scanner.realtime_monitoring", EnvScopeStored},
 
-	{"SILO_BACKUP_ENABLED", BackupEnabledSettingKey, EnvScopeStored},
+	{BackupEnabledEnvVar, BackupEnabledSettingKey, EnvScopeStored},
 	{"SILO_BACKUP_TIME", BackupTimeSettingKey, EnvScopeStored},
 	{"SILO_BACKUP_KEEP", BackupKeepSettingKey, EnvScopeStored},
 	{"SILO_BACKUP_INCLUDE_SUBTITLES", BackupIncludeSubtitlesSettingKey, EnvScopeStored},

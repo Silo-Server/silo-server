@@ -61,8 +61,9 @@ func newBackupService(pool *pgxpool.Pool, bc *config.BootstrapConfig, settings *
 // beforeMigrateBackup is the hook database.MigrateAtStartup runs when
 // migrations are pending: the before-upgrade backup, holding the backup lock
 // through the migrations. It runs before this release's schema exists, so
-// it reads only the server_settings rows the previous release left, with
-// defaults for the rest, and publishes no status.
+// it reads the server_settings rows the previous release left, with
+// defaults for the rest and SILO_BACKUP_ENABLED over backup.enabled
+// (withEnvBackupSettings), and publishes no status.
 func beforeMigrateBackup(bc *config.BootstrapConfig, pool *pgxpool.Pool, cipher *secret.Cipher, wait time.Duration, env config.EnvSettings) func(context.Context) (database.Guard, error) {
 	return func(ctx context.Context) (database.Guard, error) {
 		skip := backup.SkipBeforeUpgradeFromEnv()

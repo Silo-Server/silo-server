@@ -598,9 +598,10 @@ previous release left:
   deleted after it was taken: artwork, avatars, or branding replaced or
   removed since stay as they are now, and a restored row may name a file
   that is gone.
-- It reads only `server_settings` rows, with defaults for keys the old
+- It reads the `server_settings` rows, with defaults for keys the old
   release never wrote: the first upgrade to a release with backups finds no
-  `backup.*` rows and backs up to the default destination. Blob storage comes
+  `backup.*` rows and backs up to the default destination. The one
+  environment value it reads is `SILO_BACKUP_ENABLED`, over `backup.enabled`. Blob storage comes
   from the stored settings, as at startup, opened without recording anything.
 - The core inventory checks each table with `to_regclass`, so tables the old
   schema lacks are recorded as absent. `pg_dump` excludes the same table data
