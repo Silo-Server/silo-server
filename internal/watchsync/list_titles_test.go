@@ -335,16 +335,18 @@ func TestServiceWatchlistImportCountsATitleWhoseRowWriteFails(t *testing.T) {
 // than the title row's (imdb against tmdb), so the export's key guard wouldn't
 // hold the removal. Adding the item after the removal is a re-add: the title
 // row's removal no longer goes out, while one removed after the add still
-// does (#4286).
+// does (#4286). The store keeps added_at to the second, so an add later in
+// the removal's second is still a re-add.
 func TestServiceWatchlistReAddedLibraryItemSupersedesAnEarlierTitleRemoval(t *testing.T) {
 	const titleRow = "watchlist-title:movie:550"
-	removedAt := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	removedAt := time.Now().Add(-time.Hour).UTC().Truncate(time.Second).Add(100 * time.Millisecond)
 	for _, tt := range []struct {
 		name        string
 		addedAt     time.Time
 		wantPending bool
 	}{
 		{name: "added after the removal", addedAt: removedAt.Add(30 * time.Minute)},
+		{name: "added later in the removal's second", addedAt: removedAt.Add(800 * time.Millisecond)},
 		{name: "added before the removal", addedAt: removedAt.Add(-30 * time.Minute), wantPending: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -376,6 +378,65 @@ func TestServiceWatchlistReAddedLibraryItemSupersedesAnEarlierTitleRemoval(t *te
 			state := listItemStateOf(repo, titleRow)
 			if pending := !state.LocalPresent && state.RemotePresent; pending != tt.wantPending {
 				t.Fatalf("title row = %#v, want its removal pending %v", state, tt.wantPending)
+			}
+		})
+	}
+}
+
+// watchlistRemoverStub records the watchlist removals it is sent.
+type watchlistRemoverStub struct {
+	watchlistBatchProviderStub
+	removed []LocalFavorite
+}
+
+func (p *watchlistRemoverStub) RemoveWatchlist(_ context.Context, _ ServerConfig, _ Connection, items []LocalFavorite) (ExportResult, error) {
+	p.removed = append(p.removed, items...)
+	result := ExportResult{}
+	for _, item := range items {
+		result.Sent = append(result.Sent, item.MediaItemID)
+	}
+	return result, nil
+}
+
+// An incremental provider leaves a title it hasn't changed out of its batch,
+// so the import never sees the re-added library item's listing. The removal
+// pass makes the same check: the library item with the title's IDs joined
+// the watchlist after the title's removal, so the removal doesn't go out
+// (#4286).
+func TestServiceWatchlistRemovalPassSupersedesATitleRemovalTheLibraryItemReAdded(t *testing.T) {
+	const titleRow = "watchlist-title:movie:550"
+	removedAt := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	for _, tt := range []struct {
+		name        string
+		addedAt     time.Time
+		wantRemoved bool
+	}{
+		{name: "added after the removal", addedAt: removedAt.Add(30 * time.Minute)},
+		{name: "added before the removal", addedAt: removedAt.Add(-30 * time.Minute), wantRemoved: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, repo, conn := favoriteImportFixture(t)
+			conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
+			if _, err := store.AddToWatchlistAt(ctx, conn.ProfileID, "item-550", tt.addedAt); err != nil {
+				t.Fatal(err)
+			}
+			repo.listItemStates = append(repo.listItemStates, ListItemState{
+				ConnectionID: conn.ID, ListKind: ListKindWatchlist, MediaItemID: titleRow, Kind: "movie",
+				ProviderItemKey: "tmdb:550", TitleIDs: []string{"tmdb:550", "imdb:tt0137523"},
+				RemotePresent: true, LastRemovedLocalAt: &removedAt,
+			})
+			service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{store: store})
+			service.SetWatchlistTitles(&titlesStub{entries: map[int]time.Time{}, promoted: map[int]bool{550: true}})
+			provider := &watchlistRemoverStub{}
+			if _, err := service.removePendingListItems(ctx, conn, ServerConfig{}, provider, service.watchlistBinding()); err != nil {
+				t.Fatal(err)
+			}
+			if removed := len(provider.removed) > 0; removed != tt.wantRemoved {
+				t.Fatalf("removals sent = %v, want the title's removal sent %v", provider.removed, tt.wantRemoved)
+			}
+			if state := listItemStateOf(repo, titleRow); state.RemotePresent {
+				t.Fatalf("title row = %#v, want it settled on the provider side", state)
 			}
 		})
 	}
