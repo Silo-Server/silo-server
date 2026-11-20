@@ -18490,10 +18490,11 @@ export interface components {
     };
     AdminItemMetadataRefreshInputBody: {
       /**
+       * @description quick rescans the item's folder and refreshes its metadata; complete rebuilds the item from its files first; reset is a quick refresh that also clears the item's field locks and every value its providers lack (Reset to Provider in Edit Metadata)
        * @default quick
        * @enum {string}
        */
-      mode: "quick" | "complete";
+      mode: "quick" | "complete" | "reset";
     };
     AdminItemMetadataUpdate: {
       /** @description Season or episode air date; null clears it */

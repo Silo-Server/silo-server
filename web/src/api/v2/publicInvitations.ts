@@ -1,4 +1,3 @@
-import { t } from "@/i18n";
 import { v2, V2TransportError } from "./request";
 import type { components } from "./schema";
 
@@ -10,10 +9,9 @@ export async function lookupPublicInvitation(token: string, signal: AbortSignal)
     signal,
     retryAuthentication: false,
   });
-  if (capability.state !== "available")
-    throw new Error(t("web.common.errors.invitationAcceptanceUnavailable"));
-  const result = await v2("POST /api/v2/invitations/lookup", {
-    body: { token },
+  if (capability.state !== "available") throw new Error("Invitation acceptance is unavailable.");
+  const result = await v2("GET /api/v2/invitations/{token}", {
+    path: { token },
     signal,
     retryAuthentication: false,
   });
@@ -44,8 +42,9 @@ export async function acceptPublicInvitation(
   signal: AbortSignal,
   email?: string,
 ): Promise<InvitationAcceptance> {
-  const result = await v2("POST /api/v2/invitations/accept", {
-    body: email === undefined ? { token, password } : { token, email, password },
+  const result = await v2("POST /api/v2/invitations/{token}/accept", {
+    path: { token },
+    body: email === undefined ? { password } : { email, password },
     signal,
     retryAuthentication: false,
   });

@@ -3549,7 +3549,7 @@ export interface AdminPlaybackHistoryItem {
   started_at: string;
   ended_at: string;
   /** Where the play ended, not how long it was watched. */
-  end_position_seconds: number;
+  watched_seconds: number;
   duration_seconds: number | null;
   completed: boolean;
   /** Measured watch time; null for a play recorded before it was measured. */
@@ -4267,8 +4267,6 @@ export interface PluginUpdateFailure {
   failed_at: string;
 }
 
-export type PluginSignature = V2Components["schemas"]["AdminPluginSignature"];
-
 export interface PluginInstallation {
   id: number;
   repository_id?: number | null;
@@ -4295,10 +4293,6 @@ export interface PluginInstallation {
   updates_paused: boolean;
   /** The last automatic update that failed; absent when the last check did not fail. */
   update_failure?: PluginUpdateFailure | null;
-  /** The release signature check of the installed package. */
-  signature: PluginSignature;
-  /** Whether the config test endpoint has a connection check to run for this plugin. */
-  connection_check_supported: boolean;
   legacy_metadata_import_types?: string[];
   created_at?: string;
   updated_at?: string;

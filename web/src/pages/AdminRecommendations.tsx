@@ -595,8 +595,6 @@ export default function AdminRecommendations() {
         {status && (
           <RecEmbeddingResetCard
             lockConflict={status.lock_conflict}
-            lockConflictKey={status.lock_conflict_key}
-            lockConflictArgs={status.lock_conflict_args}
             disabled={
               status.embeddings.running ||
               status.taste_profiles.running ||

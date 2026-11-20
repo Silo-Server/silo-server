@@ -260,6 +260,15 @@ export function prefetchCatalogItemDetail(
   });
 }
 
+/** Warms an episode's detail query when the user shows intent to open it. */
+export function usePrefetchCatalogItemDetail(libraryId?: number) {
+  const queryClient = useQueryClient();
+  return useCallback(
+    (itemId: string) => prefetchCatalogItemDetail(queryClient, itemId, libraryId),
+    [queryClient, libraryId],
+  );
+}
+
 /**
  * Returns a callback that warms a season detail page (item detail + episodes),
  * so opening it from a series page renders without a request waterfall.

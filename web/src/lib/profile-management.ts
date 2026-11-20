@@ -197,9 +197,6 @@ export function buildProfileRequestFromDraft(
   if (maxPlaybackQuality === "1080p" || maxPlaybackQuality === "2160p") {
     body.max_playback_quality = maxPlaybackQuality;
   }
-  if (options.requestsAllowedSupported && !draft.requestsAllowed) {
-    body.requests_allowed = false;
-  }
   if (!draft.clearPin && draft.pin.trim() !== "") {
     body.pin = draft.pin.trim();
   }
@@ -237,9 +234,6 @@ export function buildProfileUpdateFromDraft(
       // a stored flag that silently comes back with the next limit.
       body.require_advisory_age = draft.maxAdvisoryAge !== null && draft.requireAdvisoryAge;
     }
-  }
-  if (options.requestsAllowedSupported) {
-    body.requests_allowed = draft.requestsAllowed;
   }
 
   if (draft.clearPin) {

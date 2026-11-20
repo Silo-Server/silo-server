@@ -1,24 +1,16 @@
 import { useState } from "react";
 import { captureProfileRequestContext } from "@/api/client";
-import { V2ProblemError } from "@/api/v2/request";
 import { useT, type Translate } from "@/i18n";
 import type { NodeDeleteIntent } from "@/hooks/queries/admin/nodes";
 import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import type { FormEvent, ReactNode } from "react";
-import type {
-  StreamNode,
-  CreateNodeRequest,
-  NodeSourceAccess,
-  UpdateNodeRequest,
-} from "@/api/types";
+import type { StreamNode, CreateNodeRequest, UpdateNodeRequest } from "@/api/types";
 import {
-  useAdminNodeCapabilities,
   useAdminNodes,
   useCreateNode,
   useUpdateNode,
   useDeleteNode,
   useCheckNodeHealth,
-  useIssueNodeKey,
   useReprobeNode,
   useSetNodeDrain,
   useToggleNode,
@@ -29,14 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -54,13 +39,9 @@ import {
   AlertTriangle,
   CirclePause,
   CirclePlay,
-  Copy,
-  KeyRound,
 } from "lucide-react";
-import { toast } from "sonner";
 import { LoadMeter } from "@/components/admin/LoadMeter";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDateTime } from "@/lib/datetime";
 import { formatRelativeTime } from "@/lib/date";
 import { toggleHWDevice } from "@/lib/hwDevices";
@@ -96,7 +77,6 @@ import {
   hwDeviceSyntaxChanges,
   nodeUsesCUDADevices,
   parseHWDeviceOverride,
-  restoreEnvManagedFields,
 } from "./adminNodesPresentation";
 import { NodeRoutingSettings } from "@/pages/admin-settings/NodeRoutingSettings";
 
@@ -512,45 +492,6 @@ function NodeGroupFilter({
   );
 }
 
-/**
- * A transcode node's key status, and the button that issues or rotates it.
- *
- * The missing-key status is worded as its consequence: the node is listed and
- * health-checked, but receives no work until it has a key. The button needs a
- * server that can issue keys (`onKey` is undefined otherwise).
- */
-function NodeKeyLine({ node, onKey }: { node: StreamNode; onKey?: (node: StreamNode) => void }) {
-  const t = useT();
-  if (node.key_issued === undefined) return null;
-  const issued = node.key_issued;
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-      <KeyRound
-        className={cn("h-3 w-3 shrink-0", issued ? "text-muted-foreground" : "text-warning")}
-        aria-hidden="true"
-      />
-      <span className={issued ? "text-muted-foreground" : "text-warning font-medium"}>
-        {issued ? t("web.admin.nodes.key.issued") : t("web.admin.nodes.key.missing")}
-      </span>
-      {onKey && (
-        <Button
-          variant="link"
-          size="sm"
-          className="h-auto p-0 text-xs"
-          aria-label={
-            issued
-              ? t("web.admin.nodes.key.rotateFor", { name: node.name })
-              : t("web.admin.nodes.key.issueFor", { name: node.name })
-          }
-          onClick={() => onKey(node)}
-        >
-          {issued ? t("web.admin.nodes.key.rotate") : t("web.admin.nodes.key.issue")}
-        </Button>
-      )}
-    </div>
-  );
-}
-
 interface NodeUnitProps {
   node: StreamNode;
   /**
@@ -571,8 +512,6 @@ interface NodeUnitProps {
   /** Drain (true) or resume (false) a transcode node. */
   onSetDrain: (node: StreamNode, requested: boolean) => void;
   isSettingDrain: boolean;
-  /** Issue or rotate a transcode node's key; undefined when the server cannot issue keys. */
-  onKey?: (node: StreamNode) => void;
 }
 
 /**
@@ -597,7 +536,6 @@ function NodeUnit({
   isReprobing,
   onSetDrain,
   isSettingDrain,
-  onKey,
 }: NodeUnitProps) {
   const t = useT();
   const state = nodeState(node);
@@ -656,7 +594,6 @@ function NodeUnit({
               {t("web.admin.nodes.unit.publicUrl", { url: node.public_url })}
             </p>
           )}
-          {node.type === "transcode" && <NodeKeyLine node={node} onKey={onKey} />}
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
@@ -806,7 +743,6 @@ interface NodeSectionProps {
   reprobingId: StreamNode["id"] | null;
   onSetDrain: (node: StreamNode, requested: boolean) => void;
   settingDrainId: StreamNode["id"] | null;
-  onKey?: (node: StreamNode) => void;
 }
 
 function NodeSection({
@@ -826,7 +762,6 @@ function NodeSection({
   reprobingId,
   onSetDrain,
   settingDrainId,
-  onKey,
 }: NodeSectionProps) {
   const t = useT();
   const addLabel =
@@ -897,7 +832,6 @@ function NodeSection({
               isReprobing={reprobingId === node.id}
               onSetDrain={onSetDrain}
               isSettingDrain={settingDrainId === node.id}
-              onKey={onKey}
             />
           ))}
         </div>
@@ -919,12 +853,10 @@ function NodeDevicePicker({
   rows,
   onToggle,
   onInherit,
-  disabled = false,
 }: {
   rows: NodeHWDeviceRow[];
   onToggle: (path: string) => void;
   onInherit: () => void;
-  disabled?: boolean;
 }) {
   const t = useT();
   const selectedCount = rows.filter((row) => row.selected).length;
@@ -942,7 +874,6 @@ function NodeDevicePicker({
             </div>
             <Switch
               checked={row.selected}
-              disabled={disabled}
               aria-label={t("web.admin.nodes.devicePicker.toggle", { path: row.path })}
               onCheckedChange={() => onToggle(row.path)}
             />
@@ -962,7 +893,7 @@ function NodeDevicePicker({
               ? t("web.admin.nodes.devicePicker.singleDevice")
               : t("web.admin.nodes.devicePicker.balanced")}
         </p>
-        {selectedCount > 0 && !disabled && (
+        {selectedCount > 0 && (
           <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={onInherit}>
             {t("web.admin.nodes.devicePicker.useClusterDefault")}
           </Button>
@@ -976,14 +907,10 @@ function NodeForm({
   node,
   nodeType,
   defaultGroup,
-  canSetSourceAccess,
   onClose,
-  onCreated,
 }: {
   node: StreamNode | null;
   nodeType: NodeType;
-  /** The server stores a transcode node's source access (the source_access capability). */
-  canSetSourceAccess: boolean;
   /**
    * Group to start a new node in: the one the list is filtered to, so a node
    * added from a filtered view lands in the group being looked at rather than
@@ -992,18 +919,8 @@ function NodeForm({
    */
   defaultGroup: string;
   onClose: () => void;
-  /** Called with the stored node after a create succeeds, once the form has closed. */
-  onCreated?: (created: { id: string; name: string }) => void;
 }) {
   const t = useT();
-  // Fields the node declares from its own environment: shown read-only, and
-  // sent back with their stored values (restoreEnvManagedFields).
-  const envManaged = new Set(node?.env_managed ?? []);
-  const isLocked = (field: string) => envManaged.has(field);
-  const lockedNote = (field: string) =>
-    isLocked(field) ? (
-      <p className="text-muted-foreground text-sm">{t("web.admin.nodes.form.envManaged")}</p>
-    ) : null;
   const [name, setName] = useState(node?.name ?? "");
   const [url, setUrl] = useState(node?.url ?? "");
   const [publicUrl, setPublicUrl] = useState(node?.public_url ?? "");
@@ -1016,12 +933,6 @@ function NodeForm({
     node?.hw_accel_override?.trim() || HW_ACCEL_INHERIT,
   );
   const [hwDeviceOverride, setHwDeviceOverride] = useState(node?.hw_device_override ?? "");
-  const [sourceAccess, setSourceAccess] = useState<NodeSourceAccess>(
-    node?.source_access ?? "local",
-  );
-  // Only a transcode node reads sources, and only a server that stores the
-  // setting takes it; anything else leaves the field out of the request.
-  const showSourceAccess = nodeType === "transcode" && canSetSourceAccess;
   // The picker is driven by the node's own reported inventory; a node that has
   // never reported one keeps the free-text field, since the override still has
   // to be settable on a node this server has not heard from yet.
@@ -1042,11 +953,7 @@ function NodeForm({
   // the first render, and an effect would read that as a change and erase a
   // valid override on a dialog nobody had touched yet.
   function selectHWAccelOverride(next: string) {
-    // A device the node declares is saved as stored, so it stays on screen.
-    if (
-      !isLocked("hw_device_override") &&
-      hwDeviceSyntaxChanges(node, hwAccelOverride, next, clusterHWAccel)
-    ) {
+    if (hwDeviceSyntaxChanges(node, hwAccelOverride, next, clusterHWAccel)) {
       setHwDeviceOverride("");
     }
     setHwAccelOverride(next);
@@ -1095,27 +1002,13 @@ function NodeForm({
         body.hw_accel_override = hwAccelOverride === HW_ACCEL_INHERIT ? null : hwAccelOverride;
         body.hw_device_override = overrideDevices.length > 0 ? overrideDevices.join(",") : null;
       }
-      if (showSourceAccess) {
-        body.source_access = sourceAccess;
-      }
-      updateMutation.mutate(
-        { node, body: restoreEnvManagedFields(body, node) },
-        { onSuccess: onClose },
-      );
+      updateMutation.mutate({ node, body }, { onSuccess: onClose });
     } else {
       const body: CreateNodeRequest = { type: nodeType, ...fields };
       if (nodeType === "proxy" && publicUrl.trim() !== "") {
         body.public_url = publicUrl.trim();
       }
-      if (showSourceAccess && sourceAccess !== "local") {
-        body.source_access = sourceAccess;
-      }
-      createMutation.mutate(body, {
-        onSuccess: (saved) => {
-          onClose();
-          if (saved) onCreated?.({ id: saved.id, name: saved.name });
-        },
-      });
+      createMutation.mutate(body, { onSuccess: onClose });
     }
   }
 
@@ -1126,7 +1019,6 @@ function NodeForm({
           <Label>{t("web.admin.nodes.form.name")}</Label>
           <Input
             value={name}
-            disabled={isLocked("name")}
             onChange={(e) => setName(e.target.value)}
             placeholder={
               nodeType === "proxy"
@@ -1135,7 +1027,6 @@ function NodeForm({
             }
             required
           />
-          {lockedNote("name")}
         </div>
 
         <div className="space-y-2">
@@ -1151,12 +1042,10 @@ function NodeForm({
           <Label>{t("web.admin.nodes.form.url")}</Label>
           <Input
             value={url}
-            disabled={isLocked("url")}
             onChange={(e) => setUrl(e.target.value)}
             placeholder={urlPlaceholder}
             required
           />
-          {lockedNote("url")}
           {nodeType === "transcode" ? (
             <p className="text-muted-foreground text-sm">
               {t("web.admin.nodes.form.urlHelpTranscode")}
@@ -1173,11 +1062,9 @@ function NodeForm({
             <Label>{t("web.admin.nodes.form.publicUrl")}</Label>
             <Input
               value={publicUrl}
-              disabled={isLocked("public_url")}
               onChange={(e) => setPublicUrl(e.target.value)}
               placeholder={t("web.admin.nodes.form.publicUrlPlaceholder")}
             />
-            {lockedNote("public_url")}
             <p className="text-muted-foreground text-sm">
               {t("web.admin.nodes.form.publicUrlHelp")}
             </p>
@@ -1188,11 +1075,9 @@ function NodeForm({
           <Label>{t("web.admin.nodes.form.group")}</Label>
           <Input
             value={group}
-            disabled={isLocked("group")}
             onChange={(e) => setGroup(e.target.value)}
             placeholder={t("web.admin.nodes.form.groupPlaceholder")}
           />
-          {lockedNote("group")}
           <p className="text-muted-foreground text-sm">{t("web.admin.nodes.form.groupHelp")}</p>
         </div>
 
@@ -1206,11 +1091,9 @@ function NodeForm({
             type="number"
             min={0}
             value={maxJobs}
-            disabled={isLocked("max_jobs")}
             onChange={(e) => setMaxJobs(e.target.value)}
             placeholder={t("web.admin.nodes.form.unlimited")}
           />
-          {lockedNote("max_jobs")}
           <p className="text-muted-foreground text-sm">{t("web.admin.nodes.form.maxJobsHelp")}</p>
         </div>
 
@@ -1222,37 +1105,12 @@ function NodeForm({
               min={0}
               step="any"
               value={maxBandwidthMbps}
-              disabled={isLocked("max_bandwidth_kbps")}
               onChange={(e) => setMaxBandwidthMbps(e.target.value)}
               placeholder={t("web.admin.nodes.form.unlimited")}
             />
-            {lockedNote("max_bandwidth_kbps")}
             <p className="text-muted-foreground text-sm">
               {t("web.admin.nodes.form.maxEgressHelp")}
             </p>
-          </div>
-        )}
-
-        {showSourceAccess && (
-          <div className="space-y-2">
-            <Label htmlFor="node-source-access">{t("web.admin.nodes.form.sourceAccess")}</Label>
-            <Select
-              value={sourceAccess}
-              disabled={isLocked("source_access")}
-              onValueChange={(value) => setSourceAccess(value as NodeSourceAccess)}
-            >
-              <SelectTrigger id="node-source-access" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="local">{t("web.admin.nodes.form.sourceAccessLocal")}</SelectItem>
-                <SelectItem value="core">{t("web.admin.nodes.form.sourceAccessCore")}</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-muted-foreground text-sm">
-              {t("web.admin.nodes.form.sourceAccessHelp")}
-            </p>
-            {lockedNote("source_access")}
           </div>
         )}
 
@@ -1268,11 +1126,7 @@ function NodeForm({
               <Label htmlFor="node-hw-accel-override">
                 {t("web.admin.nodes.form.hardwareAcceleration")}
               </Label>
-              <Select
-                value={hwAccelOverride}
-                disabled={isLocked("hw_accel_override")}
-                onValueChange={selectHWAccelOverride}
-              >
+              <Select value={hwAccelOverride} onValueChange={selectHWAccelOverride}>
                 <SelectTrigger id="node-hw-accel-override" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -1290,7 +1144,6 @@ function NodeForm({
               {effectiveAcceleration && (
                 <p className="text-muted-foreground text-sm">{effectiveAcceleration}</p>
               )}
-              {lockedNote("hw_accel_override")}
             </div>
 
             <div className="space-y-2">
@@ -1304,14 +1157,12 @@ function NodeForm({
                     setHwDeviceOverride(toggleHWDevice(hwDeviceOverride, path, devicePaths))
                   }
                   onInherit={() => setHwDeviceOverride("")}
-                  disabled={isLocked("hw_device_override")}
                 />
               ) : (
                 <>
                   <Input
                     id="node-hw-device-override"
                     value={hwDeviceOverride}
-                    disabled={isLocked("hw_device_override")}
                     onChange={(e) => setHwDeviceOverride(e.target.value)}
                     placeholder={t("web.admin.nodes.form.gpuDevicesPlaceholder")}
                   />
@@ -1344,7 +1195,6 @@ function NodeForm({
                   </p>
                 </>
               )}
-              {lockedNote("hw_device_override")}
             </div>
           </>
         )}
@@ -1360,215 +1210,6 @@ function NodeForm({
 /** Rich-text tag for the device examples in the form help. */
 function mono(chunks: ReactNode[]) {
   return <span className="font-mono">{chunks}</span>;
-}
-
-/** The node the key dialog acts on, and whether it has a key to replace. */
-interface NodeKeyTarget {
-  node: Pick<StreamNode, "id" | "name">;
-  rotate: boolean;
-}
-
-/** Example only: the address a node reaches this server at is not knowable from here. */
-const CORE_URL_PLACEHOLDER = "http://10.0.0.2:8080";
-
-function describeKeyFailure(t: Translate, error: unknown, name: string): string {
-  // A problem other than a server fault is a refusal, so nothing was issued and
-  // the server's reason (a proxy, demo mode, no data cipher) is the message. A
-  // lost answer or a server fault may have rotated the key anyway.
-  if (error instanceof V2ProblemError && error.status !== 500) return error.message;
-  return t("web.admin.nodes.key.unconfirmed", { name });
-}
-
-/**
- * Issues or rotates one transcode node's key and shows it once, with the two
- * settings the node starts with.
- *
- * The key lives in this component's state only: the issuing mutation keeps
- * none, and the page unmounts this dialog when it closes, which drops the last
- * copy. The server never returns it again. While the request is in flight the
- * dialog cannot be closed, because a key that arrived after closing would be
- * lost with the old one already revoked.
- */
-function NodeKeyDialog({ target, onClose }: { target: NodeKeyTarget; onClose: () => void }) {
-  const t = useT();
-  const issue = useIssueNodeKey();
-  const [nodeKey, setNodeKey] = useState<string | null>(null);
-  const [copyFailed, setCopyFailed] = useState(false);
-  // SILO_CORE_URL is where the node calls this server, which only the admin
-  // knows for sure. The configured public URL is a fair first guess; the page's
-  // own origin is not (a dev proxy, or an address only browsers use), so with
-  // no public URL the field starts empty.
-  const { data: serverSettings } = useAdminServerSettings();
-  const [coreUrlInput, setCoreUrlInput] = useState<string | null>(null);
-  const coreUrlDraft = coreUrlInput ?? serverSettings?.["server.public_url"] ?? "";
-  const coreUrl = coreUrlDraft.trim().replace(/\/+$/, "");
-  const name = target.node.name;
-  const busy = issue.isPending;
-  const settings = `SILO_CORE_URL=${coreUrl}\nSILO_NODE_KEY=${nodeKey ?? ""}`;
-
-  async function copy(text: string) {
-    try {
-      await copyTextToClipboard(text);
-    } catch {
-      setCopyFailed(true);
-      return;
-    }
-    setCopyFailed(false);
-    toast.success(t("web.admin.nodes.key.copied"));
-  }
-
-  let body: ReactNode;
-  if (nodeKey !== null) {
-    body = (
-      <>
-        <DialogHeader>
-          <DialogTitle>{t("web.admin.nodes.key.dialogTitle", { name })}</DialogTitle>
-          <DialogDescription className="text-warning font-medium">
-            {t("web.admin.nodes.key.notShownAgain")}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-2">
-          <Label htmlFor="node-key-value">{t("web.admin.nodes.key.keyLabel")}</Label>
-          <div className="bg-muted flex items-center gap-2 rounded-lg p-3">
-            <output
-              id="node-key-value"
-              dir="ltr"
-              className="min-w-0 flex-1 font-mono text-xs break-all"
-            >
-              {nodeKey}
-            </output>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0"
-              aria-label={t("web.admin.nodes.key.copyKey")}
-              onClick={() => void copy(nodeKey)}
-            >
-              <Copy className="h-4 w-4" aria-hidden="true" />
-            </Button>
-          </div>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="node-core-url">{t("web.admin.nodes.key.coreUrlLabel")}</Label>
-          <Input
-            id="node-core-url"
-            dir="ltr"
-            value={coreUrlDraft}
-            onChange={(e) => setCoreUrlInput(e.target.value)}
-            placeholder={CORE_URL_PLACEHOLDER}
-          />
-          <p className="text-muted-foreground text-sm">{t("web.admin.nodes.key.coreUrlHelp")}</p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="node-key-settings">{t("web.admin.nodes.key.settingsLabel")}</Label>
-          <div className="bg-muted flex items-start gap-2 rounded-lg p-3">
-            <output
-              id="node-key-settings"
-              dir="ltr"
-              className="block min-w-0 flex-1 font-mono text-xs break-all whitespace-pre-wrap"
-            >
-              {settings}
-            </output>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0"
-              aria-label={t("web.admin.nodes.key.copySettings")}
-              disabled={coreUrl === ""}
-              onClick={() => void copy(settings)}
-            >
-              <Copy className="h-4 w-4" aria-hidden="true" />
-            </Button>
-          </div>
-          <p className="text-muted-foreground text-sm">
-            {coreUrl === ""
-              ? t("web.admin.nodes.key.coreUrlMissing")
-              : t("web.admin.nodes.key.settingsHelp")}
-          </p>
-        </div>
-        {copyFailed && (
-          <p role="alert" className="text-destructive text-sm font-medium">
-            {t("web.admin.nodes.key.copyFailed")}
-          </p>
-        )}
-        <DialogFooter>
-          <Button onClick={onClose}>{t("web.admin.nodes.key.saved")}</Button>
-        </DialogFooter>
-      </>
-    );
-  } else if (issue.error && !busy) {
-    body = (
-      <>
-        <DialogHeader>
-          <DialogTitle>{t("web.admin.nodes.key.dialogTitle", { name })}</DialogTitle>
-          <DialogDescription asChild>
-            <p role="alert" className="text-destructive font-medium">
-              {describeKeyFailure(t, issue.error, name)}
-            </p>
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            {t("web.admin.nodes.key.close")}
-          </Button>
-        </DialogFooter>
-      </>
-    );
-  } else {
-    body = (
-      <>
-        <DialogHeader>
-          <DialogTitle>
-            {target.rotate
-              ? t("web.admin.nodes.key.rotateTitle", { name })
-              : t("web.admin.nodes.key.dialogTitle", { name })}
-          </DialogTitle>
-          <DialogDescription>
-            {busy
-              ? t("web.admin.nodes.key.issuing")
-              : target.rotate
-                ? t("web.admin.nodes.key.rotateDescription")
-                : t("web.admin.nodes.key.offer", { name })}
-          </DialogDescription>
-        </DialogHeader>
-        {target.rotate && !busy && (
-          <p className="text-sm">{t("web.admin.nodes.key.rotateDrainHint")}</p>
-        )}
-        <DialogFooter>
-          <Button variant="outline" disabled={busy} onClick={onClose}>
-            {target.rotate ? t("common.cancel") : t("web.admin.nodes.key.later")}
-          </Button>
-          <Button
-            variant={target.rotate ? "destructive" : "default"}
-            disabled={busy}
-            onClick={() => issue.mutate(target.node, setNodeKey)}
-          >
-            {target.rotate ? t("web.admin.nodes.key.rotate") : t("web.admin.nodes.key.issue")}
-          </Button>
-        </DialogFooter>
-      </>
-    );
-  }
-
-  return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open && !busy) onClose();
-      }}
-    >
-      <DialogContent
-        showCloseButton={!busy}
-        // An outside click would throw a shown key away for good; closing a
-        // shown key takes the button, the close icon or Escape.
-        onInteractOutside={(event) => {
-          if (busy || nodeKey !== null) event.preventDefault();
-        }}
-      >
-        {body}
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 export default function AdminNodes() {
@@ -1587,14 +1228,6 @@ export default function AdminNodes() {
   const reprobeMutation = useReprobeNode();
   const drainMutation = useSetNodeDrain();
   const toggleMutation = useToggleNode();
-  const { data: nodeCapabilities } = useAdminNodeCapabilities();
-  const [keyTarget, setKeyTarget] = useState<NodeKeyTarget | null>(null);
-  // Key controls appear only against a server that can issue keys.
-  const canIssueKeys = nodeCapabilities?.node_keys === true;
-  const handleKey = canIssueKeys
-    ? (node: StreamNode) =>
-        setKeyTarget({ node: { id: node.id, name: node.name }, rotate: node.key_issued === true })
-    : undefined;
 
   const groupOptions = describeNodeGroups(nodes);
   // Derived rather than reset in an effect: the selected group can stop
@@ -1702,7 +1335,6 @@ export default function AdminNodes() {
         reprobingId={reprobingId}
         onSetDrain={(node, requested) => drainMutation.mutate(node, requested)}
         settingDrainId={settingDrainId}
-        onKey={handleKey}
         infoBanner={
           <div className="surface-panel-subtle text-info flex items-start gap-2 rounded-xl p-3 text-sm">
             <Info className="mt-0.5 h-4 w-4 shrink-0" />
@@ -1727,7 +1359,6 @@ export default function AdminNodes() {
         reprobingId={reprobingId}
         onSetDrain={(node, requested) => drainMutation.mutate(node, requested)}
         settingDrainId={settingDrainId}
-        onKey={handleKey}
         infoBanner={
           <div className="surface-panel-subtle text-warning flex items-start gap-2 rounded-xl p-3 text-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -1763,20 +1394,10 @@ export default function AdminNodes() {
             node={editingNode}
             nodeType={resolvedNodeType}
             defaultGroup={activeGroup ?? ""}
-            canSetSourceAccess={nodeCapabilities?.source_access === true}
             onClose={() => handleDialogChange(false)}
-            // A new transcode node takes no work until it has a key, so offer
-            // one straight away.
-            onCreated={
-              resolvedNodeType === "transcode" && canIssueKeys
-                ? (created) => setKeyTarget({ node: created, rotate: false })
-                : undefined
-            }
           />
         </DialogContent>
       </Dialog>
-
-      {keyTarget && <NodeKeyDialog target={keyTarget} onClose={() => setKeyTarget(null)} />}
     </div>
   );
 }

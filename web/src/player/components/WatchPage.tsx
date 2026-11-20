@@ -322,6 +322,7 @@ function WatchPagePlayer({
   contentId,
   title,
   year,
+  backdrop,
   playbackRequestKey,
   fileId,
   libraryId,
@@ -1662,6 +1663,7 @@ function WatchPagePlayer({
         contentId={contentId}
         title={title}
         year={year}
+        backdrop={backdrop}
         streamUrl={session.streamUrl}
         plan={session.plan}
         planRevision={session.planRevision}

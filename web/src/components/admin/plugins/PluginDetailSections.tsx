@@ -1,12 +1,11 @@
 import type { ReactNode } from "react";
-import { ExternalLink, ShieldAlert } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 
 import type {
   PluginCatalogEntry,
   PluginConfigSchema,
   PluginInstallation,
   PluginPresentation,
-  PluginSignature,
 } from "@/api/types";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +24,6 @@ import {
   licenseLabel,
   pluginResourceLinks,
   safeExternalURL,
-  signatureRepositoryLabel,
   sourceLabel,
 } from "@/lib/pluginPresentation";
 import { describeTrigger, pluginTaskPath, pluginTaskTrigger } from "@/lib/taskTrigger";
@@ -124,14 +122,11 @@ export function PluginSettingsPanels({
               configuredSecrets={saved?.configured_secrets}
               isSaving={saveConfig.isPending}
               isTesting={testConfig.isPending}
-              onTest={
-                installation.connection_check_supported
-                  ? (key, nextValue, clearSecrets) =>
-                      testConfig.mutateAsync({
-                        id: installation.id,
-                        body: { key, value: nextValue, clear_secrets: clearSecrets },
-                      })
-                  : undefined
+              onTest={(key, nextValue, clearSecrets) =>
+                testConfig.mutateAsync({
+                  id: installation.id,
+                  body: { key, value: nextValue, clear_secrets: clearSecrets },
+                })
               }
               onSave={(key, nextValue, clearSecrets) =>
                 saveConfig.mutate({
@@ -194,7 +189,7 @@ export function PluginSettingsPanels({
             {taskCapabilities.map((capability) => {
               const binding = taskBindings.find((e) => e.capability_id === capability.id);
               const label = capability.display_name || capability.id;
-              const trigger = pluginTaskTrigger(binding?.trigger, capability.default_schedule);
+              const trigger = pluginTaskTrigger(binding?.trigger);
               const registered = installation.enabled && (binding?.enabled ?? true);
               return (
                 <li key={capability.id} className="flex items-center justify-between gap-4 p-3.5">
@@ -225,9 +220,10 @@ export function PluginSettingsPanels({
                       saveTaskBinding.mutate({
                         id: installation.id,
                         capabilityId: capability.id,
-                        // Resend a trigger set through the API; with none,
-                        // the task follows its manifest default.
-                        body: { enabled: checked, trigger: binding?.trigger ?? {} },
+                        body: {
+                          enabled: checked,
+                          trigger: binding?.trigger ?? { type: "startup" },
+                        },
                       })
                     }
                   />
@@ -294,63 +290,6 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
       <dd className="min-w-0 [overflow-wrap:anywhere]">{children}</dd>
     </>
   );
-}
-
-/** The Release signature row's value: what the check proved, or why there is nothing to show. */
-function SignatureFact({ signature }: { signature: PluginSignature }) {
-  const t = useT();
-  switch (signature.state) {
-    case "verified": {
-      const sourceRepo = signature.source_repo;
-      const verifiedAt = signature.verified_at
-        ? t("web.admin.plugins.signature.verifiedAt", {
-            date: formatDateTime(signature.verified_at),
-          })
-        : undefined;
-      // The server names the repository for every verified row; without one,
-      // say only that it verified rather than show it as unchecked.
-      if (!sourceRepo) {
-        return <>{verifiedAt ?? t("web.admin.plugins.signature.verifiedNoRepository")}</>;
-      }
-      const href = safeExternalURL(sourceRepo);
-      return (
-        <>
-          <span className="block">
-            {t("web.admin.plugins.signature.verified", {
-              repository: signatureRepositoryLabel(sourceRepo),
-              link: (chunks: ReactNode[]) =>
-                href ? (
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="underline underline-offset-4"
-                  >
-                    {chunks}
-                  </a>
-                ) : (
-                  <>{chunks}</>
-                ),
-            })}
-          </span>
-          {verifiedAt ? (
-            <span className="text-muted-foreground block text-[12.5px]">{verifiedAt}</span>
-          ) : null}
-        </>
-      );
-    }
-    case "invalid":
-      return (
-        <span className="text-warning inline-flex items-center gap-1">
-          <ShieldAlert aria-hidden="true" className="size-3.5 shrink-0" />
-          {t("web.admin.plugins.signature.invalid")}
-        </span>
-      );
-    case "unsigned":
-      return <>{t("web.admin.plugins.signature.unsigned")}</>;
-    default:
-      return <>{t("web.admin.plugins.signature.unknown")}</>;
-  }
 }
 
 const RUNTIME_STATE_LABELS: Record<string, MessageKey> = {
@@ -455,11 +394,6 @@ export function PluginDetailRail({
           <Fact label={t("web.admin.plugins.rail.license")}>
             {licenseLabel(presentation?.license_spdx)}
           </Fact>
-          {installation ? (
-            <Fact label={t("web.admin.plugins.signature.label")}>
-              <SignatureFact signature={installation.signature} />
-            </Fact>
-          ) : null}
           {installation?.created_at ? (
             <Fact label={t("web.admin.plugins.rail.installed")}>
               {formatDate(installation.created_at, "medium")}

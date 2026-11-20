@@ -250,7 +250,7 @@ function NotificationsPage() {
         <NotifiedSeriesList
           switcher={switcher}
           canMute={capability?.series?.mute === true}
-          canBulkMute={capability?.series?.bulk_mute === true}
+          canBulkMute={capability?.series?.mute === true}
         />
       ) : (
         <NotificationInbox
@@ -260,7 +260,7 @@ function NotificationsPage() {
           list={list}
           unreadCount={unreadCount}
           markAllRead={markAllRead}
-          canMuteSeries={capability?.series?.bulk_mute === true}
+          canMuteSeries={capability?.series?.mute === true}
           onOpenSeries={openSeries}
         />
       )}

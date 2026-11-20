@@ -434,7 +434,6 @@ export default function AdminCollections() {
     if (!pendingDelete) return;
     const { id } = pendingDelete.collection;
     const rows = deleteRowsState?.status === "ready" ? [...deleteRowsState.rows] : [];
-    let etag = pendingDelete.etag;
     if (rows.length > 0) {
       // A deleted row can't come back: check the collection's ETag first, so
       // a Delete that would answer 412 deletes nothing.
@@ -457,9 +456,9 @@ export default function AdminCollections() {
         return;
       }
       setPendingDelete((current) => current && { ...current, rows, error: null });
-      const { remaining, etag: afterRows } = await deleteRows
-        .mutateAsync({ collectionId: id, rows, etag })
-        .catch(() => ({ remaining: rows, etag: undefined }));
+      const { remaining } = await deleteRows
+        .mutateAsync({ collectionId: id, rows })
+        .catch(() => ({ remaining: rows }));
       if (remaining.length > 0) {
         setPendingDelete((current) =>
           current?.collection.id === id
@@ -472,12 +471,10 @@ export default function AdminCollections() {
         );
         return;
       }
-      // Writing its rows moved its revision.
-      etag = afterRows ?? etag;
     }
     holdDeleteOpen.current = true;
     removeOne.mutate(
-      { id: pendingDelete.collection.id, etag },
+      { id: pendingDelete.collection.id, etag: pendingDelete.etag },
       {
         onSuccess: () => {
           toast.success(t("web.admin.collections.delete.done"));

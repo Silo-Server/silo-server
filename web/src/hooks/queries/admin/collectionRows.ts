@@ -30,13 +30,10 @@ export function useDeleteCollectionRows() {
     mutationFn: ({
       collectionId,
       rows,
-      etag,
     }: {
       collectionId: string;
       rows: readonly CollectionRow[];
-      /** The collection's ETag, read before the run. */
-      etag: string;
-    }) => deleteAdminCollectionRows(collectionId, rows, etag),
+    }) => deleteAdminCollectionRows(collectionId, rows),
     onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: sectionKeys.all }),

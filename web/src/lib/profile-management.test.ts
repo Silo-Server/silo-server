@@ -229,14 +229,6 @@ describe("profile-management", () => {
 
     const blocked = createProfileDraft(makeProfile({ requests_allowed: false }));
     expect(blocked.requestsAllowed).toBe(false);
-    expect(buildProfileUpdateFromDraft(blocked, supported).requests_allowed).toBe(false);
-    expect(
-      buildProfileUpdateFromDraft({ ...blocked, requestsAllowed: true }, supported)
-        .requests_allowed,
-    ).toBe(true);
-    expect(
-      buildProfileRequestFromDraft({ ...blocked, name: "Kid" }, supported).requests_allowed,
-    ).toBe(false);
     // A new profile is allowed by default, so the member is left out.
     expect(
       "requests_allowed" in

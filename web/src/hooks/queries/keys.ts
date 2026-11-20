@@ -67,6 +67,9 @@ export const catalogKeys = {
   allLetters: ["catalog", "letters"] as const,
   letters: (params: Pick<CatalogParams, "library_id" | "type" | "query_fingerprint">) =>
     ["catalog", "letters", params] as const,
+  allCounts: ["catalog", "count"] as const,
+  count: (params: Pick<CatalogParams, "library_id" | "type" | "query_fingerprint">) =>
+    ["catalog", "count", params] as const,
   // The detail key carries the viewer's selected file only when one is passed:
   // the selection changes the effective playback answer, so it is its own
   // cache entry. Callers that pass no file keep the original key, and every
@@ -186,6 +189,14 @@ export const libraryCollectionKeys = {
     ["libraryCollections", "userContributed", libraryId] as const,
 };
 
+// The titles that name pinned collections, kept outside libraryCollectionKeys.all:
+// personal-collection writes and media changes invalidate that root, and
+// neither renames a library collection.
+export const libraryCollectionTitleKeys = {
+  all: ["libraryCollectionTitles"] as const,
+  library: (libraryId: number) => ["libraryCollectionTitles", libraryId] as const,
+};
+
 export const profileKeys = {
   all: ["profiles"] as const,
   list: () => ["profiles", "list"] as const,
@@ -262,7 +273,9 @@ export const settingsKeys = {
 export const notificationKeys = {
   all: ["notifications"] as const,
   list: (status: "all" | "unread" = "all") => ["notifications", "list", status] as const,
-  series: (status: "active" | "inactive") => ["notifications", "series", status] as const,
+  /** Every notified-series list; prefix of each status's key. */
+  seriesAll: () => ["notifications", "series"] as const,
+  series: (status: string) => ["notifications", "series", status] as const,
   unreadCount: () => ["notifications", "unread-count"] as const,
   preferences: () => ["notifications", "preferences"] as const,
   emailPreferences: () => ["notifications", "email-preferences"] as const,
@@ -418,6 +431,8 @@ export const adminKeys = {
   libraryProviderDefaults: (libraryType: string) =>
     ["admin", "libraries", "provider-defaults", libraryType] as const,
   nodes: () => ["admin", "nodes"] as const,
+  // Outside "nodes": every node write refreshes the list, not what the build supports.
+  nodeCapabilities: () => ["admin", "nodeCapabilities"] as const,
   stats: () => ["admin", "stats"] as const,
   sessions: () => ["admin", "sessions"] as const,
   downloadPreparations: () => ["admin", "downloadPreparations"] as const,
