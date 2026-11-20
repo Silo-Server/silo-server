@@ -101,9 +101,13 @@ export default function PlaybackSettings() {
   const devicePickerApplies = hwAccel !== "none" && !isNvenc;
   const showDevicePicker =
     deviceRows.length > 0 && (devicePickerApplies || form.isDirty("playback.hw_device"));
+  const deviceChanged = (path: string) =>
+    selectedDevices.includes(path) !== savedDevices.includes(path);
+  // Kept under such a mode, a row marks a device whose switch differs from
+  // the saved list, and only those switches stay unlocked.
+  const deviceKeptForEdit = (path: string) => !devicePickerApplies && deviceChanged(path);
   const deviceSwitchLocked = (path: string) =>
-    hwDeviceEnv != null ||
-    (!devicePickerApplies && selectedDevices.includes(path) === savedDevices.includes(path));
+    hwDeviceEnv != null || (!devicePickerApplies && !deviceChanged(path));
 
   const nodes = useAdminNodes();
   const trickplayExecution =
@@ -413,6 +417,7 @@ export default function PlaybackSettings() {
                 {deviceRows.map((row, index) => (
                   <SettingFieldRow
                     key={row.path}
+                    dirty={deviceKeptForEdit(row.path)}
                     // One note for the whole device list, on its first row.
                     managedByEnv={index === 0 ? hwDeviceEnv : undefined}
                     label={
