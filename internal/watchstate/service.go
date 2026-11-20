@@ -186,7 +186,7 @@ func (s *Service) RecordFinalPlaybackStop(
 	userID int,
 	profileID, targetID string,
 	duration, position float64,
-	watchedAt time.Time,
+	watchedAt, replayUntil time.Time,
 	hints userstore.VersionHints,
 	thresholds userstore.ProgressThresholds,
 	historyID string,
@@ -214,7 +214,7 @@ func (s *Service) RecordFinalPlaybackStop(
 	}
 	targets, entries := s.markWatchedBatchEntries(ctx, profileID, spannedIDs, watchedAt, userstore.WatchHistorySourcePlayback, false)
 	spanned, alreadyRecorded, err := userstore.CommitPlaybackStop(ctx, store, userstore.PlaybackStopWrite{
-		Entry: entry, PositionSeconds: position, Thresholds: thresholds, Hints: hints, SpannedTargets: targets, SpannedHistory: entries,
+		Entry: entry, ReplayUntil: replayUntil, PositionSeconds: position, Thresholds: thresholds, Hints: hints, SpannedTargets: targets, SpannedHistory: entries,
 	})
 	if err != nil {
 		return result, err

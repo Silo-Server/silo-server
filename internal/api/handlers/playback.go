@@ -1130,7 +1130,10 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 			targets, err = h.spannedEpisodeTargets(ctx, file)
 		}
 		if err == nil {
-			result, err = watchSvc.RecordFinalPlaybackStop(ctx, session.UserID, session.ProfileID, targetID, duration, session.Position, stoppedAt, hints, thresholds, historyID, targets)
+			// Attempts expire within MaxTokenTTL. Keep the marker that
+			// long from the write, including a finalization near expiry.
+			replayUntil := stoppedAt.Add(playback.MaxTokenTTL)
+			result, err = watchSvc.RecordFinalPlaybackStop(ctx, session.UserID, session.ProfileID, targetID, duration, session.Position, stoppedAt, replayUntil, hints, thresholds, historyID, targets)
 		}
 	} else {
 		result, err = watchSvc.RecordPlaybackStop(ctx, session.UserID, session.ProfileID, targetID, duration, session.Position, stoppedAt, hints, thresholds)

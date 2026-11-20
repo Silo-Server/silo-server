@@ -22,6 +22,9 @@ func WritePlaybackProgress(ctx context.Context, store UserStore, sessionID strin
 	if writer, ok := store.(SequencedPlaybackProgressWriter); ok {
 		return writer.WriteSequencedPlaybackProgress(ctx, sessionID, sequence, profileID, mediaItemID, position, duration, thresholds, hints)
 	}
+	if _, _, skip := ResolveProgressState(position, duration, thresholds); skip {
+		return false, false, nil
+	}
 	completed, err = UpdateProgressReportingCompletion(ctx, store, profileID, mediaItemID, position, duration, thresholds)
 	if err != nil {
 		return false, false, err
@@ -31,9 +34,11 @@ func WritePlaybackProgress(ctx context.Context, store UserStore, sessionID strin
 
 // PlaybackStopWrite is the final progress, version hints, and history for one
 // stop, including episodes covered by the same file. Entry.ID identifies the
-// stop and lets a retry recover its committed result.
+// stop. Keep its commit marker until ReplayUntil, after retries can no longer
+// reach the writer.
 type PlaybackStopWrite struct {
 	Entry           WatchHistoryEntry
+	ReplayUntil     time.Time
 	PositionSeconds float64
 	Thresholds      ProgressThresholds
 	Hints           VersionHints

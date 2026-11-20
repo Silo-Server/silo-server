@@ -1316,7 +1316,7 @@ describe("RealtimeEventsProvider", () => {
       const client = new QueryClient();
       const row = sectionKeys.homeItems("continue-watching");
       client.setQueryData(row, { items: [] });
-      const { refetchQueries } = await mount(client);
+      const { refetchQueries, show } = await mount(client);
       await act(async () => {
         FakeWebSocket.instances[0]!.emitClose();
         vi.advanceTimersByTime(1_000);
@@ -1334,6 +1334,9 @@ describe("RealtimeEventsProvider", () => {
       expect(client.getQueryState(row)?.isInvalidated).toBe(true);
       expect(client.getQueryData(mediaSurfaceKeys.refreshSignal())).toBe(1);
       expect(refetchQueries).not.toHaveBeenCalledWith(catchUp);
+      await show(false);
+      await show(true);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
     });
 
     it("revalidates Home on return even when the socket is still disconnected", async () => {

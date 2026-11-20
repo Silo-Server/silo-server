@@ -116,8 +116,8 @@ func (s *PostgresUserStore) WriteSequencedPlaybackProgress(
 	return true, completed && !wasCompleted, nil
 }
 
-// CommitPlaybackStop makes history the idempotency marker for the complete
-// watch-state change. The history row and all visible progress commit together.
+// CommitPlaybackStop commits the replay marker alongside the history and
+// progress. History can be removed before the stop's receipt is finalized.
 func (s *PostgresUserStore) CommitPlaybackStop(ctx context.Context, stop userstore.PlaybackStopWrite) ([]userstore.WatchHistoryEntry, bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -125,8 +125,22 @@ func (s *PostgresUserStore) CommitPlaybackStop(ctx context.Context, stop usersto
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	entry := stop.Entry
-	if _, err := s.addVisibleHistory(ctx, tx, entry); errors.Is(err, userstore.ErrHistoryEntryExists) {
+	marker, err := tx.Exec(ctx, `
+		INSERT INTO playback_stop_commits (user_id, profile_id, id, expires_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (user_id, id) DO NOTHING`,
+		s.userID, entry.ProfileID, entry.ID, stop.ReplayUntil)
+	if err != nil {
+		return nil, false, err
+	}
+	if marker.RowsAffected() == 0 {
 		return nil, true, nil
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM playback_stop_commits WHERE user_id = $1 AND expires_at <= NOW()`, s.userID); err != nil {
+		return nil, false, err
+	}
+	if _, err := s.addVisibleHistory(ctx, tx, entry); errors.Is(err, userstore.ErrHistoryEntryExists) {
+		return nil, true, tx.Commit(ctx)
 	} else if err != nil {
 		return nil, false, err
 	}

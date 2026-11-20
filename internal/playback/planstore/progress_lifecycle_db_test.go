@@ -162,6 +162,7 @@ func TestPlaybackStopCommitsResumeAndEpisodeSpanOnceDB(t *testing.T) {
 	spanHistory.MediaItemID = second
 	stop := userstore.PlaybackStopWrite{
 		Entry: history, PositionSeconds: 3590, Hints: userstore.VersionHints{FileID: attempt.RequestedMediaFileID},
+		ReplayUntil:    time.Now().Add(time.Hour),
 		SpannedTargets: []userstore.MarkWatchedTarget{{MediaItemID: second}},
 		SpannedHistory: []userstore.WatchHistoryEntry{spanHistory},
 	}
@@ -197,8 +198,11 @@ func TestPlaybackStopCommitsResumeAndEpisodeSpanOnceDB(t *testing.T) {
 	}
 	assertHistoryCount(2)
 
-	// The stop can be retried after commit but before its receipt was saved.
-	// A newer viewing session's resume point must survive that replay.
+	// History removal can happen after commit and before the receipt is saved.
+	// A replay must preserve the removal and the next play's resume point.
+	if err := store.RemoveHistoryItems(ctx, attempt.ProfileID, []string{first}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.SetProgress(ctx, attempt.ProfileID, first, 600, 3600, stop.Thresholds); err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +212,7 @@ func TestPlaybackStopCommitsResumeAndEpisodeSpanOnceDB(t *testing.T) {
 	if saved, err := store.GetProgress(ctx, attempt.ProfileID, first); err != nil || saved == nil || saved.PositionSeconds != 600 {
 		t.Fatalf("stop replay changed newer resume point: %+v, %v", saved, err)
 	}
-	assertHistoryCount(2)
+	assertHistoryCount(1)
 }
 
 // newLifecycleAttemptDB saves a live attempt and a playing native lifecycle

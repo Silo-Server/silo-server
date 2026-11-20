@@ -1026,7 +1026,6 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         });
     }
     if (!catchUpOnFocus) {
-      droppedSinceCatchUpRef.current = false;
       return;
     }
     shouldCatchUpOnFocusRef.current = false;

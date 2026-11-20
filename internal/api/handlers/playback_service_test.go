@@ -366,20 +366,51 @@ func TestSQLitePlaybackStopReplayPreservesLaterProgress(t *testing.T) {
 		Entry: userstore.WatchHistoryEntry{
 			ID: "final-stop", ProfileID: "profile-1", MediaItemID: "movie-1", DurationSeconds: 3600,
 		},
+		ReplayUntil:     time.Now().Add(time.Hour),
 		PositionSeconds: 900,
 	}
 	if _, replay, err := userstore.CommitPlaybackStop(ctx, store, stop); err != nil || replay {
 		t.Fatalf("initial stop: replay=%t, err=%v", replay, err)
 	}
+	if err := store.RemoveHistoryItems(ctx, "profile-1", []string{"movie-1"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.SetProgress(ctx, "profile-1", "movie-1", 1800, 3600, stop.Thresholds); err != nil {
 		t.Fatal(err)
 	}
+	// A change to the threshold during receipt recovery cannot turn the
+	// committed stop into a new completion.
+	stop.Thresholds.WatchedPct = 10
 	if _, replay, err := userstore.CommitPlaybackStop(ctx, store, stop); err != nil || !replay {
 		t.Fatalf("retried stop: replay=%t, err=%v", replay, err)
 	}
 	progress, err := store.GetProgress(ctx, "profile-1", "movie-1")
 	if err != nil || progress == nil || progress.PositionSeconds != 1800 {
 		t.Fatalf("later progress: %+v, %v", progress, err)
+	}
+	history, err := store.ListHistory(ctx, "profile-1", 1, 0)
+	if err != nil || len(history) != 0 {
+		t.Fatalf("stop replay restored removed history: %+v, %v", history, err)
+	}
+}
+
+func TestSQLitePlaybackProgressSkipsHintsBelowMinimumResume(t *testing.T) {
+	ctx := t.Context()
+	store := newPlaybackTestStore(t)
+	thresholds := userstore.ProgressThresholds{MinResumePct: 10}
+	if err := store.SetProgress(ctx, "profile-1", "movie-1", 900, 3600, thresholds); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateProgressHints(ctx, "profile-1", "movie-1", userstore.VersionHints{FileID: 1}); err != nil {
+		t.Fatal(err)
+	}
+	written, completed, err := userstore.WritePlaybackProgress(ctx, store, "session-1", 1, "profile-1", "movie-1", 30, 3600, thresholds, userstore.VersionHints{FileID: 2})
+	if err != nil || written || completed {
+		t.Fatalf("skipped sample: written=%t, completed=%t, err=%v", written, completed, err)
+	}
+	progress, err := store.GetProgress(ctx, "profile-1", "movie-1")
+	if err != nil || progress == nil || progress.PositionSeconds != 900 || progress.LastFileID == nil || *progress.LastFileID != 1 {
+		t.Fatalf("skipped sample changed progress or hints: %+v, %v", progress, err)
 	}
 }
 

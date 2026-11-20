@@ -76,10 +76,25 @@ func (s *SQLiteUserStore) CommitPlaybackStop(ctx context.Context, stop userstore
 	defer func() { _ = tx.Rollback() }()
 
 	entry := stop.Entry
-	// Reserve the stop identity before any progress or span write. A retry
-	// of a committed stop must leave later playback progress alone.
-	if _, err := addVisibleHistory(ctx, tx, entry); errors.Is(err, userstore.ErrHistoryEntryExists) {
+	// Reserve the stop identity independently of its removable history.
+	marker, err := tx.ExecContext(ctx, `
+		INSERT INTO playback_stop_commits (id, profile_id, expires_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT (id) DO NOTHING`,
+		entry.ID, entry.ProfileID, stop.ReplayUntil.Unix())
+	if err != nil {
+		return nil, false, err
+	}
+	if written, err := marker.RowsAffected(); err != nil {
+		return nil, false, err
+	} else if written == 0 {
 		return nil, true, nil
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM playback_stop_commits WHERE expires_at <= ?`, time.Now().Unix()); err != nil {
+		return nil, false, err
+	}
+	if _, err := addVisibleHistory(ctx, tx, entry); errors.Is(err, userstore.ErrHistoryEntryExists) {
+		return nil, true, tx.Commit()
 	} else if err != nil {
 		return nil, false, err
 	}
