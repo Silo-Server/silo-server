@@ -143,7 +143,9 @@ function SettingsDiff({ item }: { item: RestoreItem }) {
                     <span className="font-mono text-xs break-words">
                       <BreakableKey value={setting.key} />
                     </span>
-                    {setting.restart_required ? <RestartBadge /> : null}
+                    {setting.restart_required && setting.status === "differs" ? (
+                      <RestartBadge />
+                    ) : null}
                   </div>
                   {setting.class === "external_service" ? (
                     <p className="text-muted-foreground mt-0.5 text-xs">
