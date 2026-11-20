@@ -5631,6 +5631,44 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 				if indexBudgetElapsed && ctx.Err() == nil {
 					// The keyframe index could not be read inside the start
 					// budget (a slow provider, not a verdict on the release).
+					// A segmented HLS start can still degrade: its segment layer
+					// starts the generation and waits or restarts for the
+					// requested segment, so the unanchored timeline is servable.
+					//
+					// A progressive remux is one forward-only response and has no
+					// segment layer to wait for it. Its unanchored start makes
+					// FFmpeg seek the source itself, which is the same read the
+					// anchor probe just could not finish; production showed it
+					// answering 15 s of silence instead of media (session
+					// 03d27fc2-312c-4d56-adfe-22774a0fcd7b). Refuse that start with
+					// the retryable seek verdict immediately, after the probe
+					// budget rather than after another no-byte stream window. The
+					// next attempt is sized from the probe cost just recorded, and
+					// the client keeps its retry affordance instead of a frozen
+					// playhead.
+					if result.Plan.Delivery == playback.DeliveryRemuxProgressiveV3 {
+						noticeLevel := slog.LevelInfo
+						if copySeekAnchorNotices.first(copySeekAnchorNoticeKey(session.ID, sourceIdentity)) {
+							noticeLevel = slog.LevelWarn
+						}
+						slog.Log(ctx, noticeLevel, "copy-video seek anchor unavailable inside the start budget; refusing a progressive remux start that would produce no bytes",
+							"component", "api",
+							"playback_session_id", session.ID,
+							"requested_seek_seconds", requested,
+							"copy_seek_anchor_resolved", false,
+							"reason", "anchor_budget_elapsed",
+							"delivery", result.Plan.Delivery,
+							"probe_budget_hint", copySeekAnchorProbeBudgetHint(ffmpegPath, sourceIdentity, playback.DefaultSegmentDuration),
+							"error", err,
+						)
+						return preparedTimelineV3{}, &transportErrorV3{
+							reason:      transcodeStartFailedReasonV3,
+							message:     remuxSeekPositionFailureMessageV3,
+							retryable:   true,
+							cause:       err,
+							seekFailure: true,
+						}
+					}
 					// Fail the start no longer: begin the copied stream from the
 					// requested position with the non-anchored timeline it had
 					// before the anchor existed. The plan reports the requested
@@ -13391,11 +13429,48 @@ func (h *PlaybackHandler) seekReanchorWithinActiveWindowV3(session *playback.Ses
 	if !seekReanchorWithinActiveWindowV3(plan, position) {
 		return false
 	}
+	// The plan's window is the window the transport had when the plan was
+	// built. An in-place seek restart moves the live generation forward, and
+	// the next backward seek still names this plan: its window still starts at
+	// the old origin even though the generation now begins at the restart
+	// segment. Reusing that generation would hand the client a playlist whose
+	// first segment is past the target, which clamps the playhead forward
+	// (production: a viewer asked for 328 s and ended at 931 s). A target
+	// before the live generation's own start is a new window, not a position
+	// this generation can produce, so rebuild the transport at the target.
+	if generationStart, ok := liveGenerationStartSecondsV3(h, session); ok && position < generationStart {
+		return false
+	}
 	if plan.Timeline.CanSeekAnywhere || plan.Timeline.SeekWindowEndSeconds != nil {
 		return true
 	}
 	headEnd, ok := h.producedHeadEndSecondsV3(session)
 	return seekReanchorWithinActiveWindowAtHeadV3(plan, position, headEnd, ok)
+}
+
+// liveGenerationStartSecondsV3 reports the source-timeline start of the
+// generation the session's FFmpeg process currently produces, as its absolute
+// HLS segment number times the segment duration. An in-place restart moves it
+// forward while the plan the client holds keeps the older window. A session
+// that never started a process, or whose generation begins at segment zero,
+// reports false and keeps the pre-existing plan-window behavior.
+func liveGenerationStartSecondsV3(h *PlaybackHandler, session *playback.Session) (float64, bool) {
+	if h == nil || h.tm == nil || session == nil {
+		return 0, false
+	}
+	live := h.tm.GetTranscodeSession(session.ID)
+	if live == nil {
+		return 0, false
+	}
+	progress := live.SegmentProgress(time.Now())
+	if progress.StartSegmentNumber <= 0 {
+		return 0, false
+	}
+	segmentSeconds := progress.SegmentDuration
+	if segmentSeconds <= 0 {
+		segmentSeconds = playback.DefaultSegmentDuration
+	}
+	return float64(progress.StartSegmentNumber) * float64(segmentSeconds), true
 }
 
 // seekReanchorWithinActiveWindowAtHeadV3 reports whether a growing HLS

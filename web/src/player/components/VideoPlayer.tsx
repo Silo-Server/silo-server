@@ -76,7 +76,13 @@ import {
 } from "../utils/pendingSeek";
 import { resolveVersionAudioLanguage } from "../utils/effectiveAudioLanguage";
 import { resolveEffectiveVersion } from "../utils/resolveEffectiveVersion";
-import { StartupGuard } from "../utils/startupGuard";
+import {
+  isStaleGenerationError,
+  MAX_STALE_GENERATION_RECOVERIES,
+  recoverFromStaleGeneration,
+  StartupGuard,
+} from "../utils/startupGuard";
+import type { DecodeErrorCarrier } from "../decode-failure";
 import {
   SegmentRetryBudget,
   StartupSegmentBudget,
@@ -473,6 +479,12 @@ const FIREFOX_STALL_BUFFERED_MS = 2_000;
 // stream at the paused position instead. The value sits well inside the
 // default window.
 const PROGRESSIVE_REMUX_IDLE_REOPEN_MS = 60_000;
+// How long a progressive remux replacement started for a seek may stay silent
+// before the seek is reported as failed. The server bounds a remux's first media
+// byte itself, so a start that produces nothing by this point has already
+// exhausted that window; waiting longer only freezes the playhead at the target
+// while the old frame stays on screen. The viewer gets a retry instead.
+export const PROGRESSIVE_REMUX_SEEK_NO_BYTES_MS = 15_000;
 // How often a rejected autoplay is retried, and how many times. A transport
 // swap tears the previous source down with `load()`, and the media element load
 // algorithm is required to reject any play that is still pending with an
@@ -2125,6 +2137,11 @@ export function VideoPlayer({
     },
     [onReanchorSeek, releasePendingSeek, rememberPendingSeek],
   );
+  // The hls.js error handler runs inside the transport effect, whose identity
+  // must not depend on this callback. Reading it through a ref keeps a replan
+  // of the same session from reloading the element.
+  const reanchorAtRef = useRef(reanchorAt);
+  reanchorAtRef.current = reanchorAt;
 
   // Reports whether the seek was taken up, which callers that show an
   // affordance for it (the intro prompt) need in order to know whether the
@@ -3292,6 +3309,21 @@ export function VideoPlayer({
     const unbufferedLoads = new UnbufferedFragmentLoads();
     let startHoleRecovered = false;
     let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+    // A progressive remux replacement started for a seek has no segment layer
+    // to report progress through: if it never produces a byte, the element
+    // waits with the old frame and the viewer cannot tell the seek failed. Hold
+    // it to the same bound a no-byte remux start is expected to fail inside, and
+    // surface a retry instead of a frozen playhead.
+    let progressiveSeekNoBytesTimer: ReturnType<typeof setTimeout> | null = null;
+    let progressiveSeekSettle: (() => void) | null = null;
+    // Bounds the stale-generation playlist refetches for this transport. A seek
+    // does not refetch the playlist; it reanchors (see the hls.js ERROR
+    // handler), so this only counts the in-place replay recovery.
+    let staleGenerationRecoveries = 0;
+    // The pending seek target a stale-generation fence already sent back as a
+    // reanchor. A second fence for the same target is not re-sent: it falls
+    // through to the ordinary failure path, so one seek cannot loop on replans.
+    let staleSeekReanchorTarget: number | null = null;
     let playbackStarted = false;
     let autoplayInFlight = false;
     let autoplayAttempts = 0;
@@ -3640,6 +3672,58 @@ export function VideoPlayer({
               const details = String(data.details);
               const loaded = (data as { stats?: { loaded?: number } }).stats?.loaded ?? 0;
               const subtitleLoad = details.startsWith("subtitle") || data.frag?.type === "subtitle";
+              // A 412 from the segment route is the server's generation fence,
+              // not a failed link. Retrying the same URL can never succeed:
+              // its sgen token names bytes the live generation replaced.
+              //
+              // A seek is asking for a new window. The plan on screen may still
+              // advertise the window from before an in-place restart, so the
+              // browser requested a segment below where the restarted
+              // generation now begins. Hand the pending target back to the
+              // session as a seek_reanchor; the server rebuilds at that
+              // position, which is what plays what the viewer asked for. Do not
+              // refetch the playlist here: its `startPosition` would clamp the
+              // target forward to the new generation's first segment, which is
+              // the silent jump this fence used to end in.
+              //
+              // Playback that was not seeking only needs the playlist reloaded
+              // with the live token, bounded so a session that keeps restarting
+              // still reaches the ordinary failure path.
+              if (
+                !subtitleLoad &&
+                data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+                isStaleGenerationError(data as DecodeErrorCarrier)
+              ) {
+                const seekTarget = pendingSeekTimeRef.current;
+                if (seekTarget !== null && staleSeekReanchorTarget !== seekTarget) {
+                  staleSeekReanchorTarget = seekTarget;
+                  console.warn(
+                    "[hls.js] stale generation for a pending seek; re-anchoring at the target",
+                    { target: seekTarget },
+                  );
+                  void reanchorAtRef.current(seekTarget);
+                  return;
+                }
+                if (!destroyed && staleGenerationRecoveries < MAX_STALE_GENERATION_RECOVERIES) {
+                  staleGenerationRecoveries += 1;
+                  // hls.js's startPosition is on the playlist's own clock, the
+                  // same clock the element reports, not the media timeline.
+                  const resume = video.currentTime;
+                  if (
+                    hls &&
+                    recoverFromStaleGeneration(
+                      hls as unknown as Parameters<typeof recoverFromStaleGeneration>[0],
+                      resume,
+                    )
+                  ) {
+                    console.warn(
+                      "[hls.js] stale generation during playback; reloading the playlist",
+                      { resume, attempt: staleGenerationRecoveries },
+                    );
+                    return;
+                  }
+                }
+              }
               if (
                 data.type === Hls.ErrorTypes.NETWORK_ERROR &&
                 !subtitleLoad &&
@@ -4035,6 +4119,45 @@ export function VideoPlayer({
             ? transportStartPosition()
             : effectiveInitialPositionRef.current;
           attemptAutoplayWhenReady();
+          // A seek replacement that never produces media leaves the element on
+          // its old frame at the target, which reads as a seek that succeeded.
+          // Hold the no-byte window to the server's own first-output bound and
+          // surface a retry instead. A start with no pending seek is an ordinary
+          // start and keeps the startup guard's longer window.
+          const seekTarget = pendingSeekTimeRef.current;
+          if (isProgressiveRemux && seekTarget !== null) {
+            const settle = () => {
+              if (progressiveSeekNoBytesTimer !== null) {
+                clearTimeout(progressiveSeekNoBytesTimer);
+                progressiveSeekNoBytesTimer = null;
+              }
+            };
+            progressiveSeekSettle = settle;
+            video.addEventListener("loadeddata", settle, { once: true });
+            video.addEventListener("playing", settle, { once: true });
+            video.addEventListener("timeupdate", settle, { once: true });
+            video.addEventListener("error", settle, { once: true });
+            progressiveSeekNoBytesTimer = setTimeout(() => {
+              progressiveSeekNoBytesTimer = null;
+              if (destroyed || video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return;
+              releasePendingSeek(seekTarget);
+              // The pending target may already have been folded into the plan
+              // revision, which clears the ref. The playhead still shows the
+              // target, so put the controls back on the media that exists.
+              pendingSeekTimeRef.current = null;
+              pendingSeekContextRef.current = null;
+              setPendingSeekTime(null);
+              setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
+              if (
+                !reportCurrentPlanFailureRef.current({
+                  classification: "network_error",
+                  message: "The stream produced no media for the seek.",
+                })
+              ) {
+                setPlayerError("The seek didn't produce any media. Please try again.", true);
+              }
+            }, PROGRESSIVE_REMUX_SEEK_NO_BYTES_MS);
+          }
         }
       }
     }
@@ -4047,6 +4170,17 @@ export function VideoPlayer({
       if (recoveryTimer !== null) {
         clearTimeout(recoveryTimer);
         recoveryTimer = null;
+      }
+      if (progressiveSeekNoBytesTimer !== null) {
+        clearTimeout(progressiveSeekNoBytesTimer);
+        progressiveSeekNoBytesTimer = null;
+      }
+      if (progressiveSeekSettle !== null) {
+        video.removeEventListener("loadeddata", progressiveSeekSettle);
+        video.removeEventListener("playing", progressiveSeekSettle);
+        video.removeEventListener("timeupdate", progressiveSeekSettle);
+        video.removeEventListener("error", progressiveSeekSettle);
+        progressiveSeekSettle = null;
       }
       settlePausedRef.current = () => {};
       video.removeEventListener("suspend", endHoldOnceLoaded);

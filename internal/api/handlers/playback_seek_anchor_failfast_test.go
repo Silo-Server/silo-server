@@ -82,6 +82,65 @@ func TestPrepareTransportTimelineSlowAnchorIndexTimeoutStartsWithoutTheAnchor(t 
 	}
 }
 
+// TestPrepareTransportTimelineSlowAnchorIndexRefusesAProgressiveRemuxStart
+// proves a copy-video start without an anchor does not hand back a progressive
+// remux that produces no bytes. A segmented HLS start can degrade because its
+// segment layer waits or restarts for the target; a progressive remux is one
+// forward-only response with nothing to wait for, and production showed it
+// answering 15 s of silence. The start answers the retryable seek verdict at
+// the end of the probe budget instead, so the client keeps a retry affordance
+// and never a frozen playhead.
+func TestPrepareTransportTimelineSlowAnchorIndexRefusesAProgressiveRemuxStart(t *testing.T) {
+	previous := copySeekAnchorSeekResolveTimeout
+	copySeekAnchorSeekResolveTimeout = 40 * time.Millisecond
+	defer func() { copySeekAnchorSeekResolveTimeout = previous }()
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	var probes atomic.Int32
+	handler.copySeekAnchor = func(ctx context.Context, _ string, _ string, _ float64, _ int) (float64, int, error) {
+		probes.Add(1)
+		<-ctx.Done()
+		return 0, 0, ctx.Err()
+	}
+	plan := &playback.PlanV3{
+		PlanID:   "plan:slow-progressive-anchor",
+		Delivery: playback.DeliveryRemuxProgressiveV3,
+		Timeline: playback.TimelineV3{SourceStartSeconds: 919.35, PlayerStartSeconds: 919.35},
+	}
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(previousLogger)
+
+	started := time.Now()
+	timeline, transportErr := handler.prepareTransportTimelineV3(
+		context.Background(),
+		&playback.Session{ID: "session-slow-progressive-anchor"},
+		&models.MediaFile{ID: 37985, FilePath: "/media/episode.mkv"},
+		playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux},
+	)
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("slow anchor index took %v, want it bounded near two attempts of %v", elapsed, copySeekAnchorSeekResolveTimeout)
+	}
+	if got := probes.Load(); got != 2 {
+		t.Fatalf("anchor probes = %d, want exactly 2: one attempt and the one same-pin retry a budget timeout allows", got)
+	}
+	if transportErr == nil {
+		t.Fatalf("timeline = %#v, want a retryable refusal with no progressive stream", timeline)
+	}
+	if !transportErr.retryable || !transportErr.seekFailure || transportErr.reason != transcodeStartFailedReasonV3 {
+		t.Fatalf("transport error = %#v, want a retryable seek failure with the existing transcode_start_failed code", transportErr)
+	}
+	if !strings.Contains(logs.String(), "refusing a progressive remux start that would produce no bytes") {
+		t.Fatalf("refused start left no log line:\n%s", logs.String())
+	}
+	// The plan must not be rewritten to an unanchored timeline the client would
+	// hand to a progressive remux: the start never returns it.
+	if plan.Timeline.StreamOriginSeconds != 0 {
+		t.Fatalf("plan stream origin = %v, want the plan left unconfigured", plan.Timeline.StreamOriginSeconds)
+	}
+}
+
 // TestPrepareTransportTimelineTransientAnchorMarksSeek proves an upstream 5xx
 // during the anchor probe is classified as a seek failure rather than a verdict
 // about the release, so the start path cannot rotate the version over it. The
