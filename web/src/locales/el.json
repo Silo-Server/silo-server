@@ -449,6 +449,12 @@
       "value": "Συνδεθείτε μέσω της υπηρεσίας σύνδεσης του δικτύου σας για να συνεχίσετε."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Αυτός ο κόμβος ορίζεται από τη διαμόρφωση ανάπτυξης του διακομιστή. Αφαιρέστε τον από εκεί και επανεκκινήστε τους διακομιστές API για να τον διαχειρίζεστε εδώ."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30606,7 +30612,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Λίστα συνεδριών αναπαραγωγής που ξεκίνησαν πρόσφατα"
+      "value": "Οι πιο πρόσφατες αναπαραγωγές σε όλους τους λογαριασμούς"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32239,6 +32245,72 @@
     {
       "type": 0,
       "value": "Δεν ήταν δυνατή η φόρτωση της δραστηριότητας."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " αναπαρήγαγε το στοιχείο "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " αναπαρήγαγε το στοιχείο "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49708,6 +49780,12 @@
       "value": "Εισαγάγετε τη διεύθυνση του διακομιστή για να ολοκληρωθούν οι ρυθμίσεις."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Κλειδί ορισμένο από τη διαμόρφωση ανάπτυξης του διακομιστή"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50620,6 +50698,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ορίζεται από τη διαμόρφωση ανάπτυξης του διακομιστή. Αφαιρέστε τον κόμβο από εκεί για να τον διαγράψετε εδώ."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -57425,6 +57509,12 @@
     {
       "type": 0,
       "value": "Το μήνυμα στάλθηκε"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Το πρόγραμμα αναπαραγωγής δεν επιβεβαίωσε τη λήψη του μηνύματος. Μπορεί να εμφανιστεί με καθυστέρηση ή να μην εμφανιστεί καθόλου."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

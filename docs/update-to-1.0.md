@@ -169,6 +169,12 @@ node cannot work with an earlier main server. Proxy nodes keep their current set
    previous key stops working at once. A node still running with the replaced key shuts down at
    once on SIGTERM instead of waiting for its sessions, which the main server can no longer reach,
    so restarting it with the new key does not wait for the drain timeout.
+
+   A deployment managed from configuration can skip the administration UI instead: write each
+   node's key with `silo node-key generate --id <n>`, keep it in your secret store, and list the
+   nodes in the main server's `SILO_TRANSCODE_NODES` or `SILO_TRANSCODE_NODES_FILE`. The main
+   server creates each listed node with its key when it starts. See
+   [declared nodes](architecture/transcode-nodes.md#declared-nodes).
 4. Update each transcode node and start it with:
    - `MODE=transcode`;
    - `SILO_CORE_URL`, the main server's URL as the node reaches it (the load-balanced address when

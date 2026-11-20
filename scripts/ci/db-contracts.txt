@@ -1456,6 +1456,14 @@
 ./internal/nodepool TestNodeDeclarationsLockFieldsDB
 ./internal/nodepool TestProxyDeclarationsDB
 
+# Declared transcode nodes: an API server creates the declared rows with their
+# keys and owns them (no rewrite on repeat, rotation, admin key issue and delete
+# refused, release on an empty declaration), never takes a proxy, keyless or
+# admin-keyed row, a deleted id or a proxy's address, and adopts a row that
+# already holds the declared key.
+./internal/nodepool TestProvisionTranscodeNodesDB
+./internal/nodepool TestProvisionTranscodeNodesRefusesOtherRowsDB
+
 # Admin node writes reach every credential registry: the writing API server's
 # before it answers (a deleted node's key is refused at once, a moved node is
 # signable at its new URL, a disabled one keeps its key), a proxy's through

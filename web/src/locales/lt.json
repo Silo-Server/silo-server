@@ -449,6 +449,12 @@
       "value": "Prisijunkite per savo tinklo prisijungimo sistemą, kad tęstumėte."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Šis mazgas nustatytas serverio diegimo konfigūracijoje. Pašalinkite jį iš ten ir paleiskite API serverius iš naujo, kad galėtumėte jį tvarkyti čia."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -37182,7 +37188,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Neseniai pradėtų atkūrimo seansų sąrašas"
+      "value": "Naujausi paleidimai visose paskyrose"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -39169,6 +39175,88 @@
     {
       "type": 0,
       "value": "Nepavyko įkelti veiklos."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " paleido kūrinį "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„"
+        },
+        {
+          "type": 1,
+          "value": "title"
+        },
+        {
+          "type": 0,
+          "value": "“"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " paleido kūrinį "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„"
+        },
+        {
+          "type": 1,
+          "value": "title"
+        },
+        {
+          "type": 0,
+          "value": "“"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -61737,6 +61825,12 @@
       "value": "Įveskite serverio adresą, kad užbaigtumėte nustatymus."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Raktas nustatytas serverio diegimo konfigūracijoje"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -62693,6 +62787,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nustatyta serverio diegimo konfigūracijoje. Pašalinkite mazgą iš ten, kad galėtumėte jį ištrinti čia."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -71174,6 +71274,12 @@
     {
       "type": 0,
       "value": "Žinutė išsiųsta"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Leistuvas nepatvirtino, kad gavo žinutę. Ji gali būti parodyta vėliau arba visai neparodyta."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

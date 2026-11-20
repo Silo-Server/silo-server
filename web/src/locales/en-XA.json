@@ -449,6 +449,12 @@
       "value": "⟦Šîĝñ îñ ţĥŕöûĝĥ ýöûŕ ñéţŵöŕķ’š šîĝñ-îñ ţö çöñţîñûé.~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš ñöđé îš šéţ ƀý ţĥé šéŕṽéŕ’š đéþļöýɱéñţ çöñƒîĝûŕåţîöñ. Ŕéɱöṽé îţ ţĥéŕé åñđ ŕéšţåŕţ ţĥé ÅÞÎ šéŕṽéŕš ţö ɱåñåĝé îţ ĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -33186,7 +33192,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "⟦Ƒééđ öƒ ŕéçéñţļý šţåŕţéđ þļåýƀåçķ šéššîöñš~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ṁöšţ ŕéçéñţ þļåýš åçŕöšš åļļ åççöûñţš~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -34971,6 +34977,88 @@
     {
       "type": 0,
       "value": "⟦Ƒåîļéđ ţö ļöåđ åçţîṽîţý.~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " þļåýéđ "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " þļåýéđ "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -54064,6 +54152,12 @@
       "value": "⟦Éñţéŕ ţĥé šéŕṽéŕ åđđŕéšš ţö çöɱþļéţé ţĥé šéţţîñĝš.~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "⟦Ķéý šéţ ƀý ţĥé šéŕṽéŕ’š đéþļöýɱéñţ çöñƒîĝûŕåţîöñ~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -55096,6 +55190,12 @@
     {
       "type": 0,
       "value": "~~~⟧"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "⟦Šéţ ƀý ţĥé šéŕṽéŕ’š đéþļöýɱéñţ çöñƒîĝûŕåţîöñ. Ŕéɱöṽé îţ ţĥéŕé ţö đéļéţé îţ ĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -62453,6 +62553,12 @@
     {
       "type": 0,
       "value": "⟦Ṁéššåĝé šéñţ~~~~~⟧"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé þļåýéŕ đîđñ’ţ çöñƒîŕɱ ţĥé ɱéššåĝé. Îţ ɱåý šĥöŵ ûþ ļåţé öŕ ñöţ åţ åļļ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

@@ -449,6 +449,12 @@
       "value": "A folytatáshoz jelentkezzen be a hálózat saját bejelentkezésén keresztül."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Ezt a csomópontot a szerver telepítési konfigurációja állítja be. Távolítsa el onnan, és indítsa újra az API-szervereket, hogy itt kezelhesse."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30518,7 +30524,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "A nemrég elindított lejátszási munkamenetek listája"
+      "value": "Legutóbbi lejátszások az összes fiókban"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32135,6 +32141,72 @@
     {
       "type": 0,
       "value": "Nem sikerült betölteni a tevékenységet."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " lejátszotta: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " lejátszotta: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49300,6 +49372,12 @@
       "value": "A beállítások kiegészítéséhez adja meg a szervercímet."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "A kulcsot a szerver telepítési konfigurációja állítja be"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50212,6 +50290,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "A szerver telepítési konfigurációja állítja be. Távolítsa el onnan, hogy itt törölhesse."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -56993,6 +57077,12 @@
     {
       "type": 0,
       "value": "Üzenet elküldve"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "A lejátszó nem erősítette meg az üzenet fogadását. Lehet, hogy az üzenet később jelenik meg, vagy egyáltalán nem."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

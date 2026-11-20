@@ -449,6 +449,12 @@
       "value": "Aby kontynuować, zaloguj się za pomocą logowania swojej sieci."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Ten węzeł jest ustawiony w konfiguracji wdrożenia serwera. Usuń go tam i uruchom ponownie serwery API, aby zarządzać nim tutaj."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -37424,7 +37430,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Kanał ostatnio rozpoczętych sesji odtwarzania"
+      "value": "Najnowsze odtworzenia na wszystkich kontach"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -39399,6 +39405,72 @@
     {
       "type": 0,
       "value": "Nie udało się wczytać aktywności."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ": odtworzono "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ": odtworzono "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -61732,6 +61804,12 @@
       "value": "Wpisz adres serwera, aby uzupełnić ustawienia."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Klucz ustawiony w konfiguracji wdrożenia serwera"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -62672,6 +62750,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Węzeł ustawiony w konfiguracji wdrożenia serwera. Usuń go tam, aby móc usunąć go tutaj."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -71129,6 +71213,12 @@
     {
       "type": 0,
       "value": "Wysłano wiadomość"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Odtwarzacz nie potwierdził odebrania wiadomości. Może pojawić się z opóźnieniem albo wcale się nie pojawić."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

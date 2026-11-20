@@ -449,6 +449,12 @@
       "value": "Pro pokračování se přihlaste přes přihlašovací službu vaší sítě."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Tento uzel je nastaven konfigurací nasazení serveru. Odeberte ho tam a restartujte servery API, abyste ho mohli spravovat zde."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -36882,7 +36888,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Přehled nedávno zahájených relací přehrávání"
+      "value": "Nejnovější přehrání ze všech účtů"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -38861,6 +38867,80 @@
     {
       "type": 0,
       "value": "Nepodařilo se načíst aktivitu."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "Uživatel "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " přehrál "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "Uživatel "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " přehrál "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -61238,6 +61318,12 @@
       "value": "Pro dokončení nastavení zadejte adresu serveru."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Klíč je nastaven konfigurací nasazení serveru"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -62182,6 +62268,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nastaveno konfigurací nasazení serveru. Odeberte uzel tam, abyste ho mohli smazat zde."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -70515,6 +70607,12 @@
     {
       "type": 0,
       "value": "Zpráva odeslána"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Přehrávač nepotvrdil přijetí zprávy. Může se zobrazit se zpožděním, nebo vůbec ne."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

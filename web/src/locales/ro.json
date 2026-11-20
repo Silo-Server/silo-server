@@ -449,6 +449,12 @@
       "value": "Conectați-vă prin sistemul de conectare al rețelei dvs. pentru a continua."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Acest nod este setat de configurația de implementare a serverului. Eliminați-l de acolo și reporniți serverele API pentru a-l gestiona aici."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -33576,7 +33582,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Flux al sesiunilor de redare pornite recent"
+      "value": "Cele mai recente redări din toate conturile"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35376,6 +35382,72 @@
     {
       "type": 0,
       "value": "Nu s-a putut încărca activitatea."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " a redat "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " a redat "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -55295,6 +55367,12 @@
       "value": "Introduceți adresa serverului pentru a completa setările."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Cheie setată de configurația de implementare a serverului"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -56219,6 +56297,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nodul este setat de configurația de implementare a serverului. Eliminați-l de acolo pentru a-l putea șterge aici."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -63790,6 +63874,12 @@
     {
       "type": 0,
       "value": "Mesajul a fost trimis"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Playerul nu a confirmat primirea mesajului. Este posibil ca mesajul să apară mai târziu sau deloc."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

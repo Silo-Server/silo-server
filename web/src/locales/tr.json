@@ -449,6 +449,12 @@
       "value": "Devam etmek için ağınızın oturum açma sayfası üzerinden oturum açın."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Bu düğüm, sunucunun dağıtım yapılandırması tarafından ayarlanır. Düğümü burada yönetmek için oradan kaldırıp API sunucularını yeniden başlatın."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30274,7 +30280,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Yakın zamanda başlatılan oynatma oturumlarının listesi"
+      "value": "Tüm hesaplardaki en son oynatmalar"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -31891,6 +31897,80 @@
     {
       "type": 0,
       "value": "Etkinlik yüklenemedi."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " içeriğini oynattı"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " içeriğini oynattı"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -48928,6 +49008,12 @@
       "value": "Ayarları tamamlamak için sunucu adresini girin."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Anahtar, sunucunun dağıtım yapılandırması tarafından ayarlanır"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 1,
@@ -49832,6 +49918,12 @@
     {
       "type": 0,
       "value": " düğümünü sil"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Sunucunun dağıtım yapılandırması tarafından ayarlanır. Burada silmek için oradan kaldırın."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -56621,6 +56713,12 @@
     {
       "type": 0,
       "value": "Mesaj gönderildi"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Oynatıcı mesajı onaylamadı. Mesaj geç gösterilebilir veya hiç gösterilmeyebilir."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

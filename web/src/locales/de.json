@@ -449,6 +449,12 @@
       "value": "Melde dich über die Anmeldung deines Netzwerks an, um fortzufahren."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Dieser Knoten wird über die Bereitstellungskonfiguration des Servers festgelegt. Entferne ihn dort und starte die API-Server neu, um ihn hier zu verwalten."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -30430,7 +30436,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Feed der zuletzt gestarteten Wiedergabesitzungen"
+      "value": "Neueste Wiedergaben aller Konten"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32055,6 +32061,80 @@
     {
       "type": 0,
       "value": "Aktivität konnte nicht geladen werden."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " hat "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " abgespielt"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " hat "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " abgespielt"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49256,6 +49336,12 @@
       "value": "Gib die Serveradresse ein, um die Einstellungen zu vervollständigen."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Schlüssel über die Bereitstellungskonfiguration des Servers festgelegt"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50176,6 +50262,12 @@
     {
       "type": 0,
       "value": " löschen"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Über die Bereitstellungskonfiguration des Servers festgelegt. Entferne den Knoten dort, um ihn hier zu löschen."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -56945,6 +57037,12 @@
     {
       "type": 0,
       "value": "Nachricht gesendet"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Der Player hat die Nachricht nicht bestätigt. Sie wird möglicherweise verspätet oder gar nicht angezeigt."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [

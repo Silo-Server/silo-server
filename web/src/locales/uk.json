@@ -449,6 +449,12 @@
       "value": "Увійдіть через систему входу вашої мережі, щоб продовжити."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Цей вузол задається конфігурацією розгортання сервера. Вилучіть його там і перезапустіть API-сервери, щоб керувати ним тут."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -36706,7 +36712,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Стрічка нещодавно розпочатих сеансів відтворення"
+      "value": "Останні відтворення з усіх облікових записів"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -38681,6 +38687,72 @@
     {
       "type": 0,
       "value": "Не вдалося завантажити активність."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ": відтворено "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ": відтворено "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -60961,6 +61033,12 @@
       "value": "Введіть адресу сервера, щоб завершити налаштування."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ключ задається конфігурацією розгортання сервера"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -61905,6 +61983,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Задається конфігурацією розгортання сервера. Вилучіть його там, щоб видалити тут."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -70278,6 +70362,12 @@
     {
       "type": 0,
       "value": "Повідомлення надіслано"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Програвач не підтвердив отримання повідомлення. Воно може з’явитися пізніше або не з’явитися взагалі."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
