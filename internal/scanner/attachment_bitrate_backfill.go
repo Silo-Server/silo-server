@@ -14,7 +14,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Silo-Server/silo-server/internal/fspath"
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
 
@@ -189,15 +188,7 @@ func (b *AttachmentBitrateBackfiller) Run(ctx context.Context, progress func(Att
 				mu.Lock()
 				defer mu.Unlock()
 				result.Checked++
-				switch outcome {
-				case attachmentBitrateOutcomeUnreadable, attachmentBitrateOutcomeTimedOut:
-					if consecutiveFailures == 0 {
-						streakFrom = batchFrom
-					}
-					consecutiveFailures++
-				default:
-					consecutiveFailures = 0
-				}
+				failed := false
 				switch outcome {
 				case attachmentBitrateOutcomeUpdated:
 					result.Updated++
@@ -205,10 +196,22 @@ func (b *AttachmentBitrateBackfiller) Run(ctx context.Context, progress func(Att
 					result.Unchanged++
 				case attachmentBitrateOutcomeChanged:
 					result.Changed++
-				case attachmentBitrateOutcomeRejected, attachmentBitrateOutcomeUnreadable:
+				case attachmentBitrateOutcomeRejected:
 					result.Failed++
+				case attachmentBitrateOutcomeUnreadable:
+					result.Failed++
+					failed = true
 				case attachmentBitrateOutcomeTimedOut:
 					result.TimedOut++
+					failed = true
+				}
+				if failed {
+					if consecutiveFailures == 0 {
+						streakFrom = batchFrom
+					}
+					consecutiveFailures++
+				} else {
+					consecutiveFailures = 0
 				}
 				if consecutiveFailures >= attachmentBitrateBackfillMaxFailures {
 					return fmt.Errorf("%w: %d probes in a row failed or timed out", errAttachmentBitrateStorageStalled, consecutiveFailures)
@@ -330,7 +333,7 @@ func (b *AttachmentBitrateBackfiller) backfillFile(ctx context.Context, c attach
 		  AND file_size = $2
 		  AND date_trunc('microseconds', file_modified_at) IS NOT DISTINCT FROM $3::timestamptz
 		  AND bitrate = $4`,
-		c.id, c.size, c.normalizedModifiedAt(), c.bitrate, probed.kbps)
+		c.id, c.size, normalizedStoredModifiedAt(c.modifiedAt), c.bitrate, probed.kbps)
 	if err != nil {
 		return 0, fmt.Errorf("recording attachment-free bitrate for file %d: %w", c.id, err)
 	}
@@ -374,13 +377,4 @@ func logAttachmentBitrateFailures(ctx context.Context, result AttachmentBitrateB
 		slog.WarnContext(ctx, "scanner: attachment bitrate backfill could not probe some files; they keep their stored bitrate until a scan reprobes them",
 			"component", "scanner", "failed", result.Failed, "timed_out", result.TimedOut, "checked", result.Checked)
 	}
-}
-
-// normalizedModifiedAt is the stored mtime in the form row comparisons use.
-func (c attachmentBitrateCandidate) normalizedModifiedAt() *time.Time {
-	if c.modifiedAt == nil {
-		return nil
-	}
-	normalized := models.NormalizeFileModifiedAt(*c.modifiedAt)
-	return &normalized
 }
