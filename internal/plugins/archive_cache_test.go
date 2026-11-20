@@ -664,7 +664,9 @@ func (s *platformTestStore) SavePlatformArchive(_ context.Context, in SavePlatfo
 type platformBuildFixture struct {
 	store        *platformTestStore
 	installation *Installation
-	hostBinary   []byte
+	// root, when set, is the cache's own root, as an API server can have.
+	root       string
+	hostBinary []byte
 	// signature is the fetched build's release signature check.
 	signature Signature
 	fetches   atomic.Int32
@@ -693,6 +695,9 @@ func newPlatformBuildFixture(t *testing.T) *platformBuildFixture {
 
 func (f *platformBuildFixture) cache(t *testing.T) *ArchiveCache {
 	cache := NewArchiveCache(f.store)
+	if f.root != "" {
+		cache = NewArchiveCacheAt(f.store, f.root)
+	}
 	cache.platforms = &platformArchives{store: f.store, fetch: func(context.Context, *Installation) (*downloadedBinary, error) {
 		f.fetches.Add(1)
 		manifest := testPluginManifest(t, f.installation.PluginID, f.installation.Version)
@@ -709,9 +714,15 @@ func (f *platformBuildFixture) cache(t *testing.T) *ArchiveCache {
 	return cache
 }
 
+// binaryPath is where the fixture's caches install the binary.
+func (f *platformBuildFixture) binaryPath(t *testing.T) string {
+	t.Helper()
+	return requireLocalInstallPath(t, f.cache(t), f.installation)
+}
+
 func (f *platformBuildFixture) installedBinary(t *testing.T) []byte {
 	t.Helper()
-	data, err := os.ReadFile(f.installation.InstallPath)
+	data, err := os.ReadFile(f.binaryPath(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -723,8 +734,21 @@ func (f *platformBuildFixture) installedBinary(t *testing.T) []byte {
 // version's build for its own platform once, stores it, and every server on
 // that platform then rehydrates from the stored one.
 func TestArchiveCacheFetchesThisPlatformsBuildOfAForeignStoredArchive(t *testing.T) {
+	// An API server's cache may also have its own root, as a proxy node's
+	// does; it still fetches rather than refusing, and only before running.
+	for _, withRoot := range []bool{false, true} {
+		t.Run(map[bool]string{false: "recorded install path", true: "own cache root"}[withRoot], func(t *testing.T) {
+			testFetchesThisPlatformsBuild(t, withRoot)
+		})
+	}
+}
+
+func testFetchesThisPlatformsBuild(t *testing.T, withRoot bool) {
 	ctx := context.Background()
 	f := newPlatformBuildFixture(t)
+	if withRoot {
+		f.root = t.TempDir()
+	}
 	// A build stored for an earlier release whose package had the same
 	// checksum is not this release's and is fetched again.
 	staleManifest, staleManifestJSON, staleArchive := binaryRelease(t, "0.9.0", []byte("an earlier release"))
@@ -754,7 +778,7 @@ func TestArchiveCacheFetchesThisPlatformsBuildOfAForeignStoredArchive(t *testing
 
 	// Another server on this platform, with an empty cache, uses the stored
 	// build.
-	if err := os.RemoveAll(filepath.Dir(f.installation.InstallPath)); err != nil {
+	if err := os.RemoveAll(filepath.Dir(f.binaryPath(t))); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.cache(t).Ensure(ctx, f.installation); err != nil {
@@ -799,7 +823,7 @@ func TestArchiveCacheRefusesAPlatformBuildItCannotTrust(t *testing.T) {
 			if f.fetches.Load() != tc.wantFetches || len(f.store.builds) != 0 {
 				t.Fatalf("fetched %d builds and stored %d; want %d fetched and none stored", f.fetches.Load(), len(f.store.builds), tc.wantFetches)
 			}
-			if _, err := os.Stat(f.installation.InstallPath); !errors.Is(err, fs.ErrNotExist) {
+			if _, err := os.Stat(f.binaryPath(t)); !errors.Is(err, fs.ErrNotExist) {
 				t.Fatalf("a binary was left to run at the install path: %v", err)
 			}
 		})

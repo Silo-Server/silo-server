@@ -41,12 +41,15 @@ func (e *foreignBuildError) Error() string {
 func (e *foreignBuildError) Unwrap() error { return e.err }
 
 // checksPlatform reports whether the cache checks that a binary is for this
-// host's platform. A proxy node's cache always does. An API server's does
-// before running the binary (Ensure), when it can fetch this platform's
-// build; a manifest read runs nothing and reads the same manifest from any
-// platform's build.
+// host's platform. A cache that can fetch this platform's build (an API
+// server's) checks before running the binary (Ensure), whether or not it has
+// its own root; a manifest read runs nothing and reads the same manifest from
+// any platform's build. A cache that can't (a proxy node's) always checks.
 func (c *ArchiveCache) checksPlatform(trustVerified bool) bool {
-	return c.root != "" || (c.platforms != nil && !trustVerified)
+	if c.platforms != nil {
+		return !trustVerified
+	}
+	return c.root != ""
 }
 
 // loadForHostPlatform is load, persisting, that rehydrates this host's
