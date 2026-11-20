@@ -67049,136 +67049,10 @@
       "value": "\u200F\u202ECouldn't load notification settings\u202C"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENew content is not being recorded, so nothing can be sent. Turn it back on under Processing.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESending is paused; new content waits in the queue. Turn it back on under Processing.\u202C"
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "\u200F\u202EOff sends them the daily summary instead.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHow Silo notices new content, groups it into messages, and how long it keeps them.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWork out who wants it\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMatch each item against everyone's preferences.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EGrouping and flood control\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EProcessing\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMax content age\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EOlder items are dropped instead of arriving as stale news.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMax messages per show\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAnything past this is skipped for that batch.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENotice new content\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERecord new items during library scans.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPipeline\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERead notifications\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERetention\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESent history\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERecord of what Silo already notified about.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESettle window\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EItems that finish scanning together arrive as one notification.\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUnread notifications\u202C"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -68107,18 +67981,6 @@
     {
       "type": 0,
       "value": "\u200F\u202ENotifications\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Edays\u202C"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Ehours\u202C"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -75004,7 +74866,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "\u200F\u202EDelivery channels, server channels, and how new content becomes notifications.\u202C"
+      "value": "\u200F\u202EDelivery channels and server channels.\u202C"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -75103,12 +74965,6 @@
       "value": "\u200F\u202EEmail\u202C"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EGrouping and flood control\u202C"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -75127,28 +74983,10 @@
       "value": "\u200F\u202ELet people pick an email per episode\u202C"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMax content age\u202C"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMax messages per show\u202C"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "\u200F\u202EMention the requester on Discord\u202C"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENotice new content\u202C"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -75157,46 +74995,16 @@
       "value": "\u200F\u202EPersonal Webhooks\u202C"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EProcessing\u202C"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERead notifications\u202C"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "\u200F\u202ERelay URL\u202C"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERetention\u202C"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESent history\u202C"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "\u200F\u202EServer Channels\u202C"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESettle window\u202C"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -75211,12 +75019,6 @@
       "value": "\u200F\u202ESilo Push Relay\u202C"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUnread notifications\u202C"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -75227,12 +75029,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EWebhooks per person\u202C"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWork out who wants it\u202C"
     }
   ],
   "web.admin.settings.search.playback.description": [

@@ -77904,136 +77904,10 @@
       "value": "Nepavyko įkelti pranešimų nustatymų"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Naujas turinys neregistruojamas, todėl nieko negalima išsiųsti. Vėl tai įjunkite skiltyje „Apdorojimas“."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Siuntimas pristabdytas; naujas turinys laukia eilėje. Vėl jį įjunkite skiltyje „Apdorojimas“."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Išjungus jiems siunčiama dienos suvestinė."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Kaip „Silo“ aptinka naują turinį, grupuoja jį į pranešimus ir kiek laiko juos saugo."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Nustatyti, kas jo nori"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Kiekvieną elementą palyginti su visų nuostatomis."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Grupavimas ir antplūdžio ribojimas"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Apdorojimas"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Didžiausias turinio amžius"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Senesni elementai atmetami, kad nepasiektų kaip pasenusios naujienos."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Daugiausia pranešimų vienam serialui"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Viskas, kas viršija šią ribą, tame pakete praleidžiama."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Aptikti naują turinį"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Registruoti naujus elementus bibliotekų nuskaitymo metu."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Apdorojimo grandinė"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Perskaityti pranešimai"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Saugojimas"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Išsiuntimo istorija"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Įrašai apie tai, apie ką „Silo“ jau pranešė."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Nusistovėjimo laikotarpis"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Elementai, kurių nuskaitymas baigiasi kartu, pateikiami viename pranešime."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Neperskaityti pranešimai"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -78986,18 +78860,6 @@
     {
       "type": 0,
       "value": "Pranešimai"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "d."
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "val."
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -85825,7 +85687,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Pristatymo kanalai, serverio kanalai ir tai, kaip naujas turinys tampa pranešimais."
+      "value": "Pristatymo kanalai ir serverio kanalai."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -85924,12 +85786,6 @@
       "value": "El. paštas"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Grupavimas ir pranešimų srauto ribojimas"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -85948,28 +85804,10 @@
       "value": "Leisti naudotojams pasirinkti el. laišką apie kiekvieną epizodą"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Didžiausias turinio amžius"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Daugiausia žinučių apie vieną serialą"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Paminėti užklausos pateikėją „Discord“"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Aptikti naują turinį"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -85978,46 +85816,16 @@
       "value": "Asmeniniai webhook"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Apdorojimas"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Perskaityti pranešimai"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Perdavimo serverio URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Saugojimas"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Išsiųstųjų istorija"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Serverio kanalai"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Nusistovėjimo laikotarpis"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -86032,12 +85840,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Neperskaityti pranešimai"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -86048,12 +85850,6 @@
     {
       "type": 0,
       "value": "Webhook vienam asmeniui"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Nustatyti, kas jo nori"
     }
   ],
   "web.admin.settings.search.playback.description": [

@@ -63309,136 +63309,10 @@
       "value": "सूचना सेटिंग लोड नहीं की जा सकी"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "नया कंटेंट रिकॉर्ड नहीं हो रहा है, इसलिए कुछ भी भेजा नहीं जा सकता। इसे प्रोसेसिंग में फिर से चालू करें।"
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "भेजना रुका हुआ है; नया कंटेंट कतार में इंतज़ार कर रहा है। इसे प्रोसेसिंग में फिर से चालू करें।"
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "बंद होने पर उन्हें इसकी जगह रोज़ का सारांश भेजा जाता है।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Silo नया कंटेंट कैसे पहचानता है, उसे मैसेज में कैसे ग्रुप करता है, और उन्हें कितने समय तक रखता है।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "पता करें कि इसे कौन चाहता है"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "हर आइटम को सभी की पसंद से मिलाएँ।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "ग्रुपिंग और फ़्लड कंट्रोल"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "प्रोसेसिंग"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "कंटेंट की अधिकतम उम्र"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "पुराने आइटम बासी खबर बनकर पहुँचने के बजाय हटा दिए जाते हैं।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "हर सीरीज़ के लिए अधिकतम मैसेज"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "इससे ज़्यादा जो भी हो, उसे उस बैच में छोड़ दिया जाता है।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "नया कंटेंट पहचानें"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "लाइब्रेरी स्कैन के दौरान नए आइटम रिकॉर्ड करें।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "पाइपलाइन"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "पढ़ी गई सूचनाएँ"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "रिटेंशन"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "भेजी गई सूचनाओं का इतिहास"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Silo किन चीज़ों के बारे में पहले ही सूचना दे चुका है, इसका रिकॉर्ड।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "सेटल विंडो"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "जो आइटम एक साथ स्कैन होकर पूरे होते हैं, वे एक ही सूचना में आते हैं।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "बिना पढ़ी सूचनाएँ"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64347,18 +64221,6 @@
     {
       "type": 0,
       "value": "सूचनाएँ"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "दिन"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "घंटे"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -70976,7 +70838,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "डिलीवरी चैनल, सर्वर चैनल, और नया कॉन्टेंट सूचनाओं में कैसे बदलता है।"
+      "value": "डिलीवरी चैनल और सर्वर चैनल।"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -71075,12 +70937,6 @@
       "value": "ईमेल"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "ग्रुपिंग और फ़्लड कंट्रोल"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71099,28 +70955,10 @@
       "value": "लोगों को हर एपिसोड के लिए ईमेल चुनने दें"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "कॉन्टेंट की ज़्यादा से ज़्यादा उम्र"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "हर सीरीज़ के लिए ज़्यादा से ज़्यादा मैसेज"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Discord पर अनुरोध करने वाले को मेंशन करें"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "नए कॉन्टेंट का पता लगाएँ"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -71129,46 +70967,16 @@
       "value": "निजी वेबहुक"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "प्रोसेसिंग"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "पढ़ी गई सूचनाएँ"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "रिले URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "कितने समय तक रखें"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "भेजे गए का इतिहास"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "सर्वर चैनल"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "स्थिर होने की अवधि"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71183,12 +70991,6 @@
       "value": "Silo पुश रिले"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "न पढ़ी गई सूचनाएँ"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71199,12 +71001,6 @@
     {
       "type": 0,
       "value": "हर व्यक्ति के लिए वेबहुक"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "पता लगाएँ कि इसे कौन चाहता है"
     }
   ],
   "web.admin.settings.search.playback.description": [

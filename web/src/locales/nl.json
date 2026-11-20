@@ -63297,136 +63297,10 @@
       "value": "Kan meldingsinstellingen niet laden"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Nieuwe content wordt niet geregistreerd, dus er kan niets worden verstuurd. Zet het weer aan onder Verwerking."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Versturen is gepauzeerd; nieuwe content wacht in de wachtrij. Zet het weer aan onder Verwerking."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Bij Uit krijgen ze in plaats daarvan de dagelijkse samenvatting."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Hoe Silo nieuwe content opmerkt, in berichten groepeert en hoelang het ze bewaart."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Bepalen wie het wil"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Elk item vergelijken met ieders voorkeuren."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Groeperen en floodcontrole"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Verwerking"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Maximale leeftijd van content"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Oudere items worden weggegooid in plaats van als verouderd nieuws binnen te komen."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Maximaal aantal berichten per serie"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Alles daarboven wordt voor die batch overgeslagen."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Nieuwe content opmerken"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Nieuwe items registreren tijdens bibliotheekscans."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Pipeline"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Gelezen meldingen"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Bewaartermijn"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Verzendgeschiedenis"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Overzicht van waarover Silo al een melding heeft gestuurd."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Wachtvenster"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Items die samen klaar zijn met scannen, komen binnen als één melding."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Ongelezen meldingen"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64331,18 +64205,6 @@
     {
       "type": 0,
       "value": "Meldingen"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dagen"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "uren"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -70900,7 +70762,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Bezorgkanalen, serverkanalen en hoe nieuwe content tot meldingen leidt."
+      "value": "Bezorgkanalen en serverkanalen."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -70999,12 +70861,6 @@
       "value": "E-mail"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Groeperen en floodbeveiliging"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71023,28 +70879,10 @@
       "value": "Mensen een e-mail per aflevering laten kiezen"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Maximale leeftijd van content"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Maximumaantal berichten per serie"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Aanvrager vermelden op Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Nieuwe content opmerken"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -71053,46 +70891,16 @@
       "value": "Persoonlijke webhooks"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Verwerking"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Gelezen meldingen"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Relay-URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Bewaartermijn"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Verzendgeschiedenis"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Serverkanalen"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Stabilisatievenster"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71107,12 +70915,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Ongelezen meldingen"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71123,12 +70925,6 @@
     {
       "type": 0,
       "value": "Webhooks per persoon"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Bepalen wie het wil"
     }
   ],
   "web.admin.settings.search.playback.description": [
