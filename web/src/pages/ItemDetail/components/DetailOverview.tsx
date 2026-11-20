@@ -3,11 +3,19 @@ import { EyeOff, Languages } from "lucide-react";
 import { useT } from "@/i18n";
 import MachineTranslatedLabel from "./MachineTranslatedLabel";
 
+const CLAMP_CLASSES = {
+  3: "line-clamp-3",
+  4: "line-clamp-4",
+  5: "line-clamp-5",
+} as const;
+
 interface DetailOverviewProps {
   overview: string;
   compact?: boolean;
   /** Clamp to a few lines with a More/Less toggle instead of showing it all. */
   clamp?: boolean;
+  /** Number of visible lines when clamped. Defaults to 3. */
+  clampLines?: keyof typeof CLAMP_CLASSES;
   translating?: boolean;
   onTranslate?: () => void;
   /** The shown text was machine-translated by AI; label it as such. */
@@ -21,6 +29,7 @@ export default function DetailOverview({
   overview,
   compact = false,
   clamp = false,
+  clampLines = 3,
   translating = false,
   onTranslate,
   machineTranslated = false,
@@ -43,7 +52,7 @@ export default function DetailOverview({
     const observer = new ResizeObserver(measure);
     observer.observe(text);
     return () => observer.disconnect();
-  }, [clamp, expanded, overview, hidden]);
+  }, [clamp, clampLines, expanded, overview, hidden]);
 
   if (hidden) {
     return (
@@ -66,7 +75,7 @@ export default function DetailOverview({
         ref={textRef}
         className={`bidi-text text-muted-foreground leading-7 ${
           compact ? "text-sm" : "text-foreground/72 text-sm sm:text-[0.9375rem]"
-        } ${clamp && !expanded ? "line-clamp-3" : ""} ${
+        } ${clamp && !expanded ? CLAMP_CLASSES[clampLines] : ""} ${
           translating ? "animate-pulse opacity-50" : ""
         }`}
       >
