@@ -254,12 +254,11 @@ answers any owner.
 | Media requests | `/admin/requests`, `/admin/requests/counts`, `/admin/requests/capabilities`, `/admin/requests/{id}/events`, `/admin/requests/{id}/poster` |
 
 The scope never returns filesystem paths, node addresses, storage keys, setting
-values or credentials. The one exception is `requests_enabled` on
-`/admin/requests/counts`, the server-wide requests switch, so a monitor can tell
-a disabled feature from an empty queue; the rest of the request settings stay
-outside the scope. Operations that carry them stay outside it: item files, download
+values or credentials. Operations that carry them stay outside it: item files, download
 storage other than its capabilities, settings, logs, API keys, audit, per-device setting values, node
-sessions, and the request integrations, settings and routes. Five monitored
+sessions, and the request integrations, settings and routes. The one setting value
+it returns is `requests_enabled` on `/admin/requests/counts`, the server-wide
+requests switch, so a monitor can tell a disabled feature from an empty queue. Five monitored
 reads withhold details from scoped keys:
 
 - `/admin/system/resources` omits each disk's `path`.
