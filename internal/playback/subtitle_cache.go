@@ -124,10 +124,10 @@ type SubtitleCache struct {
 	pageCostMu    sync.Mutex
 	pageReadRates map[string]float64
 
-	// pageWaitMu guards pageWaits, one bounded wait per refused bitmap page
-	// while its track's progressive artifact parses toward it (see
-	// subtitle_page_recovery.go). pageWaitBudget and pageWaitNow are test seams;
-	// zero keeps the production budget and wall clock.
+	// pageWaitMu guards pageWaits, one bounded wait per playback session and
+	// bitmap track while the track's progressive artifact parses toward the
+	// page (see subtitle_page_recovery.go). pageWaitBudget and pageWaitNow are
+	// test seams; zero keeps the production budget and wall clock.
 	pageWaitMu     sync.Mutex
 	pageWaits      map[string]subtitlePageRecovery
 	pageWaitBudget time.Duration

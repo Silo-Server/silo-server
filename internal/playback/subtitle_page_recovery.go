@@ -17,13 +17,13 @@ import (
 // until its own retry budget ran out (tens of retries, ~9 minutes) with no
 // picture and no failure.
 //
-// This is the bound. Each page gets one recovery fill — the request that starts
-// it says so, so the handler spawns exactly one — and one wait budget. The
-// artifact may cross the page inside that budget and the retry is served from it
-// (a page at a seek target on a slow relay commonly is). A fill that stops
-// advancing, or a page still ahead when the budget is spent, gets a final
-// non-retrying answer instead: the viewer sees the subtitle overlay report that
-// it could not load, once, instead of a spinner that never ends.
+// This is the bound. Each playback session's wait on a track gets one recovery
+// fill — the refusal that opens it says so, so the handler spawns exactly one —
+// and one wait budget. The artifact may cross the page inside that budget and the
+// retry is served from it (a page at a seek target on a slow relay commonly is).
+// A fill that stops advancing, or a page still ahead when the budget is spent,
+// gets a final non-retrying answer instead: the viewer sees the subtitle overlay
+// report that it could not load, once, instead of a spinner that never ends.
 const (
 	// SubtitlePageUnavailableReason is the additive problem code for a bitmap
 	// page the track's progressive artifact cannot reach inside its recovery
@@ -32,11 +32,12 @@ const (
 	// fetch (a seek, a track change, or a new session) begins a new wait.
 	SubtitlePageUnavailableReason = "subtitle_page_unavailable"
 
-	// subtitlePageRecoveryBudget bounds how long one page may wait for the
-	// progressive artifact. It is not the page's extract budget (that stays
-	// where it is); it covers the artifact's own from-zero demux, which is what
-	// a page far into the file waits on. A 4K remux measured ~8x realtime on the
-	// relay this was diagnosed on, so pages a few minutes in land well inside it.
+	// subtitlePageRecoveryBudget bounds how long one session's page may wait
+	// for the progressive artifact. It is not the page's extract budget (that
+	// stays where it is); it covers the artifact's own from-zero demux, which
+	// is what a page far into the file waits on. A 4K remux measured ~8x
+	// realtime on the relay this was diagnosed on, so pages a few minutes in
+	// land well inside it.
 	//
 	// The budget is not what a deep page needs on a slow relay: the same 4K
 	// identity measured about 1x realtime (1-2 MB of .sup in 95 s), so a page
@@ -47,7 +48,7 @@ const (
 
 	// subtitlePageReachMargin is how far past the remaining wait the fill's
 	// measured reach must fall before the page is answered finally. A fill whose
-	// rate would arrive at 1.5x the remaining budget may speed up (the
+	// rate would arrive at twice the remaining budget may speed up (the
 	// transcode competing for the relay pauses), so only a shortfall this wide
 	// is a verdict.
 	subtitlePageReachMargin = 2.0
@@ -181,8 +182,8 @@ func (c *SubtitleCache) pageRecoveryNow() time.Time {
 	return time.Now()
 }
 
-// notePageRecovery updates one track's wait entry and reports how long it has
-// waited, whether this is the first refusal of that wait, and whether the
+// notePageRecovery updates one session-and-track wait entry and reports how long
+// it has waited, whether this is the first refusal of that wait, and whether the
 // artifact has stopped advancing or has been measured too slow to reach the page
 // inside the wait still left.
 //
