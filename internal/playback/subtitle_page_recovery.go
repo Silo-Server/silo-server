@@ -107,9 +107,9 @@ type subtitlePageRecovery struct {
 	// the next page during a retry, and starts a new wait (see pageWaitSeek).
 	page float64
 	// waiting holds the pages of this session still waiting on the track, keyed
-	// by start, with the time each last refused. A final answer reads the other
-	// sessions' entries to decide whether the fill it cancels still has a page
-	// to serve.
+	// by start, with the time each last refused. Each page's own first refusal
+	// is the term the reach projection measures against, so a re-anchored page
+	// inherits the session's budget without inheriting its ladder.
 	waiting map[float64]subtitlePageWait
 }
 
@@ -148,11 +148,19 @@ func (c *SubtitleCache) pageRecoveryRefusal(opts StreamExtractOpts, start, cover
 			logKeyComponent, logValuePlayback,
 			"start", start, "covered", covered, "waited", wait,
 			"budget", c.pageRecoveryBudget(), "artifact_seconds_per_second", reachRate)
-		// Nobody is going to ask for this page again, so the fill is now a
-		// read for no one. Cancel it unless another page of the track is still
-		// waiting on it; production's answered page ran on to 95 s and 3.1 MB
-		// past its final answer.
-		c.cancelFillAfterFinalPage(opts, start)
+		// The fill is deliberately *not* canceled here. This answer is a
+		// refusal, so the page's own bytes were never delivered: the fill is
+		// still the only thing that can produce them, and its artifact and
+		// watermark are the only copy of the progress it has made. Canceling it
+		// is what made a deep page restart from byte zero on every request —
+		// production abandoned the file's fill at 15 s and again at 95 s, each
+		// answering the same refusal, neither reaching the page.
+		//
+		// Its extent is therefore the playback session that is waiting on it,
+		// not this page's wait: the handler's abort ticker stops it on a seek or
+		// when the session ends, and the cache's own warm timeout
+		// (subtitleCacheWarmTimeout) is the outer bound. A later page of the
+		// same track inherits the progress, which is the whole point.
 		return &SubtitleExtractionUnavailableError{
 			Reason:       SubtitlePageUnavailableReason,
 			Start:        start,
@@ -232,10 +240,9 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 		}
 		return 0, true, false, 0
 	}
-	// Record this page as waiting before the verdicts, so a final answer in this
-	// same call can tell whether any other page still needs the fill. The page
-	// keeps its own first refusal even when the session's wait opened earlier:
-	// both the client's ladder and the reach rate are measured from there.
+	// Record this page as waiting before the verdicts. The page keeps its own
+	// first refusal even when the session's wait opened earlier: both the
+	// client's ladder and the reach rate are measured from there.
 	page, pageSeen := entry.waiting[start]
 	if !pageSeen {
 		page = subtitlePageWait{first: now, firstCover: covered}
@@ -327,74 +334,14 @@ func pageReachVerdict(elapsed time.Duration, previouslyCovered, covered, start f
 }
 
 // pruneWaitingLocked forgets pages that have stopped asking. A page's own
-// ladder is 75 s: a position that has not refused within it is not waiting any
-// more, so its fill must not be kept alive on its behalf. Caller holds
-// pageWaitMu.
+// ladder is 75 s: a position that has not refused within it is not the page the
+// client is waiting on any more, so keeping it would only make the reach
+// projection measure an abandoned position. Caller holds pageWaitMu.
 func (r *subtitlePageRecovery) pruneWaitingLocked(now time.Time) {
 	for position, wait := range r.waiting {
 		if now.Sub(wait.first) > subtitlePageClientWaitBudget {
 			delete(r.waiting, position)
 		}
-	}
-}
-
-// cancelFillAfterFinalPage stops the fill this page was waiting on once the page
-// has its final answer, unless another playback session is still waiting on the
-// same track. The fill's remaining work cannot serve the answered page, and
-// production's answered page left it reading to 95 s and 3.1 MB for nobody.
-//
-// Answering the page also ends every other position the same session asked for
-// before it: a client waits on one page at a time, and its earlier re-anchored
-// positions were superseded by this answer. Leaving them in the set kept the
-// fill alive for a page nobody would ask for again (production ran a 1080 page's
-// fill to 00:52:29 for an abandoned 1200 position). The session's entry stays,
-// with no page waiting, so its next attempt still answers from the budget this
-// wait already spent instead of restarting it.
-func (c *SubtitleCache) cancelFillAfterFinalPage(opts StreamExtractOpts, start float64) {
-	fillKey, ok := c.pageRecoveryFillKey(opts)
-	if !ok {
-		return
-	}
-	key := pageRecoveryScopeKey(fillKey, opts.PageWaitScope)
-	now := c.pageRecoveryNow()
-	c.pageWaitMu.Lock()
-	if entry, seen := c.pageWaits[key]; seen {
-		delete(entry.waiting, start)
-		// Anything else this session still had waiting was superseded by the
-		// answer: the client has moved on from those requests.
-		entry.waiting = map[float64]subtitlePageWait{}
-		c.pageWaits[key] = entry
-	}
-	for otherKey, other := range c.pageWaits {
-		if otherKey == key || !strings.HasPrefix(otherKey, pageRecoveryFillPrefix(fillKey)) {
-			continue
-		}
-		other.pruneWaitingLocked(now)
-		if len(other.waiting) > 0 {
-			// Another session is still waiting on this track: the fill is its
-			// read, not this page's.
-			c.pageWaits[otherKey] = other
-			c.pageWaitMu.Unlock()
-			return
-		}
-		c.pageWaits[otherKey] = other
-	}
-	c.pageWaitMu.Unlock()
-	c.cancelTrackFill(fillKey)
-}
-
-// cancelTrackFill stops the full-track fill registered for key, if any. The
-// cause is the page-answered one rather than the page-preemption one: this fill
-// is finished, not yielding to a page that will hand it back.
-func (c *SubtitleCache) cancelTrackFill(key string) {
-	if c == nil || key == "" {
-		return
-	}
-	c.windowMu.Lock()
-	run := c.warmRuns[key]
-	c.windowMu.Unlock()
-	if run != nil {
-		run.cancel(errSubtitleFillPageAnswered)
 	}
 }
 
@@ -441,7 +388,7 @@ func (c *SubtitleCache) pageRecoveryKey(opts StreamExtractOpts, _ float64) (stri
 
 // pageRecoveryScopeKey scopes one track's wait to the playback session that
 // opened it. The fill key never contains a NUL byte, so the prefix scan in
-// clearPageRecovery and cancelFillAfterFinalPage cannot match another track.
+// clearPageRecovery cannot match another track.
 func pageRecoveryScopeKey(fillKey, scope string) string {
 	return pageRecoveryFillPrefix(fillKey) + scope
 }
@@ -459,10 +406,11 @@ func (c *SubtitleCache) pageRecoveryFillKey(opts StreamExtractOpts) (string, boo
 }
 
 // fillEndedFinal reports whether this track's fill ended, at or after since, for
-// a reason that is final for a page waiting on it: the fill spent the budget the
-// wait gave it, so the same read at the same rate cannot reach the page any
-// sooner. Transient ends (a provider failure, a session end, a yield) leave the
-// page retrying inside its own budget instead of turning them into a verdict.
+// a reason that is final for a page waiting on it: the fill ran out the budget it
+// was given (a caller's, or the cache's warm timeout), so the same read at the
+// same rate cannot reach the page any sooner. Transient ends (a provider
+// failure, a session end, a yield) leave the page retrying inside its own budget
+// instead of turning them into a verdict.
 func (c *SubtitleCache) fillEndedFinal(opts StreamExtractOpts, since time.Time) bool {
 	key, ok := c.pageRecoveryFillKey(opts)
 	if !ok {
@@ -472,25 +420,9 @@ func (c *SubtitleCache) fillEndedFinal(opts StreamExtractOpts, since time.Time) 
 }
 
 // subtitleFillEndPageBudgetSpent is the fill-end reason recorded when a
-// page-driven fill ran out the budget its waiter gave it.
+// page-driven fill ran out the budget it was given — the waiter's, or the
+// cache's warm timeout when the fill outlives the page's own wait.
 const subtitleFillEndPageBudgetSpent = "page_wait_budget_spent"
-
-// subtitleFillEndPageAnswered is the fill-end reason recorded when the page a
-// fill was serving got its final answer and nothing else was waiting on the
-// track: the fill is stopped instead of reading the artifact out for no one.
-const subtitleFillEndPageAnswered = "page_answered_finally"
-
-// errSubtitleFillPageAnswered cancels a full-track fill whose page has already
-// been answered. It is deliberately not ErrSubtitleWarmCanceled: that cause
-// means an admitted page took the pipe and the fill must resume afterwards,
-// while this one ends the fill for good.
-var errSubtitleFillPageAnswered = errors.New("subtitle fill ended: its page was answered finally")
-
-// SubtitlePageRecoveryBudget is the production wait budget for one refused
-// bitmap page. A caller that starts the fill the page is waiting on bounds that
-// fill with this (plus a little slack), so the fill ends when the wait does
-// instead of holding a warm slot for a page nobody is waiting on any more.
-func SubtitlePageRecoveryBudget() time.Duration { return subtitlePageRecoveryBudget }
 
 // prunePageRecoveryLocked drops entries that already waited past the budget this
 // cache applies. Their pages get a fresh, bounded wait the next time they ask.

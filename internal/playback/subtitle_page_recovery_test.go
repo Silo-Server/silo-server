@@ -19,12 +19,15 @@ func TestRefusedBitmapPageStartsOneRecoveryWarmAndRetryIsServed(t *testing.T) {
 	c, source := newTestCache(t)
 	opts := progressiveSUPOpts(source, 600, 120)
 	opts.DisableBackgroundWarm = true // the handler owns the fill for a virtual source
-	// An 18 GB container: this page's discarded prefix is priced far past the
-	// page budget before any read starts.
-	c.notePageReadRate(opts.CacheIdentity, 3_000_000)
+	// An 18 GB container over two hours reads ~2.5 MB/s, so this page's 120 s
+	// window is ~300 MB; the identity has been measured at 1 MB/s, which is
+	// 120 MB per page extract deadline. The window cannot fit, so the page is
+	// refused before its source read.
+	opts.SourceDurationSeconds = 7200
+	c.notePageReadRate(opts.CacheIdentity, 1_000_000)
 
 	extract := func(context.Context, StreamExtractOpts) error {
-		t.Error("the source was read for a page whose prefix is priced beyond the budget")
+		t.Error("the source was read for a window that cannot fit its extract deadline")
 		return nil
 	}
 
@@ -139,10 +142,11 @@ func TestStalledBitmapArtifactEndsThePageWaitOnlyWithNoFillLeft(t *testing.T) {
 	c, source := newTestCache(t)
 	opts := progressiveSUPOpts(source, 600, 120)
 	c.SetPageRecoveryBudgetForTest(time.Hour)
-	// The page's discarded prefix is priced beyond the budget at this observed
-	// read rate, so a request with nothing left to fill it is refused before it
-	// reads the source.
-	c.notePageReadRate(opts.CacheIdentity, 3_000_000)
+	// The page's window is priced beyond the budget at this observed read rate,
+	// so a request with nothing left to fill it is refused before it reads the
+	// source.
+	opts.SourceDurationSeconds = 7200
+	c.notePageReadRate(opts.CacheIdentity, 1_000_000)
 	now := time.Unix(1_700_000_000, 0)
 	c.pageWaitNow = func() time.Time { return now }
 

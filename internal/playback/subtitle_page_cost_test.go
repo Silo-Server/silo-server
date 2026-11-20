@@ -9,74 +9,152 @@ import (
 	"testing"
 )
 
-// A page's discarded prefix can never hold more than the whole container. A seek
-// past the end of a known-size source, or a size and bitrate that disagree, must
-// not price the page above the source and refuse a page it can serve.
-func TestBitmapPagePrefixIsClampedToTheKnownSourceSize(t *testing.T) {
+// A page's window can never hold more than the whole container. A window that
+// reaches past the end of a known-size source, or a bitrate that disagrees with
+// the declared size, must not price the page above the source and refuse a page
+// it can serve.
+func TestBitmapPageWindowIsClampedToTheKnownSourceSize(t *testing.T) {
 	cases := []struct {
 		name        string
 		size        int64
 		duration    float64
 		bitrateKbps int
 		seek        float64
+		window      float64
 	}{
 		{
-			name:     "seek past the end of the source",
+			// 3000 s + 4000 s runs past a 3600 s source: the span prices
+			// 4000 s x 58 kB/s = 233 MB, more container than exists.
+			name:     "window past the end of the source",
 			size:     200 << 20,
 			duration: 3600,
-			seek:     7200,
+			seek:     3000,
+			window:   4000,
 		},
 		{
+			// 28 Mbit/s over a 120 s window is 420 MB of a container declared
+			// to be 8 MB: the size is the evidence that the bitrate is wrong.
 			name:        "bitrate that disagrees with the declared size",
 			size:        8 << 20,
 			bitrateKbps: 28000,
 			seek:        1200,
+			window:      120,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c, source := newTestCache(t)
-			opts := progressiveSUPOpts(source, tc.seek, 120)
+			opts := progressiveSUPOpts(source, tc.seek, tc.window)
 			opts.SourceSizeBytes = tc.size
 			opts.SourceDurationSeconds = tc.duration
 			opts.SourceBitrateKbps = tc.bitrateKbps
 
-			prefixBytes, _, priced := opts.pagePrefixEstimate(0)
+			windowBytes, _, priced := opts.pageWindowEstimate(0)
 			if !priced {
 				t.Fatal("the page was not priced")
 			}
-			if prefixBytes != tc.size {
-				t.Fatalf("prefix = %d bytes, want the container's %d", prefixBytes, tc.size)
+			if windowBytes != tc.size {
+				t.Fatalf("window = %d bytes, want the container's %d", windowBytes, tc.size)
 			}
-			// Unclamped, each case prices above the budget and refuses a page
-			// the whole of this source can serve.
-			if refusal := c.pagePrefixRefusal(opts); refusal != nil {
+			if refusal := c.pageWindowRefusal(opts); refusal != nil {
 				t.Fatalf("page refused: %v", refusal)
 			}
 		})
 	}
 }
 
-// A page whose discarded container prefix is priced beyond the page budget must
-// be refused before the extract, not after it: the production pathology is the
-// wall clock of reading that prefix (88 s for a page at 3600 s), and a refusal
-// after the read has already paid it.
-func TestExpensiveBitmapPageIsRefusedBeforeItsExtract(t *testing.T) {
+// A fast link is not evidence about how many bytes a window holds. With the
+// container's byte rate unknown the page is unpriced and keeps its extract under
+// the unpriced read cap; pricing it from the link speed would price a 120 s
+// window at gigabytes and refuse it on the fastest link.
+func TestUnknownContainerRateIsNotPricedFromTheLinkSpeed(t *testing.T) {
 	c, source := newTestCache(t)
-	// 18 GB over two hours is ~2.5 MB/s, so the page at 3600 s would discard
-	// about 9 GB of container before reaching its own window.
+	opts := windowedSupOpts(source, 0, 600, 120)
+	opts.CacheIdentity = "virtual-unpriced"
+	opts.DisableBackgroundWarm = true
+	c.notePageReadRate(opts.CacheIdentity, 200<<20)
+
+	if _, _, priced := opts.pageWindowEstimate(200 << 20); priced {
+		t.Fatal("a window was priced from the link's read rate")
+	}
+	if c.pageWindowBeyondBudget(opts) {
+		t.Fatal("an unpriced window was refused")
+	}
+	if got := opts.pageReadBudget(); got != subtitlePageReadBudgetBytes {
+		t.Fatalf("unpriced page budget = %d, want %d", got, subtitlePageReadBudgetBytes)
+	}
+}
+
+// A bounded page is priced by the window it reads, not by the container prefix
+// in front of it. The extract carries an input seek to the page, and against a
+// source that honors Range that seek reads the window: a 120 s page at 3000 s
+// of a 102 MB cued MKV read 13.0 MB in total (5.9 MB probe+header, 3.4 MB first
+// cluster, 3.6 kB of cues, 5.8 MB at the seek offset) where the prefix scan the
+// old gate priced read 93.9 MB. Pricing the prefix refused every deep page of a
+// large source for a read it was never going to make.
+func TestDeepBitmapPagePricesItsWindowNotItsPrefix(t *testing.T) {
+	c, source := newTestCache(t)
+	// 18 GB over two hours is ~2.5 MB/s. The page at 3600 s would discard about
+	// 9 GB of container if it could not seek; its own window is 300 MB.
 	opts := progressiveSUPOpts(source, 3600, 120)
+	opts.SourceSizeBytes = 18 << 30
 	opts.SourceDurationSeconds = 7200
-	// A remote identity is warmed by its handler, not by the cache: no fill is
-	// running here, so the refusal is the pre-extract price and nothing else.
 	opts.DisableBackgroundWarm = true
 
-	extract := func(context.Context, StreamExtractOpts) error {
-		t.Error("the source was read for a page priced beyond its prefix budget")
-		return nil
+	if refusal := c.pageWindowRefusal(opts); refusal != nil {
+		t.Fatalf("deep page refused for a prefix it seeks past: %v", refusal)
+	}
+
+	// The command the serve builds seeks to the window and keeps its cues on the
+	// source timeline, which is what makes the window read the page and not the
+	// prefix.
+	args := streamExtractArgs(opts)
+	if !containsArgPair(args, "-ss", "3600.000") {
+		t.Fatalf("ffmpeg args %v carry no input seek to the page", args)
+	}
+	if !containsArg(args, "-copyts") {
+		t.Fatalf("ffmpeg args %v do not keep the window on the source timeline", args)
+	}
+
+	extracted := false
+	extract := func(_ context.Context, extractOpts StreamExtractOpts) error {
+		extracted = true
+		if extractOpts.SeekSeconds != 3600 || !extractOpts.AllowWindow {
+			t.Fatalf("extract seek=%v allow_window=%v, want the requested window", extractOpts.SeekSeconds, extractOpts.AllowWindow)
+		}
+		_, err := extractOpts.Writer.Write(pgsDisplaySetAt(3600))
+		return err
 	}
 	rec := httptest.NewRecorder()
-	err := c.ServeSUPExtract(rec, httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=3600&duration=120", nil), opts, extract)
+	if err := c.ServeSUPExtract(rec, httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=3600&duration=120", nil), opts, extract); err != nil {
+		t.Fatalf("serve deep page: %v", err)
+	}
+	if !extracted {
+		t.Fatal("the deep page was refused instead of extracted")
+	}
+	if rec.Body.Len() == 0 {
+		t.Fatal("the deep page produced no bytes")
+	}
+}
+
+// The refusal that remains is a page whose own window cannot be read inside one
+// page extract at the rate this identity reads at. That is a real cost, not an
+// assumption about a prefix.
+func TestBitmapPageWhoseWindowExceedsTheReadRateIsRefused(t *testing.T) {
+	c, source := newTestCache(t)
+	// 20 Mbit/s container: a 120 s window is 300 MB. The link has been measured
+	// at 2 MB/s, which is 240 MB per page extract deadline: this window does not
+	// fit.
+	opts := progressiveSUPOpts(source, 1800, 120)
+	opts.SourceBitrateKbps = 20000
+	opts.DisableBackgroundWarm = true
+	c.notePageReadRate(opts.CacheIdentity, 2<<20)
+
+	extract := func(context.Context, StreamExtractOpts) error {
+		t.Error("the source was read for a window that cannot fit its extract deadline")
+		return nil
+	}
+	err := c.ServeSUPExtract(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=1800&duration=120", nil), opts, extract)
 	var retry *SubtitleExtractionRetryError
 	if !errors.As(err, &retry) {
 		t.Fatalf("serve error = %v, want the retryable shape", err)
@@ -87,23 +165,64 @@ func TestExpensiveBitmapPageIsRefusedBeforeItsExtract(t *testing.T) {
 	if retry.RetryAfter <= 0 {
 		t.Fatalf("retry after = %s, want a positive delay the client can honor", retry.RetryAfter)
 	}
-	if rec.Body.Len() != 0 {
-		t.Fatalf("body = %d bytes, want none: the page was never produced", rec.Body.Len())
-	}
-	if got := c.inflightCount(); got != 0 {
-		t.Fatalf("in-flight fills = %d, want none: the refusal must not start work on its own", got)
-	}
 
 	// With the fill already running, the same page advertises how far the track
 	// is parsed, so the client can tell "not ready yet" from "unavailable".
 	fill := startProgressiveFill(t, c, opts, pgsDisplaySetAt(10), pgsDisplaySetAt(200))
 	defer fill.Discard()
-	err = c.ServeSUPExtract(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=3600&duration=120", nil), opts, extract)
+	err = c.ServeSUPExtract(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=1800&duration=120", nil), opts, extract)
 	if !errors.As(err, &retry) {
 		t.Fatalf("serve with a fill error = %v, want the retryable shape", err)
 	}
 	if retry.CoveredUntil != 200 {
 		t.Fatalf("covered_until = %v, want the artifact's watermark (200)", retry.CoveredUntil)
+	}
+}
+
+// A window that reaches over many pages is the same class of real cost: it is
+// one extract's read, and it is priced as such.
+func TestMultiPageBitmapWindowBeyondTheCeilingIsRefused(t *testing.T) {
+	c, source := newTestCache(t)
+	opts := progressiveSUPOpts(source, 1200, 900)
+	opts.SourceBitrateKbps = 20000
+	opts.DisableBackgroundWarm = true
+
+	if !c.pageWindowBeyondBudget(opts) {
+		t.Fatal("a 900 s window of a 20 Mbit/s source was priced as affordable")
+	}
+	err := c.ServeSUPExtract(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=1200&duration=900", nil), opts,
+		func(context.Context, StreamExtractOpts) error {
+			t.Error("the source was read for a nine-hundred second window")
+			return nil
+		})
+	var retry *SubtitleExtractionRetryError
+	if !errors.As(err, &retry) || retry.Reason != SubtitlePageTooCostlyReason {
+		t.Fatalf("serve error = %v, want the page-cost retryable shape", err)
+	}
+}
+
+// The observed read rate prices the page's own window, so the same page is
+// served when the link can read the window it actually asks for.
+func TestBitmapPageIsServedWhenTheLinkCanReadItsWindow(t *testing.T) {
+	c, source := newTestCache(t)
+	// 1 GB over two hours is ~139 kB/s, so a 120 s window is ~17 MB.
+	opts := progressiveSUPOpts(source, 1200, 120)
+	opts.SourceSizeBytes = 1 << 30
+	opts.SourceDurationSeconds = 7200
+	opts.DisableBackgroundWarm = true
+	c.notePageReadRate(opts.CacheIdentity, 1<<20)
+
+	extracted := false
+	extract := func(_ context.Context, extractOpts StreamExtractOpts) error {
+		extracted = true
+		_, writeErr := extractOpts.Writer.Write(pgsDisplaySetAt(1200))
+		return writeErr
+	}
+	if serveErr := c.ServeSUPExtract(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=1200&duration=120", nil), opts, extract); serveErr != nil {
+		t.Fatalf("serve = %v, want the page", serveErr)
+	}
+	if !extracted {
+		t.Fatal("the page was refused although its window reads in seconds at the observed rate")
 	}
 }
 
@@ -184,8 +303,8 @@ func TestBitmapPageRefusalCooldownServesItsOwnFill(t *testing.T) {
 	}
 }
 
-// The prefix budget must not refuse what it exists to spare: an opening page has
-// no discarded prefix, so it extracts exactly as before.
+// An opening page has no prefix, so its window prices exactly as it extracts:
+// it is never refused.
 func TestOpeningBitmapPageStillExtracts(t *testing.T) {
 	c, source := newTestCache(t)
 	opts := progressiveSUPOpts(source, 0, 120)
@@ -207,46 +326,6 @@ func TestOpeningBitmapPageStillExtracts(t *testing.T) {
 	}
 	if rec.Body.Len() == 0 {
 		t.Fatal("the opening page produced no bytes")
-	}
-}
-
-// A prefix under the byte cap can still be too slow: the estimate must use the
-// rate this identity has been observed to read at, so a page that would spend
-// most of its client fetch discarding the prefix is refused too.
-func TestSlowBitmapPageIsRefusedOnTheObservedReadRate(t *testing.T) {
-	c, source := newTestCache(t)
-	// 1 GB over two hours is ~139 kB/s, so the page at 1200 s discards ~166 MB:
-	// under the byte budget, and ~166 s of reading at the observed 1 MiB/s.
-	opts := progressiveSUPOpts(source, 1200, 120)
-	opts.SourceSizeBytes = 1 << 30
-	opts.SourceDurationSeconds = 7200
-	opts.DisableBackgroundWarm = true
-	c.notePageReadRate(opts.CacheIdentity, 1<<20)
-
-	extract := func(context.Context, StreamExtractOpts) error {
-		t.Error("the source was read for a page priced beyond its time budget")
-		return nil
-	}
-	err := c.ServeSUPExtract(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=1200&duration=120", nil), opts, extract)
-	var retry *SubtitleExtractionRetryError
-	if !errors.As(err, &retry) || retry.Reason != SubtitlePageTooCostlyReason {
-		t.Fatalf("serve error = %v, want the page-cost retryable shape", err)
-	}
-
-	// The same page at a rate the link actually sustains is served: the gate
-	// prices the link, not the page's offset.
-	c.notePageReadRate(opts.CacheIdentity, 64<<20)
-	extracted := false
-	extract = func(_ context.Context, extractOpts StreamExtractOpts) error {
-		extracted = true
-		_, writeErr := extractOpts.Writer.Write(pgsDisplaySetAt(1200))
-		return writeErr
-	}
-	if serveErr := c.ServeSUPExtract(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=1200&duration=120", nil), opts, extract); serveErr != nil {
-		t.Fatalf("serve at a fast rate = %v, want the page", serveErr)
-	}
-	if !extracted {
-		t.Fatal("the page was refused although its prefix reads in seconds at the observed rate")
 	}
 }
 
@@ -380,12 +459,16 @@ func TestProgressiveFillServesPagesWhenTheSourceSizeIsUnknown(t *testing.T) {
 	c, source := newTestCache(t)
 	opts := windowedSupOpts(source, 0, 1200, 120)
 	opts.CacheIdentity = "virtual-bitrate-only"
-	// ~28 Mbps is ~3.5 MB/s, so page 1200 would discard about 4 GB of container.
+	// ~28 Mbps is ~3.5 MB/s, so the 120 s window is 420 MB. The identity's reads
+	// have been measured at 3 MB/s, which is 360 MB per page extract deadline:
+	// the window does not fit, and the page is priced from the link rather than
+	// from a prefix.
 	opts.SourceBitrateKbps = 28000
 	opts.DisableBackgroundWarm = true
+	c.notePageReadRate(opts.CacheIdentity, 3<<20)
 
 	refused := func(context.Context, StreamExtractOpts) error {
-		t.Error("the source was read for a page priced from its bitrate alone")
+		t.Error("the source was read for a window that cannot fit its extract deadline")
 		return nil
 	}
 	err := c.ServeSUPExtract(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=1200&duration=120", nil), opts, refused)
@@ -432,4 +515,24 @@ func TestPageReadRateKeepsTheNewestSample(t *testing.T) {
 	if _, ok := c.pageReadRate("other"); ok {
 		t.Fatal("a rate leaked across identities")
 	}
+}
+
+// containsArg reports whether args carries flag as its own token.
+func containsArg(args []string, flag string) bool {
+	for _, arg := range args {
+		if arg == flag {
+			return true
+		}
+	}
+	return false
+}
+
+// containsArgPair reports whether args carries flag immediately followed by value.
+func containsArgPair(args []string, flag, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
 }

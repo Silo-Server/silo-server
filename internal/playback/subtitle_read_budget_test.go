@@ -53,9 +53,10 @@ func TestSubtitleReadBudgetWithoutCountersPasses(t *testing.T) {
 	}
 }
 
-// The cap exists for the relay prefix read a windowed bitmap page pays. A
-// whole-track read must read everything, an artifact-backed window reads a
-// local file, and a local source's prefix read is a disk read: none are capped.
+// The cap exists for a windowed bitmap page that turns out to read the
+// container prefix instead of its window. A whole-track read must read
+// everything, an artifact-backed window reads a local file, and a local
+// source's window read is a disk read: none are capped.
 func TestPageReadBudgetAppliesOnlyToRemoteBitmapWindows(t *testing.T) {
 	remote := StreamExtractOpts{
 		InputPath:       "relay",
@@ -66,8 +67,26 @@ func TestPageReadBudgetAppliesOnlyToRemoteBitmapWindows(t *testing.T) {
 		SeekSeconds:     600,
 		DurationSeconds: 120,
 	}
-	if got := remote.pageReadBudget(); got != subtitlePageReadBudgetBytes {
-		t.Fatalf("remote bitmap page budget = %d, want %d", got, subtitlePageReadBudgetBytes)
+	// A 120 s page of a 20 Mbit/s source is ~300 MB: its cap is the window, the
+	// fixed opening cost and one overshoot window, so a scan of the container
+	// prefix that reaches for a page at 600 s passes it long before arriving.
+	remote.SourceBitrateKbps = 20000
+	const windowBytes = int64(120 * 20000 * 1000 / 8)
+	wantBudget := subtitlePageReadAllowanceBytes + subtitlePageReadOvershootFactor*windowBytes
+	if got := remote.pageReadBudget(); got != wantBudget {
+		t.Fatalf("remote bitmap page budget = %d, want the window's %d", got, wantBudget)
+	}
+	if wantBudget >= int64(600*20000*1000/8) {
+		t.Fatalf("window budget %d is not below the 600 s prefix (%d): the cap could not tell them apart",
+			wantBudget, int64(600*20000*1000/8))
+	}
+	// A window nothing can price keeps the old whole-page bound rather than a
+	// looser one: an unpriced read must not gain room just because its size is
+	// unknown.
+	unpriced := remote
+	unpriced.SourceBitrateKbps = 0
+	if got := unpriced.pageReadBudget(); got != subtitlePageReadBudgetBytes {
+		t.Fatalf("unpriced page budget = %d, want the pre-existing %d", got, subtitlePageReadBudgetBytes)
 	}
 	for _, tc := range []struct {
 		name   string

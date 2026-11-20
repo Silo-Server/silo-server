@@ -32,20 +32,20 @@ type StreamExtractOpts struct {
 	CacheIdentity string
 	// SourceSizeBytes is the source container's size when the caller knows it
 	// (a catalog row's FileSize). It is 0 when unknown, which a virtual row's
-	// size commonly is. It decides only whether a bounded bitmap page is worth
-	// extracting directly: a container large enough that the prefix read costs
-	// a page its whole deadline is served from the track's progressive artifact
-	// instead (see subtitle_progressive_sup.go).
+	// size commonly is. It only prices a bounded bitmap page: with the runtime it
+	// gives the container's average byte rate, which sizes the page's own window
+	// (see subtitle_page_cost.go). A window that cannot be read inside one page
+	// extract is refused and the track's progressive artifact answers instead.
 	SourceSizeBytes int64
 	// SourceDurationSeconds is the source's runtime in seconds, when the caller
 	// knows it (a catalog row's Duration). Together with SourceSizeBytes it
-	// prices the container's average byte rate, which is what a bounded bitmap
-	// page's discarded prefix costs (see subtitle_page_cost.go). Zero is an
-	// unknown runtime and simply leaves the prefix to the declared bitrate.
+	// prices the container's average byte rate, which sizes a bounded bitmap
+	// page's window (see subtitle_page_cost.go). Zero is an unknown runtime and
+	// simply leaves the rate to the declared bitrate.
 	SourceDurationSeconds float64
 	// SourceBitrateKbps is the container's average bitrate in kbps as a probe
 	// recorded it (a catalog row's Bitrate). It is the fallback byte rate for
-	// pricing a bitmap page's prefix when the size and runtime are not both
+	// pricing a bitmap page's window when the size and runtime are not both
 	// known. Zero is unknown.
 	SourceBitrateKbps int
 	// NoteSourceReadRate, when set, receives the byte rate this extract read its
