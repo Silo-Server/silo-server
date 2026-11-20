@@ -466,14 +466,23 @@ export default function AdminRecommendations() {
     setCollapsed((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
+  // A draft for a key the environment took over since it was typed is
+  // ignored wherever the page reads it, so the page and the connection check
+  // use the environment's value.
+  function draftFor(key: string): string | undefined {
+    return sensitiveData?.managed_by_env_vars?.[key] ? undefined : localValues[key];
+  }
+
   function buildEmbeddingCheckRequest(
     serverSettings: Record<string, string>,
   ): AdminSettingsConnectionCheckRequest {
     return {
       values: Object.fromEntries(
-        EMBEDDING_CHECK_KEYS.map((key) => [key, localValues[key] ?? serverSettings[key] ?? ""]),
+        EMBEDDING_CHECK_KEYS.map((key) => [key, draftFor(key) ?? serverSettings[key] ?? ""]),
       ),
-      dirty_keys: EMBEDDING_CHECK_KEYS.filter((key) => dirtyKeys.has(key)),
+      dirty_keys: EMBEDDING_CHECK_KEYS.filter(
+        (key) => dirtyKeys.has(key) && draftFor(key) !== undefined,
+      ),
     };
   }
 
@@ -519,9 +528,8 @@ export default function AdminRecommendations() {
     serverSettings["recommendations.embedding_lock"],
   );
   const embeddingProviderID =
-    localValues[EMBEDDING_PROVIDER_KEY] ?? serverSettings[EMBEDDING_PROVIDER_KEY] ?? "";
-  const embeddingModel =
-    localValues[EMBEDDING_MODEL_KEY] ?? serverSettings[EMBEDDING_MODEL_KEY] ?? "";
+    draftFor(EMBEDDING_PROVIDER_KEY) ?? serverSettings[EMBEDDING_PROVIDER_KEY] ?? "";
+  const embeddingModel = draftFor(EMBEDDING_MODEL_KEY) ?? serverSettings[EMBEDDING_MODEL_KEY] ?? "";
 
   return (
     <div className="space-y-6 pb-4 sm:pb-6">

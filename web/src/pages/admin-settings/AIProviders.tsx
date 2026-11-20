@@ -214,7 +214,10 @@ function ProviderRow({
       primaryAction={{ label: t("web.admin.settings.ai.tile.manage"), onClick: onExpand }}
     >
       {expanded && type ? (
+        // Remounted when the deployment takes the provider over or releases
+        // it, so no draft or test result from before carries across.
         <ProviderPanel
+          key={provider.managed_by_env_var ?? ""}
           provider={provider}
           type={type}
           initial={draftOf(provider)}
@@ -461,14 +464,14 @@ function ProviderPanel({
   const locked = managedByEnv != null;
   // A locked panel shows and tests the stored provider, including one the
   // deployment took over while an admin had edits open here.
-  const draft = locked && provider ? draftOf(provider) : editDraft;
+  const draft = locked ? initial : editDraft;
   const keyCleared = draft.api_key === "" && provider?.has_api_key === true;
-  const edited =
+  const dirty =
+    !provider ||
     draft.name !== initial.name ||
     draft.base_url !== initial.base_url ||
     draft.api_key !== undefined ||
     draft.capabilities.join() !== initial.capabilities.join();
-  const dirty = !provider || (!locked && edited);
   const busy = create.isPending || update.isPending || remove.isPending;
   // The server refuses to carry a saved key to another host unasked.
   const keyMustBeRetyped =

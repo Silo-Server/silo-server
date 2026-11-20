@@ -72,7 +72,7 @@ func ApplyDeclaredAIProviders(raw string, declared []AIProvider, managedBy strin
 			// As for an admin's edit: the models bound to a provider are its
 			// type's, so a new type takes a new id.
 			if stored := registry.Providers[i]; stored.Type != provider.Type {
-				return "", fmt.Errorf("%s: a provider's type cannot change (it is %s, declared as %s); declare the %s provider under a new id",
+				return "", fmt.Errorf("%s: a provider's type cannot change (it is %s, declared as %s); declare the %s provider under a new id with a name of its own",
 					provider.ID, stored.Type, provider.Type, provider.Type)
 			}
 			registry.Providers[i] = provider
@@ -87,6 +87,11 @@ func ApplyDeclaredAIProviders(raw string, declared []AIProvider, managedBy strin
 }
 
 func nameTakenError(declared, stored AIProvider) error {
+	// Taking the other provider over is a way out only when it keeps its type.
+	if stored.Type != declared.Type {
+		return fmt.Errorf("%s: another AI provider, %s, is already named %q; give the declared provider a name of its own",
+			declared.ID, stored.ID, stored.Name)
+	}
 	return fmt.Errorf("%s: another AI provider, %s, is already named %q; give the declared provider a name of its own, or declare %s to take that provider over",
 		declared.ID, stored.ID, stored.Name, stored.ID)
 }
