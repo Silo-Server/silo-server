@@ -823,10 +823,51 @@ describe("importPage", () => {
     expect(apiAtLimit.save).not.toHaveBeenCalled();
   });
 
+  it("saves the page with the preview's hides when the fresh baseline read fails", async () => {
+    const api = {
+      ...fakeApi([{}]),
+      getBaseline: vi.fn(async () => {
+        throw new Error("unavailable");
+      }),
+    };
+
+    await importPage(page, true, api, sequentialIds(), ["s-collections"]);
+    expect(api.save).toHaveBeenCalledWith([
+      { id: "new-custom", user_section_type: "hidden_gems" },
+      { id: "new-1", section_id: "s-collections", hidden: true },
+    ]);
+  });
+
+  it("skips the save on a hide-only page when every checked row is gone", async () => {
+    const api = {
+      ...fakeApi([]),
+      getBaseline: vi.fn(async () => ({
+        section_tokens: [],
+        active_section_tokens: [],
+        visible_sections: [],
+      })),
+    };
+
+    await importPage(
+      { scope: "home", label: "Home", overrides: [], replaceExisting: false },
+      true,
+      api,
+      sequentialIds(),
+      ["s-gone"],
+    );
+    expect(api.save).not.toHaveBeenCalled();
+  });
+
   it("preserves existing destination overrides when hiding rows on a page whose file overrides were all skipped", () => {
     const existing = [
       stored({ id: "saved-1", section_id: "admin-1", position: 0 }),
-      stored({ id: "saved-col", section_id: "s-collections", title: "My Collections" }),
+      stored({
+        id: "saved-col",
+        section_id: "s-collections",
+        title: "My Collections",
+        position: 2,
+      }),
+      stored({ id: "saved-gone", section_id: "s-removed", removed: true }),
       stored({ id: "saved-custom", user_section_type: "hidden_gems", is_user_added: true }),
     ];
 
@@ -836,12 +877,19 @@ describe("importPage", () => {
         existing,
         true,
         sequentialIds(),
-        ["s-collections", "s-new"],
+        ["s-collections", "s-removed", "s-new"],
       ),
     ).toEqual([
       { id: "saved-1", section_id: "admin-1", position: 0 },
+      {
+        id: "saved-col",
+        section_id: "s-collections",
+        title: "My Collections",
+        position: 2,
+        hidden: true,
+      },
+      { id: "saved-gone", section_id: "s-removed", removed: true },
       { id: "saved-custom", user_section_type: "hidden_gems", is_user_added: true },
-      { id: "saved-col", section_id: "s-collections", hidden: true },
       { id: "new-1", section_id: "s-new", hidden: true },
     ]);
   });

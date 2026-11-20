@@ -674,16 +674,19 @@ export function mergeImportedPage(
   }
 
   if (page.replaceExisting === false) {
+    // Hiding a row keeps the profile's saved changes to it, so showing it
+    // again later brings them back. A removed row stays removed.
     const hideSet = new Set(hideSectionIds.filter(Boolean));
-    const merged: SectionOverrideWrite[] = existing
-      .filter((override) => !override.section_id || !hideSet.has(override.section_id))
-      .map(keepExisting);
+    const merged: SectionOverrideWrite[] = existing.map((override) => {
+      const kept = keepExisting(override);
+      if (!override.section_id || !hideSet.has(override.section_id) || override.removed) {
+        return kept;
+      }
+      return { ...kept, hidden: true };
+    });
     for (const sectionId of hideSet) {
-      merged.push({
-        id: existingBySection.get(sectionId)?.id || newId(),
-        section_id: sectionId,
-        hidden: true,
-      });
+      if (existingBySection.has(sectionId)) continue;
+      merged.push({ id: newId(), section_id: sectionId, hidden: true });
     }
     return merged;
   }
@@ -734,10 +737,16 @@ export async function importPage(
 ): Promise<void> {
   let effectiveHideIds = sameServer ? hideSectionIds : [];
   if (effectiveHideIds.length > 0 && api.getBaseline) {
-    const baseline = await api.getBaseline();
-    const visibleIds = new Set(baseline.visible_sections.map((row) => row.id));
-    effectiveHideIds = effectiveHideIds.filter((id) => visibleIds.has(id));
+    // The fresh read only drops rows removed since the preview; when it
+    // fails, the preview's choices stand rather than failing the page.
+    const baseline = await api.getBaseline().catch(() => null);
+    if (baseline) {
+      const visibleIds = new Set(baseline.visible_sections.map((row) => row.id));
+      effectiveHideIds = effectiveHideIds.filter((id) => visibleIds.has(id));
+    }
   }
+  // A hide-only page with nothing left to hide has nothing to save.
+  if (page.replaceExisting === false && effectiveHideIds.length === 0) return;
   const overrides = mergeImportedPage(
     page,
     await api.listSaved(),

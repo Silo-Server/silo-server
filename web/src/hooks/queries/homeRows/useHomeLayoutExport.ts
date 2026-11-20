@@ -13,10 +13,10 @@ import {
 import { SETTING_KEYS } from "@/lib/settingsContract";
 
 const HOME_PREFERENCE_KEYS = [SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS] as const;
-// Page reads during export run this many at a time.
+// Page reads during export and import run this many at a time.
 const READ_BATCH = 4;
 
-async function readInBatches<T, R>(items: readonly T[], read: (item: T) => Promise<R>) {
+export async function readInBatches<T, R>(items: readonly T[], read: (item: T) => Promise<R>) {
   const results: R[] = [];
   for (let start = 0; start < items.length; start += READ_BATCH) {
     results.push(...(await Promise.all(items.slice(start, start + READ_BATCH).map(read))));

@@ -19,6 +19,7 @@ import { v2 } from "@/api/v2/request";
 import {
   layoutPageQuery as pageQuery,
   layoutProblemMessage as problemMessage,
+  readInBatches,
 } from "@/hooks/queries/homeRows/useHomeLayoutExport";
 import { sectionKeys } from "@/hooks/queries/keys";
 import { invalidateSettingValueQueries } from "@/hooks/queries/settingValues";
@@ -192,17 +193,22 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
   const sameServerPageKeys = sameServerPages.map(homeLayoutPageKey);
   const baselinesQuery = useQuery({
     queryKey: ["home-layout-import", "section-baselines", ...sameServerPageKeys],
+    // A page whose baseline can't be read offers no rows to hide and imports
+    // as it did before baselines existed, so one failed read never blocks the
+    // rest of the import.
     queryFn: async () => {
-      const entries = await Promise.all(
-        sameServerPages.map(async (page) => {
-          const baseline = await v2("GET /api/v2/profile/sections/baseline", {
-            query: pageQuery(page.scope, page.libraryId),
-            profileContext: profileContext ?? undefined,
-          });
-          return [homeLayoutPageKey(page), baseline] as const;
-        }),
-      );
-      return new Map<string, ProfileSectionBaseline>(entries);
+      const entries = await readInBatches(sameServerPages, async (page) => {
+        const baseline = await v2("GET /api/v2/profile/sections/baseline", {
+          query: pageQuery(page.scope, page.libraryId),
+          profileContext: profileContext ?? undefined,
+        }).catch(() => null);
+        return [homeLayoutPageKey(page), baseline] as const;
+      });
+      const baselines = new Map<string, ProfileSectionBaseline>();
+      for (const [key, baseline] of entries) {
+        if (baseline) baselines.set(key, baseline);
+      }
+      return baselines;
     },
     enabled: Boolean(plan?.sameServer && sameServerPages.length > 0),
     gcTime: 0,
@@ -217,8 +223,7 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
     identityQuery.isError ||
     (refs.personalCollections && collectionsQuery.isError) ||
     (refs.profiles && profilesQuery.isError) ||
-    recipeCatalogQuery.isError ||
-    (needsBaselines && baselinesQuery.isError);
+    recipeCatalogQuery.isError;
 
   const { hideOptions, hasUnmatchedBaseline } = useMemo(() => {
     if (!plan?.sameServer || !baselinesQuery.data) {
@@ -277,6 +282,8 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
       checkedUnappliedPages.length > 0 ||
       plan.hideWatchedItems !== undefined),
   );
+  // Import applies only what the preview shows, so it waits for the preview.
+  const canImport = hasChanges && targetReady && !targetError;
 
   async function handleFile(file: File) {
     if (file.size > HOME_LAYOUT_MAX_LENGTH) {
@@ -291,7 +298,7 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
   }
 
   async function handleImport() {
-    if (!plan || !hasChanges) return;
+    if (!plan || !canImport) return;
     // The plan was checked against this profile's libraries and collections.
     if (!profileContext || !isCapturedProfileAuthorityActive(profileContext)) {
       toast.error(t("web.home.layout.profileChanged"));
@@ -430,7 +437,7 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
           <Button variant="outline" onClick={onClose} disabled={applying}>
             {t("common.cancel")}
           </Button>
-          <Button onClick={() => void handleImport()} disabled={!hasChanges || applying}>
+          <Button onClick={() => void handleImport()} disabled={!canImport || applying}>
             {applying ? t("web.home.layout.importing") : t("web.home.layout.import")}
           </Button>
         </DialogFooter>

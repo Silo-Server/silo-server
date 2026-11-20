@@ -148,4 +148,42 @@ describe("HomeLayoutImportDialog", () => {
       ],
     });
   });
+
+  it("still imports the file's rows when the server baseline can't be read", async () => {
+    const answer = mocks.request.getMockImplementation()!;
+    mocks.request.mockImplementation(async (operation: string, args?: unknown) => {
+      if (operation === "GET /api/v2/profile/sections/baseline") throw new Error("unavailable");
+      return answer(operation, args);
+    });
+    renderDialog();
+
+    const file = {
+      format: "silo-home-layout",
+      version: 1,
+      exported_at: "2026-11-10T00:00:00.000Z",
+      server_id: "srv-1",
+      libraries: [],
+      pages: [
+        {
+          scope: "home",
+          overrides: [{ section_id: "default-continue-watching", position: 1 }],
+          server_section_tokens: ["tok-continue"],
+        },
+      ],
+    };
+    fireEvent.change(screen.getByLabelText("Layout file"), {
+      target: { value: JSON.stringify(file) },
+    });
+
+    const importButton = await screen.findByRole("button", { name: "Import" });
+    await waitFor(() => expect(importButton).toBeEnabled());
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    fireEvent.click(importButton);
+    await waitFor(() => expect(mocks.savedPuts).toHaveLength(1));
+    expect(mocks.savedPuts[0]?.body).toEqual({
+      overrides: [
+        expect.objectContaining({ section_id: "default-continue-watching", position: 1 }),
+      ],
+    });
+  });
 });
