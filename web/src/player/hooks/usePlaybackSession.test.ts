@@ -5733,6 +5733,87 @@ describe("usePlaybackSession dead-session recovery", () => {
   });
 });
 
+describe("usePlaybackSession seek reanchor autoplay", () => {
+  it("keeps the replacement playing when the old transport pauses before adoption", async () => {
+    let releaseReplan: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: fixturePlanV3({ session_id: "session-1" }),
+        });
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        return new Promise<Response>((resolve) => {
+          releaseReplan = resolve;
+        });
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // The viewer is playing; the reanchor is answered after the old transport
+    // has already been torn down and reported the pause that teardown forces.
+    act(() => {
+      result.current.updatePlaybackState(120, true);
+      result.current.reportFirstFrame();
+    });
+    expect(result.current.shouldAutoPlay).toBe(true);
+
+    let seek: Promise<boolean> | undefined;
+    act(() => {
+      seek = result.current.reanchorSeek(900);
+    });
+    await waitFor(() => expect(releaseReplan).not.toBeNull());
+    act(() => result.current.updatePlaybackState(120, false));
+
+    await act(async () => {
+      releaseReplan!(
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: fixturePlanV3({
+            session_id: "session-1",
+            plan_id: "plan:seek-autoplay0001",
+            plan_attempt_key: "v3:seek-autoplay0001",
+            stream: {
+              ...fixturePlanV3().stream,
+              url: "/stream/session-1?seek=900",
+            },
+            timeline: {
+              ...fixturePlanV3().timeline,
+              source_start_seconds: 900,
+              player_start_seconds: 0,
+              stream_origin_seconds: 900,
+              timeline_offset_seconds: 900,
+            },
+          }),
+        }),
+      );
+      await seek;
+    });
+
+    // The teardown's pause is not the viewer's intent: the replacement must
+    // autoplay, or the viewer gets a frozen frame that claims to be playing.
+    expect(result.current.shouldAutoPlay).toBe(true);
+    unmount();
+  });
+});
+
 describe("usePlaybackSession seek reanchor evidence recovery", () => {
   const SEEK_EVIDENCE_MESSAGE =
     "The frozen playback source could not be reopened; start a new playback attempt.";

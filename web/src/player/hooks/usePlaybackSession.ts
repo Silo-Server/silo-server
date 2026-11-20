@@ -2125,6 +2125,13 @@ export function usePlaybackSession(
       decision: DecisionResponseV3,
       initialSubtitleFailure?: PlaybackSessionErrorState | null,
       forceTransportBump?: boolean,
+      /**
+       * The viewer's play intent sampled when the replan was sent. A transport
+       * that is torn down before its replacement is adopted reports a pause
+       * that is not the viewer's, so reading the element at adoption time can
+       * hand a seek's replacement `shouldAutoPlay=false` and leave it frozen.
+       */
+      autoplayIntent?: boolean,
     ): boolean => {
       serverFeaturesRef.current = decision.server_features;
       const plan = decision.playback_plan;
@@ -2157,7 +2164,8 @@ export function usePlaybackSession(
       // plays only if the viewer was playing when the connection dropped; the
       // element has been paused since, so its reported state says nothing.
       if (reconnectRef.current.active) playbackPlayingRef.current = reconnectRef.current.resume;
-      planAutoPlayRef.current = playbackPlayingRef.current;
+      const playIntent = autoplayIntent ?? playbackPlayingRef.current;
+      planAutoPlayRef.current = playIntent;
       planTransportShownRef.current = false;
       const attemptId = playbackAttemptIdRef.current;
       if (prevPlan !== null && planWasReplaced(prevPlan, plan) && attemptId) {
@@ -2254,7 +2262,7 @@ export function usePlaybackSession(
           transportRevisionRef.current,
           replayRevisionRef.current,
           qualityRef.current,
-          playbackPlayingRef.current,
+          playIntent,
           current.autoFallback,
           config,
         );
@@ -3169,6 +3177,11 @@ export function usePlaybackSession(
       const playIntent = planTransportShownRef.current
         ? playbackPlayingRef.current
         : planAutoPlayRef.current;
+      // A seek replacement is measured against the element's live intent, not
+      // the plan's start intent: the viewer may have paused since the plan was
+      // adopted. Sampling it now, before the request, keeps the teardown pause
+      // that a generation fence or playlist reload forces out of the answer.
+      const seekAutoplayIntent = playbackPlayingRef.current;
       replanInFlightRef.current = true;
       beginAdoption(loadSequence);
       const isQualityReplan =
@@ -3236,6 +3249,14 @@ export function usePlaybackSession(
           decision,
           options.operation === "track_change" && options.subtitle !== undefined ? null : undefined,
           isFailureRecovery || reconnect,
+          // The transport a seek replaces can be torn down (a generation
+          // fence, a playlist reload, the element's own load) before this
+          // adoption runs. Its pause is not the viewer's intent, so a seek
+          // replacement keeps the intent sampled when the seek was sent
+          // instead of reading the element now. Other replans keep their own
+          // semantics: an output or track change reports the live pause, and
+          // a reconnect carries its own resume flag.
+          options.operation === "seek_reanchor" ? seekAutoplayIntent : undefined,
         );
         if (
           subtitlePickKey !== null &&

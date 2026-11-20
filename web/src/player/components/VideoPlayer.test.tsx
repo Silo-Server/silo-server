@@ -4400,6 +4400,7 @@ describe("VideoPlayer source timeline", () => {
       act(() => controls.current!.onSeek(690));
       expect(onReanchorSeek).not.toHaveBeenCalled();
       hlsJS.loadSource.mockClear();
+      hlsJS.stopLoad.mockClear();
 
       const staleSegment = {
         fatal: true,
@@ -4411,9 +4412,20 @@ describe("VideoPlayer source timeline", () => {
       act(() => hlsJS.latest?.emit("error", staleSegment));
 
       await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(690));
+      // hls.js queues its own retry of the fenced fragment on the next tick.
+      // One 412 must stop the load, so that URL is requested exactly once.
+      expect(hlsJS.stopLoad).toHaveBeenCalledOnce();
+      expect(hlsJS.startLoad).not.toHaveBeenCalled();
       // The dead playlist was not refetched: its startPosition would have
       // clamped the seek to the new generation's start.
       expect(hlsJS.loadSource).not.toHaveBeenCalled();
+
+      // A retry that was already in flight still reports the same fence. It
+      // must not issue a second reanchor or touch the dead playlist.
+      act(() => hlsJS.latest?.emit("error", staleSegment));
+      expect(onReanchorSeek).toHaveBeenCalledTimes(1);
+      expect(hlsJS.loadSource).not.toHaveBeenCalled();
+      expect(hlsJS.startLoad).not.toHaveBeenCalled();
     });
 
     it("reloads the playlist for a fenced segment during playback", async () => {
@@ -4452,6 +4464,104 @@ describe("VideoPlayer source timeline", () => {
       // The element's own clock, not the media timeline: a start position of
       // 94 would ask hls.js for a position past the refetched window.
       expect((instance.config as { startPosition?: number }).startPosition).toBe(0);
+    });
+
+    // A transport a reanchor attaches starts on the old frame while it loads.
+    // It must not inherit the torn-down transport's "playing", and it must
+    // autoplay once it can: a paused replacement that still shows the Pause
+    // control is the worst state, because nothing moves and the viewer has no
+    // reason to press anything.
+    it("autoplays a transport attached by a reanchor and stops claiming to play before it", async () => {
+      hlsJS.supported = true;
+      vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+      const onReanchorSeek = vi.fn(() => true);
+      const reported: boolean[] = [];
+      const { container, rerenderPlayer } = renderPlayer({
+        plan: anchoredPlan,
+        onReanchorSeek,
+        onPlaybackStateChange: (state) => reported.push(state.playing),
+      });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.play(video);
+      expect(reported.at(-1)).toBe(true);
+
+      // A target this generation cannot seek to goes back to the server.
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 0, start: () => 0, end: () => 0 },
+      });
+      act(() => controls.current!.onSeek(690));
+      expect(onReanchorSeek).toHaveBeenCalledWith(690);
+
+      const play = vi.mocked(HTMLMediaElement.prototype.play);
+      play.mockClear();
+      newStream(rerenderPlayer, anchoredPlan);
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalledOnce());
+
+      // The replacement has no media yet: the controls follow the element, not
+      // the transport that was torn down.
+      expect(reported.at(-1)).toBe(false);
+      expect(play).not.toHaveBeenCalled();
+
+      markReady(video);
+      await act(async () => fireEvent.canPlay(video));
+      expect(play).toHaveBeenCalledOnce();
+
+      fireEvent.play(video);
+      fireFrameTimeUpdate(video);
+      expect(reported.at(-1)).toBe(true);
+    });
+
+    // A seek the server refuses with a terminal is not a silent no-op: the
+    // viewer gets the same retry card a refused start shows, and the controls
+    // sit on the position they were at, not on the target that never played.
+    it("offers a retry for a refused seek and restores the position", async () => {
+      hlsJS.supported = true;
+      vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+      const onReanchorSeek = vi.fn(() => new Promise<boolean>(() => {}));
+      const onRestartPlayback = vi.fn();
+      const { container, rerenderPlayer } = renderPlayer({
+        plan: anchoredPlan,
+        onReanchorSeek,
+        onRestartPlayback,
+      });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+      expect(controls.current!.currentTime).toBe(94);
+
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 0, start: () => 0, end: () => 0 },
+      });
+      act(() => {
+        void controls.current!.onSeek(690);
+      });
+      expect(onReanchorSeek).toHaveBeenCalledWith(690);
+      await waitFor(() => expect(controls.current!.currentTime).toBe(690));
+
+      // The reanchor replan answered the retryable seek terminal.
+      rerenderPlayer({
+        replanError: "failed to resolve remux seek position",
+        replanErrorReason: "transcode_start_failed",
+        replanErrorRetryable: true,
+        replanning: false,
+      });
+
+      expect(screen.getByText("Try again")).toBeInTheDocument();
+      // Back on the media that exists, not the refused target.
+      await waitFor(() => expect(controls.current!.currentTime).toBe(94));
+      expect(vi.mocked(HTMLMediaElement.prototype.pause)).toHaveBeenCalled();
+
+      fireEvent.click(screen.getByText("Try again"));
+      expect(onRestartPlayback).toHaveBeenCalledOnce();
     });
 
     it("follows the replacement's start when the seek is behind its anchor", async () => {

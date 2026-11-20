@@ -227,6 +227,41 @@ var copySeekAnchorSeekResolveTimeout = 5 * time.Second
 // copySeekAnchorSeekResolveTimeout.
 var copySeekProbeRetryMargin = 5 * time.Second
 
+// seekAnchorFirstOutputWindowV3 is the wall-clock window a progressive-remux
+// seek has to put a first media byte on screen. A progressive remux is one
+// forward-only response with no segment layer to wait or restart for the
+// target, so an anchor probe that spends this whole window leaves nothing for
+// FFmpeg to spawn and answer in: the viewer sees the failed target with no
+// media, and the retry card arrives only after 15-25 s (production:
+// 15.0 s and 24.9 s). Eight seconds is longer than a healthy seek start
+// (spawn 1.6-3 s plus the first segment) and still keeps a failed seek inside
+// a few seconds instead of the probe's own 15 s cap.
+//
+// A segmented HLS seek is deliberately excluded: its segment layer waits or
+// restarts for the requested segment, so it keeps the adaptive probe budget
+// (see prepareTransportTimelineV3).
+var seekAnchorFirstOutputWindowV3 = 8 * time.Second
+
+// seekAnchorTransportReserveV3 is the share of the first-output window a
+// rebuilt progressive-remux transport needs for spawn and its first byte
+// (production: 1.6-3 s). The anchor probe may spend only what is left, so a
+// successful probe still leaves time for output and a failed one answers the
+// retryable seek verdict at the probe bound instead of at the transport's
+// no-byte timeout.
+var seekAnchorTransportReserveV3 = 3 * time.Second
+
+// seekAnchorProgressiveProbeWindowV3 is the time a progressive-remux seek may
+// spend resolving its copy-video anchor. It is what remains of the seek's
+// first-output window after the transport's own share, so it is the window
+// that decides the probe budget, not CopySeekProbeTimeout.
+func seekAnchorProgressiveProbeWindowV3() time.Duration {
+	window := seekAnchorFirstOutputWindowV3 - seekAnchorTransportReserveV3
+	if window <= 0 {
+		return 0
+	}
+	return window
+}
+
 type serverBitrateCapContextKeyV3 struct{}
 
 func withServerBitrateCapV3(ctx context.Context, capKbps int) context.Context {
@@ -5416,6 +5451,17 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 			var err error
 			var cancelAttempt context.CancelFunc = func() {}
 			defer func() { cancelAttempt() }()
+			// A progressive remux has no segment layer to wait for the target,
+			// so its anchor work is bounded by the seek's first-output window
+			// rather than by the probe's own cap. A segmented HLS seek keeps
+			// the adaptive budget: its segment layer can still wait or restart
+			// for the requested segment after the probe.
+			progressiveSeek := result.Plan.Delivery == playback.DeliveryRemuxProgressiveV3
+			progressiveProbeWindow := time.Duration(0)
+			anchorStarted := time.Now()
+			if progressiveSeek {
+				progressiveProbeWindow = seekAnchorProgressiveProbeWindowV3()
+			}
 			for attempt := 1; attempt <= 2; attempt++ {
 				// Release the previous attempt's budget before deriving this
 				// one. Each attempt re-derives it because a timed-out attempt
@@ -5427,6 +5473,20 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 				indexBudgetElapsed = false
 				attemptStarted := time.Now()
 				attemptBudget, reserved, remaining := copySeekAnchorAttemptBudget(ctx, copySeekAnchorAdaptiveBudgetFor(file, ffmpegPath, sourceIdentity), attempt == 1)
+				if progressiveSeek && progressiveProbeWindow > 0 {
+					// The probe may not outlive the part of the seek window the
+					// transport is not already using for its own start. A fast
+					// failure still leaves room for the bounded retry; a probe
+					// that spends the whole window leaves none, so the second
+					// attempt starts with no budget and the verdict is answered
+					// at the window bound instead of at the probe's own cap.
+					windowLeft := progressiveProbeWindow - time.Since(anchorStarted)
+					if windowLeft <= 0 {
+						attemptBudget = 0
+					} else if attemptBudget > windowLeft {
+						attemptBudget = windowLeft
+					}
+				}
 				if attempt == 1 {
 					retryReserved = reserved
 				}
@@ -5530,10 +5590,14 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 				// The probe gets its own adaptive budget on a measured link, so
 				// a resolve that spent most of the attempt cannot truncate it.
 				probeCtx, probeCancel := copySeekProbeContext(ctx, attemptCtx, recentVirtualProviderLinkLatency(linkKey))
-				if retryReserved {
+				if retryReserved || progressiveSeek {
 					// A retry is reserved: keep this probe inside the attempt
 					// window it was granted so it cannot spend the retry's
-					// share on one provider open.
+					// share on one provider open. A progressive-remux seek has
+					// no retry share to protect but a first-output window to
+					// meet, so its probe must stay inside the attempt too: the
+					// link's adaptive probe budget can otherwise outlive the
+					// seek window and hold the retry card past it.
 					probeCtx, probeCancel = capProbeToAttempt(probeCtx, probeCancel, attemptCtx)
 				}
 				if attempt > 1 {
