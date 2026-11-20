@@ -216,22 +216,25 @@ func TestFinalPageAnswerCancelsTheFill(t *testing.T) {
 	}
 }
 
-// A second page waiting on the same track keeps its fill: another client (or a
-// seek target and the playhead page) still needs the artifact.
+// A second client waiting on the same track keeps the fill: another playback
+// session still needs the artifact, so answering one page must not stop the read
+// it is waiting on.
 func TestFinalPageAnswerKeepsAFillAnotherPageNeeds(t *testing.T) {
 	cache, opts, advance, canceled, release := newPageAnswerFixture(t, "two-page-track")
 	defer release()
 
 	deep := opts
+	deep.PageWaitScope = "session-deep"
 	deep.SeekSeconds = 1080
 	deep.DurationSeconds = 120
 	other := opts
+	other.PageWaitScope = "session-other"
 	other.SeekSeconds = 1320
 	other.DurationSeconds = 120
 	if err := cache.pageRecoveryRefusal(deep, 1080, 300, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
 		t.Fatal("first refusal returned no answer")
 	}
-	// A second page of the same track is waiting on the same fill.
+	// A second session's page of the same track is waiting on the same fill.
 	if err := cache.pageRecoveryRefusal(other, 1320, 300, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
 		t.Fatal("the second page's refusal returned no answer")
 	}
@@ -240,7 +243,7 @@ func TestFinalPageAnswerKeepsAFillAnotherPageNeeds(t *testing.T) {
 		t.Fatalf("page answer = %v, want the final page-unavailable reason", err)
 	}
 	if *canceled {
-		t.Fatal("the fill was canceled while another page of the track was still waiting")
+		t.Fatal("the fill was canceled while another session's page was still waiting")
 	}
 }
 
@@ -288,4 +291,214 @@ func newPageAnswerFixture(t *testing.T, identity string) (cache *SubtitleCache, 
 			cache.unregisterWarmRun(key, run)
 			fill.Discard()
 		}
+}
+
+// A new playback session starts its own wait for the page it asks for. The
+// previous session's spent budget is not evidence about this one: production
+// carried waited=9m54 into a new session and answered its first page in 1 ms
+// with covered=0, which made every later page of the track terminal on arrival.
+func TestNewPlaybackSessionStartsANewPageWait(t *testing.T) {
+	cache, opts, advance, _, release := newPageAnswerFixture(t, "new-session-track")
+	defer release()
+	cache.SetPageRecoveryBudgetForTest(5 * time.Second)
+
+	first := opts
+	first.PageWaitScope = "session-one"
+	first.SeekSeconds = 1080
+	first.DurationSeconds = 120
+	if err := cache.pageRecoveryRefusal(first, 1080, 300, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
+		t.Fatal("first refusal returned no answer")
+	}
+	advance(6 * time.Second)
+	if err := cache.pageRecoveryRefusal(first, 1080, 310, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); !IsSubtitlePageUnavailable(err) {
+		t.Fatalf("page answer in the first session = %v, want the final reason", err)
+	}
+
+	// The next session asks for the same page on the same track. It must be a
+	// fresh, measured wait, not the old session's spent one.
+	next := first
+	next.PageWaitScope = "session-two"
+	advance(time.Second)
+	err := cache.pageRecoveryRefusal(next, 1080, 310, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason)
+	var retry *SubtitleExtractionRetryError
+	if !errors.As(err, &retry) || !retry.PageRecoveryDue {
+		t.Fatalf("new session's first answer = %v, want the retryable shape that starts its own fill", err)
+	}
+
+	// It still ends bounded, by its own measurement.
+	advance(6 * time.Second)
+	var unavailable *SubtitleExtractionUnavailableError
+	if err := cache.pageRecoveryRefusal(next, 1080, 310, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); !errors.As(err, &unavailable) {
+		t.Fatalf("new session's page answer = %v, want its own bounded final answer", err)
+	}
+	if unavailable.Waited > 2*5*time.Second {
+		t.Fatalf("waited = %s, want the new session's own ~5 s wait, not the previous session's total", unavailable.Waited)
+	}
+}
+
+// A seek starts a new wait for the page it lands on. The page before the seek is
+// not being retried any more, so its spent budget must not answer the new one.
+func TestSeekStartsANewPageWait(t *testing.T) {
+	cache, opts, advance, _, release := newPageAnswerFixture(t, "seek-page-track")
+	defer release()
+	cache.SetPageRecoveryBudgetForTest(5 * time.Second)
+
+	watch := opts
+	watch.PageWaitScope = "session-seek"
+	watch.SeekSeconds = 1080
+	watch.DurationSeconds = 120
+	if err := cache.pageRecoveryRefusal(watch, 1080, 300, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
+		t.Fatal("first refusal returned no answer")
+	}
+	advance(6 * time.Second)
+	if err := cache.pageRecoveryRefusal(watch, 1080, 310, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); !IsSubtitlePageUnavailable(err) {
+		t.Fatalf("page answer before the seek = %v, want the final reason", err)
+	}
+
+	// The viewer seeks back to 600 s. That page begins its own wait.
+	seeked := watch
+	seeked.SeekSeconds = 600
+	advance(time.Second)
+	err := cache.pageRecoveryRefusal(seeked, 600, 310, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason)
+	var retry *SubtitleExtractionRetryError
+	if !errors.As(err, &retry) || !retry.PageRecoveryDue {
+		t.Fatalf("page after the seek = %v, want a fresh retryable wait", err)
+	}
+}
+
+// A page the fill is measurably not going to reach before the client's ladder
+// ends must answer finally at the retry, not after the ladder. The measurement is
+// the fill's average rate since this page's first refusal; the last interval
+// alone is not the rate, and production's 1080p page stayed retryable for 75 s
+// because a watermark jump between two refusals looked fast.
+func TestPageProjectedPastTheClientLadderAnswersAtTheRetry(t *testing.T) {
+	cache, opts, advance, _, release := newPageAnswerFixture(t, "projected-page-track")
+	defer release()
+
+	page := opts
+	page.PageWaitScope = "session-projected"
+	page.SeekSeconds = 1200
+	page.DurationSeconds = 120
+	if err := cache.pageRecoveryRefusal(page, 1200, 0, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
+		t.Fatal("first refusal returned no answer")
+	}
+	// Forty seconds in, the fill has parsed 500 media seconds (~12.5x). The
+	// 700 s left is ~56 s at that rate, inside the 35 s the client still waits
+	// with the margin, so the page stays retryable.
+	advance(40 * time.Second)
+	var retry *SubtitleExtractionRetryError
+	if err := cache.pageRecoveryRefusal(page, 1200, 500, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); !errors.As(err, &retry) {
+		t.Fatalf("page the fill may still reach = %v, want to keep waiting", err)
+	}
+	// The watermark has not moved since the last refusal, but the average rate
+	// since the first refusal is ~6.6 media seconds per wall second: the 700 s
+	// left needs ~105 s, past everything the client will wait.
+	advance(35_400 * time.Millisecond)
+	var unavailable *SubtitleExtractionUnavailableError
+	if err := cache.pageRecoveryRefusal(page, 1200, 500, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); !errors.As(err, &unavailable) {
+		t.Fatalf("page projected past the ladder = %v, want the bounded final answer", err)
+	}
+	if unavailable.CoveredUntil != 500 {
+		t.Fatalf("covered_until = %v, want the measured 500 s watermark", unavailable.CoveredUntil)
+	}
+	if unavailable.Waited < 75*time.Second {
+		t.Fatalf("waited = %s, want the ladder the client actually held", unavailable.Waited)
+	}
+}
+
+// The other side of the same measurement: a page the fill is about to cross
+// stays retryable even when the watermark has not moved since the last refusal.
+func TestPageTheFillIsAboutToCrossStaysRetryable(t *testing.T) {
+	cache, opts, advance, _, release := newPageAnswerFixture(t, "about-to-cross-track")
+	defer release()
+
+	page := opts
+	page.PageWaitScope = "session-near"
+	page.SeekSeconds = 1200
+	page.DurationSeconds = 120
+	if err := cache.pageRecoveryRefusal(page, 1200, 0, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
+		t.Fatal("first refusal returned no answer")
+	}
+	advance(40 * time.Second)
+	if err := cache.pageRecoveryRefusal(page, 1200, 1190, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
+		t.Fatal("near-page refusal returned no answer")
+	}
+	// The watermark stalls at 1197 for the rest of the ladder, but that is 3 s
+	// of media away at the average rate: the fill is about to cross it.
+	advance(35_400 * time.Millisecond)
+	err := cache.pageRecoveryRefusal(page, 1200, 1197, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason)
+	var retry *SubtitleExtractionRetryError
+	if !errors.As(err, &retry) {
+		t.Fatalf("a page the fill is about to cross answered %v, want the retryable shape", err)
+	}
+}
+
+// Answering a page finally removes it from the waiting set immediately, along
+// with the earlier positions the same session asked for before it. Otherwise an
+// abandoned position keeps the fill alive for a page nobody will ask for again
+// (production ran a 1080 page's fill to 00:52:29 for a stale 1200 entry).
+func TestAnsweredPageLeavesTheWaitingSetAndStopsTheFill(t *testing.T) {
+	cache, opts, advance, canceled, release := newPageAnswerFixture(t, "answered-waiting-track")
+	defer release()
+
+	first := opts
+	first.PageWaitScope = "session-answered"
+	first.SeekSeconds = 1080
+	first.DurationSeconds = 120
+	if err := cache.pageRecoveryRefusal(first, 1080, 300, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
+		t.Fatal("first refusal returned no answer")
+	}
+	// The client re-anchors a few seconds forward on the next attempt.
+	reanchored := first
+	reanchored.SeekSeconds = 1085
+	advance(5 * time.Second)
+	if err := cache.pageRecoveryRefusal(reanchored, 1085, 300, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
+		t.Fatal("re-anchored refusal returned no answer")
+	}
+	// Ten wall seconds in, the fill has parsed ten media seconds: far too slow.
+	advance(5 * time.Second)
+	if err := cache.pageRecoveryRefusal(reanchored, 1085, 310, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); !IsSubtitlePageUnavailable(err) {
+		t.Fatalf("page answer = %v, want the final reason", err)
+	}
+	if !*canceled {
+		t.Fatal("the final answer did not cancel the fill")
+	}
+	key, ok := cache.pageRecoveryKey(reanchored, 1085)
+	if !ok {
+		t.Fatal("page recovery key unavailable")
+	}
+	cache.pageWaitMu.Lock()
+	defer cache.pageWaitMu.Unlock()
+	if entry, seen := cache.pageWaits[key]; seen && len(entry.waiting) != 0 {
+		t.Fatalf("waiting set = %v, want every answered/superseded position removed", entry.waiting)
+	}
+}
+
+// A page projected past the client's ladder answers at the retry, not after it.
+// The 7.9x fill measured in production needs ~145 s to reach a 1200 s page from
+// zero, so the page answers on the third request (15 s in) instead of keeping
+// `page_not_ready` alive for the whole 75 s ladder with nothing to show.
+func TestPageProjectedPastTheClientLadderAnswersByTheThirdRetry(t *testing.T) {
+	cache, opts, advance, _, release := newPageAnswerFixture(t, "third-retry-page-track")
+	defer release()
+
+	page := opts
+	page.PageWaitScope = "session-third-retry"
+	page.SeekSeconds = 1200
+	page.DurationSeconds = 120
+	if err := cache.pageRecoveryRefusal(page, 1200, 0, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
+		t.Fatal("first refusal returned no answer")
+	}
+	// Five seconds in, ~11x: the 1145 s left is ~104 s, inside the 70 s the
+	// client still waits once the margin is applied, so keep waiting.
+	advance(5 * time.Second)
+	if err := cache.pageRecoveryRefusal(page, 1200, 55, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
+		t.Fatal("second refusal returned no answer")
+	}
+	// Fifteen seconds in, ~7.9x average: the 1082 s left needs ~137 s, past
+	// everything the client will wait.
+	advance(10 * time.Second)
+	if err := cache.pageRecoveryRefusal(page, 1200, 118, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); !IsSubtitlePageUnavailable(err) {
+		t.Fatalf("third refusal of a page projected past the ladder = %v, want the bounded final answer", err)
+	}
 }

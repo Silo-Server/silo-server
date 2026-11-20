@@ -129,6 +129,14 @@ type StreamExtractOpts struct {
 	// starve the read that makes the client's retry cheap. It wins over
 	// DetachedRelayDemux when both are set.
 	WaitingRelayDemux bool
+	// PageWaitScope names the playback session a bounded bitmap page belongs to.
+	// A page wait is per track (a client re-anchors on every retry, so a per-page
+	// budget would restart on each attempt), but it must not outlive the session
+	// that opened it: a new session starts a new wait for the page it asks for
+	// instead of inheriting a spent one (see subtitle_page_recovery.go). Empty
+	// keeps the wait scoped to the track alone, which is what direct cache
+	// callers and tests get.
+	PageWaitScope string
 	// WaitingRefusalReason names the answer that started this recovery read, so
 	// a request that joins the read while it is still running and times out can
 	// keep the reason instead of degrading to a generic source failure. It is

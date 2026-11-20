@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -90,20 +91,41 @@ const (
 	subtitlePageRecoveryMaxEntries = 1024
 )
 
-// subtitlePageRecovery is one track's wait for its progressive artifact.
+// subtitlePageRecovery is one playback session's wait for one track's
+// progressive artifact.
 type subtitlePageRecovery struct {
 	first     time.Time
 	lastSeen  time.Time
 	lastCover float64
 	// start is the page position that opened the wait. It is diagnostic only:
-	// the budget belongs to the track, because a client that re-anchors on every
-	// retry asks for a new start on the same artifact.
+	// the budget belongs to the session's wait on the track, because a client
+	// that re-anchors on every retry asks for a new start on the same artifact.
 	start float64
-	// waiting holds the page positions still waiting on this track, keyed by
-	// start, with the time each last refused. A final answer reads it to decide
-	// whether the fill it cancels still has another page to serve: two clients,
-	// or a seek target and the playhead page, can wait on one track.
-	waiting map[float64]time.Time
+	// page is the most recently refused page position. A refusal behind it, or
+	// more than one page ahead, is a seek rather than the playhead crossing into
+	// the next page during a retry, and starts a new wait (see pageWaitSeek).
+	page float64
+	// waiting holds the pages of this session still waiting on the track, keyed
+	// by start, with the time each last refused. A final answer reads the other
+	// sessions' entries to decide whether the fill it cancels still has a page
+	// to serve.
+	waiting map[float64]subtitlePageWait
+}
+
+// subtitlePageWait is one page's place in its session's wait.
+type subtitlePageWait struct {
+	// first is when this page was first refused: the client's retry ladder and
+	// the reach projection both start there, so a page that inherits the
+	// session's budget still measures its own remaining wait.
+	first time.Time
+	// seen is when it last refused.
+	seen time.Time
+	// firstCover is the artifact watermark at the first refusal. The reach
+	// projection measures the fill's average rate from here, so a burst
+	// between two refusals cannot hide a page the fill will not reach: the
+	// production page sat on `page_not_ready` for 75 s because the last interval
+	// looked fast while the fill was still 20 s away.
+	firstCover float64
 }
 
 // pageRecoveryRefusal records this page's wait and answers it: the retryable
@@ -164,13 +186,17 @@ func (c *SubtitleCache) pageRecoveryNow() time.Time {
 // artifact has stopped advancing or has been measured too slow to reach the page
 // inside the wait still left.
 //
-// The wait is keyed by the track, not by the refused page position. A client
-// re-anchors a few seconds forward on every bitmap-page retry, so a per-page
-// key gave each retry a fresh budget: the fill spent its 90 s, the next page
-// started a new wait, and the overlay sat on "loading" with no final answer —
-// the production deep-4K page. The artifact is a per-track object, so its wait
-// budget is too; a page at a different position of the same track inherits the
-// wait the earlier page opened, which is what makes the final answer reachable.
+// The wait is keyed by the playback session and the track, not by the refused
+// page position. A client re-anchors a few seconds forward on every
+// bitmap-page retry, so a per-page key gave each retry a fresh budget: the fill
+// spent its 90 s, the next page started a new wait, and the overlay sat on
+// "loading" with no final answer — the production deep-4K page. The artifact is
+// a per-track object, so a page at a different position of the same session
+// inherits the wait the earlier page opened, which is what makes the final
+// answer reachable. The session is part of the key because the wait is the
+// viewer's, not the artifact's: a new session must pay its own measured wait
+// rather than inherit a spent one (production carried waited=9m54 into a new
+// session and answered its first page in 1 ms with covered=0).
 func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered float64) (wait time.Duration, due, stalled bool, reachRate float64) {
 	key, ok := c.pageRecoveryKey(opts, start)
 	if !ok {
@@ -189,19 +215,35 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 		c.pageWaits = make(map[string]subtitlePageRecovery)
 	}
 	entry, seen := c.pageWaits[key]
-	if !seen {
+	// A seek opens a new wait for the page it lands on: it is not the same
+	// client still retrying the same page against the same artifact. Within one
+	// wait the budget stays per session and track, which is what keeps a
+	// re-anchoring retry from getting a fresh budget each time.
+	if !seen || pageWaitSeek(entry.page, start, opts) {
 		if len(c.pageWaits) >= subtitlePageRecoveryMaxEntries {
 			c.prunePageRecoveryLocked(now)
 		}
 		c.pageWaits[key] = subtitlePageRecovery{
-			first: now, lastSeen: now, lastCover: covered, start: start,
-			waiting: map[float64]time.Time{start: now},
+			first: now, lastSeen: now, lastCover: covered, start: start, page: start,
+			waiting: map[float64]subtitlePageWait{
+				start: {first: now, seen: now, firstCover: covered},
+			},
 		}
 		return 0, true, false, 0
 	}
 	// Record this page as waiting before the verdicts, so a final answer in this
-	// same call can tell whether any other page still needs the fill.
-	entry.noteWaiting(now, start)
+	// same call can tell whether any other page still needs the fill. The page
+	// keeps its own first refusal even when the session's wait opened earlier:
+	// both the client's ladder and the reach rate are measured from there.
+	page, pageSeen := entry.waiting[start]
+	if !pageSeen {
+		page = subtitlePageWait{first: now, firstCover: covered}
+	}
+	page.seen = now
+	entry.waiting[start] = page
+	entry.page = start
+	entry.start = start
+	entry.pruneWaitingLocked(now)
 	wait = now.Sub(entry.first)
 	stalled = !filling && covered <= entry.lastCover && now.Sub(entry.lastSeen) >= subtitlePageRecoveryStallWindow
 	// A fill that ended without committing since this track began its wait is
@@ -213,105 +255,130 @@ func (c *SubtitleCache) notePageRecovery(opts StreamExtractOpts, start, covered 
 		stalled = true
 	}
 	// What reaching this page costs is measurable once the fill has advanced:
-	// the media seconds it parsed between two refusals, over the wall seconds
-	// between them. A page the fill cannot reach inside the wait still left, by
-	// a wide margin, can never be answered by retrying, so the final answer is
-	// due now rather than after the budget — the production deep 4K page spent
-	// 95 s on a fill that was parsing at about real time toward a page twenty
-	// minutes ahead. The margin keeps a merely tight estimate retryable: fills
-	// speed up when the transcode competing for the relay pauses, so only an
-	// order-of-magnitude shortfall is a verdict.
+	// the media seconds it parsed since this page's first refusal, over the wall
+	// seconds since it. A page the fill cannot reach inside the wait still left,
+	// by a wide margin, can never be answered by retrying, so the final answer
+	// is due now rather than after the budget — the production deep 4K page
+	// spent 95 s on a fill that was parsing at about real time toward a page
+	// twenty minutes ahead. The margin keeps a merely tight estimate retryable:
+	// fills speed up when the transcode competing for the relay pauses, so only
+	// an order-of-magnitude shortfall is a verdict.
 	//
-	// The wait that decides "too slow" is the client's, not the server's (see
-	// pageReachVerdict).
-	if !stalled && filling && covered > entry.lastCover {
-		reachRate, stalled = pageReachVerdict(now.Sub(entry.lastSeen), entry.lastCover, covered, start, wait, c.pageRecoveryBudget())
+	// Measuring from the page's first refusal is deliberate. The last interval
+	// alone is not the fill's rate: production's 1080p page sat on
+	// `page_not_ready` through the whole 75 s ladder because the watermark
+	// happened to jump between two refusals while the fill was still ~20 s from
+	// the page. The page's own ladder is the other half of the same measurement
+	// (see pageReachVerdict).
+	clientRemaining := subtitlePageClientWaitBudget - now.Sub(page.first)
+	if clientRemaining < subtitlePageReachFloor {
+		clientRemaining = subtitlePageReachFloor
+	}
+	if serverRemaining := c.pageRecoveryBudget() - wait; serverRemaining < clientRemaining {
+		clientRemaining = serverRemaining
+	}
+	if !stalled && filling && covered > page.firstCover && clientRemaining > 0 {
+		reachRate, stalled = pageReachVerdict(now.Sub(page.first), page.firstCover, covered, start, clientRemaining)
 	}
 	entry.lastSeen = now
 	entry.lastCover = covered
-	if wait == 0 && start != entry.start {
-		// A different page of the same track, still inside the opening wait's
-		// window: remember it only for the diagnostics line.
-		entry.start = start
-	}
 	c.pageWaits[key] = entry
 	return wait, false, stalled, reachRate
 }
 
+// pageWaitSeek reports whether start is a seek away from the page the track's
+// wait is following rather than the playhead crossing into the next page during
+// a retry. The client re-anchors a page request on the playhead, and a 75 s
+// retry ladder can advance one page; backwards, or more than one page ahead, is
+// the viewer seeking, and the page it lands on pays its own bounded wait instead
+// of inheriting the one it left. Without this a seek inherited a spent budget
+// and was answered `subtitle_page_unavailable` in 1 ms with covered=0.
+func pageWaitSeek(previous, start float64, opts StreamExtractOpts) bool {
+	if start < previous-1 {
+		return true
+	}
+	step := SubtitleRequestGridFor(opts.SourceCodec).PageSeconds
+	if step <= 0 {
+		step = SubtitleBitmapPageSeconds
+	}
+	return start > previous+step+1
+}
+
 // pageReachVerdict reports how fast the fill is parsing and whether the page it
 // is heading for is out of reach. The wait that decides "too slow" is the
-// client's: a page nobody asks for any more cannot be served by retrying,
-// whatever the fill's own budget allows. The projection is measured against the
-// shorter of the two windows, with the client's side floored at its first retry
-// step so a fill that is about to cross the page keeps the page retryable even
-// after the ladder is spent, and the verdict needs the margin because a fill
-// speeds up whenever the transcode competing for the relay pauses.
-func pageReachVerdict(elapsed time.Duration, previouslyCovered, covered, start float64, waited, budget time.Duration) (rate float64, outOfReach bool) {
+// client's, not the server's: a page nobody asks for any more cannot be served
+// by retrying, whatever the fill's own budget allows. remaining is already the
+// shorter of the client's ladder still left and the server's budget, floored at
+// its first retry step so a fill that is about to cross the page keeps the page
+// retryable even after the ladder is spent. The verdict needs the margin
+// because a fill speeds up whenever the transcode competing for the relay
+// pauses.
+func pageReachVerdict(elapsed time.Duration, previouslyCovered, covered, start float64, remaining time.Duration) (rate float64, outOfReach bool) {
 	if elapsed <= 0 {
 		return 0, false
 	}
 	rate = (covered - previouslyCovered) / elapsed.Seconds()
-	if rate <= 0 {
+	if rate <= 0 || remaining <= 0 {
 		return rate, false
 	}
-	remaining := budget - waited
-	clientRemaining := subtitlePageClientWaitBudget - waited
-	if clientRemaining < subtitlePageReachFloor {
-		clientRemaining = subtitlePageReachFloor
-	}
-	if remaining < clientRemaining {
-		clientRemaining = remaining
-	}
-	if clientRemaining <= 0 {
-		return rate, false
-	}
-	return rate, (start-covered)/rate > subtitlePageReachMargin*clientRemaining.Seconds()
+	return rate, (start-covered)/rate > subtitlePageReachMargin*remaining.Seconds()
 }
 
-// noteWaiting records that the page at start refused now, and forgets pages
-// that have stopped asking. A page that has not refused for the client's own
-// wait budget is not waiting any more: its client gave up or seeked away, and
-// its fill must not be kept alive on its behalf.
-func (r *subtitlePageRecovery) noteWaiting(now time.Time, start float64) {
-	if r.waiting == nil {
-		r.waiting = make(map[float64]time.Time, 1)
-	}
-	r.waiting[start] = now
-	for position, seen := range r.waiting {
-		if now.Sub(seen) > subtitlePageClientWaitBudget {
+// pruneWaitingLocked forgets pages that have stopped asking. A page's own
+// ladder is 75 s: a position that has not refused within it is not waiting any
+// more, so its fill must not be kept alive on its behalf. Caller holds
+// pageWaitMu.
+func (r *subtitlePageRecovery) pruneWaitingLocked(now time.Time) {
+	for position, wait := range r.waiting {
+		if now.Sub(wait.first) > subtitlePageClientWaitBudget {
 			delete(r.waiting, position)
 		}
 	}
 }
 
 // cancelFillAfterFinalPage stops the fill this page was waiting on once the page
-// has its final answer, unless another page of the same track is still waiting
-// for it. The fill's remaining work cannot serve the answered page, and
+// has its final answer, unless another playback session is still waiting on the
+// same track. The fill's remaining work cannot serve the answered page, and
 // production's answered page left it reading to 95 s and 3.1 MB for nobody.
+//
+// Answering the page also ends every other position the same session asked for
+// before it: a client waits on one page at a time, and its earlier re-anchored
+// positions were superseded by this answer. Leaving them in the set kept the
+// fill alive for a page nobody would ask for again (production ran a 1080 page's
+// fill to 00:52:29 for an abandoned 1200 position). The session's entry stays,
+// with no page waiting, so its next attempt still answers from the budget this
+// wait already spent instead of restarting it.
 func (c *SubtitleCache) cancelFillAfterFinalPage(opts StreamExtractOpts, start float64) {
-	key, ok := c.pageRecoveryFillKey(opts)
+	fillKey, ok := c.pageRecoveryFillKey(opts)
 	if !ok {
 		return
 	}
+	key := pageRecoveryScopeKey(fillKey, opts.PageWaitScope)
 	now := c.pageRecoveryNow()
 	c.pageWaitMu.Lock()
 	if entry, seen := c.pageWaits[key]; seen {
 		delete(entry.waiting, start)
-		for position, seenAt := range entry.waiting {
-			if now.Sub(seenAt) > subtitlePageClientWaitBudget {
-				delete(entry.waiting, position)
-			}
-		}
+		// Anything else this session still had waiting was superseded by the
+		// answer: the client has moved on from those requests.
+		entry.waiting = map[float64]subtitlePageWait{}
 		c.pageWaits[key] = entry
-		if len(entry.waiting) > 0 {
-			// Another page of this track is still waiting: the fill is its read,
-			// not this page's.
+	}
+	for otherKey, other := range c.pageWaits {
+		if otherKey == key || !strings.HasPrefix(otherKey, pageRecoveryFillPrefix(fillKey)) {
+			continue
+		}
+		other.pruneWaitingLocked(now)
+		if len(other.waiting) > 0 {
+			// Another session is still waiting on this track: the fill is its
+			// read, not this page's.
+			c.pageWaits[otherKey] = other
 			c.pageWaitMu.Unlock()
 			return
 		}
+		c.pageWaits[otherKey] = other
 	}
 	c.pageWaitMu.Unlock()
-	c.cancelTrackFill(key)
+	c.cancelTrackFill(fillKey)
 }
 
 // cancelTrackFill stops the full-track fill registered for key, if any. The
@@ -344,22 +411,43 @@ func (c *SubtitleCache) progressiveFillInFlight(opts StreamExtractOpts) bool {
 	return c.inflight[key] != nil
 }
 
-// clearPageRecovery forgets a track's wait once a page of it has been answered,
-// so a later visit pays its own bounded wait instead of inheriting this one.
+// clearPageRecovery forgets a track's waits once a page of it has been answered,
+// so a later visit pays its own bounded wait instead of inheriting one.
 func (c *SubtitleCache) clearPageRecovery(opts StreamExtractOpts, _ float64) {
-	key, ok := c.pageRecoveryKey(opts, 0)
+	fillKey, ok := c.pageRecoveryFillKey(opts)
 	if !ok {
 		return
 	}
 	c.pageWaitMu.Lock()
-	delete(c.pageWaits, key)
+	for key := range c.pageWaits {
+		if strings.HasPrefix(key, pageRecoveryFillPrefix(fillKey)) {
+			delete(c.pageWaits, key)
+		}
+	}
 	c.pageWaitMu.Unlock()
 }
 
-// pageRecoveryKey names one track's wait. The page position is deliberately not
-// part of the key: see notePageRecovery.
+// pageRecoveryKey names one session's wait on one track. Neither the page
+// position nor the session is a per-page key: see notePageRecovery.
 func (c *SubtitleCache) pageRecoveryKey(opts StreamExtractOpts, _ float64) (string, bool) {
-	return c.pageRecoveryFillKey(opts)
+	fillKey, ok := c.pageRecoveryFillKey(opts)
+	if !ok {
+		return "", false
+	}
+	return pageRecoveryScopeKey(fillKey, opts.PageWaitScope), true
+}
+
+// pageRecoveryScopeKey scopes one track's wait to the playback session that
+// opened it. The fill key never contains a NUL byte, so the prefix scan in
+// clearPageRecovery and cancelFillAfterFinalPage cannot match another track.
+func pageRecoveryScopeKey(fillKey, scope string) string {
+	return pageRecoveryFillPrefix(fillKey) + scope
+}
+
+// pageRecoveryFillPrefix is the prefix every session's wait on this track
+// shares: the fill identity plus the scope separator.
+func pageRecoveryFillPrefix(fillKey string) string {
+	return fillKey + "\x00"
 }
 
 // pageRecoveryFillKey is the page ledger's per-track key: the same identity the

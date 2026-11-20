@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,13 +19,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/remotestream"
 )
 
-// TestPrepareTransportTimelineSlowAnchorRetriesOnceThenFailsSeekFast proves the
-// copy-video seek-anchor resolve is bounded well inside the replan budget. A
-// relay that never answers costs the one same-pin retry a budget timeout
-// allows — each attempt bounded by the anchor budget — and returns the
-// retryable seek classification, instead of holding the request for the full
-// probe timeout.
-func TestPrepareTransportTimelineSlowAnchorRetriesOnceThenFailsSeekFast(t *testing.T) {
+// TestPrepareTransportTimelineSlowAnchorIndexTimeoutStartsWithoutTheAnchor
+// proves a keyframe index that cannot be read inside the start budget no longer
+// fails the start. The copied stream begins from the requested position with the
+// non-anchored timeline it had before the anchor existed, the plan says so
+// (copy_seek_anchor_resolved=false), and the start logs the degradation. The
+// anchor resolve is still bounded and still retried once.
+func TestPrepareTransportTimelineSlowAnchorIndexTimeoutStartsWithoutTheAnchor(t *testing.T) {
 	previous := copySeekAnchorSeekResolveTimeout
 	copySeekAnchorSeekResolveTimeout = 40 * time.Millisecond
 	defer func() { copySeekAnchorSeekResolveTimeout = previous }()
@@ -38,24 +40,45 @@ func TestPrepareTransportTimelineSlowAnchorRetriesOnceThenFailsSeekFast(t *testi
 	plan := &playback.PlanV3{
 		PlanID:   "plan:slow-anchor",
 		Delivery: playback.DeliveryRemuxHLSV3,
-		Timeline: playback.TimelineV3{SourceStartSeconds: 120},
+		Timeline: playback.TimelineV3{SourceStartSeconds: 120, PlayerStartSeconds: 120},
 	}
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(previousLogger)
+
 	started := time.Now()
-	_, transportErr := handler.prepareTransportTimelineV3(
+	timeline, transportErr := handler.prepareTransportTimelineV3(
 		context.Background(),
 		&playback.Session{ID: "session-slow-anchor"},
 		&models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"},
 		playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux},
 	)
-	elapsed := time.Since(started)
-	if elapsed > time.Second {
-		t.Fatalf("slow anchor resolve took %v, want it bounded near two attempts of %v", elapsed, copySeekAnchorSeekResolveTimeout)
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("slow anchor index took %v, want it bounded near two attempts of %v", elapsed, copySeekAnchorSeekResolveTimeout)
 	}
 	if got := probes.Load(); got != 2 {
 		t.Fatalf("anchor probes = %d, want exactly 2: one attempt and the one same-pin retry a budget timeout allows", got)
 	}
-	if transportErr == nil || !transportErr.retryable || !transportErr.seekFailure || transportErr.reason != transcodeStartFailedReasonV3 {
-		t.Fatalf("transport error = %#v, want a retryable seek failure with the existing transcode_start_failed code", transportErr)
+	if transportErr != nil {
+		t.Fatalf("transport error = %#v, want a start from the requested position without the anchor", transportErr)
+	}
+	if timeline.copySeekAnchorResolved {
+		t.Fatalf("timeline = %#v, want the unanchored shape", timeline)
+	}
+	if timeline.seekSeconds != 120 || timeline.streamOriginSeconds != 120 {
+		t.Fatalf("timeline = %#v, want seek and origin at the requested 120 s", timeline)
+	}
+	// The plan carries the same unanchored timeline the client reads: the player
+	// clock starts at the requested position, not at an unknown keyframe.
+	if got := plan.Timeline.PlayerStartSeconds; got != 0 {
+		t.Fatalf("plan player start = %v, want 0 for the requested origin", got)
+	}
+	if got := plan.Timeline.StreamOriginSeconds; got != 120 {
+		t.Fatalf("plan stream origin = %v, want the requested 120 s", got)
+	}
+	if !strings.Contains(logs.String(), "starting from the requested position without it") {
+		t.Fatalf("degraded start left no log line:\n%s", logs.String())
 	}
 }
 
