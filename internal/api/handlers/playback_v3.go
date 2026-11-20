@@ -5241,6 +5241,16 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 			// repeat of the probed request; only a request on the anchor
 			// keyframe still re-probes, so seek accuracy is unchanged.
 			if cachedOrigin, cachedSegment, ok := h.lookupCachedCopySeekAnchorV3(ffmpegPath, sourceIdentity, requested, playback.DefaultSegmentDuration); ok {
+				// A proven hit is the "known good" half of the anchor story: it is
+				// the line that shows a seek inside an already-probed GOP paid no
+				// provider work at all.
+				slog.InfoContext(ctx, "copy seek anchor served from the proven cache without a probe",
+					logComponentKey, playbackLogValueV3,
+					"playback_session_id", session.ID,
+					"requested_seek_seconds", requested,
+					"anchor_seconds", cachedOrigin,
+					"start_segment_number", cachedSegment,
+				)
 				configureCopyRemuxTimelineV3(result.Plan, cachedOrigin)
 				return preparedTimelineV3{seekSeconds: requested, streamOriginSeconds: cachedOrigin, startSegmentNumber: cachedSegment, copySeekAnchorResolved: true}, nil
 			}
@@ -5416,7 +5426,7 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 				resolveFailure = nil
 				indexBudgetElapsed = false
 				attemptStarted := time.Now()
-				attemptBudget, reserved, remaining := copySeekAnchorAttemptBudget(ctx, copySeekAnchorResolveBudgetFor(file), attempt == 1)
+				attemptBudget, reserved, remaining := copySeekAnchorAttemptBudget(ctx, copySeekAnchorAdaptiveBudgetFor(file, ffmpegPath, sourceIdentity), attempt == 1)
 				if attempt == 1 {
 					retryReserved = reserved
 				}
@@ -5626,10 +5636,22 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 					// before the anchor existed. The plan reports the requested
 					// origin and copy_seek_anchor_resolved=false, so the client
 					// and the transport see exactly the unanchored shape.
-					slog.WarnContext(ctx, "copy-video seek anchor unavailable inside the start budget; starting from the requested position without it",
+					//
+					// The notice is worth one WARN per session: a silent degrade
+					// left an anchor-less session indistinguishable from a resolved
+					// one, so the next seek looked like a fresh 5-19s mystery
+					// instead of a known slow link paying for the anchor again.
+					noticeLevel := slog.LevelInfo
+					if copySeekAnchorNotices.first(copySeekAnchorNoticeKey(session.ID, sourceIdentity)) {
+						noticeLevel = slog.LevelWarn
+					}
+					slog.Log(ctx, noticeLevel, "copy-video seek anchor unavailable inside the start budget; starting from the requested position without it",
 						"component", "api",
 						"playback_session_id", session.ID,
 						"requested_seek_seconds", requested,
+						"copy_seek_anchor_resolved", false,
+						"reason", "anchor_budget_elapsed",
+						"probe_budget_hint", copySeekAnchorProbeBudgetHint(ffmpegPath, sourceIdentity, playback.DefaultSegmentDuration),
 						"error", err,
 					)
 					configureCopyRemuxTimelineV3(result.Plan, requested)

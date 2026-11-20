@@ -239,7 +239,9 @@ func TestResolveCopySeekAnchorMatchesRealLongGOPHEVC(t *testing.T) {
 }
 
 // resetCopySeekAnchorCache swaps in an isolated cache with an injectable clock
-// and probe runner, restoring the process-wide cache when the test ends.
+// and probe runner, restoring the process-wide cache when the test ends. The
+// probe-cost tracker is reset with it, on the same clock, so one test's measured
+// probe need never sizes another test's budget.
 func resetCopySeekAnchorCache(t *testing.T, now func() time.Time, probe anchorProbeRunner) *copySeekAnchorCache {
 	t.Helper()
 	previous := copySeekAnchors
@@ -252,7 +254,19 @@ func resetCopySeekAnchorCache(t *testing.T, now func() time.Time, probe anchorPr
 	}
 	copySeekAnchors = cache
 	t.Cleanup(func() { copySeekAnchors = previous })
+	resetCopySeekAnchorProbeNeeds(t, now)
 	return cache
+}
+
+// resetCopySeekAnchorProbeNeeds swaps in an isolated probe-cost tracker with an
+// injectable clock and restores the process-wide one when the test ends.
+func resetCopySeekAnchorProbeNeeds(t *testing.T, now func() time.Time) *copySeekAnchorProbeNeedTracker {
+	t.Helper()
+	previous := copySeekAnchorProbeNeeds
+	tracker := &copySeekAnchorProbeNeedTracker{marks: make(map[string]copySeekAnchorProbeNeedMark), now: now}
+	copySeekAnchorProbeNeeds = tracker
+	t.Cleanup(func() { copySeekAnchorProbeNeeds = previous })
+	return tracker
 }
 
 // awaitCopySeekProbeFlight waits for the singleflight probe registered under key
@@ -703,10 +717,17 @@ func TestResolveCopySeekAnchorForSourceCoalescesConcurrentIdenticalProbes(t *tes
 // retry that lands in that window must open the provider under its own fresh
 // budget; joining the spent flight answers the first attempt's timeout a few
 // milliseconds later while the reserved budget goes unused.
+//
+// It also pins the two things that make the retry worth reserving: the retry
+// really does open the provider (its probe context is live with the budget it was
+// granted, not a dead copy of the first attempt's), and its success is stored so a
+// second seek in the same GOP performs no probe at all.
 func TestResolveCopySeekAnchorRetryDoesNotJoinSpentFlight(t *testing.T) {
 	const identity = "virtual://movie/retry-flight"
 	var calls atomic.Int32
 	retryStarted := make(chan struct{})
+	var retryBudget time.Duration
+	var retryCtxDone bool
 	resetCopySeekAnchorCache(t, nil, func(ctx context.Context, _ string, _ string, requested float64, segmentDuration int) (float64, int, error) {
 		if calls.Add(1) == 1 {
 			// The first attempt's own budget ends and the caller returns, but
@@ -720,6 +741,13 @@ func TestResolveCopySeekAnchorRetryDoesNotJoinSpentFlight(t *testing.T) {
 			case <-time.After(2 * time.Second):
 			}
 			return 0, 0, fmt.Errorf("resolve copy seek anchor: probe interrupted: %w", ctx.Err())
+		}
+		// The retry's probe must be a live provider open: a retry that joined the
+		// spent flight reaches this function with the first attempt's expiry and
+		// no budget of its own.
+		retryCtxDone = ctx.Err() != nil
+		if deadline, ok := ctx.Deadline(); ok {
+			retryBudget = time.Until(deadline)
 		}
 		close(retryStarted)
 		return requested - 1, int((requested - 1) / float64(segmentDuration)), nil
@@ -744,6 +772,21 @@ func TestResolveCopySeekAnchorRetryDoesNotJoinSpentFlight(t *testing.T) {
 	}
 	if got := calls.Load(); got != 2 {
 		t.Fatalf("probe calls = %d, want the first attempt and the retry's own probe", got)
+	}
+	if retryCtxDone {
+		t.Fatal("the retry's probe context was already done; it never opened the provider")
+	}
+	if retryBudget < time.Second {
+		t.Fatalf("retry probe budget = %v, want the reserved attempt window, not the first attempt's leftover", retryBudget)
+	}
+
+	// The retry stored its anchor, so the next seek inside the same GOP is a pure
+	// cache hit: a zero-probe seek rather than another provider open.
+	if anchor, segment, err := ResolveCopySeekAnchorForSource(context.Background(), "ffmpeg", identity, "http://relay/retry", 119.5, 2); err != nil || anchor != 119 || segment != 59 {
+		t.Fatalf("second seek = %v/%d err=%v, want the stored anchor 119/59", anchor, segment, err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("probe calls = %d, want the second seek in the same GOP to perform no probe", got)
 	}
 }
 
@@ -795,6 +838,95 @@ func TestResolveCopySeekAnchorProbeUsesFullCapWithLargerCallerBudget(t *testing.
 	}
 	if gotBudget < CopySeekProbeTimeout-time.Second || gotBudget > CopySeekProbeTimeout {
 		t.Fatalf("probe budget = %s, want the %s probe cap", gotBudget, CopySeekProbeTimeout)
+	}
+}
+
+// TestCopySeekAnchorProbeBudgetHintSizesFromObservedProbeCost pins the sizing the
+// handler's first attempt uses. A probe is not a provider listing: it byte-seeks
+// into the release and reads a frame, so the budget has to follow the cost the
+// probe itself paid. A budget expiry records the budget as a lower bound (the
+// probe needed at least that), a success records the measured cost, the slowest
+// recent observation wins, one source never sizes another, and a lapsed
+// observation stops sizing anything.
+func TestCopySeekAnchorProbeBudgetHintSizesFromObservedProbeCost(t *testing.T) {
+	now := time.Now()
+	resetCopySeekAnchorCache(t, func() time.Time { return now }, func(context.Context, string, string, float64, int) (float64, int, error) {
+		return 0, 0, nil
+	})
+
+	// A budget that expired is a lower bound on the need: the next attempt must
+	// be able to spend more than it.
+	sourceKey := copySeekAnchorSourceKey(ResolveFFmpegPath("ffmpeg"), "virtual://movie/need", 2)
+	copySeekAnchorProbeNeeds.record(sourceKey, 5*time.Second)
+	if got := CopySeekAnchorProbeBudgetHint("ffmpeg", "virtual://movie/need", 2); got != 10*time.Second {
+		t.Fatalf("hint after a 5s expiry = %v, want 10s", got)
+	}
+
+	// A slower success replaces it; a faster one must not retract the room the
+	// slow observation proved necessary.
+	copySeekAnchorProbeNeeds.record(sourceKey, 7*time.Second)
+	copySeekAnchorProbeNeeds.record(sourceKey, time.Second)
+	if got := CopySeekAnchorProbeBudgetHint("ffmpeg", "virtual://movie/need", 2); got != 14*time.Second {
+		t.Fatalf("hint after a 7s and a 1s probe = %v, want the slow 14s", got)
+	}
+
+	// The per-probe cap bounds the hint: a budget past it would only hold the
+	// attempt open on paper.
+	copySeekAnchorProbeNeeds.record(sourceKey, time.Minute)
+	if got := CopySeekAnchorProbeBudgetHint("ffmpeg", "virtual://movie/need", 2); got != CopySeekProbeTimeout {
+		t.Fatalf("hint for a stalled probe = %v, want the %v probe cap", got, CopySeekProbeTimeout)
+	}
+
+	// Another source, another segment duration, and an empty identity are not
+	// sized by this one.
+	if got := CopySeekAnchorProbeBudgetHint("ffmpeg", "virtual://movie/other", 2); got != 0 {
+		t.Fatalf("hint for an unmeasured source = %v, want 0", got)
+	}
+	if got := CopySeekAnchorProbeBudgetHint("ffmpeg", "virtual://movie/need", 4); got != 0 {
+		t.Fatalf("hint for another segment duration = %v, want 0", got)
+	}
+	if got := CopySeekAnchorProbeBudgetHint("ffmpeg", "  ", 2); got != 0 {
+		t.Fatalf("hint for an empty identity = %v, want 0", got)
+	}
+
+	// The window is the anchor cache's, so an old measurement stops sizing.
+	now = now.Add(copySeekAnchorCacheTTL + time.Second)
+	if got := CopySeekAnchorProbeBudgetHint("ffmpeg", "virtual://movie/need", 2); got != 0 {
+		t.Fatalf("hint after the window lapsed = %v, want 0", got)
+	}
+}
+
+// TestResolveCopySeekAnchorRecordsMeasuredProbeCost proves the resolver feeds the
+// tracker from what the probe actually cost, not from the attempt it was granted:
+// a probe that returns immediately records a need near zero (so a fast source
+// keeps the floor), while one that exhausts its budget records that budget as the
+// need's lower bound.
+func TestResolveCopySeekAnchorRecordsMeasuredProbeCost(t *testing.T) {
+	const fastIdentity = "virtual://movie/fast-cost"
+	now := time.Now()
+	cache := resetCopySeekAnchorCache(t, func() time.Time { return now }, func(context.Context, string, string, float64, int) (float64, int, error) {
+		return 100, 50, nil
+	})
+	if _, _, err := ResolveCopySeekAnchorForSource(context.Background(), "ffmpeg", fastIdentity, "http://relay/fast", 101, 2); err != nil {
+		t.Fatalf("fast probe: %v", err)
+	}
+	if hint := CopySeekAnchorProbeBudgetHint("ffmpeg", fastIdentity, 2); hint > 10*time.Millisecond {
+		t.Fatalf("hint for an instant probe = %v, want no measurable need", hint)
+	}
+
+	const slowIdentity = "virtual://movie/slow-cost"
+	cache.probe = func(ctx context.Context, _ string, _ string, _ float64, _ int) (float64, int, error) {
+		<-ctx.Done()
+		return 0, 0, ctx.Err()
+	}
+	budget := 80 * time.Millisecond
+	probeCtx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	if _, _, err := ResolveCopySeekAnchorForSource(probeCtx, "ffmpeg", slowIdentity, "http://relay/slow", 101, 2); err == nil {
+		t.Fatal("a probe that never returns resolved an anchor")
+	}
+	if hint := CopySeekAnchorProbeBudgetHint("ffmpeg", slowIdentity, 2); hint < budget || hint > CopySeekProbeTimeout {
+		t.Fatalf("hint after an exhausted %v budget = %v, want at least that budget", budget, hint)
 	}
 }
 
