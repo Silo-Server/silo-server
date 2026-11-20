@@ -94452,25 +94452,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Impossibile effettuare l’accesso sulla TV. Riprova."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Verifica che l’app mostri"
+      "value": "Impossibile approvare l’accesso. Riprova."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Verifica che la TV mostri"
+      "value": "Verifica che questo codice corrisponda"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Inserisci il codice mostrato sulla TV o nell’app"
+      "value": "Inserisci il codice mostrato sul dispositivo"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94482,13 +94476,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Accedi con il tuo account su una TV o un altro dispositivo."
+      "value": "Accedi su una TV, un’app o un altro dispositivo."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Accedi su una TV"
+      "value": "Approva l’accesso"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94508,13 +94502,13 @@
     },
     {
       "type": 0,
-      "value": " per approvare una TV. Solo il titolare dell’account può far accedere una TV."
+      "value": " per approvare questo accesso. Solo il titolare dell’account può approvare i dispositivi."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Smetti di visualizzare come questo utente per approvare una TV. Solo il titolare dell’account può far accedere una TV."
+      "value": "Smetti di visualizzare come questo utente per approvare questo accesso. Solo il titolare dell’account può approvare i dispositivi."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94532,39 +94526,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Non abbiamo trovato questo codice. Controlla il codice sulla TV."
+      "value": "Non abbiamo trovato questo codice. Controlla il codice e riprova."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Non ora"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Le app TV meno recenti mostrano invece "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Approva solo un dispositivo che hai davanti in questo momento."
+      "value": "Rifiuta"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Approva solo una TV che hai davanti in questo momento."
+      "value": "Approva solo se hai avviato tu l’accesso."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94590,7 +94564,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Chiunque usi questa TV può scegliere tra i tuoi profili. I profili con un PIN restano bloccati."
+      "value": "Così il dispositivo avrà accesso ai tuoi profili. I profili con un PIN restano bloccati."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94637,6 +94611,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Richiesta "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -94650,7 +94634,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Questa TV ha smesso di attendere. Ricomincia dalla TV."
+      "value": "Questo dispositivo ha smesso di attendere. Ricomincia l’accesso dal dispositivo."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -94659,10 +94643,34 @@
       "value": "Questo accesso è stato rifiutato."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Fatto. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sta effettuando l’accesso."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ha effettuato l’accesso."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Questo codice è scaduto. La TV ne mostra uno nuovo: usa quello."
+      "value": "Questo codice è scaduto. Ottieni un nuovo codice sul dispositivo e riprova."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -94746,25 +94754,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "La TV ha già effettuato l’accesso."
+      "value": "Questo dispositivo ha già effettuato l’accesso."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Questa TV è stata approvata e sta completando l’accesso."
+      "value": "Questo dispositivo è stato approvato e sta completando l’accesso."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Fatto. La TV sta effettuando l’accesso."
+      "value": "Fatto. Il dispositivo sta effettuando l’accesso."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "La TV ha effettuato l’accesso."
+      "value": "Il dispositivo ha effettuato l’accesso."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -94842,13 +94850,13 @@
     },
     {
       "type": 0,
-      "value": " per approvare questa TV."
+      "value": " per approvare questo accesso."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Accedi sulla TV"
+      "value": "Approva l’accesso"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -95894,7 +95902,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Impossibile far accedere il dispositivo. Riprova."
+      "value": "Impossibile approvare l’accesso. Riprova."
     }
   ],
   "web.auth.quickConnect.impersonating": [

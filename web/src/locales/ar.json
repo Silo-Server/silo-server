@@ -116334,25 +116334,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "تعذّر تسجيل الدخول على التلفزيون. حاول مرة أخرى."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "تحقق من أن تطبيقك يعرض"
+      "value": "تعذّرت الموافقة على تسجيل الدخول. حاول مرة أخرى."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "تحقق من أن التلفزيون يعرض"
+      "value": "تأكّد من تطابق هذا الرمز"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "أدخل الرمز الظاهر على التلفزيون أو التطبيق"
+      "value": "أدخل الرمز المعروض على جهازك"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -116364,13 +116358,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "سجل الدخول على تلفزيون أو جهاز آخر باستخدام حسابك."
+      "value": "تسجيل الدخول على تلفزيون أو تطبيق أو جهاز آخر."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "تسجيل الدخول على التلفزيون"
+      "value": "الموافقة على تسجيل الدخول"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -116390,13 +116384,13 @@
     },
     {
       "type": 0,
-      "value": " للموافقة على التلفزيون. لا يمكن تسجيل الدخول على التلفزيون إلا من الحساب نفسه."
+      "value": " للموافقة على تسجيل الدخول هذا. لا يمكن الموافقة على الأجهزة إلا من الحساب نفسه."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "أوقف العرض باسم هذا المستخدم للموافقة على التلفزيون. لا يمكن تسجيل الدخول على التلفزيون إلا من الحساب نفسه."
+      "value": "أوقف العرض باسم هذا المستخدم للموافقة على تسجيل الدخول هذا. لا يمكن الموافقة على الأجهزة إلا من الحساب نفسه."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -116414,39 +116408,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "لم نعثر على هذا الرمز. تحقق من الرمز على التلفزيون."
+      "value": "لم نعثر على هذا الرمز. تحقّق من الرمز وحاول مرة أخرى."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "ليس الآن"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "تعرض تطبيقات التلفزيون الأقدم "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " بدلًا من ذلك."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "لا توافق إلا على جهاز موجود أمامك الآن."
+      "value": "رفض"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "لا توافق إلا على تلفزيون موجود أمامك الآن."
+      "value": "لا توافق على هذا إلا إذا بدأت تسجيل الدخول بنفسك."
     }
   ],
   "web.auth.activate.playOn": [
@@ -116472,7 +116446,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "يمكن لأي شخص يستخدم هذا التلفزيون الاختيار من ملفاتك الشخصية. تبقى الملفات الشخصية المحمية برمز PIN مقفلة."
+      "value": "يمنحه هذا الوصول إلى ملفاتك الشخصية. تبقى الملفات الشخصية المحمية برمز PIN مقفلة."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -116519,6 +116493,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "تم الطلب "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -116532,7 +116516,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "توقف هذا التلفزيون عن الانتظار. ابدأ من جديد على التلفزيون."
+      "value": "توقف هذا الجهاز عن الانتظار. ابدأ تسجيل الدخول مجددًا عليه."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -116541,10 +116525,38 @@
       "value": "تم رفض تسجيل الدخول هذا."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "تم. يسجّل "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " الدخول الآن."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "تم تسجيل دخول "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "انتهت صلاحية هذا الرمز. يعرض التلفزيون رمزًا جديدًا. استخدم ذلك الرمز بدلًا منه."
+      "value": "انتهت صلاحية هذا الرمز. احصل على رمز جديد على الجهاز وحاول مرة أخرى."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -116578,7 +116590,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "تم. هذا الجهاز يسجل الدخول باسم "
+      "value": "تم. يسجّل هذا الجهاز الدخول باسم "
     },
     {
       "type": 1,
@@ -116628,25 +116640,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "تم تسجيل الدخول على ذلك التلفزيون بالفعل."
+      "value": "تم تسجيل دخول هذا الجهاز بالفعل."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "تمت الموافقة على هذا التلفزيون وهو يُكمل تسجيل الدخول."
+      "value": "تمت الموافقة على هذا الجهاز وهو يُكمل تسجيل الدخول."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "تم. يجري تسجيل الدخول على التلفزيون."
+      "value": "تم. يسجّل جهازك الدخول الآن."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "تم تسجيل الدخول على التلفزيون."
+      "value": "تم تسجيل دخول جهازك."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -116690,7 +116702,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "تسجيل الدخول على "
+      "value": "هل تسمح لـ "
     },
     {
       "type": 1,
@@ -116698,13 +116710,13 @@
     },
     {
       "type": 0,
-      "value": "؟"
+      "value": " بتسجيل الدخول؟"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "تسجيل الدخول على هذا الجهاز؟"
+      "value": "هل تسمح لهذا الجهاز بتسجيل الدخول؟"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -116716,7 +116728,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "سجل الدخول إلى "
+      "value": "سجّل الدخول إلى "
     },
     {
       "type": 1,
@@ -116724,13 +116736,13 @@
     },
     {
       "type": 0,
-      "value": " للموافقة على هذا التلفزيون."
+      "value": " للموافقة على تسجيل الدخول هذا."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "تسجيل الدخول على التلفزيون"
+      "value": "الموافقة على تسجيل الدخول"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -117780,7 +117792,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "تعذّر تسجيل الدخول على الجهاز. حاول مرة أخرى."
+      "value": "تعذّرت الموافقة على تسجيل الدخول. حاول مرة أخرى."
     }
   ],
   "web.auth.quickConnect.impersonating": [

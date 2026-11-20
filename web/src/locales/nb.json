@@ -86690,25 +86690,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Kunne ikke logge på TV-en. Prøv igjen."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Kontroller at appen din viser"
+      "value": "Kunne ikke godkjenne påloggingen. Prøv igjen."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Kontroller at TV-en din viser"
+      "value": "Sjekk at denne koden stemmer"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Skriv inn koden på TV-en eller i appen"
+      "value": "Skriv inn koden som vises på enheten din"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86720,13 +86714,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Logg på en TV eller en annen enhet med kontoen din."
+      "value": "Logg på en TV, en app eller en annen enhet."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Logg på en TV"
+      "value": "Godkjenn pålogging"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86746,13 +86740,13 @@
     },
     {
       "type": 0,
-      "value": " for å godkjenne en TV. Bare kontoen selv kan logge på en TV."
+      "value": " for å godkjenne denne påloggingen. Bare kontoen selv kan godkjenne enheter."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Slutt å se som denne brukeren for å godkjenne en TV. Bare kontoen selv kan logge på en TV."
+      "value": "Slutt å se som denne brukeren for å godkjenne denne påloggingen. Bare kontoen selv kan godkjenne enheter."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86770,39 +86764,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Vi fant ikke den koden. Kontroller koden på TV-en."
+      "value": "Vi fant ikke den koden. Sjekk koden, og prøv igjen."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ikke nå"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Eldre TV-apper viser "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " i stedet."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Godkjenn bare en enhet som står foran deg akkurat nå."
+      "value": "Avvis"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Godkjenn bare en TV som står foran deg akkurat nå."
+      "value": "Godkjenn bare hvis du startet påloggingen selv."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86828,7 +86802,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Alle som bruker denne TV-en, kan velge blant profilene dine. Profiler med PIN forblir låst."
+      "value": "Dette gir den tilgang til profilene dine. Profiler med PIN forblir låst."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86875,6 +86849,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Forespurt "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86888,7 +86872,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Denne TV-en sluttet å vente. Start på nytt på TV-en."
+      "value": "Denne enheten sluttet å vente. Start påloggingen på nytt på enheten."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86897,10 +86881,34 @@
       "value": "Denne påloggingen ble avslått."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Ferdig. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " logger på."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " er logget på."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Denne koden er utløpt. TV-en din viser en ny. Bruk den koden i stedet."
+      "value": "Denne koden er utløpt. Hent en ny kode på enheten, og prøv igjen."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86984,25 +86992,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Den TV-en er allerede logget på."
+      "value": "Denne enheten er allerede logget på."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Denne TV-en ble godkjent og fullfører påloggingen."
+      "value": "Denne enheten ble godkjent og fullfører påloggingen."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Ferdig. TV-en din logger på."
+      "value": "Ferdig. Enheten din logger på."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "TV-en din er logget på."
+      "value": "Enheten din er logget på."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -87046,7 +87054,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Logge på "
+      "value": "Vil du la "
     },
     {
       "type": 1,
@@ -87054,13 +87062,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " logge på?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Logge på denne enheten?"
+      "value": "Vil du la denne enheten logge på?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87080,13 +87088,13 @@
     },
     {
       "type": 0,
-      "value": " for å godkjenne denne TV-en."
+      "value": " for å godkjenne denne påloggingen."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Logg på TV-en"
+      "value": "Godkjenn pålogging"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88132,7 +88140,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Kunne ikke logge på enheten. Prøv igjen."
+      "value": "Kunne ikke godkjenne påloggingen. Prøv igjen."
     }
   ],
   "web.auth.quickConnect.impersonating": [

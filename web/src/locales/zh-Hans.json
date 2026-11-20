@@ -79615,25 +79615,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "无法登录电视。请重试。"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "请确认你的应用显示"
+      "value": "无法批准登录。请重试。"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "请确认你的电视显示"
+      "value": "请确认此代码一致"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "输入电视或应用上显示的代码"
+      "value": "输入你的设备上显示的代码"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -79645,13 +79639,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "使用你的账户登录电视或其他设备。"
+      "value": "登录电视、应用或其他设备。"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "登录电视"
+      "value": "批准登录"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -79671,13 +79665,13 @@
     },
     {
       "type": 0,
-      "value": "身份查看，然后再批准电视。只有该账户本人才能登录电视。"
+      "value": "身份查看，然后再批准此次登录。只有该账户本人才能批准设备。"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "请停止以此用户身份查看，然后再批准电视。只有该账户本人才能登录电视。"
+      "value": "请停止以此用户身份查看，然后再批准此次登录。只有该账户本人才能批准设备。"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -79695,39 +79689,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "找不到该代码。请检查电视上显示的代码。"
+      "value": "找不到该代码。请检查代码并重试。"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "暂不"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "旧版电视应用会改为显示"
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "。"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "只批准此刻就在你面前的设备。"
+      "value": "拒绝"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "只批准此刻就在你面前的电视。"
+      "value": "仅在登录是你本人发起时才批准。"
     }
   ],
   "web.auth.activate.playOn": [
@@ -79753,7 +79727,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "使用这台电视的任何人都可以选择你的个人资料。设有PIN的个人资料仍保持锁定。"
+      "value": "这会让它访问你的个人资料。设有PIN的个人资料将保持锁定。"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -79800,6 +79774,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "请求于"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -79813,7 +79797,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "这台电视已停止等待。请在电视上重新开始。"
+      "value": "此设备已停止等待。请在该设备上重新开始登录。"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -79822,10 +79806,34 @@
       "value": "此登录已被拒绝。"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "完成。"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "正在登录。"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "已登录。"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "此代码已过期。你的电视正在显示新代码，请改用该代码。"
+      "value": "此代码已过期。请在设备上获取新代码，然后重试。"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -79909,25 +79917,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "该电视已登录。"
+      "value": "此设备已登录。"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "这台电视已获批准，正在完成登录。"
+      "value": "此设备已获批准，正在完成登录。"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "完成。你的电视正在登录。"
+      "value": "完成。你的设备正在登录。"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "你的电视已登录。"
+      "value": "你的设备已登录。"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -79971,7 +79979,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "登录"
+      "value": "要允许"
     },
     {
       "type": 1,
@@ -79979,13 +79987,13 @@
     },
     {
       "type": 0,
-      "value": "？"
+      "value": "登录吗？"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "登录此设备？"
+      "value": "要允许此设备登录吗？"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -80005,13 +80013,13 @@
     },
     {
       "type": 0,
-      "value": "以批准这台电视。"
+      "value": "以批准此次登录。"
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "登录电视"
+      "value": "批准登录"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -81065,7 +81073,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "无法登录该设备。请重试。"
+      "value": "无法批准登录。请重试。"
     }
   ],
   "web.auth.quickConnect.impersonating": [

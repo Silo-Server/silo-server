@@ -87070,25 +87070,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Δεν ήταν δυνατή η σύνδεση της τηλεόρασης. Δοκιμάστε ξανά."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Ελέγξτε ότι η εφαρμογή σας εμφανίζει"
+      "value": "Δεν ήταν δυνατή η έγκριση της σύνδεσης. Δοκιμάστε ξανά."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Ελέγξτε ότι η τηλεόρασή σας εμφανίζει"
+      "value": "Βεβαιωθείτε ότι αυτός ο κωδικός ταιριάζει"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Εισαγάγετε τον κωδικό που εμφανίζεται στην τηλεόραση ή στην εφαρμογή σας"
+      "value": "Εισαγάγετε τον κωδικό που εμφανίζεται στη συσκευή σας"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -87100,13 +87094,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Συνδέστε μια τηλεόραση ή άλλη συσκευή με τον λογαριασμό σας."
+      "value": "Σύνδεση τηλεόρασης, εφαρμογής ή άλλης συσκευής."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Σύνδεση τηλεόρασης"
+      "value": "Έγκριση σύνδεσης"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -87126,13 +87120,13 @@
     },
     {
       "type": 0,
-      "value": " για να εγκρίνετε μια τηλεόραση. Μόνο ο ίδιος ο λογαριασμός μπορεί να συνδέσει μια τηλεόραση."
+      "value": " για να εγκρίνετε αυτή τη σύνδεση. Μόνο ο ίδιος ο λογαριασμός μπορεί να εγκρίνει συσκευές."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Σταματήστε την προβολή ως αυτός ο χρήστης για να εγκρίνετε μια τηλεόραση. Μόνο ο ίδιος ο λογαριασμός μπορεί να συνδέσει μια τηλεόραση."
+      "value": "Σταματήστε την προβολή ως αυτός ο χρήστης για να εγκρίνετε αυτή τη σύνδεση. Μόνο ο ίδιος ο λογαριασμός μπορεί να εγκρίνει συσκευές."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -87150,39 +87144,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Δεν βρέθηκε αυτός ο κωδικός. Ελέγξτε τον κωδικό στην τηλεόρασή σας."
+      "value": "Δεν ήταν δυνατή η εύρεση αυτού του κωδικού. Ελέγξτε τον κωδικό και δοκιμάστε ξανά."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Όχι τώρα"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Οι παλαιότερες εφαρμογές τηλεόρασης εμφανίζουν στη θέση του τις λέξεις "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Εγκρίνετε μόνο μια συσκευή που βρίσκεται μπροστά σας αυτή τη στιγμή."
+      "value": "Απόρριψη"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Εγκρίνετε μόνο μια τηλεόραση που βρίσκεται μπροστά σας αυτή τη στιγμή."
+      "value": "Εγκρίνετε μόνο αν ξεκινήσατε εσείς τη σύνδεση."
     }
   ],
   "web.auth.activate.playOn": [
@@ -87208,7 +87182,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Όποιος χρησιμοποιεί αυτή την τηλεόραση μπορεί να επιλέξει από τα προφίλ σας. Τα προφίλ με PIN παραμένουν κλειδωμένα."
+      "value": "Έτσι αποκτά πρόσβαση στα προφίλ σας. Τα προφίλ με PIN παραμένουν κλειδωμένα."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -87255,6 +87229,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Ζητήθηκε "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -87268,7 +87252,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Αυτή η τηλεόραση σταμάτησε να περιμένει. Ξεκινήστε ξανά από την τηλεόραση."
+      "value": "Αυτή η συσκευή σταμάτησε να περιμένει. Ξεκινήστε ξανά τη σύνδεση σε αυτήν."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -87277,10 +87261,38 @@
       "value": "Αυτή η σύνδεση απορρίφθηκε."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Ολοκληρώθηκε. Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " συνδέεται."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " συνδέθηκε."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Αυτός ο κωδικός έληξε. Η τηλεόρασή σας εμφανίζει έναν νέο. Χρησιμοποιήστε εκείνον τον κωδικό."
+      "value": "Αυτός ο κωδικός έληξε. Λάβετε νέο κωδικό στη συσκευή και δοκιμάστε ξανά."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -87364,25 +87376,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Η τηλεόραση έχει ήδη συνδεθεί."
+      "value": "Αυτή η συσκευή έχει ήδη συνδεθεί."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Αυτή η τηλεόραση εγκρίθηκε και ολοκληρώνει τη σύνδεση."
+      "value": "Αυτή η συσκευή εγκρίθηκε και ολοκληρώνει τη σύνδεση."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Ολοκληρώθηκε. Η τηλεόρασή σας συνδέεται."
+      "value": "Ολοκληρώθηκε. Η συσκευή σας συνδέεται."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Η τηλεόρασή σας συνδέθηκε."
+      "value": "Η συσκευή σας συνδέθηκε."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -87426,7 +87438,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Σύνδεση της συσκευής "
+      "value": "Να επιτραπεί η σύνδεση της συσκευής "
     },
     {
       "type": 1,
@@ -87440,7 +87452,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Σύνδεση αυτής της συσκευής;"
+      "value": "Να επιτραπεί η σύνδεση αυτής της συσκευής;"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87460,13 +87472,13 @@
     },
     {
       "type": 0,
-      "value": " για να εγκρίνετε αυτή την τηλεόραση."
+      "value": " για να εγκρίνετε αυτή τη σύνδεση."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Σύνδεση τηλεόρασης"
+      "value": "Έγκριση σύνδεσης"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88516,7 +88528,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Δεν ήταν δυνατή η σύνδεση της συσκευής. Δοκιμάστε ξανά."
+      "value": "Δεν ήταν δυνατή η έγκριση της σύνδεσης. Δοκιμάστε ξανά."
     }
   ],
   "web.auth.quickConnect.impersonating": [

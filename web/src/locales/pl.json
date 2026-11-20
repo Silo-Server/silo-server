@@ -103356,25 +103356,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Nie udało się zalogować telewizora. Spróbuj ponownie."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Sprawdź, czy aplikacja wyświetla"
+      "value": "Nie udało się zatwierdzić logowania. Spróbuj ponownie."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Sprawdź, czy telewizor wyświetla"
+      "value": "Sprawdź, czy ten kod się zgadza"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Wpisz kod z telewizora lub aplikacji"
+      "value": "Wpisz kod wyświetlany na urządzeniu"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -103386,13 +103380,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Zaloguj telewizor lub inne urządzenie na swoje konto."
+      "value": "Zaloguj telewizor, aplikację lub inne urządzenie."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Zaloguj telewizor"
+      "value": "Zatwierdź logowanie"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -103412,13 +103406,13 @@
     },
     {
       "type": 0,
-      "value": ", aby zatwierdzić telewizor. Telewizor można zalogować tylko z tego konta."
+      "value": ", aby zatwierdzić to logowanie. Urządzenia można zatwierdzać tylko z tego konta."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Zakończ podgląd jako ten użytkownik, aby zatwierdzić telewizor. Telewizor można zalogować tylko z tego konta."
+      "value": "Zakończ podgląd jako ten użytkownik, aby zatwierdzić to logowanie. Urządzenia można zatwierdzać tylko z tego konta."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -103436,39 +103430,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Nie znaleziono tego kodu. Sprawdź kod na telewizorze."
+      "value": "Nie znaleziono tego kodu. Sprawdź kod i spróbuj ponownie."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Nie teraz"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Starsze aplikacje na telewizory wyświetlają zamiast tego "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Zatwierdzaj tylko urządzenie, które masz teraz przed sobą."
+      "value": "Odrzuć"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Zatwierdzaj tylko telewizor, który masz teraz przed sobą."
+      "value": "Zatwierdzaj tylko logowanie rozpoczęte przez ciebie."
     }
   ],
   "web.auth.activate.playOn": [
@@ -103494,7 +103468,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Każda osoba korzystająca z tego telewizora może wybrać jeden z twoich profili. Profile z kodem PIN pozostają zablokowane."
+      "value": "Dzięki temu urządzenie uzyska dostęp do twoich profili. Profile z kodem PIN pozostaną zablokowane."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -103541,6 +103515,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Prośba wysłana "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -103554,7 +103538,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Ten telewizor przestał czekać. Zacznij ponownie na telewizorze."
+      "value": "To urządzenie przestało czekać. Rozpocznij na nim logowanie ponownie."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -103563,10 +103547,38 @@
       "value": "Odrzucono to logowanie."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Gotowe. Urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " się loguje."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " jest zalogowane."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Ten kod wygasł. Telewizor wyświetla nowy. Użyj tego kodu."
+      "value": "Ten kod wygasł. Uzyskaj nowy kod na urządzeniu i spróbuj ponownie."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -103650,25 +103662,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Ten telewizor jest już zalogowany."
+      "value": "To urządzenie jest już zalogowane."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Ten telewizor został zatwierdzony i kończy logowanie."
+      "value": "To urządzenie zostało zatwierdzone i kończy logowanie."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Gotowe. Telewizor się loguje."
+      "value": "Gotowe. Urządzenie się loguje."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Telewizor jest zalogowany."
+      "value": "Urządzenie jest zalogowane."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -103712,7 +103724,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Zalogować urządzenie "
+      "value": "Zezwolić urządzeniu "
     },
     {
       "type": 1,
@@ -103720,13 +103732,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " na logowanie?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Zalogować to urządzenie?"
+      "value": "Zezwolić temu urządzeniu na logowanie?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -103746,13 +103758,13 @@
     },
     {
       "type": 0,
-      "value": ", aby zatwierdzić ten telewizor."
+      "value": ", aby zatwierdzić to logowanie."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Zaloguj telewizor"
+      "value": "Zatwierdź logowanie"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -104802,7 +104814,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Nie udało się zalogować urządzenia. Spróbuj ponownie."
+      "value": "Nie udało się zatwierdzić logowania. Spróbuj ponownie."
     }
   ],
   "web.auth.quickConnect.impersonating": [

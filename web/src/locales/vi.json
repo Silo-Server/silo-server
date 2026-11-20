@@ -87034,25 +87034,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Không thể đăng nhập TV. Vui lòng thử lại."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Kiểm tra xem ứng dụng của bạn có hiển thị"
+      "value": "Không thể phê duyệt đăng nhập. Vui lòng thử lại."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Kiểm tra xem TV của bạn có hiển thị"
+      "value": "Đảm bảo mã này khớp"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Nhập mã trên TV hoặc ứng dụng của bạn"
+      "value": "Nhập mã hiển thị trên thiết bị của bạn"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -87064,13 +87058,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Đăng nhập TV hoặc thiết bị khác bằng tài khoản của bạn."
+      "value": "Đăng nhập TV, ứng dụng hoặc thiết bị khác."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Đăng nhập TV"
+      "value": "Phê duyệt đăng nhập"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -87090,13 +87084,13 @@
     },
     {
       "type": 0,
-      "value": " để phê duyệt TV. Chỉ chính tài khoản đó mới có thể đăng nhập TV."
+      "value": " để phê duyệt lần đăng nhập này. Chỉ chính tài khoản đó mới có thể phê duyệt thiết bị."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Dừng xem với tư cách người dùng này để phê duyệt TV. Chỉ chính tài khoản đó mới có thể đăng nhập TV."
+      "value": "Dừng xem với tư cách người dùng này để phê duyệt lần đăng nhập này. Chỉ chính tài khoản đó mới có thể phê duyệt thiết bị."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -87114,39 +87108,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Không tìm thấy mã đó. Kiểm tra mã trên TV của bạn."
+      "value": "Không tìm thấy mã đó. Kiểm tra mã và thử lại."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Để sau"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Ứng dụng TV cũ hơn hiển thị "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " thay vào đó."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Chỉ phê duyệt thiết bị đang ở ngay trước mặt bạn."
+      "value": "Từ chối"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Chỉ phê duyệt TV đang ở ngay trước mặt bạn."
+      "value": "Chỉ phê duyệt nếu chính bạn đã bắt đầu đăng nhập."
     }
   ],
   "web.auth.activate.playOn": [
@@ -87172,7 +87146,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Bất kỳ ai dùng TV này đều có thể chọn trong các hồ sơ của bạn. Hồ sơ có PIN vẫn được khóa."
+      "value": "Thao tác này cho phép thiết bị truy cập các hồ sơ của bạn. Hồ sơ có PIN vẫn được khóa."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -87219,6 +87193,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Đã yêu cầu "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -87232,7 +87216,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "TV này đã ngừng chờ. Bắt đầu lại trên TV."
+      "value": "Thiết bị này đã ngừng chờ. Bắt đầu đăng nhập lại trên thiết bị đó."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -87241,10 +87225,34 @@
       "value": "Đã từ chối lần đăng nhập này."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Xong. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " đang đăng nhập."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " đã đăng nhập."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Mã này đã hết hạn. TV của bạn đang hiển thị mã mới. Dùng mã đó thay thế."
+      "value": "Mã này đã hết hạn. Lấy mã mới trên thiết bị rồi thử lại."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -87328,25 +87336,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "TV đó đã đăng nhập rồi."
+      "value": "Thiết bị này đã được đăng nhập."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "TV này đã được phê duyệt và đang hoàn tất đăng nhập."
+      "value": "Thiết bị này đã được phê duyệt và đang hoàn tất đăng nhập."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Xong. TV của bạn đang đăng nhập."
+      "value": "Xong. Thiết bị của bạn đang đăng nhập."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "TV của bạn đã đăng nhập."
+      "value": "Thiết bị của bạn đã đăng nhập."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -87390,7 +87398,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Đăng nhập "
+      "value": "Cho phép "
     },
     {
       "type": 1,
@@ -87398,13 +87406,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " đăng nhập?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Đăng nhập thiết bị này?"
+      "value": "Cho phép thiết bị này đăng nhập?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87416,7 +87424,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "Đăng nhập vào "
+      "value": "Đăng nhập vào máy chủ "
     },
     {
       "type": 1,
@@ -87424,13 +87432,13 @@
     },
     {
       "type": 0,
-      "value": " để phê duyệt TV này."
+      "value": " để phê duyệt lần đăng nhập này."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Đăng nhập TV"
+      "value": "Phê duyệt đăng nhập"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88476,7 +88484,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Không thể đăng nhập thiết bị. Vui lòng thử lại."
+      "value": "Không thể phê duyệt đăng nhập. Vui lòng thử lại."
     }
   ],
   "web.auth.quickConnect.impersonating": [

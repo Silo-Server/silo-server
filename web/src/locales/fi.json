@@ -86646,25 +86646,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Tv:n kirjautuminen epäonnistui. Yritä uudelleen."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Tarkista, että sovelluksessa näkyy"
+      "value": "Kirjautumisen hyväksyminen epäonnistui. Yritä uudelleen."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Tarkista, että tv:ssä näkyy"
+      "value": "Varmista, että tämä koodi täsmää"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Syötä tv:ssä tai sovelluksessa näkyvä koodi"
+      "value": "Anna laitteessasi näkyvä koodi"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86676,13 +86670,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Kirjaudu tilillesi tv:llä tai muulla laitteella."
+      "value": "Kirjaudu sisään tv:llä, sovelluksella tai muulla laitteella."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Tv:n sisäänkirjautuminen"
+      "value": "Hyväksy kirjautuminen"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86702,13 +86696,13 @@
     },
     {
       "type": 0,
-      "value": ", jotta voit hyväksyä tv:n. Vain tilin oma käyttäjä voi hyväksyä tv:n kirjautumisen."
+      "value": ", jotta voit hyväksyä tämän kirjautumisen. Vain tilin oma käyttäjä voi hyväksyä laitteita."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Lopeta katselu tänä käyttäjänä, jotta voit hyväksyä tv:n. Vain tilin oma käyttäjä voi hyväksyä tv:n kirjautumisen."
+      "value": "Lopeta katselu tänä käyttäjänä, jotta voit hyväksyä tämän kirjautumisen. Vain tilin oma käyttäjä voi hyväksyä laitteita."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86726,39 +86720,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Koodia ei löytynyt. Tarkista tv:ssä näkyvä koodi."
+      "value": "Koodia ei löytynyt. Tarkista koodi ja yritä uudelleen."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ei nyt"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Vanhemmat tv-sovellukset näyttävät sen sijaan sanat "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Hyväksy vain laite, joka on juuri nyt edessäsi."
+      "value": "Hylkää"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Hyväksy vain tv, joka on juuri nyt edessäsi."
+      "value": "Hyväksy tämä vain, jos aloitit kirjautumisen itse."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86784,7 +86758,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Kuka tahansa tämän tv:n käyttäjä voi valita profiileistasi. PIN-koodilla suojatut profiilit pysyvät lukittuina."
+      "value": "Laite saa näin pääsyn profiileihisi. PIN-koodilla suojatut profiilit pysyvät lukittuina."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86831,6 +86805,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Pyydetty "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86844,7 +86828,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Tv lopetti odottamisen. Aloita uudelleen tv:ssä."
+      "value": "Tämä laite lopetti odottamisen. Aloita kirjautuminen siinä uudelleen."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86853,10 +86837,34 @@
       "value": "Tämä kirjautuminen hylättiin."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Valmis. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " kirjautuu sisään."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " on kirjautunut sisään."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Tämä koodi vanheni. Tv:ssä näkyy nyt uusi koodi. Käytä sitä."
+      "value": "Tämä koodi vanheni. Hae laitteeseen uusi koodi ja yritä uudelleen."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86940,25 +86948,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Tv on jo kirjautunut sisään."
+      "value": "Tämä laite on jo kirjautunut sisään."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Tämä tv hyväksyttiin, ja sen kirjautuminen viimeistellään."
+      "value": "Tämä laite hyväksyttiin, ja sen kirjautuminen viimeistellään."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Valmis. Tv kirjautuu sisään."
+      "value": "Valmis. Laitteesi kirjautuu sisään."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Tv on kirjautunut sisään."
+      "value": "Laitteesi on kirjautunut sisään."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -87002,7 +87010,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Hyväksytäänkö laitteen "
+      "value": "Sallitaanko laitteen "
     },
     {
       "type": 1,
@@ -87010,13 +87018,13 @@
     },
     {
       "type": 0,
-      "value": " kirjautuminen?"
+      "value": " kirjautua sisään?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Hyväksytäänkö tämän laitteen kirjautuminen?"
+      "value": "Sallitaanko tämän laitteen kirjautua sisään?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87036,13 +87044,13 @@
     },
     {
       "type": 0,
-      "value": ", jotta voit hyväksyä tämän tv:n."
+      "value": ", jotta voit hyväksyä tämän kirjautumisen."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Hyväksy tv:n kirjautuminen"
+      "value": "Hyväksy kirjautuminen"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88092,7 +88100,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Laitteen sisäänkirjautuminen epäonnistui. Yritä uudelleen."
+      "value": "Kirjautumisen hyväksyminen epäonnistui. Yritä uudelleen."
     }
   ],
   "web.auth.quickConnect.impersonating": [

@@ -86510,25 +86510,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Der Fernseher konnte nicht angemeldet werden. Versuche es erneut."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Prüfe, ob deine App diesen Code anzeigt"
+      "value": "Die Anmeldung konnte nicht genehmigt werden. Versuche es erneut."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Prüfe, ob dein Fernseher diesen Code anzeigt"
+      "value": "Prüfe, ob dieser Code übereinstimmt"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Gib den Code von deinem Fernseher oder deiner App ein"
+      "value": "Gib den Code ein, den dein Gerät anzeigt"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86540,13 +86534,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Melde einen Fernseher oder ein anderes Gerät mit deinem Konto an."
+      "value": "Melde einen Fernseher, eine App oder ein anderes Gerät an."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Fernseher anmelden"
+      "value": "Anmeldung genehmigen"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86566,13 +86560,13 @@
     },
     {
       "type": 0,
-      "value": ", um einen Fernseher zu genehmigen. Nur das Konto selbst kann einen Fernseher anmelden."
+      "value": ", um diese Anmeldung zu genehmigen. Nur das Konto selbst kann Geräte genehmigen."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Beende die Ansicht als dieser Benutzer, um einen Fernseher zu genehmigen. Nur das Konto selbst kann einen Fernseher anmelden."
+      "value": "Beende die Ansicht als dieser Benutzer, um diese Anmeldung zu genehmigen. Nur das Konto selbst kann Geräte genehmigen."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86590,39 +86584,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Dieser Code wurde nicht gefunden. Prüfe den Code auf deinem Fernseher."
+      "value": "Dieser Code wurde nicht gefunden. Prüfe den Code und versuche es erneut."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Nicht jetzt"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Ältere TV-Apps zeigen stattdessen "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " an."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Genehmige nur ein Gerät, das sich gerade vor dir befindet."
+      "value": "Ablehnen"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Genehmige nur einen Fernseher, der sich gerade vor dir befindet."
+      "value": "Genehmige dies nur, wenn du die Anmeldung selbst gestartet hast."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86648,7 +86622,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Alle, die diesen Fernseher nutzen, können aus deinen Profilen wählen. Profile mit PIN bleiben gesperrt."
+      "value": "Das Gerät erhält dadurch Zugriff auf deine Profile. Profile mit PIN bleiben gesperrt."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86695,6 +86669,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Angefragt: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86708,7 +86692,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Dieser Fernseher wartet nicht mehr. Starte den Vorgang auf dem Fernseher neu."
+      "value": "Dieses Gerät wartet nicht mehr. Starte die Anmeldung dort erneut."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86717,10 +86701,34 @@
       "value": "Diese Anmeldung wurde abgelehnt."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Fertig. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " wird angemeldet."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ist angemeldet."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Dieser Code ist abgelaufen. Dein Fernseher zeigt einen neuen an. Verwende stattdessen diesen Code."
+      "value": "Dieser Code ist abgelaufen. Lass dir auf dem Gerät einen neuen Code anzeigen und versuche es erneut."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86804,25 +86812,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Dieser Fernseher ist bereits angemeldet."
+      "value": "Dieses Gerät ist bereits angemeldet."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Dieser Fernseher wurde genehmigt und schließt die Anmeldung ab."
+      "value": "Dieses Gerät wurde genehmigt und schließt die Anmeldung ab."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Fertig. Dein Fernseher wird angemeldet."
+      "value": "Fertig. Dein Gerät wird angemeldet."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Dein Fernseher ist angemeldet."
+      "value": "Dein Gerät ist angemeldet."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86865,6 +86873,10 @@
   ],
   "web.auth.activate.signInDevice": [
     {
+      "type": 0,
+      "value": "Darf sich "
+    },
+    {
       "type": 1,
       "value": "device"
     },
@@ -86876,7 +86888,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Dieses Gerät anmelden?"
+      "value": "Darf sich dieses Gerät anmelden?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86896,13 +86908,13 @@
     },
     {
       "type": 0,
-      "value": " an, um diesen Fernseher zu genehmigen."
+      "value": " an, um diese Anmeldung zu genehmigen."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Fernseher anmelden"
+      "value": "Anmeldung genehmigen"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -87952,7 +87964,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Das Gerät konnte nicht angemeldet werden. Versuche es erneut."
+      "value": "Die Anmeldung konnte nicht genehmigt werden. Versuche es erneut."
     }
   ],
   "web.auth.quickConnect.impersonating": [
