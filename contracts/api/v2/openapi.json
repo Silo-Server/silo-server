@@ -48806,7 +48806,7 @@
         "additionalProperties": false,
         "properties": {
           "section_tokens": {
-            "description": "Opaque server-keyed tokens for every server section on this page that the acting profile's access policy permits (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically. Rows tied to libraries the profile can't see are left out.",
+            "description": "Opaque server-keyed tokens, bound to the acting profile, for every server section on this page in a library the profile is allowed (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically. Rows tied to libraries the profile isn't allowed are left out.",
             "items": {
               "type": "string"
             },
@@ -48869,7 +48869,7 @@
             "type": "string"
           },
           "token": {
-            "description": "Opaque server-keyed token identifying this server section on this page for layout export and import comparisons",
+            "description": "Opaque server-keyed token identifying this server section on this page for the acting profile, for layout export and import comparisons",
             "examples": [
               "m3s9R1pQv8fK2nL7wX4yZA"
             ],

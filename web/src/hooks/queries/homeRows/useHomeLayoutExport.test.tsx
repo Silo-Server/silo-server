@@ -166,6 +166,31 @@ describe("useHomeLayoutExport", () => {
     expect(toast.success).toHaveBeenCalledWith("Home layout exported");
   });
 
+  it("still exports a page whose baseline can't be read, without its tokens", async () => {
+    const answer = mocks.request.getMockImplementation()!;
+    mocks.request.mockImplementation(
+      async (operation: string, args?: { query?: Record<string, unknown> }) => {
+        if (
+          operation === "GET /api/v2/profile/sections/baseline" &&
+          args?.query?.library_id === "7"
+        ) {
+          throw new Error("unavailable");
+        }
+        return answer(operation, args);
+      },
+    );
+    await exportLayout();
+
+    const file = await exportedFile();
+    expect(file.pages.map((page) => page.server_section_tokens)).toEqual([
+      ["tok-home"],
+      undefined,
+      ["tok-8"],
+      ["tok-9"],
+    ]);
+    expect(file.pages.every((page) => page.overrides.length === 1)).toBe(true);
+  });
+
   it("exports a restricted profile's allowed libraries except the one it hid", async () => {
     allowed = [7, 9];
     mocks.hidden = [9];

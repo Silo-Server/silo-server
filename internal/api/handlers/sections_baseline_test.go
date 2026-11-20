@@ -36,6 +36,7 @@ func TestGetProfileSectionBaselineLeavesOutRowsTheProfileCannotSee(t *testing.T)
 				{ID: "s-home", Scope: "home", Position: 0, SectionType: sections.SectionContinueWatching, Title: "Continue Watching", Enabled: true},
 				{ID: "s-kids", Scope: "home", Position: 1, SectionType: sections.SectionRecentlyAdded, Title: "Kids", Config: json.RawMessage(`{"library_ids":[2]}`), Enabled: true},
 				{ID: "s-disabled", Scope: "home", Position: 2, SectionType: sections.SectionCollectionPosters, Title: "Collections", Enabled: false},
+				{ID: "s-kids-off", Scope: "home", Position: 3, SectionType: sections.SectionRecentlyAdded, Title: "Kids (off)", Config: json.RawMessage(`{"library_ids":[2]}`), Enabled: false},
 			},
 		},
 	}
@@ -49,13 +50,46 @@ func TestGetProfileSectionBaselineLeavesOutRowsTheProfileCannotSee(t *testing.T)
 		t.Fatalf("GetProfileSectionBaseline failed: %v", err)
 	}
 
-	// s-kids is tied to library 2, which this profile can't see, so it is
-	// neither listed nor counted.
+	// s-kids and the disabled s-kids-off are tied to library 2, which this
+	// profile can't see, so neither is listed or counted.
 	if !slices.Equal(got.SectionIDs, []string{"s-home", "s-disabled"}) {
 		t.Fatalf("SectionIDs = %v, want [s-home s-disabled]", got.SectionIDs)
 	}
 	if len(got.VisibleSections) != 1 || got.VisibleSections[0].ID != "s-home" {
 		t.Fatalf("VisibleSections = %+v, want only s-home", got.VisibleSections)
+	}
+}
+
+func TestGetProfileSectionBaselineKeepsRowsInLibrariesTheProfileHid(t *testing.T) {
+	h := &SectionHandler{
+		sectionLister: &stubSectionScopeLister{
+			all: []*sections.PageSection{
+				{ID: "s-home", Scope: "home", Position: 0, SectionType: sections.SectionContinueWatching, Title: "Continue Watching", Enabled: true},
+				{ID: "s-anime", Scope: "home", Position: 1, SectionType: sections.SectionRecentlyAdded, Title: "Anime", Config: json.RawMessage(`{"library_ids":[3]}`), Enabled: true},
+			},
+		},
+	}
+
+	// The profile hid library 3 from its own browsing; it is still allowed
+	// it. An unrestricted profile's hidden libraries arrive as disabled ones;
+	// a restricted profile's are taken out of its allowed set.
+	for name, scope := range map[string]access.Scope{
+		"unrestricted": {DisabledLibraryIDs: []int{3}},
+		"restricted":   {LibrariesRestricted: true, AllowedLibraryIDs: []int{1}, HiddenLibraryIDs: []int{3}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := h.GetProfileSectionBaseline(access.SetScope(context.Background(), scope), 1, "home", nil)
+			if err != nil {
+				t.Fatalf("GetProfileSectionBaseline failed: %v", err)
+			}
+			// Showing library 3 again must not make s-anime look new to an import.
+			if !slices.Equal(got.SectionIDs, []string{"s-home", "s-anime"}) {
+				t.Fatalf("SectionIDs = %v, want [s-home s-anime]", got.SectionIDs)
+			}
+			if len(got.VisibleSections) != 1 || got.VisibleSections[0].ID != "s-home" {
+				t.Fatalf("VisibleSections = %+v, want only s-home", got.VisibleSections)
+			}
+		})
 	}
 }
 

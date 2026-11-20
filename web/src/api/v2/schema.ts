@@ -33330,7 +33330,7 @@ export interface components {
       pin: string;
     };
     ProfileSectionBaseline: {
-      /** @description Opaque server-keyed tokens for every server section on this page that the acting profile's access policy permits (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically. Rows tied to libraries the profile can't see are left out. */
+      /** @description Opaque server-keyed tokens, bound to the acting profile, for every server section on this page in a library the profile is allowed (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically. Rows tied to libraries the profile isn't allowed are left out. */
       section_tokens: string[];
       /** @description Pre-override active server sections the acting profile's access policy permits, in display order */
       visible_sections: components["schemas"]["ProfileSectionBaselineRow"][];
@@ -33363,7 +33363,7 @@ export interface components {
        */
       title_key?: string;
       /**
-       * @description Opaque server-keyed token identifying this server section on this page for layout export and import comparisons
+       * @description Opaque server-keyed token identifying this server section on this page for the acting profile, for layout export and import comparisons
        * @example m3s9R1pQv8fK2nL7wX4yZA
        */
       token: string;

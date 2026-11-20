@@ -1,14 +1,14 @@
 {
   "section_tokens": [
-    "JJCuATASZNkHWhXxVIzNtQ",
-    "swuu975wnHbdix1ektLR6w"
+    "JPHkNzvh_RNMk7KYUGOlDQ",
+    "_1gGrJD4MbMO9KNmA9yydg"
   ],
   "visible_sections": [
     {
       "id": "s-continue",
       "section_type": "continue_watching",
       "title": "Continue Watching",
-      "token": "swuu975wnHbdix1ektLR6w",
+      "token": "JPHkNzvh_RNMk7KYUGOlDQ",
       "title_key": "home.section.continueWatching"
     }
   ]

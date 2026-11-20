@@ -164,7 +164,7 @@ type ProfileSectionBaselineRow struct {
 	ID          string `json:"id" example:"s-continue-watching"`
 	SectionType string `json:"section_type" doc:"The recipe; the set is extensible" example:"continue_watching"`
 	Title       string `json:"title" doc:"The server's title for this row before any profile overrides" example:"Continue Watching"`
-	Token       string `json:"token" doc:"Opaque server-keyed token identifying this server section on this page for layout export and import comparisons" example:"m3s9R1pQv8fK2nL7wX4yZA"`
+	Token       string `json:"token" doc:"Opaque server-keyed token identifying this server section on this page for the acting profile, for layout export and import comparisons" example:"m3s9R1pQv8fK2nL7wX4yZA"`
 	SectionTitleKey
 }
 
@@ -172,7 +172,7 @@ type ProfileSectionBaselineRow struct {
 // profile overrides are applied, for home layout export snapshots and import
 // previews.
 type ProfileSectionBaseline struct {
-	SectionTokens   []string                    `json:"section_tokens" doc:"Opaque server-keyed tokens for every server section on this page that the acting profile's access policy permits (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically. Rows tied to libraries the profile can't see are left out."`
+	SectionTokens   []string                    `json:"section_tokens" doc:"Opaque server-keyed tokens, bound to the acting profile, for every server section on this page in a library the profile is allowed (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically. Rows tied to libraries the profile isn't allowed are left out."`
 	VisibleSections []ProfileSectionBaselineRow `json:"visible_sections" doc:"Pre-override active server sections the acting profile's access policy permits, in display order"`
 }
 
@@ -418,9 +418,13 @@ func profileSectionSettingsOf(resolved []sections.ResolvedSection) (*ProfileSect
 }
 
 // getProfileSectionFlags answers what v1 GET /profile/sections/flags does:
-// profiles may always add rule rows, so the flag is always true.
+// profiles may always add rule rows, so that flag is always true. It also
+// reports whether this server can serve getProfileSectionBaseline.
 func (reg *Registry) getProfileSectionFlags(context.Context, *struct{}) (*ProfileSectionFlagsOutput, error) {
-	return &ProfileSectionFlagsOutput{Body: ProfileSectionFlags{AllowProfileCustomSections: true, HomeLayoutBaseline: true}}, nil
+	return &ProfileSectionFlagsOutput{Body: ProfileSectionFlags{
+		AllowProfileCustomSections: true,
+		HomeLayoutBaseline:         reg.deps.ProfileSections != nil && len(reg.deps.CursorSecret) > 0,
+	}}, nil
 }
 
 // getProfileSectionBaseline returns one page's pre-override server section
@@ -442,19 +446,19 @@ func (reg *Registry) getProfileSectionBaseline(ctx context.Context, in *SectionO
 		return nil, serviceProblem(err)
 	}
 	return &ProfileSectionBaselineOutput{
-		Body: profileSectionBaselineOf(reg.deps.CursorSecret, q.Scope, q.LibraryID, baseline),
+		Body: profileSectionBaselineOf(reg.deps.CursorSecret, q.ProfileID, q.Scope, q.LibraryID, baseline),
 	}, nil
 }
 
-func profileSectionBaselineOf(secret []byte, scope, libraryID string, baseline handlers.ProfileSectionBaseline) ProfileSectionBaseline {
-	tokens := baselineTokensOf(secret, scope, libraryID, baseline.SectionIDs)
+func profileSectionBaselineOf(secret []byte, profileID, scope, libraryID string, baseline handlers.ProfileSectionBaseline) ProfileSectionBaseline {
+	tokens := baselineTokensOf(secret, profileID, scope, libraryID, baseline.SectionIDs)
 	visible := make([]ProfileSectionBaselineRow, 0, len(baseline.VisibleSections))
 	for _, s := range baseline.VisibleSections {
 		visible = append(visible, ProfileSectionBaselineRow{
 			ID:              s.ID,
 			SectionType:     string(s.SectionType),
 			Title:           s.Title,
-			Token:           baselineSectionToken(secret, scope, libraryID, s.ID),
+			Token:           baselineSectionToken(secret, profileID, scope, libraryID, s.ID),
 			SectionTitleKey: sectionTitleKeyOf(s.TitleKey, s.TitleArgs),
 		})
 	}
@@ -464,21 +468,26 @@ func profileSectionBaselineOf(secret []byte, scope, libraryID string, baseline h
 	}
 }
 
-func baselineTokensOf(secret []byte, scope, libraryID string, ids []string) []string {
+func baselineTokensOf(secret []byte, profileID, scope, libraryID string, ids []string) []string {
 	tokens := make([]string, 0, len(ids))
 	for _, id := range ids {
 		if id == "" {
 			continue
 		}
-		tokens = append(tokens, baselineSectionToken(secret, scope, libraryID, id))
+		tokens = append(tokens, baselineSectionToken(secret, profileID, scope, libraryID, id))
 	}
 	sort.Strings(tokens)
 	return tokens
 }
 
-func baselineSectionToken(secret []byte, scope, libraryID, sectionID string) string {
+// baselineSectionToken binds a row to the profile that reads it, so an export
+// from another profile matches nothing: what that profile could see says
+// nothing about which rows are new to this one.
+func baselineSectionToken(secret []byte, profileID, scope, libraryID, sectionID string) string {
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte("home-layout-baseline\x00"))
+	mac.Write([]byte(profileID))
+	mac.Write([]byte{0})
 	mac.Write([]byte(scope))
 	mac.Write([]byte{0})
 	mac.Write([]byte(libraryID))

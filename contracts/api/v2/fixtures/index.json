@@ -8380,7 +8380,7 @@
     {
       "name": "get_profile_section_baseline_ok",
       "operation_id": "getProfileSectionBaseline",
-      "scenario": "The home page's pre-override server section baseline: opaque tokens for all and active server rows, plus the pre-override visible server rows.",
+      "scenario": "The home page's pre-override server section baseline: opaque tokens for the server rows in libraries the profile is allowed, plus the pre-override visible server rows.",
       "request": {
         "method": "GET",
         "path": "/api/v2/profile/sections/baseline",

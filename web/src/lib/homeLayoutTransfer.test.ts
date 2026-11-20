@@ -902,17 +902,20 @@ describe("importPage", () => {
     const parsed = parseHomeLayoutFile(JSON.stringify(exported));
     expect(parsed.ok && parsed.file.pages[0]?.server_section_tokens).toEqual(["tok-1", "tok-2"]);
 
-    const truncated = {
+    const withTokens = (count: number) => ({
       ...exported,
       pages: [
         {
           scope: "home",
           overrides: [],
-          server_section_tokens: Array.from({ length: 501 }, (_, i) => `tok-${i}`),
+          server_section_tokens: Array.from({ length: count }, (_, i) => `tok-${i}`),
         },
       ],
-    };
-    const parsedTruncated = parseHomeLayoutFile(JSON.stringify(truncated));
+    });
+    // A page can have more server rows than one save takes overrides.
+    const parsedLarge = parseHomeLayoutFile(JSON.stringify(withTokens(501)));
+    expect(parsedLarge.ok && parsedLarge.file.pages[0]?.server_section_tokens).toHaveLength(501);
+    const parsedTruncated = parseHomeLayoutFile(JSON.stringify(withTokens(10_001)));
     expect(parsedTruncated.ok && parsedTruncated.file.pages[0]?.server_section_tokens).toEqual([]);
   });
 });

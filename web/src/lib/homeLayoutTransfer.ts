@@ -155,11 +155,11 @@ function sanitizeOverride(raw: unknown): SectionOverrideWrite | null {
 }
 
 // Validates the optional server baseline token list on a page. Absent means an
-// export from before tokens existed (undefined); a malformed or oversized
-// (> 500) list becomes [], so the import offers no rows to hide on that page.
+// export from before tokens existed (undefined); a malformed or oversized list
+// becomes [], so the import offers no rows to hide on that page.
 function sanitizeServerSectionTokens(raw: unknown): string[] | undefined {
   if (raw === undefined) return undefined;
-  if (!Array.isArray(raw) || raw.length > HOME_LAYOUT_MAX_PAGE_OVERRIDES) return [];
+  if (!Array.isArray(raw) || raw.length > HOME_LAYOUT_MAX_PAGE_TOKENS) return [];
   const seen = new Set<string>();
   const tokens: string[] = [];
   for (const item of raw) {
@@ -715,6 +715,13 @@ export function mergeImportedPage(
   }
   return merged;
 }
+
+/**
+ * The most server-row tokens one page of a file may carry. A page's server
+ * rows aren't capped like its overrides, and the file's length limit still
+ * bounds the whole file.
+ */
+const HOME_LAYOUT_MAX_PAGE_TOKENS = 10_000;
 
 /** The most overrides one page's save accepts (SectionOverrideSet in the v2 contract). */
 export const HOME_LAYOUT_MAX_PAGE_OVERRIDES = 500;

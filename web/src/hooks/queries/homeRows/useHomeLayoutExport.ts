@@ -105,14 +105,16 @@ export function useHomeLayoutExport(): HomeLayoutExport {
       ];
       const pages = await readInBatches(sources, async (source) => {
         const query = layoutPageQuery(source.scope, source.libraryId);
+        // The tokens are optional: without them the page still exports, and
+        // an import of it offers no rows to hide.
         const [result, baseline] = await Promise.all([
           v2("GET /api/v2/profile/sections", { query, profileContext }),
-          v2("GET /api/v2/profile/sections/baseline", { query, profileContext }),
+          v2("GET /api/v2/profile/sections/baseline", { query, profileContext }).catch(() => null),
         ]);
         return {
           ...source,
           overrides: result.items,
-          serverSectionTokens: baseline.section_tokens,
+          serverSectionTokens: baseline?.section_tokens,
         };
       });
       const exportedAt = new Date();

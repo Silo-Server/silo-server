@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -19,11 +20,11 @@ type sectionScopeLister interface {
 // overrides are applied, used for home layout export snapshots and import
 // previews.
 type ProfileSectionBaseline struct {
-	// SectionIDs holds every server section ID on this page that the acting
-	// profile's access policy permits: stored rows (enabled and disabled)
-	// plus fallback defaults when no stored row is enabled. Rows tied to
-	// libraries the profile can't see are left out, so the list reveals
-	// nothing about them.
+	// SectionIDs holds every server section ID on this page in a library the
+	// acting profile is allowed: stored rows (enabled and disabled) plus
+	// fallback defaults when no stored row is enabled. Rows tied to libraries
+	// the profile isn't allowed are left out, so the list reveals nothing
+	// about them; libraries the profile hid from its own browsing still count.
 	SectionIDs []string
 	// VisibleSections holds the pre-override active server sections permitted
 	// by the acting profile's access policy, in display order.
@@ -104,6 +105,8 @@ func (h *SectionHandler) GetProfileSectionBaseline(ctx context.Context, userID i
 		return ProfileSectionBaseline{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve section access")
 	}
 
+	tokenFilter := allowedLibrariesFilter(ctx, accessFilter)
+
 	resolved := sections.Resolve(active, nil)
 	visible := filterResolvedSectionsByAccess(resolved, accessFilter)
 	if visible == nil {
@@ -111,9 +114,23 @@ func (h *SectionHandler) GetProfileSectionBaseline(ctx context.Context, userID i
 	}
 
 	return ProfileSectionBaseline{
-		SectionIDs:      uniqueSectionIDs(allowedPageSections(storedAll, accessFilter), allowedPageSections(active, accessFilter)),
+		SectionIDs:      uniqueSectionIDs(allowedPageSections(storedAll, tokenFilter), allowedPageSections(active, tokenFilter)),
 		VisibleSections: visible,
 	}, nil
+}
+
+// allowedLibrariesFilter is filter widened back to every library the profile
+// is allowed, including the ones it hid from its own browsing: a row it hid
+// that way is still one it knew about, and showing the library again must not
+// make that row look new to an import. An unrestricted profile's hidden
+// libraries arrive as DisabledLibraryIDs; a restricted one's were taken out
+// of AllowedLibraryIDs and kept in the scope's HiddenLibraryIDs.
+func allowedLibrariesFilter(ctx context.Context, filter catalog.AccessFilter) catalog.AccessFilter {
+	filter.DisabledLibraryIDs = nil
+	if scope, ok := access.GetScope(ctx); ok && filter.AllowedLibraryIDs != nil && len(scope.HiddenLibraryIDs) > 0 {
+		filter.AllowedLibraryIDs = append(slices.Clone(filter.AllowedLibraryIDs), scope.HiddenLibraryIDs...)
+	}
+	return filter
 }
 
 // allowedPageSections keeps the rows the access filter permits, by the same
