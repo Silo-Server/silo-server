@@ -254,6 +254,11 @@ func (e *remuxStderr) snapshot() (tail string, demuxError bool) {
 // demuxer failed, so its output ends before the source does.
 var errRemuxSourceEndedEarly = errors.New("ffmpeg stopped reading the source on a demux error")
 
+// audioOnlyRemuxFragmentMicros is the fragment length of an audio-only remux,
+// in microseconds: 2 seconds, so a client gets its first audio at once and
+// then a fragment every couple of seconds.
+const audioOnlyRemuxFragmentMicros = "2000000"
+
 // RemuxDVMode makes Profile 7 handling an explicit byte-level recipe choice.
 // The empty/legacy mode exists only for pre-v3 callers and old stream tokens.
 type RemuxDVMode string
@@ -559,8 +564,13 @@ func buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat string, seekS
 		// writing codec configuration. empty_moov fails immediately for copied
 		// E-AC-3/Atmos tracks because their frame size is not known at header time.
 		"-movflags", "frag_keyframe+delay_moov+default_base_moof",
-		"pipe:1",
 	)
+	if audioOnly {
+		// frag_keyframe only cuts at video keyframes, so audio-only output
+		// would be one fragment that FFmpeg writes when the whole book is done.
+		args = append(args, "-frag_duration", audioOnlyRemuxFragmentMicros)
+	}
+	args = append(args, "pipe:1")
 
 	return args
 }

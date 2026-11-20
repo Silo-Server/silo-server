@@ -391,7 +391,9 @@ authenticated owner, while the card exists
 Ranges, conditional requests and HEAD keep their HTTP semantics; an
 unsatisfiable range is `416 range_not_satisfiable`. A `server_remux_progressive`
 stream is the exception: it is one forward-only response from its `seek`
-origin, so it answers `200` from that origin whatever the `Range`. A client that
+origin, so it answers `200` from that origin whatever the `Range`. An audio-only
+remux (`audio/mp4`) arrives as MP4 fragments of about 2 seconds each, so a player
+can start on the first one. A client that
 lists `progressive_range_refusal_v1` in `deliveries.progressive.features` gets
 `remux_range=refuse` on that URL, and a GET whose range starts past byte 0, or
 is a suffix range such as `bytes=-500`, is then `409` before the remux starts;
