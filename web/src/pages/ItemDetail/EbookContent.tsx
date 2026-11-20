@@ -388,7 +388,7 @@ export default function EbookContent({
 
           {series && seriesEntries.length > 0 && (
             <RelatedRail
-              key={series.name || item.content_id}
+              key={`series:${series.name || item.content_id}`}
               heading={
                 series.name
                   ? t("web.detail.books.inSeries", { series: series.name })
@@ -408,7 +408,7 @@ export default function EbookContent({
 
           {alsoByAuthor.length > 0 && (
             <RelatedRail
-              key={item.content_id}
+              key={`author:${item.content_id}`}
               heading={
                 authors[0]
                   ? t("web.detail.books.alsoByAuthor", { author: authors[0] })
@@ -421,7 +421,7 @@ export default function EbookContent({
 
           {similar.length > 0 && (
             <RelatedRail
-              key={item.content_id}
+              key={`similar:${item.content_id}`}
               heading={t("web.detail.books.youMightAlsoLike")}
               coverAspect="poster"
               items={similar.map((entry) => relatedRailItem(t, entry))}

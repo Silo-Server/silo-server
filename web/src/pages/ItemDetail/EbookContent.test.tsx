@@ -252,25 +252,29 @@ describe("EbookContent", () => {
     }
   });
 
-  it("renders series, also-by-author, and similar rows inside the shared MediaCarousel", () => {
+  it("renders series, also-by-author, and similar rows inside the shared MediaCarousel without leaking stale rails on book switch", () => {
     const base = makeEbook();
-    const { container } = renderEbook(
-      makeEbook({
-        ebook: {
-          ...base.ebook!,
-          related: {
-            also_by_author: [
-              { content_id: "book-3", title: "Notes from an Inland Sea", year: 2019 },
-            ],
-            similar: [{ content_id: "book-4", title: "The Paper Observatory", year: 2023 }],
-          },
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const firstBook = makeEbook({
+      ebook: {
+        ...base.ebook!,
+        related: {
+          also_by_author: [{ content_id: "book-3", title: "Notes from an Inland Sea", year: 2019 }],
+          similar: [{ content_id: "book-4", title: "The Paper Observatory", year: 2023 }],
         },
-      }),
-      3,
+      },
+    });
+    const { container, rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <EbookContent item={firstBook} libraryId={3} />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
-    const carousels = Array.from(container.querySelectorAll("section.media-carousel"));
-    expect(carousels).toHaveLength(3);
+    expect(container.querySelectorAll("section.media-carousel")).toHaveLength(3);
     expect(screen.getByRole("heading", { name: "In The Meridian Chronicles" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Also by Clara Vance" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "You might also like" })).toBeInTheDocument();
@@ -281,6 +285,37 @@ describe("EbookContent", () => {
     expect(screen.getByRole("link", { name: /The Paper Observatory/i })).toHaveAttribute(
       "href",
       "/item/book-4",
+    );
+
+    // Switching to another cached book with all three rails replaces every rail cleanly.
+    const secondBook = makeEbook({
+      content_id: "book-9",
+      title: "Winter Harbor",
+      ebook: {
+        authors: [{ name: "Kenji Sato" }],
+        series: {
+          entries: [{ content_id: "book-9", title: "Winter Harbor", year: 2024 }],
+        },
+        related: {
+          also_by_author: [{ content_id: "book-10", title: "Glass Harbor", year: 2022 }],
+          similar: [{ content_id: "book-11", title: "Tidal Atlas", year: 2021 }],
+        },
+      },
+    });
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <EbookContent item={secondBook} libraryId={3} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(container.querySelectorAll("section.media-carousel")).toHaveLength(3);
+    expect(screen.queryByRole("heading", { name: "Also by Clara Vance" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Also by Kenji Sato" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Glass Harbor/i })).toHaveAttribute(
+      "href",
+      "/item/book-10",
     );
   });
 });

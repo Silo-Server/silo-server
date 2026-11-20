@@ -134,7 +134,7 @@
       align-items: start;
     }
 
-    .audiobook-detail-side {
+    .audiobook-detail-grid .audiobook-detail-side {
       grid-area: side;
       display: grid;
       grid-template-columns: minmax(0, 1fr);
@@ -144,8 +144,8 @@
       align-self: start;
     }
 
-    .audiobook-detail-cover,
-    .audiobook-detail-actions {
+    .audiobook-detail-grid .audiobook-detail-cover,
+    .audiobook-detail-grid .audiobook-detail-actions {
       grid-area: auto;
     }
   }
