@@ -337,7 +337,9 @@ step.
   and binding, alongside the post-logout redirect `<public URL>/login`.
   The connection test repeats the binding's callback. These URLs are
   empty until a public URL is configured. External providers wait for
-  initial Owner setup, and OAuth also waits for a public URL.
+  initial Owner setup. OAuth sign-in also waits for a public URL.
+  Existing sessions can still recheck their accounts through an enabled
+  OAuth provider when the public URL is cleared.
 - **Provider errors.** An `error` on the callback maps to a reason:
   `access_denied` and the interaction errors to `not_permitted`,
   `temporarily_unavailable` and `server_error` to `provider_unavailable`,

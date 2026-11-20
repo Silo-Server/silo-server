@@ -112,7 +112,7 @@ func (s *Service) currentManifestForConfig(ctx context.Context, id int) (*Instal
 	if err != nil {
 		return nil, nil, err
 	}
-	manifest, err := s.readInstalledManifest(ctx, installation)
+	manifest, err := s.ReadInstalledManifest(ctx, installation)
 	return installation, manifest, err
 }
 

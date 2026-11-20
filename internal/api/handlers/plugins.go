@@ -793,6 +793,21 @@ func (h *PluginHandler) buildInstallationResponses(
 			repositoriesByID,
 			ownership[installation.ID],
 		)
+		if errors.Is(err, plugins.ErrInstallationChanged) {
+			// A peer replaced this release during the list. Reload this item
+			// with its current ownership and bindings before rendering it.
+			current, readErr := h.installations.GetByID(ctx, installation.ID)
+			if errors.Is(readErr, plugins.ErrInstallationNotFound) {
+				continue
+			}
+			if readErr != nil {
+				return nil, readErr
+			}
+			item, err = h.buildInstallationResponse(ctx, current, nil)
+			if errors.Is(err, plugins.ErrInstallationChanged) {
+				continue // Still changing. Serve the rest of the inventory.
+			}
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -1162,16 +1177,7 @@ func (h *PluginHandler) loadInstallationManifest(
 		return nil, errors.New("plugin installation is required")
 	}
 	if h.service != nil {
-		manifest, err := h.service.ManifestForInstallation(ctx, installation.ID)
-		if err == nil {
-			return manifest, nil
-		}
-		if errors.Is(err, plugins.ErrArchiveNotFound) {
-			return nil, plugins.ErrArchiveNotFound
-		}
-		if !errors.Is(err, plugins.ErrArchiveNotFound) {
-			return nil, err
-		}
+		return h.service.ReadInstalledManifest(ctx, installation)
 	}
 	manifest, err := loadPluginManifest(installation)
 	if err != nil && errors.Is(err, os.ErrNotExist) {

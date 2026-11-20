@@ -858,6 +858,7 @@
 ./internal/plugins TestInstallationStoreRetiresFilesAfterCommittedDeleteDB
 ./internal/plugins TestArchiveCacheRejectsSupersededSameVersionDB
 ./internal/api/handlers TestPluginListsKeepWorkingWithAnInvalidIdentityRowDB
+./internal/api/handlers TestPluginInventoryDuringReplacementDB
 
 # An enabled plugin whose stored archive won't open stays in the installation
 # list, marked failed, leaves the user settings list working, and turning it off

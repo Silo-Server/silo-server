@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
@@ -138,6 +139,17 @@ func (f *lockedRegistryStores) waitForReads(t *testing.T, n int) {
 	}
 }
 
+type registryTestClients struct {
+	oidc *pluginhost.AuthProviderClient
+}
+
+func (c registryTestClients) AuthProviderClient(_ context.Context, id int, capability string) (*pluginhost.AuthProviderClient, error) {
+	if id == 3 && capability == "oidc" {
+		return c.oidc, nil
+	}
+	return nil, plugins.ErrInstallationNotFound
+}
+
 func TestPluginProviderRegistryWaitsForSetupAndPublicURL(t *testing.T) {
 	stores := &fakeRegistryStores{
 		bindings: []*plugins.AuthBinding{
@@ -151,8 +163,9 @@ func TestPluginProviderRegistryWaitsForSetupAndPublicURL(t *testing.T) {
 		},
 	}
 	needsSetup, publicURL := true, false
+	oidc := &pluginhost.AuthProviderClient{}
 	registry := NewPluginProviderRegistry(PluginProviderRegistryConfig{
-		Bindings: stores, Installations: stores,
+		Bindings: stores, Installations: stores, Clients: registryTestClients{oidc},
 		NeedsSetup:     func(context.Context) (bool, error) { return needsSetup, nil },
 		OAuthAvailable: func() bool { return publicURL },
 	})
@@ -166,9 +179,15 @@ func TestPluginProviderRegistryWaitsForSetupAndPublicURL(t *testing.T) {
 	if providers := rebuild(); len(providers) != 0 {
 		t.Fatalf("providers before setup = %+v", providers)
 	}
+	if _, err := registry.AccountChecker(t.Context(), 3); !errors.Is(err, ErrProviderNotLoaded) {
+		t.Fatalf("account checker before setup: %v", err)
+	}
 	needsSetup = false
 	if providers := rebuild(); len(providers) != 1 || providers[0].Info.Mode != ProviderModeNetwork {
 		t.Fatalf("providers without public URL = %+v", providers)
+	}
+	if checker, err := registry.AccountChecker(t.Context(), 3); err != nil || checker != oidc {
+		t.Fatalf("OAuth account checker without public URL = %v, %v", checker, err)
 	}
 	publicURL = true
 	providers := rebuild()

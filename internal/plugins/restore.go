@@ -80,7 +80,7 @@ func (s *Service) PrepareRestore(ctx context.Context, pluginID string) error {
 	}
 	for _, inst := range existing {
 		if !inst.IsBuiltin() {
-			if _, err := s.readInstalledManifest(ctx, inst); err != nil {
+			if _, err := s.ReadInstalledManifest(ctx, inst); err != nil {
 				return err
 			}
 		}

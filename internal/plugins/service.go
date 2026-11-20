@@ -1291,7 +1291,7 @@ func (s *Service) loadForManifestRead(
 	if err != nil {
 		return nil, nil, err
 	}
-	manifest, err := s.readInstalledManifest(ctx, installation)
+	manifest, err := s.ReadInstalledManifest(ctx, installation)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1407,10 +1407,10 @@ func (s *Service) ensureLoadedInstallation(
 	return s.archiveCache.Ensure(ctx, installation)
 }
 
-// readInstalledManifest is ensureLoadedInstallation without re-hashing a
-// binary this process already verified and has not seen change. Only callers
-// that never execute the binary may use it.
-func (s *Service) readInstalledManifest(
+// ReadInstalledManifest reads the manifest for the supplied installation row.
+// It can reuse a binary verification, so only callers that never execute the
+// binary may use it.
+func (s *Service) ReadInstalledManifest(
 	ctx context.Context,
 	installation *Installation,
 ) (*pluginv1.PluginManifest, error) {
@@ -1424,11 +1424,11 @@ func (s *Service) readInstalledManifest(
 	return s.archiveCache.Manifest(ctx, installation)
 }
 
-// readInstalledManifestFrom is readInstalledManifest reading a stored
+// readInstalledManifestFrom is ReadInstalledManifest reading a stored
 // archive, when it needs one, through archives.
 func (s *Service) readInstalledManifestFrom(ctx context.Context, installation *Installation, archives archiveStore) (*pluginv1.PluginManifest, error) {
 	if s.archiveCache == nil {
-		return s.readInstalledManifest(ctx, installation)
+		return s.ReadInstalledManifest(ctx, installation)
 	}
 	return s.archiveCache.ManifestFrom(ctx, installation, archives)
 }
