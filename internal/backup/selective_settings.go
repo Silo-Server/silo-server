@@ -133,15 +133,20 @@ func (p *planner) planSettings(ctx context.Context) ([]settingPlan, error) {
 // environment's plain-text transport with the backup's host and password.
 // The rule holds even when the environment sets only part of the bundle
 // that is neither an address nor a credential (a sender name, the switch).
-// Each of its settings that differs is marked managed_by_environment.
+// Each of its settings that differs, or that would widen access (mail's
+// switch and transport are access settings too), is marked
+// managed_by_environment, so the page names the environment as the reason.
 func keepEnvironmentBundles(plans []settingPlan, setByEnvironment func(key string) bool) {
 	for _, b := range outboundBundles {
 		if !slices.ContainsFunc(b.keys, setByEnvironment) {
 			continue
 		}
 		for i := range plans {
-			if plans[i].preview.Status == ItemDiffers && slices.Contains(b.keys, plans[i].preview.Key) {
-				plans[i].preview.Status = SettingManagedByEnvironment
+			switch plans[i].preview.Status {
+			case ItemDiffers, SettingKeptStricter:
+				if slices.Contains(b.keys, plans[i].preview.Key) {
+					plans[i].preview.Status = SettingManagedByEnvironment
+				}
 			}
 		}
 	}
