@@ -14868,6 +14868,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nevar atjaunot "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vienumus – šī servera vide nosaka atšķirīgos iestatījumus vai daļu no savienojuma, kuram tie pieder"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nevar atjaunot "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vienumu – šī servera vide nosaka atšķirīgos iestatījumus vai daļu no savienojuma, kuram tie pieder"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nevar atjaunot "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vienumus – šī servera vide nosaka atšķirīgos iestatījumus vai daļu no savienojuma, kuram tie pieder"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15726,6 +15784,52 @@
     {
       "type": 0,
       "value": "Pakalpojuma adrese mainās, bet dublējumā nav tā akreditācijas datu, tāpēc atjaunošana tos šeit notīra un izslēdz pakalpojumu, līdz tie tiek ievadīti vēlreiz."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " iestatījumi saglabā pašreizējās vērtības, jo šī servera vide nosaka tos vai daļu no to savienojuma."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " iestatījums saglabā pašreizējo vērtību, jo šī servera vide nosaka to vai daļu no tā savienojuma."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " iestatījumi saglabā pašreizējās vērtības, jo šī servera vide nosaka tos vai daļu no to savienojuma."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -19226,6 +19330,12 @@
       "value": "Šeit ar tā lietotājvārdu vai e-pasta adresi pierakstās cits konts."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Šī servera vide nosaka atšķirīgos iestatījumus vai daļu no savienojuma, kuram tie pieder, tāpēc šis serveris saglabā pašreizējās vērtības."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -20484,6 +20594,16 @@
     {
       "type": 0,
       "value": " (saglabāts: stingrāks)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (saglabāts: vide)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -57229,7 +57349,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Šo mezglu iestata servera izvietošanas konfigurācija. Noņemiet to tur, lai to dzēstu šeit."
+      "value": "Iestatīts servera izvietošanas konfigurācijā. Noņemiet to tur un restartējiet API serverus, lai to dzēstu šeit."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -60040,6 +60160,130 @@
       "value": "Ģenerēšana ir apturēta. Saglabātie ieteikumi paliek redzami sadaļā „Atklāt”, līdz serveris tiks restartēts."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Notiek profilu ranžēšana ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Notiek TMDB sarakstu ielāde ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Notiek nosaukumu uzmeklēšana un iegulumu izveide ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Notīrīti "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " novecojuši nosaukumi"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Notīrīts "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " novecojis nosaukums"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Notīrīti "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " novecojuši nosaukumi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -60096,6 +60340,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Pirms ieteikumu izveides sadaļai „Atklāt” novērsiet tālāk norādīto iegulumu bloķēšanas konfliktu."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Vispirms palaidiet darbu „Iegulumi”, lai Silo būtu bibliotēkas vektori, ar kuriem salīdzināt."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Pirms ieteikumu izveides sadaļai „Atklāt” pievienojiet iegulumu nodrošinātāju sadaļā „MI pakalpojumi”."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Nevienam profilam vēl nav gaumes profila. Palaidiet darbu „Gaumes profili”, kad kāds noskatīsies vai novērtēs nosaukumus."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -62318,6 +62586,32 @@
       "value": "Paliek tukša, līdz ieteikumi sadaļai „Atklāt” tiek ieslēgti sadaļā „Administrēšana → Ieteikumi”."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Ieteikumu rindas paliek tukšas, līdz ieteikumi sadaļai „Atklāt” tiek ieslēgti sadaļā „"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Administrēšana → Ieteikumi"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Izslēgts sadaļā „Ieteikumi”"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -63933,6 +64227,12 @@
       "value": "Jaunās rindas tiek novietotas lapas „Atklāt” apakšā"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Atvērt ieteikumu iestatījumus"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -63945,6 +64245,12 @@
       "value": "MDBList plūsmā nav iekļauta kārtošana, kas saglabāta saraksta lapā. Atlasiet to, kas tajā redzama."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Jūsu profilam vēl nav ieteikumu sadaļai „Atklāt”. Lai priekšskatītu šo rindu, palaidiet ieteikumu izveidi sadaļai „Atklāt” vai noskatieties un novērtējiet dažus nosaukumus."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -63955,6 +64261,12 @@
     {
       "type": 0,
       "value": "Atlasiet sarakstu vai ielīmējiet tā saiti, lai redzētu tā nosaukumus."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Lai priekšskatītu šo rindu, ieslēdziet ieteikumus sadaļai „Atklāt” sadaļā „Administrēšana → Ieteikumi”."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -68418,6 +68730,30 @@
     {
       "type": 0,
       "value": "Neizdevās atjaunināt kanālu"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Ielādējiet iestatījumus vēlreiz, lai redzētu pašreizējās vērtības. Jūsu labojumi iestatījumos, kas ir mainījušies, kā arī saglabātajās parolēs un atslēgās tiks atsaukti; pārējie jūsu labojumi tiks saglabāti."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Ielādēt vēlreiz"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās vēlreiz ielādēt iestatījumus. Mēģiniet vēlreiz."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Iestatījumi ir mainīti citur"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -73996,6 +74332,24 @@
       "value": "Lai pārslēgtos uz citu modeli, ir jāatiestata iegulumi, un tādējādi tie visi tiek izdzēsti. Cits nodrošinātājs, kas nodrošina to pašu modeli, tiek lietots pēc restartēšanas."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Pievienot sadaļai „Atklāt”"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās pievienot ieteikumu rindas lapai „Atklāt”."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Ieteikumu rindas pievienotas lapai „Atklāt”."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -74018,6 +74372,44 @@
     {
       "type": 0,
       "value": "Cik nosaukumu, kuru nav bibliotēkā, serveris glabā, lai no tiem ieteiktu. Katrs tiek uzmeklēts TMDB un iegults. Iegulšana parasti ir lēta, taču lielāks skaits atkarībā no jūsu iegulumu nodrošinātāja var izmaksāt vairāk vai aizņemt ilgāku laiku, kā arī izmanto vairāk krātuves."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Jūsu lapā „Atklāt” vēl netiek rādīta neviena ieteikumu rinda."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Lai varētu palaist ieteikumus sadaļai „Atklāt”, ieslēdziet augstāk esošo opciju „Iespējot ieteikumus” un restartējiet serveri."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Pieprasījumi pašlaik ir izslēgti. Ieslēdziet tos "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "pieprasījumu iestatījumos"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", lai skatītāji varētu redzēt lapu „Atklāt”."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Atvērt lapu „Atklāt”"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -84526,6 +84918,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Šo grafiku nosaka dublējumu iestatījumi. Mainiet to sadaļā "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Serveris › Dublējumi"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

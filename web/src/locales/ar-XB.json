@@ -14393,6 +14393,48 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E can't be restored — this server's environment sets the settings that differ, or part of their connection\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E can't be restored — this server's environment sets the settings that differ, or part of their connection\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15027,6 +15069,48 @@
     {
       "type": 0,
       "value": "\u200F\u202EA service's address changes without its credentials in the backup, so restoring clears them here and turns the service off until they're entered again.\u202C"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E setting keeps its current value because this server's environment sets it, or part of its connection.\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E settings keep their current values because this server's environment sets them, or part of their connection.\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -18079,6 +18163,12 @@
       "value": "\u200F\u202EAnother account here signs in with its username or email.\u202C"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis server's environment sets the settings that differ, or part of their connection, so this server keeps its current values.\u202C"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19249,6 +19339,20 @@
     {
       "type": 0,
       "value": "\u202E (kept: stricter)\u202C"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "\u202E (kept: environment)\u202C"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -53419,7 +53523,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "\u200F\u202ESet by the server’s deployment configuration. Remove it there to delete it here.\u202C"
+      "value": "\u200F\u202ESet by the server’s deployment configuration. Remove it there and restart the API servers to delete it here.\u202C"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -56137,6 +56241,114 @@
       "value": "\u200F\u202EGeneration has stopped. Stored recommendations stay visible in Discover until the server restarts.\u202C"
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERanking profiles (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E / \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFetching TMDB lists (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E / \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELooking up and embedding titles (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E / \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202ECleared \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E expired title\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202ECleared \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E expired titles\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -56177,6 +56389,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EResolve the embedding lock conflict below before building Discover recommendations.\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERun the Embeddings job first so Silo has library vectors to compare against.\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EConnect an embedding provider in AI Services before building Discover recommendations.\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo profiles have taste profiles yet. Run Taste Profiles once someone has watched or rated titles.\u202C"
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -58155,6 +58391,32 @@
       "value": "\u200F\u202EStays empty until Discover recommendations are turned on in Admin → Recommendations.\u202C"
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERecommended rows stay empty until Discover Recommendations are turned on in \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202EAdmin → Recommendations\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOff in Recommendations\u202C"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -59681,6 +59943,12 @@
       "value": "\u200F\u202ENew rows go to the bottom of Discover\u202C"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen Recommendations settings\u202C"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -59693,6 +59961,12 @@
       "value": "\u200F\u202EMDBList's feed doesn't carry the sort saved on the list's page. Pick the one it shows.\u202C"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour profile has no Discover recommendations yet. Run Discover Recommendations or watch and rate a few titles to preview this row.\u202C"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -59703,6 +59977,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EPick a list or paste its link to see its titles.\u202C"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETurn on Discover Recommendations in Admin → Recommendations to preview this row.\u202C"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -64063,6 +64343,30 @@
     {
       "type": 0,
       "value": "\u200F\u202EFailed to update channel\u202C"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReload to see the current values. Your edits to settings that changed, and to saved passwords and keys, are undone; your other edits are kept.\u202C"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReload\u202C"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t reload settings. Try again.\u202C"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESettings changed elsewhere\u202C"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -69649,6 +69953,24 @@
       "value": "\u200F\u202ESwitching to another model requires resetting embeddings, which deletes them all. Another provider serving the same model applies after a restart.\u202C"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdd to Discover\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECould not add recommended rows to the Discover page.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdded recommended rows to the Discover page.\u202C"
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -69671,6 +69993,44 @@
     {
       "type": 0,
       "value": "\u200F\u202EHow many titles that aren't in the library the server keeps to recommend from. Each one is looked up on TMDB and embedded. Embedding is usually cheap, but a higher number can cost more or take longer depending on your embedding provider, and uses more storage.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour Discover page doesn't show any Recommendations rows yet.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETurn on Enable Recommendations above and restart the server before Discover Recommendations can run.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequests are currently off. Turn them on in \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202ERequests settings\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E so viewers can see the Discover page.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen Discover Page\u202C"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -80299,6 +80659,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis schedule comes from the backup settings. Change it in \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202EServer › Backups\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

@@ -14548,6 +14548,52 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " element nu poate fi restaurat — mediul acestui server setează opțiunile care diferă sau o parte din conexiunea sa"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elemente nu pot fi restaurate — mediul acestui server setează opțiunile care diferă sau o parte din conexiunea lor"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de elemente nu pot fi restaurate — mediul acestui server setează opțiunile care diferă sau o parte din conexiunea lor"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15238,6 +15284,52 @@
     {
       "type": 0,
       "value": "Adresa unui serviciu se schimbă fără ca datele sale de autentificare să fie în backup, așa că restaurarea le șterge aici și dezactivează serviciul până când sunt introduse din nou."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " setare își păstrează valoarea curentă, deoarece mediul acestui server setează această opțiune sau o parte din conexiunea ei."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " setări își păstrează valorile curente, deoarece mediul acestui server setează aceste opțiuni sau o parte din conexiunea lor."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de setări își păstrează valorile curente, deoarece mediul acestui server setează aceste opțiuni sau o parte din conexiunea lor."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -18638,6 +18730,12 @@
       "value": "Un alt cont de aici se conectează cu numele său de utilizator sau adresa sa de e-mail."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Mediul acestui server setează opțiunile care diferă sau o parte din conexiunea lor, așa că acest server își păstrează valorile curente."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19848,6 +19946,16 @@
     {
       "type": 0,
       "value": " (păstrată: mai strictă)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (se păstrează: mediu)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -56302,7 +56410,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Nodul este setat de configurația de implementare a serverului. Eliminați-l de acolo pentru a-l putea șterge aici."
+      "value": "Nodul este setat de configurația de implementare a serverului. Eliminați-l de acolo și reporniți serverele API pentru a-l putea șterge aici."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -59069,6 +59177,130 @@
       "value": "Generarea s-a oprit. Recomandările stocate rămân vizibile în Descoperiți până la repornirea serverului."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Se clasifică titlurile pentru profiluri ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Se preiau listele TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Se caută titlurile și se creează embeddingurile ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "S-a eliminat "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titlu expirat"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "S-au eliminat "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titluri expirate"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "S-au eliminat "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de titluri expirate"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -59113,6 +59345,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Rezolvați mai jos conflictul de blocare a embeddingurilor înainte de a genera recomandările în Descoperiți."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Rulați mai întâi jobul Embeddinguri, ca Silo să aibă vectori ai bibliotecii cu care să compare."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Conectați un furnizor de embedding în Servicii AI înainte de a genera recomandările în Descoperiți."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Niciun profil nu are încă un profil de preferințe. Rulați Profiluri de preferințe după ce cineva a vizionat sau a evaluat titluri."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -61359,6 +61615,32 @@
       "value": "Rândul rămâne gol până la activarea recomandărilor în Descoperiți din Administrare → Recomandări."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Rândurile de recomandări rămân goale până la activarea recomandărilor în Descoperiți din "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Administrare → Recomandări"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Dezactivat în Recomandări"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -62966,6 +63248,12 @@
       "value": "Rândurile noi se adaugă la sfârșitul paginii Descoperiți"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Deschideți setările din Recomandări"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -62978,6 +63266,12 @@
       "value": "Feedul MDBList nu include sortarea salvată pe pagina listei. Alegeți-o pe cea afișată acolo."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Profilul dvs. nu are încă recomandări în Descoperiți. Rulați Recomandări în Descoperiți sau vizionați și evaluați câteva titluri pentru a previzualiza acest rând."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -62988,6 +63282,12 @@
     {
       "type": 0,
       "value": "Alegeți o listă sau lipiți linkul acesteia pentru a-i vedea titlurile."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Activați recomandările în Descoperiți din Administrare → Recomandări pentru a previzualiza acest rând."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -67395,6 +67695,30 @@
     {
       "type": 0,
       "value": "Nu s-a putut actualiza canalul"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Reîncărcați pentru a vedea valorile curente. Modificările dvs. la setările care s-au schimbat și la parolele și cheile salvate se anulează; celelalte modificări se păstrează."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Reîncărcați"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-au putut reîncărca setările. Încercați din nou."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Setările au fost modificate în altă parte"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -72981,6 +73305,24 @@
       "value": "Trecerea la alt model necesită resetarea embeddingurilor, ceea ce le șterge pe toate. Un alt furnizor care servește același model se aplică după o repornire."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Adăugați în Descoperiți"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-au putut adăuga rândurile de recomandări pe pagina Descoperiți."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "S-au adăugat rândurile de recomandări pe pagina Descoperiți."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -73003,6 +73345,44 @@
     {
       "type": 0,
       "value": "Câte titluri care nu sunt în bibliotecă păstrează serverul pentru recomandări. Fiecare este căutat pe TMDB și transformat în embedding. Crearea embeddingurilor este de obicei ieftină, dar un număr mai mare poate costa mai mult sau poate dura mai mult, în funcție de furnizorul dvs. de embeddinguri, și folosește mai mult spațiu de stocare."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Pagina Descoperiți nu afișează încă niciun rând Recomandări."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Activați opțiunea „Activați recomandările” de mai sus și reporniți serverul înainte ca jobul Recomandări în Descoperiți să poată rula."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Cererile sunt dezactivate momentan. Activați-le în "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Setări cereri"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", ca spectatorii să poată vedea pagina Descoperiți."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Deschideți pagina Descoperiți"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -83471,6 +83851,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Acest program provine din setările de backup. Modificați-l în "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Copii de rezervă"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

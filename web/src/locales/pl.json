@@ -15687,6 +15687,80 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nie można przywrócić: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — różniące się ustawienia lub część ich połączenia określa środowisko tego serwera"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nie można przywrócić: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — różniące się ustawienia lub część ich połączenia określa środowisko tego serwera"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nie można przywrócić: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — różniące się ustawienia lub część ich połączenia określa środowisko tego serwera"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nie można przywrócić: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — różniące się ustawienia lub część ich połączenia określa środowisko tego serwera"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -16769,6 +16843,64 @@
     {
       "type": 0,
       "value": "Adres usługi się zmienia, a kopia zapasowa nie zawiera jej danych logowania, więc przywracanie usunie je tutaj i wyłączy usługę do czasu ich ponownego wprowadzenia."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustawienie zachowuje bieżącą wartość, bo środowisko tego serwera określa je lub część jego połączenia."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustawienia zachowują bieżące wartości, bo środowisko tego serwera określa je lub część ich połączenia."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustawień zachowuje bieżące wartości, bo środowisko tego serwera określa je lub część ich połączenia."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ustawienia zachowuje bieżące wartości, bo środowisko tego serwera określa je lub część ich połączenia."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -20869,6 +21001,12 @@
       "value": "Inne konto na tym serwerze loguje się tą samą nazwą użytkownika lub tym samym e-mailem."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Środowisko tego serwera określa różniące się ustawienia lub część ich połączenia, więc ten serwer zachowuje bieżące wartości."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -22263,6 +22401,16 @@
     {
       "type": 0,
       "value": " (zachowano: bardziej restrykcyjne)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (zachowano: środowisko)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -62755,7 +62903,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Węzeł ustawiony w konfiguracji wdrożenia serwera. Usuń go tam, aby móc usunąć go tutaj."
+      "value": "Węzeł ustawiony w konfiguracji wdrożenia serwera. Usuń go tam i uruchom ponownie serwery API, aby usunąć go tutaj."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -65783,6 +65931,146 @@
       "value": "Generowanie zostało zatrzymane. Zapisane rekomendacje pozostaną widoczne na stronie Odkryj do ponownego uruchomienia serwera."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Ustalanie rankingu dla profili ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Pobieranie list TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Sprawdzanie tytułów i tworzenie embeddingów ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Usunięto "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " wygasły tytuł"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Usunięto "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " wygasłe tytuły"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Usunięto "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " wygasłych tytułów"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Usunięto "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " wygasłego tytułu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -65855,6 +66143,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Przed budowaniem rekomendacji dla strony Odkryj rozwiąż poniższy konflikt blokady embeddingów."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Najpierw uruchom zlecenie Embeddingi, aby Silo miało wektory biblioteki do porównania."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Przed budowaniem rekomendacji dla strony Odkryj połącz dostawcę embeddingów na stronie Usługi AI."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Żaden profil nie ma jeszcze profilu gustu. Uruchom zlecenie Profile gustu, gdy ktoś obejrzy lub oceni tytuły."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -68465,6 +68777,32 @@
       "value": "Pozostaje pusty, dopóki nie włączysz rekomendacji dla strony Odkryj (Administracja → Rekomendacje)."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Rzędy rekomendacji pozostają puste, dopóki nie włączysz rekomendacji dla strony Odkryj w sekcji "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Administracja → Rekomendacje"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Wyłączone w Rekomendacjach"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -70177,6 +70515,12 @@
       "value": "Nowe rzędy trafiają na dół strony Odkrywaj"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Otwórz ustawienia rekomendacji"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -70189,6 +70533,12 @@
       "value": "Kanał MDBList nie przenosi sortowania zapisanego na stronie listy. Wybierz to, które jest tam widoczne."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Twój profil nie ma jeszcze rekomendacji dla strony Odkryj. Uruchom zlecenie Rekomendacje dla strony Odkryj lub obejrzyj i oceń kilka tytułów, aby wyświetlić podgląd tego rzędu."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -70199,6 +70549,12 @@
     {
       "type": 0,
       "value": "Wybierz listę lub wklej jej link, aby zobaczyć jej tytuły."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Aby wyświetlić podgląd tego rzędu, włącz rekomendacje dla strony Odkryj w sekcji Administracja → Rekomendacje."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -74813,6 +75169,30 @@
     {
       "type": 0,
       "value": "Nie udało się zaktualizować kanału"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Wczytaj ponownie, aby zobaczyć bieżące wartości. Twoje zmiany w ustawieniach, które się zmieniły, oraz w zapisanych hasłach i kluczach zostaną cofnięte; pozostałe zmiany zostaną zachowane."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Wczytaj ponownie"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się ponownie wczytać ustawień. Spróbuj ponownie."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Ustawienia zmieniono w innym miejscu"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -80491,6 +80871,24 @@
       "value": "Przejście na inny model wymaga zresetowania embeddingów, co usuwa je wszystkie. Inny dostawca obsługujący ten sam model zacznie działać po ponownym uruchomieniu."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Dodaj do strony Odkryj"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się dodać rzędów rekomendacji do strony Odkryj."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Dodano rzędy rekomendacji do strony Odkryj."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -80513,6 +80911,44 @@
     {
       "type": 0,
       "value": "Ile tytułów spoza biblioteki serwer przechowuje jako źródło rekomendacji. Każdy z nich jest wyszukiwany w TMDB i przetwarzany na embedding. Tworzenie embeddingów jest zwykle tanie, ale wyższa liczba może, zależnie od dostawcy embeddingów, zwiększyć koszt lub wydłużyć czas działania, a także zajmuje więcej miejsca."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Twoja strona Odkryj nie wyświetla jeszcze żadnych rzędów typu Rekomendacje."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Włącz powyżej opcję „Włącz rekomendacje” i uruchom ponownie serwer, aby zlecenie Rekomendacje dla strony Odkryj mogło działać."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Prośby są obecnie wyłączone. Włącz je w sekcji "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Ustawienia próśb"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", aby osoby oglądające widziały stronę Odkryj."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Otwórz stronę Odkryj"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -91213,6 +91649,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Ten harmonogram pochodzi z ustawień kopii zapasowych. Zmień go na stronie "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Serwer › Kopie zapasowe"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

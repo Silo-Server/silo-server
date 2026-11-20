@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useT } from "@/i18n";
@@ -62,6 +62,20 @@ export function SaveBar({
   className,
 }: SaveBarProps) {
   const t = useT();
+  const shown = placement === "page" ? visible : dirtyCount > 0;
+  // The room the bar takes at the bottom of the viewport, with a gap. Toasts
+  // stay above it (`Toaster`), so a toast's action and Discard and Save never
+  // cover each other.
+  const clearance =
+    placement === "page" ? "calc(var(--playback-bar-clearance, 0px) + 5.5rem)" : "5rem";
+  useEffect(() => {
+    if (!shown) return;
+    const style = document.documentElement.style;
+    style.setProperty("--save-bar-clearance", clearance);
+    return () => {
+      style.removeProperty("--save-bar-clearance");
+    };
+  }, [shown, clearance]);
   const text = message ?? t("web.shell.saveBar.count", { count: dirtyCount, shown: dirtyCount });
   const saveDisabled = isSaving || !canSave;
   const saveText = isSaving ? t("web.ui.saving") : (saveLabel ?? t("common.save"));

@@ -11,7 +11,7 @@ import {
 import { toast } from "sonner";
 import { useSelectChatGPTAccount, useCompleteChatGPTLogin } from "./chatgpt";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
-vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), dismiss: vi.fn() } }));
 function fixture() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: 3 } },
@@ -224,6 +224,119 @@ it.each([false, true])(
     expect(result.current.dirtyCount).toBe(competitor ? 1 : 0);
   },
 );
+it("lets a refused settings save through after a reload, replacing only edits it cannot vouch for", async () => {
+  let stored = {
+    "branding.server_name": "Silo",
+    "branding.login_subtitle": "Welcome",
+    "server.log_level": "info",
+  };
+  let tag = '"tagA"';
+  const writes: Array<{ values: Record<string, string>; tag: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        const values = JSON.parse(String(init.body)).values as Record<string, string>;
+        const submittedTag = new Headers(init.headers).get("If-Match") ?? "";
+        writes.push({ values, tag: submittedTag });
+        if (submittedTag !== tag)
+          return response(
+            {
+              type: "https://siloserver.org/docs/api/v2/problems/precondition_failed",
+              title: "Precondition failed",
+              status: 412,
+            },
+            412,
+          );
+        stored = { ...stored, ...values };
+        tag = '"tagC"';
+        return response({ values, restart_required: false }, 200, tag);
+      }
+      if (url.endsWith("/sensitive-status"))
+        return response({ configured: ["email.smtp_password"], managed_by_env: [] });
+      return response(stored, 200, tag);
+    }),
+  );
+  const { result } = renderHook(
+    () =>
+      useSettingsForm({
+        keys: [
+          "branding.server_name",
+          "branding.login_subtitle",
+          "server.log_level",
+          "email.smtp_host",
+          "email.smtp_password",
+        ],
+      }),
+    fixture(),
+  );
+  await waitFor(() => expect(result.current.sensitiveStatusReady).toBe(true));
+  await waitFor(() => expect(result.current.getValue("branding.server_name")).toBe("Silo"));
+  act(() => result.current.setValue("branding.server_name", "Casa"));
+  // Another administrator saves the subtitle, and a background read shows it
+  // before this admin edits it in turn.
+  stored = { ...stored, "branding.login_subtitle": "Hello" };
+  tag = '"tagA2"';
+  await act(async () => {
+    await result.current.retryLoad();
+  });
+  await waitFor(() => expect(result.current.getValue("branding.login_subtitle")).toBe("Hello"));
+  act(() => result.current.setValue("branding.login_subtitle", "Hello there"));
+  act(() => result.current.setValue("server.log_level", "debug"));
+  // Unset, so no snapshot carries it; and a saved secret no snapshot shows.
+  act(() => result.current.setValue("email.smtp_host", "mail.example.invalid"));
+  act(() => result.current.setValue("email.smtp_password", "new-secret"));
+  // The other administrator then saves the log level too.
+  stored = { ...stored, "server.log_level": "warn" };
+  tag = '"tagB"';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await act(async () => {
+      await expect(result.current.save()).rejects.toBeInstanceOf(Error);
+    });
+  }
+  expect(writes.map((write) => write.tag)).toEqual(['"tagA"', '"tagA"']);
+  // Each refusal is reported once, by the form, with a way to reload.
+  const refusals = vi.mocked(toast.error).mock.calls;
+  expect(refusals).toHaveLength(2);
+  const action = refusals[1]?.[1]?.action as
+    | { onClick: (event: { preventDefault: () => void }) => void }
+    | undefined;
+  expect(action).toBeDefined();
+  const preventDefault = vi.fn();
+  act(() => action?.onClick({ preventDefault }));
+  expect(preventDefault).toHaveBeenCalled();
+  await waitFor(() => expect(toast.dismiss).toHaveBeenCalled());
+  // The log level changed after its edit began, so the edit gives way to the
+  // saved value, and nothing here can tell whether the saved password changed.
+  // The subtitle edit began over the value now saved, so it stays.
+  expect(result.current.getValue("server.log_level")).toBe("warn");
+  expect(result.current.getValue("email.smtp_password")).toBe("");
+  expect(result.current.getValue("branding.server_name")).toBe("Casa");
+  expect(result.current.getValue("branding.login_subtitle")).toBe("Hello there");
+  expect([...result.current.dirtyKeys].sort()).toEqual([
+    "branding.login_subtitle",
+    "branding.server_name",
+    "email.smtp_host",
+  ]);
+  await act(async () => {
+    await result.current.save();
+  });
+  expect(writes.at(-1)).toEqual({
+    values: {
+      "branding.server_name": "Casa",
+      "branding.login_subtitle": "Hello there",
+      "email.smtp_host": "mail.example.invalid",
+    },
+    tag: '"tagB"',
+  });
+  expect(stored).toEqual({
+    "branding.server_name": "Casa",
+    "branding.login_subtitle": "Hello there",
+    "server.log_level": "warn",
+    "email.smtp_host": "mail.example.invalid",
+  });
+  expect(result.current.dirtyCount).toBe(0);
+});
 it("refreshes the link capabilities when the public URL changes", async () => {
   const fetchMock = vi
     .fn()

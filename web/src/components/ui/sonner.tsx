@@ -31,12 +31,20 @@ const Toaster = ({ ...props }: ToasterProps) => {
       dir={dir}
       // Sonner's corners are physical; toasts sit at the bottom end corner.
       position={dir === "rtl" ? "bottom-left" : "bottom-right"}
+      // Above a floating save bar while one shows (`SaveBar` publishes the room
+      // it takes), so a toast never covers Discard and Save.
+      offset={{ bottom: "max(24px, var(--save-bar-clearance, 0px))" }}
+      mobileOffset={{ bottom: "max(16px, var(--save-bar-clearance, 0px))" }}
       className="toaster group"
       toastOptions={{
         classNames: {
           toast: "!text-[var(--popover-foreground)]",
           title: "!text-[var(--popover-foreground)]",
           description: "!text-[var(--popover-foreground)]",
+          // Sonner's own action chip has no hover state, a dark focus ring on
+          // the dark toast, and a 24px target.
+          actionButton:
+            "!h-8 !px-3 !text-[13px] hover:!opacity-85 focus-visible:!outline-2 focus-visible:!outline-offset-2 focus-visible:!outline-ring pointer-coarse:!h-11",
         },
       }}
       style={

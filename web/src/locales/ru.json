@@ -15751,6 +15751,80 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Нельзя восстановить: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — отличающиеся настройки или часть их подключения задаются окружением этого сервера"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Нельзя восстановить: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — отличающиеся настройки или часть их подключения задаются окружением этого сервера"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Нельзя восстановить: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — отличающиеся настройки или часть их подключения задаются окружением этого сервера"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Нельзя восстановить: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — отличающиеся настройки или часть их подключения задаются окружением этого сервера"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -16833,6 +16907,64 @@
     {
       "type": 0,
       "value": "Адрес сервиса меняется, а его учётных данных в резервной копии нет, поэтому при восстановлении они здесь будут удалены, а сервис будет выключен, пока их не введут снова."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " настройка сохраняет текущее значение, так как её или часть её подключения задаёт окружение этого сервера."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " настройки сохраняют текущие значения, так как их или часть их подключения задаёт окружение этого сервера."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " настроек сохраняют текущие значения, так как их или часть их подключения задаёт окружение этого сервера."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " настройки сохраняют текущие значения, так как их или часть их подключения задаёт окружение этого сервера."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -20913,6 +21045,12 @@
       "value": "На этом сервере уже есть другой аккаунт, который входит с таким же именем пользователя или эл. почтой."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Окружение этого сервера задаёт отличающиеся настройки или часть их подключения, поэтому сервер сохраняет текущие значения."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -22279,6 +22417,16 @@
     {
       "type": 0,
       "value": " (сохранено: строже)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (сохранено: окружение)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -62946,7 +63094,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Задаётся в конфигурации развёртывания сервера. Удалите узел там, чтобы удалить его здесь."
+      "value": "Задаётся в конфигурации развёртывания сервера. Удалите узел там и перезапустите API-серверы, чтобы удалить его здесь."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -65934,6 +66082,146 @@
       "value": "Создание рекомендаций остановлено. Сохранённые рекомендации будут отображаться в разделе «Обзор» до перезапуска сервера."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Ранжирование профилей ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Загрузка списков TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Поиск фильмов и сериалов и создание эмбеддингов ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Удалено "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " устаревшее название"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Удалено "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " устаревших названия"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Удалено "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " устаревших названий"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Удалено "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " устаревших названия"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -66006,6 +66294,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Перед созданием рекомендаций в разделе «Обзор» устраните конфликт блокировки эмбеддингов ниже."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Сначала запустите задание «Эмбеддинги», чтобы у Silo были векторы медиатеки для сравнения."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Подключите провайдера эмбеддингов в разделе «Сервисы ИИ», чтобы создавать рекомендации для раздела «Обзор»."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Ни у одного профиля пока нет профиля предпочтений. Запустите задание «Профили предпочтений», когда кто-нибудь посмотрит или оценит фильмы или сериалы."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -68664,6 +68976,32 @@
       "value": "Ряд останется пустым, пока на странице «Администрирование → Рекомендации» не включены рекомендации в разделе «Обзор»."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Ряды рекомендаций останутся пустыми, пока на странице "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "«Администрирование → Рекомендации»"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " не включены рекомендации в разделе «Обзор»."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Выкл. в разделе «Рекомендации»"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -70400,6 +70738,12 @@
       "value": "Новые ряды добавляются в конец страницы «Обзор»"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Открыть настройки рекомендаций"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -70412,6 +70756,12 @@
       "value": "Лента MDBList не передаёт сортировку, сохранённую на странице списка. Выберите ту, что там показана."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "В вашем профиле пока нет рекомендаций для раздела «Обзор». Запустите задание «Рекомендации в разделе „Обзор“» или посмотрите и оцените несколько фильмов или сериалов, чтобы увидеть предварительный просмотр этого ряда."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -70422,6 +70772,12 @@
     {
       "type": 0,
       "value": "Выберите список или вставьте ссылку на него, чтобы увидеть его содержимое."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Включите рекомендации в разделе «Обзор» на странице «Администрирование → Рекомендации», чтобы увидеть предварительный просмотр этого ряда."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -75036,6 +75392,30 @@
     {
       "type": 0,
       "value": "Не удалось изменить канал"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Перезагрузите, чтобы увидеть текущие значения. Ваши правки изменившихся настроек, а также сохранённых паролей и ключей будут отменены; остальные правки сохранятся."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Перезагрузить"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Не удалось перезагрузить настройки. Повторите попытку."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Настройки изменены в другом месте"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -80734,6 +81114,24 @@
       "value": "Для перехода на другую модель нужно сбросить эмбеддинги, при этом все они будут удалены. Другой провайдер с той же моделью применяется после перезапуска."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Добавить в «Обзор»"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Не удалось добавить ряды рекомендаций на страницу «Обзор»."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Ряды рекомендаций добавлены на страницу «Обзор»."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -80756,6 +81154,44 @@
     {
       "type": 0,
       "value": "Сколько фильмов и сериалов, которых нет в медиатеке, сервер хранит для рекомендаций. Для каждого из них выполняется запрос к TMDB и создаётся эмбеддинг. Обычно это недорого, но чем больше число, тем выше могут быть затраты или дольше обработка (в зависимости от провайдера эмбеддингов) и тем больше места занимают данные."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "На вашей странице «Обзор» пока нет рядов «Рекомендации»."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Включите параметр «Включить рекомендации» выше и перезапустите сервер, чтобы можно было запускать рекомендации в разделе «Обзор»."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Запросы сейчас выключены. Включите их в "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "настройках запросов"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", чтобы зрители могли видеть страницу «Обзор»."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Открыть страницу «Обзор»"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -91468,6 +91904,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Это расписание задаётся в настройках резервного копирования. Измените его в разделе "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "«Сервер › Резервные копии»"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

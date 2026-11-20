@@ -14789,6 +14789,48 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çåñ'ţ ƀé ŕéšţöŕéđ — ţĥîš šéŕṽéŕ'š éñṽîŕöñɱéñţ šéţš ţĥé šéţţîñĝš ţĥåţ đîƒƒéŕ, öŕ þåŕţ öƒ ţĥéîŕ çöññéçţîöñ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çåñ'ţ ƀé ŕéšţöŕéđ — ţĥîš šéŕṽéŕ'š éñṽîŕöñɱéñţ šéţš ţĥé šéţţîñĝš ţĥåţ đîƒƒéŕ, öŕ þåŕţ öƒ ţĥéîŕ çöññéçţîöñ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15423,6 +15465,48 @@
     {
       "type": 0,
       "value": "⟦Å šéŕṽîçé'š åđđŕéšš çĥåñĝéš ŵîţĥöûţ îţš çŕéđéñţîåļš îñ ţĥé ƀåçķûþ, šö ŕéšţöŕîñĝ çļéåŕš ţĥéɱ ĥéŕé åñđ ţûŕñš ţĥé šéŕṽîçé öƒƒ ûñţîļ ţĥéý'ŕé éñţéŕéđ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " šéţţîñĝ ķééþš îţš çûŕŕéñţ ṽåļûé ƀéçåûšé ţĥîš šéŕṽéŕ'š éñṽîŕöñɱéñţ šéţš îţ, öŕ þåŕţ öƒ îţš çöññéçţîöñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " šéţţîñĝš ķééþ ţĥéîŕ çûŕŕéñţ ṽåļûéš ƀéçåûšé ţĥîš šéŕṽéŕ'š éñṽîŕöñɱéñţ šéţš ţĥéɱ, öŕ þåŕţ öƒ ţĥéîŕ çöññéçţîöñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -18623,6 +18707,12 @@
       "value": "⟦Åñöţĥéŕ åççöûñţ ĥéŕé šîĝñš îñ ŵîţĥ îţš ûšéŕñåɱé öŕ éɱåîļ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš šéŕṽéŕ'š éñṽîŕöñɱéñţ šéţš ţĥé šéţţîñĝš ţĥåţ đîƒƒéŕ, öŕ þåŕţ öƒ ţĥéîŕ çöññéçţîöñ, šö ţĥîš šéŕṽéŕ ķééþš îţš çûŕŕéñţ ṽåļûéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19833,6 +19923,20 @@
     {
       "type": 0,
       "value": " (ķéþţ: šţŕîçţéŕ)~~~~~~~⟧"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (ķéþţ: éñṽîŕöñɱéñţ)~~~~~~~~⟧"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -55195,7 +55299,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "⟦Šéţ ƀý ţĥé šéŕṽéŕ’š đéþļöýɱéñţ çöñƒîĝûŕåţîöñ. Ŕéɱöṽé îţ ţĥéŕé ţö đéļéţé îţ ĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Šéţ ƀý ţĥé šéŕṽéŕ’š đéþļöýɱéñţ çöñƒîĝûŕåţîöñ. Ŕéɱöṽé îţ ţĥéŕé åñđ ŕéšţåŕţ ţĥé ÅÞÎ šéŕṽéŕš ţö đéļéţé îţ ĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -58029,6 +58133,114 @@
       "value": "⟦Ĝéñéŕåţîöñ ĥåš šţöþþéđ. Šţöŕéđ ŕéçöɱɱéñđåţîöñš šţåý ṽîšîƀļé îñ Đîšçöṽéŕ ûñţîļ ţĥé šéŕṽéŕ ŕéšţåŕţš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "⟦Ŕåñķîñĝ þŕöƒîļéš ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "⟦Ƒéţçĥîñĝ ŢṀĐƁ ļîšţš ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "⟦Ļööķîñĝ ûþ åñđ éɱƀéđđîñĝ ţîţļéš ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Çļéåŕéđ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " éẋþîŕéđ ţîţļé~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Çļéåŕéđ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " éẋþîŕéđ ţîţļéš~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -58069,6 +58281,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéšöļṽé ţĥé éɱƀéđđîñĝ ļöçķ çöñƒļîçţ ƀéļöŵ ƀéƒöŕé ƀûîļđîñĝ Đîšçöṽéŕ ŕéçöɱɱéñđåţîöñš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "⟦Ŕûñ ţĥé Éɱƀéđđîñĝš ĵöƀ ƒîŕšţ šö Šîļö ĥåš ļîƀŕåŕý ṽéçţöŕš ţö çöɱþåŕé åĝåîñšţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "⟦Çöññéçţ åñ éɱƀéđđîñĝ þŕöṽîđéŕ îñ ÅÎ Šéŕṽîçéš ƀéƒöŕé ƀûîļđîñĝ Đîšçöṽéŕ ŕéçöɱɱéñđåţîöñš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "⟦Ñö þŕöƒîļéš ĥåṽé ţåšţé þŕöƒîļéš ýéţ. Ŕûñ Ţåšţé Þŕöƒîļéš öñçé šöɱéöñé ĥåš ŵåţçĥéđ öŕ ŕåţéđ ţîţļéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -60111,6 +60347,32 @@
       "value": "⟦Šţåýš éɱþţý ûñţîļ Đîšçöṽéŕ ŕéçöɱɱéñđåţîöñš åŕé ţûŕñéđ öñ îñ Åđɱîñ → Ŕéçöɱɱéñđåţîöñš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéçöɱɱéñđéđ ŕöŵš šţåý éɱþţý ûñţîļ Đîšçöṽéŕ Ŕéçöɱɱéñđåţîöñš åŕé ţûŕñéđ öñ îñ "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Åđɱîñ → Ŕéçöɱɱéñđåţîöñš"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "⟦Öƒƒ îñ Ŕéçöɱɱéñđåţîöñš~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -61673,6 +61935,12 @@
       "value": "⟦Ñéŵ ŕöŵš ĝö ţö ţĥé ƀöţţöɱ öƒ Đîšçöṽéŕ~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "⟦Öþéñ Ŕéçöɱɱéñđåţîöñš šéţţîñĝš~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -61685,6 +61953,12 @@
       "value": "⟦ṀĐƁĻîšţ'š ƒééđ đöéšñ'ţ çåŕŕý ţĥé šöŕţ šåṽéđ öñ ţĥé ļîšţ'š þåĝé. Þîçķ ţĥé öñé îţ šĥöŵš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ þŕöƒîļé ĥåš ñö Đîšçöṽéŕ ŕéçöɱɱéñđåţîöñš ýéţ. Ŕûñ Đîšçöṽéŕ Ŕéçöɱɱéñđåţîöñš öŕ ŵåţçĥ åñđ ŕåţé å ƒéŵ ţîţļéš ţö þŕéṽîéŵ ţĥîš ŕöŵ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -61695,6 +61969,12 @@
     {
       "type": 0,
       "value": "⟦Þîçķ å ļîšţ öŕ þåšţé îţš ļîñķ ţö šéé îţš ţîţļéš.~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "⟦Ţûŕñ öñ Đîšçöṽéŕ Ŕéçöɱɱéñđåţîöñš îñ Åđɱîñ → Ŕéçöɱɱéñđåţîöñš ţö þŕéṽîéŵ ţĥîš ŕöŵ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -66175,6 +66455,30 @@
     {
       "type": 0,
       "value": "⟦Ƒåîļéđ ţö ûþđåţé çĥåññéļ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļöåđ ţö šéé ţĥé çûŕŕéñţ ṽåļûéš. Ýöûŕ éđîţš ţö šéţţîñĝš ţĥåţ çĥåñĝéđ, åñđ ţö šåṽéđ þåššŵöŕđš åñđ ķéýš, åŕé ûñđöñé; ýöûŕ öţĥéŕ éđîţš åŕé ķéþţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļöåđ~~~⟧"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ’ţ ŕéļöåđ šéţţîñĝš. Ţŕý åĝåîñ.~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "⟦Šéţţîñĝš çĥåñĝéđ éļšéŵĥéŕé~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -71913,6 +72217,24 @@
       "value": "⟦Šŵîţçĥîñĝ ţö åñöţĥéŕ ɱöđéļ ŕéǫûîŕéš ŕéšéţţîñĝ éɱƀéđđîñĝš, ŵĥîçĥ đéļéţéš ţĥéɱ åļļ. Åñöţĥéŕ þŕöṽîđéŕ šéŕṽîñĝ ţĥé šåɱé ɱöđéļ åþþļîéš åƒţéŕ å ŕéšţåŕţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "⟦Åđđ ţö Đîšçöṽéŕ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ åđđ ŕéçöɱɱéñđéđ ŕöŵš ţö ţĥé Đîšçöṽéŕ þåĝé.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "⟦Åđđéđ ŕéçöɱɱéñđéđ ŕöŵš ţö ţĥé Đîšçöṽéŕ þåĝé.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -71935,6 +72257,44 @@
     {
       "type": 0,
       "value": "⟦Ĥöŵ ɱåñý ţîţļéš ţĥåţ åŕéñ'ţ îñ ţĥé ļîƀŕåŕý ţĥé šéŕṽéŕ ķééþš ţö ŕéçöɱɱéñđ ƒŕöɱ. Éåçĥ öñé îš ļööķéđ ûþ öñ ŢṀĐƁ åñđ éɱƀéđđéđ. Éɱƀéđđîñĝ îš ûšûåļļý çĥéåþ, ƀûţ å ĥîĝĥéŕ ñûɱƀéŕ çåñ çöšţ ɱöŕé öŕ ţåķé ļöñĝéŕ đéþéñđîñĝ öñ ýöûŕ éɱƀéđđîñĝ þŕöṽîđéŕ, åñđ ûšéš ɱöŕé šţöŕåĝé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ Đîšçöṽéŕ þåĝé đöéšñ'ţ šĥöŵ åñý Ŕéçöɱɱéñđåţîöñš ŕöŵš ýéţ.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "⟦Ţûŕñ öñ Éñåƀļé Ŕéçöɱɱéñđåţîöñš åƀöṽé åñđ ŕéšţåŕţ ţĥé šéŕṽéŕ ƀéƒöŕé Đîšçöṽéŕ Ŕéçöɱɱéñđåţîöñš çåñ ŕûñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţš åŕé çûŕŕéñţļý öƒƒ. Ţûŕñ ţĥéɱ öñ îñ "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Ŕéǫûéšţš šéţţîñĝš"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " šö ṽîéŵéŕš çåñ šéé ţĥé Đîšçöṽéŕ þåĝé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "⟦Öþéñ Đîšçöṽéŕ Þåĝé~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -83031,6 +83391,26 @@
     {
       "type": 0,
       "value": "~~~~⟧"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš šçĥéđûļé çöɱéš ƒŕöɱ ţĥé ƀåçķûþ šéţţîñĝš. Çĥåñĝé îţ îñ "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Šéŕṽéŕ › Ɓåçķûþš"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

@@ -15427,6 +15427,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " не можна відновити – параметри, що відрізняються, або частину їхнього з’єднання задає середовище цього сервера"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " не можна відновити – параметри, що відрізняються, або частину їхнього з’єднання задає середовище цього сервера"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " не можна відновити – параметри, що відрізняються, або частину їхнього з’єднання задає середовище цього сервера"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " не можна відновити – параметри, що відрізняються, або частину їхнього з’єднання задає середовище цього сервера"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -16285,6 +16343,64 @@
     {
       "type": 0,
       "value": "Адреса сервісу змінюється, а його облікових даних у резервній копії немає, тож відновлення очистить їх тут і вимкне сервіс, доки їх не буде введено знову."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " параметр зберігає поточне значення: його або частину його з’єднання задає середовище цього сервера."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " параметри зберігають поточні значення: їх або частину їхнього з’єднання задає середовище цього сервера."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " параметрів зберігають поточні значення: їх або частину їхнього з’єднання задає середовище цього сервера."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " параметра зберігають поточні значення: їх або частину їхнього з’єднання задає середовище цього сервера."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -20297,6 +20413,12 @@
       "value": "Інший обліковий запис на цьому сервері вже використовує для входу це ім’я користувача або електронну пошту."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Параметри, що відрізняються, або частину їхнього з’єднання задає середовище цього сервера, тож сервер зберігає поточні значення."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -21659,6 +21781,16 @@
     {
       "type": 0,
       "value": " (залишено: суворіше)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (збережено: середовище)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -61988,7 +62120,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Задається конфігурацією розгортання сервера. Вилучіть його там, щоб видалити тут."
+      "value": "Задається конфігурацією розгортання сервера. Вилучіть його там і перезапустіть API-сервери, щоб видалити тут."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -64968,6 +65100,146 @@
       "value": "Генерування зупинено. Збережені рекомендації залишаться видимими в Огляді до перезапуску сервера."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Ранжування профілів ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Отримання списків TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Пошук назв і створення ембедингів ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Очищено "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " прострочену назву"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Очищено "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " прострочені назви"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Очищено "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " прострочених назв"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Очищено "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " простроченої назви"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -65040,6 +65312,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Розв’яжіть конфлікт блокування ембедингів нижче, перш ніж створювати рекомендації в Огляді."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Спершу запустіть операцію «Ембединги», щоб Silo мав вектори бібліотеки для порівняння."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Під’єднайте постачальника ембедингів у розділі «Сервіси ШІ», перш ніж створювати рекомендації в Огляді."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Ще в жодного профілю немає профілю смаків. Запустіть «Профілі смаків», коли хтось перегляне або оцінить назви."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -67634,6 +67930,32 @@
       "value": "Ряд залишатиметься порожнім, доки рекомендації в Огляді не буде ввімкнено в меню Адміністрування → Рекомендації."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Ряди рекомендацій залишатимуться порожніми, доки рекомендації в Огляді не буде ввімкнено в меню "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Адміністрування → Рекомендації"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Вимкнено в «Рекомендаціях»"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -69366,6 +69688,12 @@
       "value": "Нові ряди з’являються внизу «Огляду»"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Відкрити налаштування рекомендацій"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -69378,6 +69706,12 @@
       "value": "Стрічка MDBList не передає сортування, збережене на сторінці списку. Виберіть те, що там показано."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "У вашому профілі ще немає рекомендацій в Огляді. Запустіть «Рекомендації в Огляді» або перегляньте й оцініть кілька назв, щоб попередньо переглянути цей ряд."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -69388,6 +69722,12 @@
     {
       "type": 0,
       "value": "Виберіть список або вставте посилання на нього, щоб побачити його вміст."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Увімкніть рекомендації в Огляді в меню Адміністрування → Рекомендації, щоб попередньо переглянути цей ряд."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -73962,6 +74302,30 @@
     {
       "type": 0,
       "value": "Не вдалося оновити канал"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Перезавантажте, щоб побачити поточні значення. Ваші зміни в налаштуваннях, які змінилися, а також у збережених паролях і ключах буде скасовано; інші ваші зміни буде збережено."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Перезавантажити"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Не вдалося перезавантажити налаштування. Спробуйте ще раз."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Налаштування змінено в іншому місці"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -79652,6 +80016,24 @@
       "value": "Щоб перейти на іншу модель, потрібно скинути ембединги, а це видаляє їх усі. Інший постачальник тієї самої моделі почне використовуватися після перезапуску."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Додати в Огляд"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Не вдалося додати ряди рекомендацій на сторінку Огляду."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Ряди рекомендацій додано на сторінку Огляду."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -79674,6 +80056,44 @@
     {
       "type": 0,
       "value": "Скільки назв, яких немає в бібліотеці, сервер зберігає для рекомендацій. Для кожної з них запитуються дані з TMDB і створюється ембединг. Зазвичай це недорого, але більше число може коштувати дорожче або займати більше часу залежно від вашого постачальника ембедингів, а також потребує більше місця для зберігання."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "На вашій сторінці Огляду ще немає рядів рекомендацій."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Увімкніть параметр «Увімкнути рекомендації» вище й перезапустіть сервер, щоб рекомендації в Огляді могли працювати."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Запити наразі вимкнено. Увімкніть їх у "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "налаштуваннях запитів"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", щоб глядачі могли бачити сторінку Огляду."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Відкрити сторінку Огляду"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -90294,6 +90714,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Цей розклад береться з налаштувань резервного копіювання. Змініть його в розділі "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Сервер › Резервні копії"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

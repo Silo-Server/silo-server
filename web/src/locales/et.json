@@ -13949,6 +13949,48 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ei saa taastada: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " – selle serveri keskkond määrab erinevad seadistused või osa nende ühendusest"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ei saa taastada: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " – selle serveri keskkond määrab erinevad seadistused või osa nende ühendusest"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14583,6 +14625,40 @@
     {
       "type": 0,
       "value": "Teenuse aadress muutub, kuid varukoopias pole selle mandaate, seega tühjendab taastamine need siin ja lülitab teenuse välja, kuni need uuesti sisestatakse."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seadistus jääb praeguse väärtusega, sest selle serveri keskkond määrab selle või osa selle ühendusest."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seadistust jääb praeguste väärtustega, sest selle serveri keskkond määrab need või osa nende ühendusest."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17431,6 +17507,12 @@
       "value": "Siin logib selle kasutajanime või e-posti aadressiga sisse teine konto."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Selle serveri keskkond määrab erinevad seadistused või osa nende ühendusest, seega jätab see server alles oma praegused väärtused."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18521,6 +18603,16 @@
     {
       "type": 0,
       "value": " (säilitatud: rangem)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (alles jäetud: keskkond)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -50971,7 +51063,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Selle määrab serveri juurutuskonfiguratsioon. Et see siin kustutada, eemaldage see sealt."
+      "value": "Selle määrab serveri juurutuskonfiguratsioon. Et see siin kustutada, eemaldage see sealt ja taaskäivitage API-serverid."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -53573,6 +53665,114 @@
       "value": "Loomine on peatatud. Salvestatud soovitused jäävad vahelehel „Avasta“ nähtavaks, kuni server taaskäivitub."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Profiilide järjestamine ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDB loendite laadimine ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Pealkirjade otsimine ja manustamine ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Eemaldati "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " aegunud pealkiri"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Eemaldati "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " aegunud pealkirja"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53605,6 +53805,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Enne vahelehe „Avasta“ soovituste koostamist lahendage allpool manustuse luku konflikt."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Käivitage esmalt töö „Manustused“, et Silol oleks meediakogu vektoreid, millega võrrelda."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Enne vahelehe „Avasta“ soovituste koostamist ühendage lehel „AI-teenused“ manustuste teenusepakkuja."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Ühelgi profiilil pole veel maitseprofiili. Käivitage töö „Maitseprofiilid“, kui keegi on pealkirju vaadanud või hinnanud."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -55471,6 +55695,32 @@
       "value": "Jääb tühjaks, kuni vahelehe „Avasta“ soovitused lülitatakse sisse menüüs „Haldus → Soovitused“."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Soovitatud read jäävad tühjaks, kuni vahelehe „Avasta“ soovitused lülitatakse sisse menüüs "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„Haldus → Soovitused“"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Väljas lehel „Soovitused“"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56957,6 +57207,12 @@
       "value": "Uued read lisatakse lehe „Avasta“ lõppu"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Ava lehe „Soovitused“ seaded"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56969,6 +57225,12 @@
       "value": "MDBListi voog ei sisalda loendi lehel salvestatud sortimist. Valige see, mida leht näitab."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Teie profiilil pole veel vahelehe „Avasta“ soovitusi. Selle rea eelvaate nägemiseks käivitage vahelehe „Avasta“ soovituste töö või vaadake ja hinnake mõnda pealkirja."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56979,6 +57241,12 @@
     {
       "type": 0,
       "value": "Valige loend või kleepige selle link, et näha selle pealkirju."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Selle rea eelvaate nägemiseks lülitage vahelehe „Avasta“ soovitused sisse menüüs „Haldus → Soovitused“."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -61259,6 +61527,30 @@
     {
       "type": 0,
       "value": "Kanali muutmine ebaõnnestus"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Praeguste väärtuste nägemiseks laadige leht uuesti. Teie muudatused vahepeal muutunud seadistustes ning salvestatud paroolides ja võtmetes tühistatakse; teie ülejäänud muudatused jäävad alles."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Laadi uuesti"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Seadete uuesti laadimine ebaõnnestus. Proovige uuesti."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Seadeid muudeti mujal"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -66729,6 +67021,24 @@
       "value": "Teisele mudelile üleminekuks tuleb vektoresitused lähtestada, mis kustutab need kõik. Teine teenusepakkuja, mis pakub sama mudelit, rakendub pärast taaskäivitust."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Lisa vahelehele „Avasta“"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Soovitatud ridu ei õnnestunud vahelehele „Avasta“ lisada."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Soovitatud read lisati vahelehele „Avasta“."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66751,6 +67061,44 @@
     {
       "type": 0,
       "value": "Mitu meediakogust puuduvat pealkirja server soovitamiseks hoiab. Iga pealkiri otsitakse TMDB-st ja manustatakse. Manustamine on tavaliselt odav, kuid suurem arv võib olenevalt teie manustuste teenusepakkujast maksta rohkem või võtta kauem aega ning kasutab rohkem salvestusruumi."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Teie vahelehel „Avasta“ pole veel ühtegi soovituste rida."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Enne kui vahelehe „Avasta“ soovitusi saab käivitada, lülitage ülal sisse valik „Luba soovitused“ ja taaskäivitage server."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Taotlused on praegu välja lülitatud. Lülitage need sisse "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "taotluste seadetes"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", et vaatajad näeksid vahelehte „Avasta“."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Ava vaheleht „Avasta“"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -77103,6 +77451,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "See ajakava pärineb varukoopiate seadetest. Muutke seda lehel "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Varukoopiad"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

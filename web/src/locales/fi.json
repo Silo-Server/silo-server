@@ -13781,6 +13781,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ei palautettavissa — tämän palvelimen ympäristö määrittää poikkeavat asetukset tai osan niiden yhteydestä"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ei palautettavissa — tämän palvelimen ympäristö määrittää poikkeavat asetukset tai osan niiden yhteydestä"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14303,6 +14337,40 @@
     {
       "type": 0,
       "value": "Palvelun osoite muuttuu, mutta varmuuskopiossa ei ole sen tunnistetietoja, joten palautus tyhjentää ne täällä ja poistaa palvelun käytöstä, kunnes ne syötetään uudelleen."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " asetus säilyttää nykyisen arvonsa, koska tämän palvelimen ympäristö määrittää sen tai osan sen yhteydestä."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " asetusta säilyttää nykyiset arvonsa, koska tämän palvelimen ympäristö määrittää ne tai osan niiden yhteydestä."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17151,6 +17219,12 @@
       "value": "Toinen tili täällä kirjautuu sisään sen käyttäjänimellä tai sähköpostiosoitteella."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Tämän palvelimen ympäristö määrittää poikkeavat asetukset tai osan niiden yhteydestä, joten tämä palvelin säilyttää nykyiset arvonsa."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18241,6 +18315,16 @@
     {
       "type": 0,
       "value": " (säilytetty: tiukempi)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (säilytetty: ympäristö)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -50471,7 +50555,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Asetettu palvelimen käyttöönottomäärityksissä. Poista solmu sieltä, jotta voit poistaa sen täällä."
+      "value": "Asetettu palvelimen käyttöönottomäärityksissä. Poista solmu sieltä ja käynnistä API-palvelimet uudelleen, jotta voit poistaa sen täällä."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -53081,6 +53165,114 @@
       "value": "Luonti on pysähtynyt. Tallennetut suositukset näkyvät Tutustu-osiossa, kunnes palvelin käynnistetään uudelleen."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Järjestetään profiilien rivejä ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Haetaan TMDB-listoja ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Haetaan ja upotetaan nimikkeitä ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Poistettu "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vanhentunut nimike"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Poistettu "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vanhentunutta nimikettä"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53113,6 +53305,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Ratkaise alla oleva upotuslukituksen ristiriita ennen Tutustu-suositusten muodostamista."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Suorita ensin Upotukset-työ, jotta Silolla on kirjaston vektoreita vertailua varten."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Yhdistä upotuspalvelu sivulla Tekoälypalvelut ennen Tutustu-suositusten muodostamista."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Yhdelläkään profiililla ei ole vielä makuprofiilia. Suorita Makuprofiilit, kun joku on katsonut tai arvioinut nimikkeitä."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54971,6 +55187,32 @@
       "value": "Pysyy tyhjänä, kunnes Tutustu-suositukset otetaan käyttöön kohdassa Ylläpito → Suositukset."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Suositusrivit pysyvät tyhjinä, kunnes Tutustu-suositukset otetaan käyttöön kohdassa "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Ylläpito → Suositukset"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Pois käytöstä kohdassa Suositukset"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56449,6 +56691,12 @@
       "value": "Uudet rivit lisätään Tutustu-sivun loppuun"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Avaa Suositukset-asetukset"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56461,6 +56709,12 @@
       "value": "MDBList-palvelun syöte ei sisällä listan sivulle tallennettua järjestystä. Valitse järjestys, jota sivu käyttää."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Profiilillasi ei ole vielä Tutustu-suosituksia. Suorita Tutustu-suositukset tai katso ja arvioi muutama nimike, niin voit esikatsella tätä riviä."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56471,6 +56725,12 @@
     {
       "type": 0,
       "value": "Valitse lista tai liitä sen linkki nähdäksesi sen nimikkeet."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Ota Tutustu-suositukset käyttöön kohdassa Ylläpito → Suositukset, niin voit esikatsella tätä riviä."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -60691,6 +60951,30 @@
     {
       "type": 0,
       "value": "Kanavan päivittäminen epäonnistui"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Lataa uudelleen, niin näet nykyiset arvot. Muokkauksesi muuttuneisiin asetuksiin sekä tallennettuihin salasanoihin ja avaimiin kumotaan; muut muokkauksesi säilyvät."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Lataa uudelleen"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Asetusten lataaminen uudelleen epäonnistui. Yritä uudelleen."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Asetuksia muutettiin muualla"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -66157,6 +66441,24 @@
       "value": "Vaihtaminen toiseen malliin vaatii upotusten nollaamisen, mikä poistaa ne kaikki. Toinen samaa mallia tarjoava palvelu otetaan käyttöön uudelleenkäynnistyksen jälkeen."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Lisää Tutustu-sivulle"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Suositusrivien lisääminen Tutustu-sivulle epäonnistui."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Suositusrivit lisättiin Tutustu-sivulle."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66179,6 +66481,44 @@
     {
       "type": 0,
       "value": "Kuinka monta kirjastosta puuttuvaa nimikettä palvelin säilyttää suositusten pohjaksi. Jokainen niistä haetaan TMDB:stä ja upotetaan. Upottaminen on yleensä edullista, mutta suurempi määrä voi upotuspalvelustasi riippuen maksaa enemmän tai kestää pidempään, ja se vie enemmän tallennustilaa."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Tutustu-sivullasi ei näy vielä yhtään suositusriviä."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Ota yllä oleva asetus ”Ota suositukset käyttöön” päälle ja käynnistä palvelin uudelleen, ennen kuin Tutustu-suosituksia voidaan suorittaa."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Pyynnöt ovat tällä hetkellä pois käytöstä. Ota ne käyttöön kohdassa "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pyyntöjen asetukset"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", jotta katsojat näkevät Tutustu-sivun."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Avaa Tutustu-sivu"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -76471,6 +76811,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Tämä aikataulu tulee varmuuskopioinnin asetuksista. Muuta sitä kohdassa "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Palvelin › Varmuuskopiot"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
