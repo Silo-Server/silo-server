@@ -45,11 +45,10 @@ export const SETTINGS_NUMBER_WIDTH = "w-full sm:w-[var(--settings-control-w-num)
  * "Detected VA-API on renderD128". Pass any node to `status` instead when the
  * copy needs richer markup.
  *
- * The text may wrap. Items align to the top, and each direct `svg` child (the
- * tone's icon, or one a caller passes first, like a spinner) drops by half the
- * gap between one line and the icon's `size-3.5` (0.875rem). That centers the
- * icon on the first line at any root font size, as `items-center` did for a
- * single line.
+ * The text may wrap. Items align to the top, and each direct `svg` child (a
+ * `size-3.5` icon) is offset to center on the first line. When the icon is
+ * taller than a line, as with a large browser font size, the top padding lowers
+ * the text instead, so the icon stays inside the status.
  */
 export function SettingFieldStatus({
   tone = "ok",
@@ -62,7 +61,7 @@ export function SettingFieldStatus({
   return (
     <span
       className={cn(
-        "inline-flex items-start gap-1.5 text-[13px] leading-snug [&>svg]:mt-[calc((1lh-0.875rem)/2)]",
+        "inline-flex items-start gap-1.5 text-[13px] leading-snug has-[>svg]:pt-[max(0px,calc((0.875rem-1lh)/2))] [&>svg]:mt-[calc((1lh-0.875rem)/2)]",
         tone === "ok" && "text-green-600 dark:text-green-400",
         tone === "warn" && "text-amber-600 dark:text-amber-400",
         tone === "muted" && "text-muted-foreground",
