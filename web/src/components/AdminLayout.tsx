@@ -139,7 +139,8 @@ function AdminLayoutContent() {
                 <span className="text-muted-foreground block text-[10px] leading-none font-semibold tracking-[0.16em] uppercase">
                   {t("web.admin.shell.mobileHeader.eyebrow")}
                 </span>
-                <span className="mt-1 block truncate text-[15px] leading-none font-extrabold tracking-tight">
+                {/* truncate clips to the line box: a tighter leading cuts off descenders and accents. */}
+                <span className="block truncate text-[15px] leading-normal font-extrabold tracking-tight">
                   {mobileTitle}
                 </span>
               </div>
