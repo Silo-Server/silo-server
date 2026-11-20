@@ -418,6 +418,7 @@ it("lets a refused settings save through after a reload, replacing only edits it
           "branding.server_name",
           "branding.login_subtitle",
           "server.log_level",
+          "download.artifact_dir",
           "email.smtp_host",
           "email.smtp_password",
         ],
@@ -437,7 +438,9 @@ it("lets a refused settings save through after a reload, replacing only edits it
   await waitFor(() => expect(result.current.getValue("branding.login_subtitle")).toBe("Hello"));
   act(() => result.current.setValue("branding.login_subtitle", "Hello there"));
   act(() => result.current.setValue("server.log_level", "debug"));
-  // Unset, so no snapshot carries it; and a saved secret no snapshot shows.
+  // Unset, so no snapshot carries it; a new mail server with a new password
+  // for it, and that password is a saved secret no snapshot shows.
+  act(() => result.current.setValue("download.artifact_dir", "/srv/artifacts"));
   act(() => result.current.setValue("email.smtp_host", "mail.example.invalid"));
   act(() => result.current.setValue("email.smtp_password", "new-secret"));
   // The other administrator then saves the log level too.
@@ -461,16 +464,18 @@ it("lets a refused settings save through after a reload, replacing only edits it
   expect(preventDefault).toHaveBeenCalled();
   await waitFor(() => expect(toast.dismiss).toHaveBeenCalled());
   // The log level changed after its edit began, so the edit gives way to the
-  // saved value, and nothing here can tell whether the saved password changed.
-  // The subtitle edit began over the value now saved, so it stays.
+  // saved value. Nothing here can tell whether the saved password changed, so
+  // its edit is undone, and the mail server edit goes with it. The subtitle
+  // edit began over the value now saved, so it stays.
   expect(result.current.getValue("server.log_level")).toBe("warn");
   expect(result.current.getValue("email.smtp_password")).toBe("");
+  expect(result.current.getValue("email.smtp_host")).toBe("");
   expect(result.current.getValue("branding.server_name")).toBe("Casa");
   expect(result.current.getValue("branding.login_subtitle")).toBe("Hello there");
   expect([...result.current.dirtyKeys].sort()).toEqual([
     "branding.login_subtitle",
     "branding.server_name",
-    "email.smtp_host",
+    "download.artifact_dir",
   ]);
   await act(async () => {
     await result.current.save();
@@ -479,7 +484,7 @@ it("lets a refused settings save through after a reload, replacing only edits it
     values: {
       "branding.server_name": "Casa",
       "branding.login_subtitle": "Hello there",
-      "email.smtp_host": "mail.example.invalid",
+      "download.artifact_dir": "/srv/artifacts",
     },
     tag: '"tagB"',
   });
@@ -487,7 +492,7 @@ it("lets a refused settings save through after a reload, replacing only edits it
     "branding.server_name": "Casa",
     "branding.login_subtitle": "Hello there",
     "server.log_level": "warn",
-    "email.smtp_host": "mail.example.invalid",
+    "download.artifact_dir": "/srv/artifacts",
   });
   expect(result.current.dirtyCount).toBe(0);
 });

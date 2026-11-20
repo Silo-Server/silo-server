@@ -357,8 +357,17 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       const redisReplaced =
         redisDrafts.length > 0 &&
         (redisDrafts.some(changed) || (configured?.includes("redis.url") ?? true));
+      // An undone password or key takes the rest of its group with it (the
+      // settings sharing its key prefix, such as a host or endpoint), so a
+      // connection's settings are never saved apart from its credential.
+      const undoneSecretGroups = new Set(
+        drafts.filter((key) => !Object.hasOwn(fresh, key) && changed(key)).map(settingGroup),
+      );
       const replaced = drafts.filter(
-        (key) => changed(key) || (redisReplaced && REDIS_KEYS.includes(key)),
+        (key) =>
+          changed(key) ||
+          undoneSecretGroups.has(settingGroup(key)) ||
+          (redisReplaced && REDIS_KEYS.includes(key)),
       );
       // Retire a ChatGPT sign-in callback that started before this reload.
       saveEpoch.current++;
@@ -545,6 +554,11 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     buildConnectionCheckRequest,
     beginSettingsTransition,
   };
+}
+
+/** The settings a key belongs with: its key up to the last segment. */
+function settingGroup(key: string) {
+  return key.slice(0, key.lastIndexOf(".") + 1);
 }
 
 /**
