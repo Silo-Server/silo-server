@@ -494,7 +494,7 @@ func TestPrepareTransportV3AuthorizedOriginsPublishGrantBackedHLSManifest(t *tes
 	}
 	defer transport.rollback()
 
-	if transport.url != "http://proxy-1/stream/v3/session-origin-hls/master.m3u8" {
+	if transport.url != withTransportMarkerV3("http://proxy-1/stream/v3/session-origin-hls/master.m3u8", "session-origin-hls", transport.generation) {
 		t.Fatalf("manifest url = %q, want the credential-free proxy manifest", transport.url)
 	}
 	assertNoPlaybackCredentialV3(t, transport.url)

@@ -602,6 +602,11 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 		if requestUserID != 0 && session.UserID != requestUserID {
 			return nil, playback.SessionForbidden, nil, nil, nil
 		}
+		// A request from a superseded plan's playlist must not drive the
+		// current transport: no wait, restart, relay or reconstruct.
+		if playback.TransportSuperseded(session.ID, session.TransportGeneration, r.URL.Query()) {
+			return nil, playback.SessionUnavailable, nil, nil, errPlaybackTransportSuperseded
+		}
 		// A non-API or incomplete route is returned to the handler for the
 		// committed-egress guard below. Do not rebuild a local runtime first:
 		// even discarded output would cross the route's execution boundary.
@@ -2162,7 +2167,7 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return
 	case playback.SessionUnavailable:
-		if writePlaybackSessionEndedError(w, reconstructErr) || writeNativeRouteBindingErrorV3(w, reconstructErr) {
+		if writePlaybackTransportSupersededError(w, reconstructErr) || writePlaybackSessionEndedError(w, reconstructErr) || writeNativeRouteBindingErrorV3(w, reconstructErr) {
 			return
 		}
 		if writePlaybackToneMapExecutionError(w, reconstructErr) {
@@ -2269,7 +2274,9 @@ func writePlaybackToneMapExecutionError(w http.ResponseWriter, err error) bool {
 // rule as the manifest endpoint above.
 //
 // Errors: 404 (playback_session_not_found / not_found) when the session is
-// missing or cannot be reconstructed, or the segment does not exist; 503
+// missing or cannot be reconstructed, or the segment does not exist; 404
+// (playback_transport_superseded) when the URL's silo_transport names a
+// transport a replan replaced; 503
 // (unavailable) while the transcode is temporarily unavailable; and — for
 // tone-map execution failures — 422 (unsupported) with an
 // X-Silo-Tone-Map-Execution-Error header of source_revision_changed or
@@ -2300,7 +2307,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return
 	case playback.SessionUnavailable:
-		if writePlaybackSessionEndedError(w, reconstructErr) || writeNativeRouteBindingErrorV3(w, reconstructErr) {
+		if writePlaybackTransportSupersededError(w, reconstructErr) || writePlaybackSessionEndedError(w, reconstructErr) || writeNativeRouteBindingErrorV3(w, reconstructErr) {
 			return
 		}
 		if writePlaybackToneMapExecutionError(w, reconstructErr) {

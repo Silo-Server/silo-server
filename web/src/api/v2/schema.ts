@@ -134685,6 +134685,8 @@ export interface operations {
         silo_rendition?: "video" | "subtitles";
         /** @description Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer. */
         silo_track?: string;
+        /** @description Opaque transport generation the plan's HLS URL carries and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport. */
+        silo_transport?: string;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
@@ -134813,6 +134815,8 @@ export interface operations {
         silo_rendition?: "video" | "subtitles";
         /** @description Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer. */
         silo_track?: string;
+        /** @description Opaque transport generation the plan's HLS URL carries and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport. */
+        silo_transport?: string;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
@@ -134935,6 +134939,8 @@ export interface operations {
   getPlaybackSegment: {
     parameters: {
       query?: {
+        /** @description Opaque transport generation the plan's HLS URL carries and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport. */
+        silo_transport?: string;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
