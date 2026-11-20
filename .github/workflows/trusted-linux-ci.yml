@@ -95,6 +95,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -392,6 +393,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -459,7 +461,7 @@ jobs:
             golangci-lint-cache-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}-
 
       - name: Normalize tracked source mtimes
-        run: python3 scripts/ci/content_mtimes.py
+        run: python3 .ci-tools/scripts/ci/content_mtimes.py
 
       - name: Check Go module tidiness without rewriting
         run: go mod tidy -diff
@@ -512,6 +514,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -525,7 +528,7 @@ jobs:
       - *libvips-save
 
       - name: Normalize tracked source mtimes
-        run: python3 scripts/ci/content_mtimes.py
+        run: python3 .ci-tools/scripts/ci/content_mtimes.py
 
       - name: Scan reachable Go vulnerabilities
         if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main')
@@ -581,6 +584,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -596,7 +600,7 @@ jobs:
       - *libvips-save
 
       - name: Normalize tracked source mtimes
-        run: python3 scripts/ci/content_mtimes.py
+        run: python3 .ci-tools/scripts/ci/content_mtimes.py
 
       - name: Run Go tests
         shell: bash
@@ -655,10 +659,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: &go-db-checkout
-          # Fetch small files in the first pack. Checkout then requests only
-          # the remaining large files it needs, excluding frontend assets and
-          # translation catalogs (~390 MB) that no DB job reads.
-          filter: blob:limit=1m
+          # Fetch only trees in the initial pack, then download only the
+          # checked-out files in one batch, skipping frontend assets, images,
+          # and translation catalogs (~390 MB on disk) that no DB job reads.
+          filter: blob:none
           sparse-checkout: |
             /*
             !/web/assets-source/
@@ -1174,6 +1178,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
