@@ -137,7 +137,8 @@ server's build, so before running it such a server resolves the installed
 version for its own platform in the catalog the plugin came from and
 downloads it through `downloadBinary`
 (`internal/plugins/platform_archive.go`). The build must also declare the
-installed manifest apart from its checksum, be a binary for that platform,
+installed manifest apart from its checksum and supported platforms, be a
+binary for that platform,
 and, when the installed build's signature was verified, verify from the same
 source repository. It is stored in
 `plugin_platform_archives` for that platform, tied to the stored archive's

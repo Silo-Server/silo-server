@@ -184,10 +184,12 @@ func TestPlatformArchiveFollowsTheInstalledPackageDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	build := &InstallationArchive{ManifestJSON: stored.ManifestJSON, Checksum: "build-checksum", Bytes: []byte("build")}
+	repo := "https://github.com/Silo-Server/silo-plugin-example"
 	save := func(inst *Installation) bool {
 		t.Helper()
 		saved, err := f.store.SavePlatformArchive(ctx, SavePlatformArchiveInput{
 			Installation: inst, OS: "linux", Arch: "riscv64", BaseChecksum: stored.Checksum, Archive: build,
+			Signature: Signature{State: SignatureStateVerified, SourceRepo: &repo},
 		})
 		if err != nil {
 			t.Fatalf("SavePlatformArchive() = %v", err)
@@ -197,8 +199,9 @@ func TestPlatformArchiveFollowsTheInstalledPackageDB(t *testing.T) {
 	if !save(first.Installation) {
 		t.Fatal("SavePlatformArchive() for the installed package stored nothing")
 	}
-	if got, err := f.store.GetPlatformArchive(ctx, first.Installation.ID, "linux", "riscv64", stored.Checksum); err != nil || got.Checksum != build.Checksum {
-		t.Fatalf("GetPlatformArchive() = %v, %v; want the stored build", got, err)
+	if got, err := f.store.GetPlatformArchive(ctx, first.Installation.ID, "linux", "riscv64", stored.Checksum); err != nil ||
+		got.Archive.Checksum != build.Checksum || got.Signature.State != SignatureStateVerified || got.Signature.SourceRepo == nil || *got.Signature.SourceRepo != repo {
+		t.Fatalf("GetPlatformArchive() = %+v, %v; want the stored build and its signature", got, err)
 	}
 	if _, err := f.store.GetPlatformArchive(ctx, first.Installation.ID, "linux", "riscv64", "another-package"); !errors.Is(err, ErrArchiveNotFound) {
 		t.Fatalf("GetPlatformArchive() for another package = %v, want ErrArchiveNotFound", err)

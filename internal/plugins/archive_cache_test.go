@@ -623,7 +623,9 @@ func requireLocalInstallPath(t *testing.T, cache *ArchiveCache, installation *In
 type platformTestStore struct {
 	mu     sync.Mutex
 	stored *InstallationArchive
-	builds map[string]*InstallationArchive
+	builds map[string]*PlatformArchive
+	// replaced makes every save find the installation replaced.
+	replaced bool
 }
 
 func (s *platformTestStore) GetArchive(context.Context, int) (*InstallationArchive, error) {
@@ -634,7 +636,7 @@ func (s *platformTestStore) SaveArchive(context.Context, int, []byte, string, []
 	return nil
 }
 
-func (s *platformTestStore) GetPlatformArchive(_ context.Context, _ int, goos, goarch, baseChecksum string) (*InstallationArchive, error) {
+func (s *platformTestStore) GetPlatformArchive(_ context.Context, _ int, goos, goarch, baseChecksum string) (*PlatformArchive, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if archive, ok := s.builds[goos+"/"+goarch+"@"+baseChecksum]; ok {
@@ -646,10 +648,13 @@ func (s *platformTestStore) GetPlatformArchive(_ context.Context, _ int, goos, g
 func (s *platformTestStore) SavePlatformArchive(_ context.Context, in SavePlatformArchiveInput) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.builds == nil {
-		s.builds = map[string]*InstallationArchive{}
+	if s.replaced {
+		return false, nil
 	}
-	s.builds[in.OS+"/"+in.Arch+"@"+in.BaseChecksum] = in.Archive
+	if s.builds == nil {
+		s.builds = map[string]*PlatformArchive{}
+	}
+	s.builds[in.OS+"/"+in.Arch+"@"+in.BaseChecksum] = &PlatformArchive{Archive: in.Archive, Signature: in.Signature}
 	return true, nil
 }
 
@@ -660,7 +665,9 @@ type platformBuildFixture struct {
 	store        *platformTestStore
 	installation *Installation
 	hostBinary   []byte
-	fetches      atomic.Int32
+	// signature is the fetched build's release signature check.
+	signature Signature
+	fetches   atomic.Int32
 	// mutate, when set, changes the fetched build's manifest.
 	mutate func(*pluginv1.PluginManifest)
 }
@@ -697,7 +704,7 @@ func (f *platformBuildFixture) cache(t *testing.T) *ArchiveCache {
 		if err != nil {
 			return nil, err
 		}
-		return &downloadedBinary{data: f.hostBinary, checksum: manifest.Checksum, manifest: manifest, manifestJSON: manifestJSON}, nil
+		return &downloadedBinary{data: f.hostBinary, checksum: manifest.Checksum, manifest: manifest, manifestJSON: manifestJSON, signature: f.signature}, nil
 	}}
 	return cache
 }
@@ -721,10 +728,10 @@ func TestArchiveCacheFetchesThisPlatformsBuildOfAForeignStoredArchive(t *testing
 	// A build stored for an earlier release whose package had the same
 	// checksum is not this release's and is fetched again.
 	staleManifest, staleManifestJSON, staleArchive := binaryRelease(t, "0.9.0", []byte("an earlier release"))
-	f.store.builds = map[string]*InstallationArchive{
-		runtime.GOOS + "/" + runtime.GOARCH + "@" + f.store.stored.Checksum: {
+	f.store.builds = map[string]*PlatformArchive{
+		runtime.GOOS + "/" + runtime.GOARCH + "@" + f.store.stored.Checksum: {Archive: &InstallationArchive{
 			ManifestJSON: staleManifestJSON, Checksum: staleManifest.GetChecksum(), Bytes: staleArchive,
-		},
+		}},
 	}
 
 	// A manifest read runs nothing and takes the stored build as it is,
@@ -776,6 +783,9 @@ func TestArchiveCacheRefusesAPlatformBuildItCannotTrust(t *testing.T) {
 			repo := "https://github.com/Silo-Server/silo-plugin-example"
 			f.installation.Signature = Signature{State: SignatureStateVerified, SourceRepo: &repo}
 		}},
+		// The fetched build is for a release no longer installed, so it
+		// isn't run; the next start fetches for the current one.
+		{name: "installation replaced during the fetch", wantFetches: 2, setup: func(f *platformBuildFixture) { f.store.replaced = true }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newPlatformBuildFixture(t)
@@ -793,5 +803,30 @@ func TestArchiveCacheRefusesAPlatformBuildItCannotTrust(t *testing.T) {
 				t.Fatalf("a binary was left to run at the install path: %v", err)
 			}
 		})
+	}
+}
+
+// A build stored with a weaker signature than the installation now has, as
+// after a verified reinstall of the same package, is fetched again rather
+// than run.
+func TestArchiveCacheRefetchesAStoredBuildSignedWithLess(t *testing.T) {
+	f := newPlatformBuildFixture(t)
+	repo := "https://github.com/Silo-Server/silo-plugin-example"
+	f.installation.Signature = Signature{State: SignatureStateVerified, SourceRepo: &repo}
+	f.signature = f.installation.Signature
+	unsigned := f.hostBinary
+	manifest, manifestJSON, archive := binaryRelease(t, f.installation.Version, unsigned)
+	f.store.builds = map[string]*PlatformArchive{
+		runtime.GOOS + "/" + runtime.GOARCH + "@" + f.store.stored.Checksum: {
+			Archive:   &InstallationArchive{ManifestJSON: manifestJSON, Checksum: manifest.GetChecksum(), Bytes: archive},
+			Signature: Signature{State: SignatureStateUnsigned},
+		},
+	}
+	if _, err := f.cache(t).Ensure(context.Background(), f.installation); err != nil {
+		t.Fatalf("Ensure() = %v", err)
+	}
+	stored := f.store.builds[runtime.GOOS+"/"+runtime.GOARCH+"@"+f.store.stored.Checksum]
+	if f.fetches.Load() != 1 || stored.Signature.State != SignatureStateVerified {
+		t.Fatalf("fetched %d builds and stored one signed %q; want the unsigned build replaced by a verified fetch", f.fetches.Load(), stored.Signature.State)
 	}
 }

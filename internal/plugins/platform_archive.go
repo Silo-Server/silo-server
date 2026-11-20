@@ -11,6 +11,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
@@ -66,7 +67,7 @@ func (c *ArchiveCache) loadForHostPlatform(ctx context.Context, installation *In
 
 // platformArchiveStore stores builds of installations for other platforms.
 type platformArchiveStore interface {
-	GetPlatformArchive(ctx context.Context, installationID int, goos, goarch, baseChecksum string) (*InstallationArchive, error)
+	GetPlatformArchive(ctx context.Context, installationID int, goos, goarch, baseChecksum string) (*PlatformArchive, error)
 	SavePlatformArchive(ctx context.Context, input SavePlatformArchiveInput) (bool, error)
 }
 
@@ -114,14 +115,18 @@ func (p *platformArchives) archiveFor(ctx context.Context, installation *Install
 	if err != nil {
 		return nil, cannot(fmt.Errorf("read the stored manifest: %w", err))
 	}
-	archive, err := p.store.GetPlatformArchive(ctx, installation.ID, goos, goarch, stored.Checksum)
+	row, err := p.store.GetPlatformArchive(ctx, installation.ID, goos, goarch, stored.Checksum)
 	switch {
 	case err == nil:
 		// Two packages can share a binary checksum, as legacy archives of
 		// one binary under several versions do, so the build must also
-		// declare the installed release. Otherwise fetch it again.
-		if manifest, err := LoadManifestBytes(archive.ManifestJSON); err == nil && sameRelease(storedManifest, manifest) {
-			return archive, nil
+		// declare the installed release, and its signature must prove as
+		// much as the installed build's now does: a verified reinstall of
+		// the same package doesn't keep a build fetched with less. Otherwise
+		// fetch it again.
+		manifest, err := LoadManifestBytes(row.Archive.ManifestJSON)
+		if err == nil && sameRelease(storedManifest, manifest) && checkBuildSignature(installation, row.Signature) == nil {
+			return row.Archive, nil
 		}
 	case !errors.Is(err, ErrArchiveNotFound):
 		return nil, fmt.Errorf("load stored %s/%s build of plugin %s %s: %w", goos, goarch, installation.PluginID, installation.Version, err)
@@ -137,17 +142,20 @@ func (p *platformArchives) archiveFor(ctx context.Context, installation *Install
 		p.recordFailure(key, err)
 		return nil, err
 	}
-	archive = build.archive
 
-	// Rehydrate from it whether or not it is stored: it is this
-	// installation's release either way. A failed or skipped write only
+	// The write is guarded on the installation the build was fetched for.
+	// When an install or update replaced it meanwhile, this build is for a
+	// release that is no longer installed: refuse it rather than run it. The
+	// caller's next load reads the current installation. A write that failed
+	// for another reason leaves a build for the current release, which only
 	// costs a fetch on the next load.
 	saved, err := p.store.SavePlatformArchive(ctx, SavePlatformArchiveInput{
 		Installation: installation,
 		OS:           goos,
 		Arch:         goarch,
 		BaseChecksum: stored.Checksum,
-		Archive:      archive,
+		Archive:      build.archive,
+		Signature:    build.signature,
 	})
 	switch {
 	case err != nil:
@@ -155,15 +163,14 @@ func (p *platformArchives) archiveFor(ctx context.Context, installation *Install
 			"component", "plugins", "installation_id", installation.ID, "plugin_id", installation.PluginID,
 			"version", installation.Version, "platform", goos+"/"+goarch, "error", err)
 	case !saved:
-		slog.InfoContext(ctx, "plugin installation changed while its build for this platform was fetched; not storing it",
-			"component", "plugins", "installation_id", installation.ID, "plugin_id", installation.PluginID,
-			"version", installation.Version, "platform", goos+"/"+goarch)
+		return nil, fmt.Errorf("plugin %s %s was replaced while this server fetched its %s/%s build: %w",
+			installation.PluginID, installation.Version, goos, goarch, ErrInstallationChanged)
 	default:
 		slog.InfoContext(ctx, "fetched and stored plugin build for this platform",
 			"component", "plugins", "installation_id", installation.ID, "plugin_id", installation.PluginID,
 			"version", installation.Version, "platform", goos+"/"+goarch, "signature_state", build.signature.State)
 	}
-	return archive, nil
+	return build.archive, nil
 }
 
 // fetchedBuild is this platform's build of an installation, checked and
@@ -184,19 +191,13 @@ func (p *platformArchives) fetchBuild(ctx context.Context, installation *Install
 	if err != nil {
 		return nil, err
 	}
-	if goos, goarch, ok := binaryPlatformOf(bytes.NewReader(build.data)); ok && (goos != runtime.GOOS || goarch != runtime.GOARCH) {
-		return nil, fmt.Errorf("the catalog's build for this platform is a %s/%s binary", goos, goarch)
+	// The fetcher runs these checks before the build runs; they are repeated
+	// here for any fetcher that doesn't.
+	if err := checkPlatformBuild(installation, build.data, build.signature); err != nil {
+		return nil, err
 	}
 	if !sameRelease(storedManifest, build.manifest) {
 		return nil, errors.New("the catalog's build declares a different manifest than the installed one")
-	}
-	if installed := installation.Signature; installed.State == SignatureStateVerified {
-		switch {
-		case build.signature.State != SignatureStateVerified:
-			return nil, fmt.Errorf("the installed build's release signature was verified, and this build's is %s", build.signature.State)
-		case installed.SourceRepo != nil && (build.signature.SourceRepo == nil || *build.signature.SourceRepo != *installed.SourceRepo):
-			return nil, fmt.Errorf("this build's release signature names another source repository than the installed build's (%s)", *installed.SourceRepo)
-		}
 	}
 	manifestBytes, err := binaryManifestBytes(build.manifest, build.manifestJSON)
 	if err != nil {
@@ -215,6 +216,40 @@ func (p *platformArchives) fetchBuild(ctx context.Context, installation *Install
 		},
 		signature: build.signature,
 	}, nil
+}
+
+// checkPlatformBuild refuses a fetched build that isn't a binary for this
+// platform, or whose release signature proves less than the installed
+// build's.
+func checkPlatformBuild(installation *Installation, data []byte, signature Signature) error {
+	if goos, goarch, ok := binaryPlatformOf(bytes.NewReader(data)); ok && (goos != runtime.GOOS || goarch != runtime.GOARCH) {
+		return fmt.Errorf("the catalog's build for this platform is a %s/%s binary", goos, goarch)
+	}
+	return checkBuildSignature(installation, signature)
+}
+
+// checkBuildSignature refuses a build whose release signature proves less
+// than the installed build's: when that was verified, the build's must be
+// too, from the same source repository when one is recorded.
+func checkBuildSignature(installation *Installation, signature Signature) error {
+	installed := installation.Signature
+	if installed.State != SignatureStateVerified {
+		return nil
+	}
+	switch {
+	case signature.State != SignatureStateVerified:
+		return fmt.Errorf("the installed build's release signature was verified, and this build's is %s", signatureStateLabel(signature.State))
+	case installed.SourceRepo != nil && (signature.SourceRepo == nil || *signature.SourceRepo != *installed.SourceRepo):
+		return fmt.Errorf("this build's release signature names another source repository than the installed build's (%s)", *installed.SourceRepo)
+	}
+	return nil
+}
+
+func signatureStateLabel(state SignatureState) SignatureState {
+	if state == "" {
+		return SignatureStateUnknown
+	}
+	return state
 }
 
 // recentFailure returns the failure to get key's build within the last
@@ -274,7 +309,11 @@ func (s *Service) fetchPlatformBuild(ctx context.Context, installation *Installa
 	if target.LegacyArchive {
 		return nil, errors.New("the catalog lists this version as a single archive, with no build per platform")
 	}
-	return s.installer.downloadBinary(ctx, target.BinaryRequest())
+	// Refuse a build for another platform, or one signed with less than the
+	// installed build, before it runs to read its manifest.
+	return s.installer.downloadBinaryChecked(ctx, target.BinaryRequest(), func(data []byte, signature Signature) error {
+		return checkPlatformBuild(installation, data, signature)
+	})
 }
 
 // SavePlatformArchiveInput is a build of an installation for one platform.
@@ -287,15 +326,38 @@ type SavePlatformArchiveInput struct {
 	// the build was fetched for; the write applies only while it still is.
 	BaseChecksum string
 	Archive      *InstallationArchive
+	// Signature is the build's release signature check.
+	Signature Signature
+}
+
+// PlatformArchive is a build of an installation stored for one platform.
+type PlatformArchive struct {
+	Archive *InstallationArchive
+	// Signature is the build's release signature check, from when it was
+	// fetched.
+	Signature Signature
 }
 
 // GetPlatformArchive returns the installation's stored build for goos/goarch
 // fetched for the stored archive whose checksum is baseChecksum, or
 // ErrArchiveNotFound.
-func (s *InstallationStore) GetPlatformArchive(ctx context.Context, installationID int, goos, goarch, baseChecksum string) (*InstallationArchive, error) {
-	query := `SELECT ` + archiveColumns + ` FROM plugin_platform_archives
-		WHERE plugin_installation_id = $1 AND os = $2 AND arch = $3 AND base_checksum = $4`
-	return scanArchive(s.pool.QueryRow(ctx, query, installationID, goos, goarch, baseChecksum))
+func (s *InstallationStore) GetPlatformArchive(ctx context.Context, installationID int, goos, goarch, baseChecksum string) (*PlatformArchive, error) {
+	var archive InstallationArchive
+	var state string
+	var sourceRepo *string
+	err := s.pool.QueryRow(ctx, `SELECT `+archiveColumns+`, signature_state, signature_source_repo
+		FROM plugin_platform_archives
+		WHERE plugin_installation_id = $1 AND os = $2 AND arch = $3 AND base_checksum = $4`,
+		installationID, goos, goarch, baseChecksum).Scan(
+		&archive.InstallationID, &archive.ManifestJSON, &archive.Checksum, &archive.Bytes,
+		&archive.CreatedAt, &archive.UpdatedAt, &state, &sourceRepo)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrArchiveNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scanning plugin platform archive: %w", err)
+	}
+	return &PlatformArchive{Archive: &archive, Signature: Signature{State: SignatureState(state), SourceRepo: sourceRepo}}, nil
 }
 
 // SavePlatformArchive stores a build of an installation for one platform,
@@ -310,8 +372,9 @@ func (s *InstallationStore) SavePlatformArchive(ctx context.Context, input SaveP
 	}
 	tag, err := s.pool.Exec(ctx, `
 		INSERT INTO plugin_platform_archives
-			(plugin_installation_id, os, arch, base_checksum, manifest_json, checksum, archive_bytes)
-		SELECT i.id, $2, $3, $4, $5, $6, $7
+			(plugin_installation_id, os, arch, base_checksum, manifest_json, checksum, archive_bytes,
+			 signature_state, signature_source_repo)
+		SELECT i.id, $2, $3, $4, $5, $6, $7, $10, $11
 		FROM plugin_installations i
 		JOIN plugin_archives a ON a.plugin_installation_id = i.id
 		WHERE i.id = $1 AND i.version = $8 AND i.install_path = $9 AND a.checksum = $4
@@ -320,9 +383,11 @@ func (s *InstallationStore) SavePlatformArchive(ctx context.Context, input SaveP
 			manifest_json = EXCLUDED.manifest_json,
 			checksum = EXCLUDED.checksum,
 			archive_bytes = EXCLUDED.archive_bytes,
+			signature_state = EXCLUDED.signature_state,
+			signature_source_repo = EXCLUDED.signature_source_repo,
 			updated_at = NOW()`,
 		inst.ID, input.OS, input.Arch, input.BaseChecksum, archive.ManifestJSON, archive.Checksum, archive.Bytes,
-		inst.Version, inst.InstallPath)
+		inst.Version, inst.InstallPath, string(signatureStateLabel(input.Signature.State)), input.Signature.SourceRepo)
 	if err != nil {
 		return false, fmt.Errorf("saving plugin platform archive: %w", err)
 	}

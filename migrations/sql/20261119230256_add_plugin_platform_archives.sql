@@ -9,6 +9,9 @@
 -- base_checksum is the plugin_archives checksum the row was fetched for. A
 -- row whose base_checksum no longer matches is from an earlier package and
 -- is ignored, so nothing that replaces plugin_archives has to clear it.
+-- signature_state and signature_source_repo are the build's own release
+-- signature check; a build is used only while it proves as much as the
+-- installed build's does.
 -- +goose StatementBegin
 CREATE TABLE plugin_platform_archives (
     plugin_installation_id BIGINT NOT NULL REFERENCES plugin_installations(id) ON DELETE CASCADE,
@@ -18,6 +21,8 @@ CREATE TABLE plugin_platform_archives (
     manifest_json          BYTEA NOT NULL,
     checksum               TEXT NOT NULL,
     archive_bytes          BYTEA NOT NULL,
+    signature_state        TEXT NOT NULL,
+    signature_source_repo  TEXT,
     created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (plugin_installation_id, os, arch),
