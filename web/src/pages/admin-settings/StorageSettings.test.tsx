@@ -1348,4 +1348,37 @@ describe("StorageSettings", () => {
       );
     });
   });
+
+  describe("leaving Cloudflare token links", () => {
+    beforeEach(() => {
+      realForm.enabled = true;
+      serverSettings.current = {
+        "artwork.storage_backend": "s3",
+        "s3.public_url_auth": "presigned",
+      };
+      sensitiveStatus.current = { configured: [], managed_by_env: [] };
+    });
+
+    afterEach(() => {
+      realForm.enabled = false;
+    });
+
+    it("keeps a typed token secret in view after switching back to signed links", async () => {
+      render(<StorageSettings />);
+
+      const publicGroup = within(screen.getByRole("group", { name: "Public storage" }));
+      const linkMode = publicGroup.getByRole("combobox", {
+        name: "How asset links are authorized",
+      });
+      await userEvent.click(linkMode);
+      await userEvent.click(screen.getByRole("option", { name: "Cloudflare signed token" }));
+      await userEvent.click(publicGroup.getByRole("button", { name: /Advanced/ }));
+      await userEvent.type(publicGroup.getByLabelText("Token Secret"), "secret");
+      await userEvent.click(linkMode);
+      await userEvent.click(screen.getByRole("option", { name: "Signed links (recommended)" }));
+
+      expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+      expect(publicGroup.getByLabelText("Token Secret")).toHaveValue("secret");
+    });
+  });
 });

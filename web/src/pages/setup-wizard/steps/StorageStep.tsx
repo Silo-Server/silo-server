@@ -40,6 +40,13 @@ const PUBLIC_S3_KEYS = [
   "s3.public_token_ttl",
 ];
 
+// The Cloudflare token settings, shown only for that link mode.
+const PUBLIC_S3_TOKEN_KEYS = [
+  "s3.public_token_secret",
+  "s3.public_token_param",
+  "s3.public_token_ttl",
+];
+
 const PRIVATE_S3_KEYS = [
   "s3.private_endpoint",
   "s3.private_region",
@@ -198,6 +205,11 @@ function S3Fields({
   const t = useT();
   const key = (name: string) => `s3.${prefix}_${name}`;
   const urlAuth = form.getValue(key("url_auth")) || "presigned";
+  // Link-mode settings show for the modes that use them, and while they hold
+  // an unsaved edit, so Continue never saves a value the admin can't see.
+  const showReadEndpoint = urlAuth !== "presigned" || form.isDirty("s3.public_read_endpoint");
+  const showTokenSettings =
+    urlAuth === "cloudflare_token" || PUBLIC_S3_TOKEN_KEYS.some(form.isDirty);
   return (
     <>
       <SettingField
@@ -276,7 +288,7 @@ function S3Fields({
             disabled={disabled}
             managedByEnv={form.envVar("s3.public_url_auth")}
           />
-          {urlAuth !== "presigned" ? (
+          {showReadEndpoint ? (
             <SettingField
               label={t("web.setup.storage.readEndpointLabel")}
               // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
@@ -286,7 +298,7 @@ function S3Fields({
               managedByEnv={form.envVar("s3.public_read_endpoint")}
             />
           ) : null}
-          {urlAuth === "cloudflare_token" ? (
+          {showTokenSettings ? (
             <>
               <SettingField
                 label={t("web.setup.storage.tokenSecretLabel")}

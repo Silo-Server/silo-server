@@ -51,7 +51,9 @@ export function ConnectStep() {
           onChange={(v) => form.setValue("jellyfin_compat.enabled", v)}
           managedByEnv={form.envVar("jellyfin_compat.enabled")}
         />
-        {jellyfinEnabled ? (
+        {/* An address typed before turning Jellyfin off stays in view, so
+            Continue never saves a value the admin can't see. */}
+        {jellyfinEnabled || form.isDirty("jellyfin_compat.public_url") ? (
           <SettingField
             label={t("web.setup.connect.addressLabel")}
             description={t("web.setup.connect.addressDescription")}

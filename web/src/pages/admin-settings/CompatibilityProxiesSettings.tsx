@@ -221,10 +221,16 @@ export default function CompatibilityProxiesSettings() {
   const publicURL = form.getValue("jellyfin_compat.public_url");
   const serverID = form.getValue("jellyfin_compat.server_id");
 
+  // Switching the API off also turns Jellyfin Web off, as the server's own
+  // Jellyfin settings endpoint does. That edit has no field on this page, so
+  // it is staged only with a switch-off that is itself a change, and any
+  // other flip takes it back rather than leave a change the admin can't see.
   const setJellyfinAPIEnabled = (value: string) => {
     form.setValue("jellyfin_compat.enabled", value);
-    if (value === "false") {
+    if (value === "false" && form.getPersistedValue("jellyfin_compat.enabled") !== "false") {
       form.setValue("jellyfin_compat.web_enabled", "false");
+    } else {
+      form.resetValue("jellyfin_compat.web_enabled");
     }
   };
   const installJellyfinWeb = () => {

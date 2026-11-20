@@ -59,14 +59,16 @@ const PUBLIC_S3_KEYS = [
   "s3.public_token_ttl",
 ];
 
-// Shown only for the link modes that use them, behind public storage's
-// Advanced disclosure.
-const PUBLIC_S3_ADVANCED_KEYS = [
-  "s3.public_read_endpoint",
+// The Cloudflare token settings, shown only for that link mode.
+const PUBLIC_S3_TOKEN_KEYS = [
   "s3.public_token_secret",
   "s3.public_token_param",
   "s3.public_token_ttl",
 ];
+
+// Shown only for the link modes that use them, behind public storage's
+// Advanced disclosure.
+const PUBLIC_S3_ADVANCED_KEYS = ["s3.public_read_endpoint", ...PUBLIC_S3_TOKEN_KEYS];
 
 // Changing any of these moves where cached artwork objects live. Once artwork
 // has been stored in S3, direct settings writes are rejected and this page
@@ -271,11 +273,14 @@ function S3Group({
 
   // Everything that reaches the bucket is shown. Only public storage has an
   // Advanced tier: the CDN address and the Cloudflare token settings, which
-  // exist only for the link modes that use them.
-  const advancedCount =
-    scope === "public"
-      ? (urlAuth !== "presigned" ? 1 : 0) + (urlAuth === "cloudflare_token" ? 3 : 0)
-      : 0;
+  // show for the link modes that use them, and while they hold an unsaved
+  // edit, so Save never writes a value the admin can't see.
+  const showReadEndpoint =
+    scope === "public" && (urlAuth !== "presigned" || form.isDirty("s3.public_read_endpoint"));
+  const showTokenSettings =
+    scope === "public" &&
+    (urlAuth === "cloudflare_token" || countDirty(form, PUBLIC_S3_TOKEN_KEYS) > 0);
+  const advancedCount = (showReadEndpoint ? 1 : 0) + (showTokenSettings ? 3 : 0);
   const advancedChanged = countDirty(form, PUBLIC_S3_ADVANCED_KEYS);
 
   async function handleCheckConnection() {
@@ -431,21 +436,23 @@ function S3Group({
               count={advancedCount}
               forceOpen={advancedChanged > 0}
             >
-              <SettingField
-                label={t("web.admin.settings.storage.s3.readEndpoint")}
-                // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
-                hint="https://cdn.example.com"
-                value={form.getValue("s3.public_read_endpoint")}
-                onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
-                restartRequired={restartKeys.has("s3.public_read_endpoint")}
-                managedByEnv={form.envVar("s3.public_read_endpoint")}
-              />
-              {urlAuth === "cloudflare_token" && (
+              {showReadEndpoint && (
+                <SettingField
+                  label={t("web.admin.settings.storage.s3.readEndpoint")}
+                  // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
+                  hint="https://cdn.example.com"
+                  value={form.getValue("s3.public_read_endpoint")}
+                  onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
+                  restartRequired={restartKeys.has("s3.public_read_endpoint")}
+                  managedByEnv={form.envVar("s3.public_read_endpoint")}
+                />
+              )}
+              {showTokenSettings && (
                 <>
                   {/*
                     Cloudflare token auth requires this secret, so a clear only
-                    saves alongside a switch back to another mode — the one
-                    order that works, since the field is hidden in those modes.
+                    saves alongside a switch back to another mode. The staged
+                    clear keeps these rows in view after that switch.
                   */}
                   <SecretField
                     label={t("web.admin.settings.storage.s3.tokenSecret")}

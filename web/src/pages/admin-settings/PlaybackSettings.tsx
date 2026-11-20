@@ -78,7 +78,12 @@ export default function PlaybackSettings() {
   const hwDevice = form.getValue("playback.hw_device");
   const hwDeviceEnv = form.envVar("playback.hw_device");
   const selectedDevices = parseHWDeviceList(hwDevice);
-  const deviceRows = buildHWDeviceRows(hwDetection.data, hwDevice);
+  // Saved paths keep their rows when the draft drops them, so switching off a
+  // device that detection doesn't list leaves its row in view to undo.
+  const deviceRows = buildHWDeviceRows(
+    hwDetection.data,
+    `${hwDevice},${form.getPersistedValue("playback.hw_device")}`,
+  );
   const detectedPaths = deviceRows.filter((row) => row.detected).map((row) => row.path);
   // Balancing is QSV/VAAPI-only: NVENC addresses GPUs by CUDA index/UUID, so
   // the multi-select picker is hidden for it (the server uses the first
@@ -86,7 +91,11 @@ export default function PlaybackSettings() {
   const isNvenc =
     hwAccel === "nvenc" || (hwAccel === "auto" && hwDetection.data?.resolved === "nvenc");
   const inventoriesDiverge = nodeInventoriesDiverge(hwDetection.data);
-  const showDevicePicker = hwAccel !== "none" && !isNvenc && deviceRows.length > 0;
+  // A device choice staged before switching acceleration keeps the picker in
+  // view, so Save never writes a value the admin can't see.
+  const showDevicePicker =
+    deviceRows.length > 0 &&
+    ((hwAccel !== "none" && !isNvenc) || form.isDirty("playback.hw_device"));
 
   const nodes = useAdminNodes();
   const trickplayExecution =
@@ -133,8 +142,12 @@ export default function PlaybackSettings() {
   const anyDirty = (keys: readonly string[]) => keys.some((key) => isDirty(key));
   const allRestart = (keys: readonly string[]) => keys.every((key) => restartKeys.has(key));
 
-  const throttleOn = form.getValue("enable_transcode_throttle") === "true";
-  const allow4KTranscode = form.getValue("allow_4k_transcode") === "true";
+  // Each of these rows also stays in view while it holds an unsaved edit.
+  const showThrottleSeconds =
+    form.getValue("enable_transcode_throttle") === "true" || isDirty("transcode_throttle_seconds");
+  const showPreferLower =
+    form.getValue("allow_4k_transcode") === "true" ||
+    isDirty("playback.prefer_lower_version_transcode");
   // Every advanced transcoding key has one row, except the device picker,
   // which renders only when it applies.
   const transcodingAdvancedCount = TRANSCODING_ADVANCED_KEYS.length - (showDevicePicker ? 0 : 1);
@@ -279,7 +292,7 @@ export default function PlaybackSettings() {
             onChange={(v) => form.setValue("allow_4k_transcode", v)}
             restartRequired={restartKeys.has("allow_4k_transcode")}
           />
-          {allow4KTranscode && (
+          {showPreferLower && (
             <SettingField
               label={t("web.admin.settings.playback.transcoding.preferLower")}
               type="toggle"
@@ -319,7 +332,7 @@ export default function PlaybackSettings() {
             onChange={(v) => form.setValue("enable_transcode_throttle", v)}
             restartRequired={restartKeys.has("enable_transcode_throttle")}
           />
-          {throttleOn && (
+          {showThrottleSeconds && (
             <SettingField
               label={t("web.admin.settings.playback.transcoding.bufferAhead")}
               type="number"
