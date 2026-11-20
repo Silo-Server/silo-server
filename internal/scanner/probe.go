@@ -644,6 +644,12 @@ const (
 	// container rounds to its last block, which can differ by a few seconds.
 	trackSpanToleranceSeconds  = 5
 	trackSpanRelativeTolerance = 0.01
+	// trackSpanShortfallSeconds is how far video and audio may fall short of
+	// the container before their span replaces it. It is far below the
+	// tolerance: a transcode's playlist lists two-second segments to the
+	// stored duration, and every one past the streams' end is a segment
+	// FFmpeg never writes.
+	trackSpanShortfallSeconds = 1
 )
 
 func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
@@ -695,8 +701,8 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 // previews, runtime, progress) then reaches past the end of the video.
 //
 // It answers only when every primary video and audio track reports a
-// length, the longest falls short of formatDuration by more than the
-// tolerance, and another track's own length accounts for formatDuration. A
+// length, the longest falls short of formatDuration by more than a second,
+// and another track that ends after them accounts for formatDuration. A
 // missing or unparseable length is unknown, not short, and the last
 // condition keeps track lengths that understate the media (stale Matroska
 // statistics tags) from shortening a file on their own: with nothing else
@@ -710,8 +716,8 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 func audioVideoSpan(raw *ffprobeOutput, formatDuration float64) (float64, bool) {
 	tolerance := max(trackSpanToleranceSeconds, formatDuration*trackSpanRelativeTolerance)
 	formatStart := parseFloat(raw.Format.StartTime)
-	var audioVideo float64
-	hasVideo, accounted := false, false
+	var audioVideo, accountedEnd float64
+	hasVideo := false
 	for _, stream := range raw.Streams {
 		length, known := trackLength(stream)
 		end := max(0, parseFloat(stream.StartTime)-formatStart) + length
@@ -724,12 +730,11 @@ func audioVideoSpan(raw *ffprobeOutput, formatDuration float64) (float64, bool) 
 			audioVideo = max(audioVideo, end)
 		case stream.CodecType == "video":
 			// Attached pictures carry no timeline.
-		case known:
-			accounted = accounted || math.Abs(formatDuration-length) <= tolerance ||
-				math.Abs(formatDuration-end) <= tolerance
+		case known && (math.Abs(formatDuration-length) <= tolerance || math.Abs(formatDuration-end) <= tolerance):
+			accountedEnd = max(accountedEnd, end)
 		}
 	}
-	if !hasVideo || !accounted || !durationIsPositiveFinite(audioVideo) || formatDuration-audioVideo <= tolerance {
+	if !hasVideo || accountedEnd <= audioVideo || !durationIsPositiveFinite(audioVideo) || formatDuration-audioVideo <= trackSpanShortfallSeconds {
 		return 0, false
 	}
 	return audioVideo, true
