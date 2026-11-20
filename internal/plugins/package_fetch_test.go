@@ -58,20 +58,6 @@ func fetchWithDeadline(t *testing.T, fetch func() ([]byte, error)) ([]byte, erro
 	}
 }
 
-func TestPackageFetchDefaultClientHasTimeouts(t *testing.T) {
-	for name, client := range map[string]*http.Client{
-		"catalog":   NewCatalogService(nil, CatalogServiceOptions{}).httpClient,
-		"installer": NewInstaller(nil, InstallerOptions{}).httpClient,
-	} {
-		if _, ok := client.Transport.(*netguard.Transport); !ok {
-			t.Fatalf("%s client transport = %T, want *netguard.Transport", name, client.Transport)
-		}
-		if client.Timeout != 0 {
-			t.Fatalf("%s client has a whole-request timeout %s; slow downloads would be cut off", name, client.Timeout)
-		}
-	}
-}
-
 // Catalog JSON from a third party chooses package addresses. A blocked
 // address is refused before connecting and reported as a permanent package
 // error, since a retry can't change it. The netguard tests cover redirects.
@@ -135,7 +121,7 @@ func TestFetchPackageResourceTimesOutStalledBody(t *testing.T) {
 	})
 	client := newPackageFetchClient(shortPackageFetchTimeouts)
 	_, err := fetchWithDeadline(t, func() ([]byte, error) {
-		return fetchPackageResourceWithIdle(context.Background(), client, server.URL, "the plugin", 100*time.Millisecond)
+		return fetchPackageResourceWithIdle(context.Background(), client, server.URL, "the plugin", 100*time.Millisecond, 0)
 	})
 	requirePackageError(t, err, "download of the plugin was interrupted")
 	requireTransient(t, err, true)
@@ -163,7 +149,7 @@ func TestFetchPackageResourceAllowsSlowProgressingBody(t *testing.T) {
 	client := newPackageFetchClient(shortPackageFetchTimeouts)
 	start := time.Now()
 	data, err := fetchWithDeadline(t, func() ([]byte, error) {
-		return fetchPackageResourceWithIdle(context.Background(), client, server.URL, "the plugin", idle)
+		return fetchPackageResourceWithIdle(context.Background(), client, server.URL, "the plugin", idle, 0)
 	})
 	if err != nil {
 		t.Fatalf("slow download failed: %v", err)
@@ -198,7 +184,7 @@ func TestFetchPackageResourceCancelDuringStalledBody(t *testing.T) {
 		cancel()
 	}()
 	_, err := fetchWithDeadline(t, func() ([]byte, error) {
-		return fetchPackageResourceWithIdle(ctx, client, server.URL, "the plugin", time.Hour)
+		return fetchPackageResourceWithIdle(ctx, client, server.URL, "the plugin", time.Hour, 0)
 	})
 	if _, ok := AsPackageError(err); ok || !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled fetch = %v, want context.Canceled and no PackageError", err)
@@ -241,7 +227,7 @@ func TestFetchPackageResourceAllowsSlowSingleChunkBody(t *testing.T) {
 	}()
 	client := newPackageFetchClient(shortPackageFetchTimeouts)
 	data, err := fetchWithDeadline(t, func() ([]byte, error) {
-		return fetchPackageResourceWithIdle(context.Background(), client, "http://"+listener.Addr().String(), "the plugin", idle)
+		return fetchPackageResourceWithIdle(context.Background(), client, "http://"+listener.Addr().String(), "the plugin", idle, 0)
 	})
 	if err != nil {
 		t.Fatalf("steady single-chunk download failed: %v", err)

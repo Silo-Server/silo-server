@@ -133,7 +133,7 @@ func (n *RatingNotifier) hasRatingSubscribers(ctx context.Context, userID int, p
 	// Check webhooks first — the primary rating delivery channel. The
 	// webhook repo has a lightweight EXISTS query for this.
 	if n.system.Settings.WebhooksEnabled(ctx) && n.system.webhookRepo != nil {
-		if has, err := n.system.webhookRepo.HasRatingSubscribers(ctx, profileID); err == nil && has {
+		if has, err := n.system.webhookRepo.HasRatingSubscribers(ctx, userID, profileID); err == nil && has {
 			return true
 		}
 	}

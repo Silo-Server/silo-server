@@ -19,8 +19,8 @@ func mangaChapterWrite(volume string, index float64, has bool) (idx *float64, vo
 
 // upsertMangaChapter inserts or updates a row in manga_chapters for the given
 // chapter. A nil index is stored as NULL (chapter number unparseable or absent).
-func upsertMangaChapter(ctx context.Context, pool *pgxpool.Pool, chapterID, seriesID string, index *float64, volume string) error {
-	_, err := pool.Exec(ctx, `
+func upsertMangaChapter(ctx context.Context, exec ebookSQLExecutor, chapterID, seriesID string, index *float64, volume string) error {
+	_, err := exec.Exec(ctx, `
 		INSERT INTO manga_chapters (chapter_content_id, series_content_id, chapter_index, volume, updated_at)
 		VALUES ($1, $2, $3, $4, NOW())
 		ON CONFLICT (chapter_content_id) DO UPDATE SET

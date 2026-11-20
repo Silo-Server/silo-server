@@ -160,7 +160,7 @@ func testCollectionSortPreferences(t *testing.T, newStore func(t *testing.T) use
 		t.Fatalf("SetCollectionSortPreference(profile delete target): %v", err)
 	}
 
-	if err := store.DeleteProfile(ctx, profileID); err != nil {
+	if _, err := store.DeleteProfile(ctx, profileID); err != nil {
 		t.Fatalf("DeleteProfile: %v", err)
 	}
 	deletedPref, err = store.GetCollectionSortPreference(ctx, viewerProfileID, userstore.CollectionKindUser, profileDeletedCollection.ID)
@@ -827,7 +827,7 @@ func testProfiles(t *testing.T, newStore func(t *testing.T) userstore.UserStore)
 	}
 
 	// Delete
-	if err := store.DeleteProfile(ctx, "prof-1"); err != nil {
+	if _, err := store.DeleteProfile(ctx, "prof-1"); err != nil {
 		t.Fatalf("DeleteProfile: %v", err)
 	}
 	deleted, _ := store.GetProfile(ctx, "prof-1")
@@ -2576,7 +2576,7 @@ func testLibraryPlaybackPreferences(t *testing.T, newStore func(t *testing.T) us
 	}); err != nil {
 		t.Fatalf("UpsertLibraryPlaybackPreference(lifecycle): %v", err)
 	}
-	if err := store.DeleteProfile(ctx, "p1"); err != nil {
+	if _, err := store.DeleteProfile(ctx, "p1"); err != nil {
 		t.Fatalf("DeleteProfile: %v", err)
 	}
 	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Recreated"}); err != nil {
@@ -2610,7 +2610,7 @@ func testLibraryPlaybackPreferences(t *testing.T, newStore func(t *testing.T) us
 	if pref == nil {
 		t.Fatal("GetLibraryPlaybackPreference(p2) returned nil")
 	}
-	if err := store.DeleteProfile(ctx, "p1"); err != nil {
+	if _, err := store.DeleteProfile(ctx, "p1"); err != nil {
 		t.Fatalf("DeleteProfile(recreated): %v", err)
 	}
 	pref, err = store.GetLibraryPlaybackPreference(ctx, "p2", 1)
@@ -3013,7 +3013,7 @@ func RunNotInterested(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 			t.Fatalf("keyset walk = %v, want %s", got, want)
 		}
 
-		if err := store.DeleteProfile(ctx, "p1"); err != nil {
+		if _, err := store.DeleteProfile(ctx, "p1"); err != nil {
 			t.Fatalf("DeleteProfile: %v", err)
 		}
 		if rows, err := store.ListNotInterestedPage(ctx, "p1", nil, 10); err != nil || len(rows) != 0 {
@@ -3286,6 +3286,23 @@ func testProgressPage(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 	}
 	if len(rest) != 5 || rest[0].MediaItemID != want[0] {
 		t.Fatalf("rest = %d rows, first %q", len(rest), rest[0].MediaItemID)
+	}
+
+	// The unpaged item listing matches the full listing and stays within the
+	// profile: another profile on the same account keeps its own progress.
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p2", Name: "Other"}); err != nil {
+		t.Fatalf("CreateProfile(p2): %v", err)
+	}
+	if err := store.SetProgressAt(ctx, "p2", "m-other", 10, 1000, false, base); err != nil {
+		t.Fatalf("write m-other: %v", err)
+	}
+	itemIDs, err := store.ListProgressItemIDs(ctx, "p1")
+	if err != nil {
+		t.Fatalf("ListProgressItemIDs: %v", err)
+	}
+	slices.Sort(itemIDs)
+	if wantIDs := []string{"m-a", "m-b", "m-c", "m-d", "m-done", "m-e"}; !slices.Equal(itemIDs, wantIDs) {
+		t.Fatalf("ListProgressItemIDs = %v, want %v", itemIDs, wantIDs)
 	}
 }
 

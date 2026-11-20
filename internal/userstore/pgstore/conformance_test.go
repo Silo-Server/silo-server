@@ -92,6 +92,21 @@ func TestPostgresAtomicJellycompatProgress(t *testing.T) {
 	storetest.RunAtomicJellycompatProgress(t, newStore(pool, userID))
 }
 
+// TestPostgresJellycompatPlayedByDate runs the play-date listing conformance
+// test against the Postgres backend; the SQLite backend runs it in
+// internal/userdb. Skips unless SILO_TEST_DATABASE_URL is set.
+func TestPostgresJellycompatPlayedByDate(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	userID := seedTestUser(t, pool, "conf-playedbydate")
+	t.Cleanup(func() {
+		for _, table := range []string{"user_watch_history", "user_history_hidden_items", "user_watch_progress", "user_profiles"} {
+			_, _ = pool.Exec(ctx, `DELETE FROM `+table+` WHERE user_id = $1`, userID)
+		}
+	})
+	storetest.RunJellycompatPlayedByDate(t, newStore(pool, userID))
+}
+
 // TestPostgresPersonalListPage runs the keyset favorites/watchlist paging
 // and membership-change conformance tests against the Postgres backend.
 // Skips unless SILO_TEST_DATABASE_URL is set.
@@ -114,6 +129,28 @@ func TestPostgresPersonalListPage(t *testing.T) {
 	storetest.RunNotInterested(t, newListStore)
 }
 
+// TestPostgresCompletedHistoryPage runs the completed-history keyset walk
+// against the Postgres backend, whose key must keep watched_at's sub-second
+// precision. Skips unless SILO_TEST_DATABASE_URL is set.
+func TestPostgresCompletedHistoryPage(t *testing.T) {
+	pool := testPool(t)
+	storetest.RunCompletedHistoryPage(t, func(t *testing.T) userstore.UserStore {
+		// Deleting the user cascades to every user-scoped table.
+		return newStore(pool, seedTestUser(t, pool, "conf-completedpage"))
+	})
+}
+
+// TestPostgresProgressPage runs the progress keyset, completed-since and
+// unpaged item listings against the Postgres backend. Skips unless
+// SILO_TEST_DATABASE_URL is set.
+func TestPostgresProgressPage(t *testing.T) {
+	pool := testPool(t)
+	storetest.RunProgressPage(t, func(t *testing.T) userstore.UserStore {
+		// Deleting the user cascades to every user-scoped table.
+		return newStore(pool, seedTestUser(t, pool, "conf-progresspage"))
+	})
+}
+
 // TestPostgresDeleteProfileRemovesProfileState runs the profile-deletion
 // conformance test against the Postgres backend. Skips unless
 // SILO_TEST_DATABASE_URL is set.
@@ -126,10 +163,11 @@ func TestPostgresDeleteProfileRemovesProfileState(t *testing.T) {
 }
 
 // profileTablesClearedElsewhere are the user tables with a profile_id that
-// DeleteProfile leaves to another step, with the step.
+// profileCascadeTables leaves out, with the step that clears them.
 var profileTablesClearedElsewhere = map[string]string{
-	"user_devices":   "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
-	"user_downloads": "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
+	"user_personal_collections": "DeleteProfile's own delete, which returns the collection IDs for artwork cleanup",
+	"user_devices":              "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
+	"user_downloads":            "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
 }
 
 // Every user-store table (user_*) keyed by (user_id, profile_id) is cleared
@@ -245,7 +283,7 @@ func TestPostgresConcurrentProfileDeletesWithCrossVisibility(t *testing.T) {
 		var wg sync.WaitGroup
 		errs := make(chan error, 2)
 		for _, id := range []string{"a", "b"} {
-			wg.Go(func() { errs <- newStore(pool, userID).DeleteProfile(ctx, id) })
+			wg.Go(func() { _, err := newStore(pool, userID).DeleteProfile(ctx, id); errs <- err })
 		}
 		wg.Wait()
 		close(errs)
@@ -286,7 +324,7 @@ func TestPostgresConcurrentProfileAndCollectionDeletes(t *testing.T) {
 
 		var wg sync.WaitGroup
 		errs := make(chan error, 2)
-		wg.Go(func() { errs <- newStore(pool, userID).DeleteProfile(ctx, "listed") })
+		wg.Go(func() { _, err := newStore(pool, userID).DeleteProfile(ctx, "listed"); errs <- err })
 		wg.Go(func() { errs <- newStore(pool, userID).DeleteCollection(ctx, c.ID) })
 		wg.Wait()
 		close(errs)
@@ -324,7 +362,7 @@ func TestPostgresConcurrentProfileDeleteAndCollectionReorder(t *testing.T) {
 
 		var wg sync.WaitGroup
 		var deleteErr, reorderErr error
-		wg.Go(func() { deleteErr = newStore(pool, userID).DeleteProfile(ctx, "gone") })
+		wg.Go(func() { _, deleteErr = newStore(pool, userID).DeleteProfile(ctx, "gone") })
 		wg.Go(func() { reorderErr = newStore(pool, userID).ReorderCollections(ctx, "gone", ids) })
 		wg.Wait()
 		if deleteErr != nil {
@@ -334,5 +372,31 @@ func TestPostgresConcurrentProfileDeleteAndCollectionReorder(t *testing.T) {
 		if errors.As(reorderErr, &pgErr) && pgErr.Code == "40P01" {
 			t.Fatalf("round %d: ReorderCollections deadlocked: %v", round, reorderErr)
 		}
+	}
+}
+
+// TestPostgresCollectionsHolding runs the "Also in" membership conformance
+// test against the Postgres backend, then checks that another account's
+// collection holding the same title is never reported. The SQLite backend
+// runs the suite in internal/userdb.
+func TestPostgresCollectionsHolding(t *testing.T) {
+	pool := testPool(t)
+	store := newStore(pool, seedTestUser(t, pool, "conf-holding"))
+	storetest.RunCollectionsHolding(t, store)
+
+	other := newStore(pool, seedTestUser(t, pool, "conf-holding-other"))
+	c, err := other.CreateCollection(t.Context(), userstore.CreateCollectionInput{CreatorProfileID: "owner", Name: "Other account's", CollectionType: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.AddCollectionItem(t.Context(), c.ID, "title", 0); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.CollectionsHolding(t.Context(), "title")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(got, c.ID) {
+		t.Fatalf("collections holding title = %v, includes another account's %s", got, c.ID)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/historyimport"
@@ -27,6 +28,7 @@ type Service struct {
 	signals        SignalsChangedNotifier
 	dropped        droppedStore
 	profileAccess  ProfileAccessFunc
+	titles         atomic.Pointer[watchlistTitlesRef]
 	locks          sync.Map
 	scrobbleQueues sync.Map
 }
@@ -592,7 +594,10 @@ func (s *Service) PollDeviceAuth(
 			updated.VerificationURL = session.VerificationURL
 			updated.CompletedAt = session.CompletedAt
 			if _, persistErr := s.repo.UpsertAuthSession(ctx, updated); persistErr != nil {
-				return Connection{}, errors.Join(err, fmt.Errorf("persist pending auth session: %w", persistErr))
+				// A storage failure, not a pending answer: the provider's
+				// updated challenge was lost, so the poll must not read as
+				// "approve the code and try again".
+				return Connection{}, fmt.Errorf("persist pending auth session: %w", persistErr)
 			}
 		}
 		return Connection{}, err
@@ -961,11 +966,13 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			break
 		}
 		caps := provider.Capabilities()
+		importFailed := false
 		if b.importEnabled(conn) && b.capImport(caps) {
 			result, err := s.importList(ctx, conn, cfg, provider, b)
 			b.setImportCounts(&run, result.Found, result.Imported)
 			signalsChanged = signalsChanged || result.changedLocalList()
 			run.Warning = appendWarning(run.Warning, result.Warnings)
+			importFailed = err != nil
 			afterFlow(string(b.kind)+" import", err)
 		}
 		if !halted() && b.exportEnabled(conn) && b.capExport(caps) {
@@ -974,7 +981,10 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			run.Warning = appendWarning(run.Warning, result.Warnings)
 			afterFlow(string(b.kind)+" export", err)
 		}
-		if !halted() && b.removalsEnabled(conn) && b.capRemove(caps) {
+		// The import decides which pending removals a newer provider listing
+		// supersedes. One that failed partway may not have reached that
+		// listing, so the removals wait for a run whose import completes.
+		if !halted() && !importFailed && b.removalsEnabled(conn) && b.capRemove(caps) {
 			removed, err := s.removePendingListItems(ctx, conn, cfg, provider, b)
 			b.setRemovalCount(&run, removed)
 			if err != nil {
@@ -1622,11 +1632,13 @@ type completedHistoryLister interface {
 
 const completedHistoryPageSize = 500
 
+// listAllCompletedHistory pages by key, so each page reads only its rows and
+// a play added or hidden mid-walk cannot shift a neighbor out of the walk.
 func listAllCompletedHistory(ctx context.Context, store completedHistoryLister, query userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
 	var all []userstore.WatchHistoryEntry
-	for offset := 0; ; offset += completedHistoryPageSize {
-		query.Limit = completedHistoryPageSize
-		query.Offset = offset
+	query.Limit = completedHistoryPageSize
+	query.Offset = 0 // the cursor pages; an offset would skip rows on every page
+	for {
 		rows, err := store.ListCompletedHistory(ctx, query)
 		if err != nil {
 			return nil, err
@@ -1635,6 +1647,7 @@ func listAllCompletedHistory(ctx context.Context, store completedHistoryLister, 
 		if len(rows) < completedHistoryPageSize {
 			return all, nil
 		}
+		query.After = rows[len(rows)-1].CompletedHistoryKey()
 	}
 }
 
@@ -1697,29 +1710,23 @@ func playNear(times []time.Time, at time.Time, window time.Duration) bool {
 }
 
 func hasVisibleCompletedHistoryAtOrAfter(ctx context.Context, store completedHistoryLister, profileID, mediaItemID string, at time.Time) (bool, error) {
-	for offset := 0; ; offset += completedHistoryPageSize {
-		rows, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{
-			ProfileID:    profileID,
-			MediaItemIDs: []string{mediaItemID},
-			Limit:        completedHistoryPageSize,
-			Offset:       offset,
-		})
+	rows, err := listAllCompletedHistory(ctx, store, userstore.CompletedHistoryQuery{
+		ProfileID:    profileID,
+		MediaItemIDs: []string{mediaItemID},
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		watchedAt, err := time.Parse(time.RFC3339, row.WatchedAt)
 		if err != nil {
-			return false, err
+			continue
 		}
-		for _, row := range rows {
-			watchedAt, err := time.Parse(time.RFC3339, row.WatchedAt)
-			if err != nil {
-				continue
-			}
-			if !watchedAt.Before(at) {
-				return true, nil
-			}
-		}
-		if len(rows) < completedHistoryPageSize {
-			return false, nil
+		if !watchedAt.Before(at) {
+			return true, nil
 		}
 	}
+	return false, nil
 }
 
 const tokenRefreshSkew = 5 * time.Minute

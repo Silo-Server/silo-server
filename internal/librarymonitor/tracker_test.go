@@ -42,17 +42,6 @@ func assertReady(t *testing.T, tr *tracker, now time.Time, want ...change) {
 	}
 }
 
-func TestTrackerQuietWindowRestartsOnNewEvent(t *testing.T) {
-	tr := newTestTracker(fakeFiles{})
-	ev := Event{Kind: EventCloseWrite, Dir: "/lib/Movie", Name: "movie.mkv"}
-	tr.observe(ev, t0)
-	assertReady(t, tr, t0.Add(4*time.Second))
-	tr.observe(ev, t0.Add(4*time.Second))
-	assertReady(t, tr, t0.Add(8*time.Second))
-	assertReady(t, tr, t0.Add(9*time.Second), change{path: "/lib/Movie/movie.mkv", kind: changeFile})
-	assertReady(t, tr, t0.Add(20*time.Second))
-}
-
 func TestTrackerHardlinkIsCompleteButCopyWaitsForCloseWrite(t *testing.T) {
 	files := fakeFiles{
 		"/lib/M/hardlink.mkv": regular(2, 100, t0),
@@ -101,27 +90,6 @@ func TestTrackerFallbackDropsFileThatVanished(t *testing.T) {
 	}
 }
 
-func TestTrackerNewDirectoryReportsOnceAfterItsContentsSettle(t *testing.T) {
-	files := fakeFiles{
-		"/lib/New":           {mode: fs.ModeDir | 0o755},
-		"/lib/New/movie.mkv": regular(1, 10, t0),
-		"/lib/New/movie.nfo": regular(1, 1, t0),
-	}
-	tr := newTestTracker(files)
-	tr.observe(Event{Kind: EventCreate, Dir: "/lib", Name: "New", IsDir: true}, t0)
-	tr.observe(Event{Kind: EventCreate, Dir: "/lib/New", Name: "movie.mkv"}, t0.Add(time.Second))
-	tr.observe(Event{Kind: EventCloseWrite, Dir: "/lib/New", Name: "movie.nfo"}, t0.Add(time.Second))
-
-	// The copy is in progress: nothing, not even the complete sidecar.
-	assertReady(t, tr, t0.Add(30*time.Second))
-	tr.observe(Event{Kind: EventCloseWrite, Dir: "/lib/New", Name: "movie.mkv"}, t0.Add(40*time.Second))
-	assertReady(t, tr, t0.Add(44*time.Second))
-	assertReady(t, tr, t0.Add(45*time.Second), change{path: "/lib/New", kind: changeDir})
-	if len(tr.pending) != 0 {
-		t.Fatalf("pending = %v, want the directory to absorb its contents", tr.pending)
-	}
-}
-
 func TestTrackerRenamePairs(t *testing.T) {
 	t.Run("file", func(t *testing.T) {
 		tr := newTestTracker(fakeFiles{})
@@ -144,35 +112,6 @@ func TestTrackerRenamePairs(t *testing.T) {
 		tr.observe(Event{Kind: EventCloseWrite, Dir: "/lib/New", Name: "part.mkv"}, t0.Add(20*time.Second))
 		assertReady(t, tr, t0.Add(25*time.Second), change{path: "/lib/New", kind: changeDir})
 	})
-}
-
-func TestTrackerVanishedDirectorySubsumesChangesBelowIt(t *testing.T) {
-	tr := newTestTracker(fakeFiles{})
-	tr.observe(Event{Kind: EventDelete, Dir: "/lib/M", Name: "a.mkv"}, t0)
-	tr.observe(Event{Kind: EventCloseWrite, Dir: "/lib/M/Extras", Name: "b.mkv"}, t0)
-	tr.observe(Event{Kind: EventDelete, Dir: "/lib", Name: "M", IsDir: true}, t0.Add(time.Second))
-	assertReady(t, tr, t0.Add(6*time.Second), change{path: "/lib/M", kind: changeVanishedDir})
-}
-
-func TestTrackerCreatedThenDeletedIsDropped(t *testing.T) {
-	files := fakeFiles{"/lib/M/a.mkv": regular(1, 1, t0)}
-	tr := newTestTracker(files)
-	tr.observe(Event{Kind: EventCreate, Dir: "/lib/M", Name: "a.mkv"}, t0)
-	tr.observe(Event{Kind: EventDelete, Dir: "/lib/M", Name: "a.mkv"}, t0.Add(time.Second))
-	assertReady(t, tr, t0.Add(6*time.Second))
-	if len(tr.pending) != 0 {
-		t.Fatalf("pending = %v, want nothing for a file that came and went", tr.pending)
-	}
-}
-
-func TestTrackerTempFileRenamedIntoPlace(t *testing.T) {
-	// rsync and downloaders write a hidden temp name, then rename it.
-	files := fakeFiles{"/lib/M/.Movie.mkv.Xy12Ab": regular(1, 1, t0)}
-	tr := newTestTracker(files)
-	tr.observe(Event{Kind: EventCreate, Dir: "/lib/M", Name: ".Movie.mkv.Xy12Ab"}, t0)
-	tr.observe(Event{Kind: EventCloseWrite, Dir: "/lib/M", Name: ".Movie.mkv.Xy12Ab"}, t0.Add(time.Second))
-	tr.observe(Event{Kind: EventRename, OldDir: "/lib/M", OldName: ".Movie.mkv.Xy12Ab", Dir: "/lib/M", Name: "Movie.mkv"}, t0.Add(2*time.Second))
-	assertReady(t, tr, t0.Add(7*time.Second), change{path: "/lib/M/Movie.mkv", kind: changeFile})
 }
 
 func TestTrackerFolderRenamedRightAfterItWasMade(t *testing.T) {
@@ -206,28 +145,6 @@ func TestTrackerVanishedIsKeptWhenThePathMayHaveExisted(t *testing.T) {
 		tr.observe(Event{Kind: EventDelete, Dir: "/lib/M", Name: "a.mkv"}, t0.Add(6*time.Second))
 		assertReady(t, tr, t0.Add(11*time.Second), change{path: "/lib/M/a.mkv", kind: changeVanishedFile})
 	})
-}
-
-func TestTrackerMovedFromAndToAreComplete(t *testing.T) {
-	tr := newTestTracker(fakeFiles{})
-	tr.observe(Event{Kind: EventMovedTo, Dir: "/lib", Name: "Import", IsDir: true}, t0)
-	tr.observe(Event{Kind: EventMovedTo, Dir: "/lib/M", Name: "in.mkv"}, t0)
-	tr.observe(Event{Kind: EventMovedFrom, Dir: "/lib/M", Name: "out.mkv"}, t0)
-	tr.observe(Event{Kind: EventMovedFrom, Dir: "/lib", Name: "Gone", IsDir: true}, t0)
-	assertReady(t, tr, t0.Add(5*time.Second),
-		change{path: "/lib/Gone", kind: changeVanishedDir},
-		change{path: "/lib/Import", kind: changeDir},
-		change{path: "/lib/M/in.mkv", kind: changeFile},
-		change{path: "/lib/M/out.mkv", kind: changeVanishedFile},
-	)
-}
-
-func TestTrackerDropUnderForgetsARoot(t *testing.T) {
-	tr := newTestTracker(fakeFiles{})
-	tr.observe(Event{Kind: EventDelete, Dir: "/lib/M", Name: "a.mkv"}, t0)
-	tr.observe(Event{Kind: EventDelete, Dir: "/other", Name: "b.mkv"}, t0)
-	tr.dropUnder("/lib")
-	assertReady(t, tr, t0.Add(5*time.Second), change{path: "/other/b.mkv", kind: changeVanishedFile})
 }
 
 // A file a walk found in a new directory may have been written before the

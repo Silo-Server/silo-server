@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 
 import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { useT } from "@/i18n";
 import { SettingField } from "@/pages/admin-settings/SettingField";
 
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
@@ -16,15 +17,15 @@ function currentOrigin(): string {
 }
 
 export function ServerStep() {
+  const t = useT();
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const { handleSubmit, busy, skip } = useStepSubmit(
     "server",
     form,
-    "Failed to save server settings",
+    t("web.setup.server.saveFailed"),
   );
   const prefilled = useRef(false);
 
-  const proxiesManaged = form.sensitiveManagedByEnv.includes("clientip.trusted_proxies");
   const serverName = form.getValue("branding.server_name");
 
   // Offer the URL the admin is looking at as the public URL. It is staged,
@@ -44,45 +45,46 @@ export function ServerStep() {
 
   return (
     <StepFrame
-      title="Name your server"
-      lede="What people see when they sign in, and the address their apps use to reach you."
+      title={t("web.setup.server.title")}
+      lede={t("web.setup.server.lede")}
       onSubmit={handleSubmit}
       busy={busy}
       onSkip={skip}
-      footnote="Everything here is in Admin › Server › General."
+      footnote={t("web.setup.server.footnote")}
     >
       <StepSection>
         <SettingField
-          label="Server name"
-          description="Shown on the sign-in page and in the apps."
-          hint="Vio"
+          label={t("web.setup.server.nameLabel")}
+          description={t("web.setup.server.nameDescription")}
+          // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
+          hint="Silo"
           value={serverName}
           onChange={(v) => form.setValue("branding.server_name", v)}
+          managedByEnv={form.envVar("branding.server_name")}
         />
         <SettingField
-          label="Public URL"
-          description="The address people open in a browser. Also used for links in emails and notifications."
+          label={t("web.setup.server.publicUrlLabel")}
+          description={t("web.setup.server.publicUrlDescription")}
+          // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
           hint="https://silo.example.com"
           value={form.getValue("server.public_url")}
           onChange={(v) => form.setValue("server.public_url", v)}
+          managedByEnv={form.envVar("server.public_url")}
         />
         <AdvancedSection
           id="setup.server"
-          title="Behind a reverse proxy?"
+          title={t("web.setup.server.proxyTitle")}
           count={1}
           forceOpen={form.isDirty("clientip.trusted_proxies")}
         >
           <SettingField
-            label="Trusted proxies"
-            description={
-              proxiesManaged
-                ? "Set by SILO_TRUSTED_PROXIES in the environment."
-                : "Vio reads the real client address from these proxy ranges. Leave blank to trust private networks only."
-            }
+            label={t("web.setup.server.trustedProxiesLabel")}
+            description={t("web.setup.server.trustedProxiesDescription")}
+            // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="172.16.0.0/12, 203.0.113.7/32"
             value={form.getValue("clientip.trusted_proxies")}
             onChange={(v) => form.setValue("clientip.trusted_proxies", v)}
-            disabled={proxiesManaged}
+            managedByEnv={form.envVar("clientip.trusted_proxies")}
           />
         </AdvancedSection>
       </StepSection>

@@ -20,6 +20,7 @@ import (
 
 const (
 	webpQuality              = 90
+	posterCropQuality        = 95
 	thumbhashSourceDimension = 100
 )
 
@@ -29,6 +30,20 @@ const (
 // that pool is the only source of parallelism and the pools are sized per
 // CPU core; see tasks.imageCacheWorkerCount. Do not raise VIPS_CONCURRENCY
 // in deployments without lowering those pools, or the host oversubscribes.
+
+// libvips operation cache: bimg's package init lets libvips keep up to 500
+// finished operations, trimmed only once libvips' tracked memory passes
+// 100 MB, to answer a repeat of the same operation. A Silo encode can never
+// be one. libvips keys a buffer load on the blob it wraps around the bytes,
+// which is new on every call, so even a second load of the same source (the
+// next rung of an artwork ladder) misses, and every later operation keys on
+// the image that load produced. The cache only kept decoded images alive
+// outside the Go heap, where GOGC and GOMEMLIMIT cannot reclaim them. Turn it
+// off. bimg's init runs before this package's, so these settings win.
+func init() {
+	bimg.VipsCacheSetMax(0)
+	bimg.VipsCacheSetMaxMem(0)
+}
 
 // ErrInvalidImage reports source bytes that libvips cannot read as an image.
 // Failures after the header was read, such as encoding a variant, do not wrap
@@ -320,6 +335,44 @@ func encodeSquare(data []byte, side, squareSize int) ([]byte, error) {
 		Crop:          true,
 		Enlarge:       squareSize < side,
 	})
+}
+
+// CropToPoster returns the centered 2:3 portrait crop of data as a JPEG, for
+// a poster taken from a video frame. It trims whichever dimension is in
+// excess, keeping a landscape frame's full height or a narrower frame's full
+// width, and never scales; the poster variants are cut from the crop. The
+// frame is already a lossy JPEG, so a high-quality JPEG costs little more,
+// and unlike a PNG it decodes with shrink-on-load for each smaller variant.
+func CropToPoster(data []byte) ([]byte, error) {
+	size, release, err := reserveSource(data)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	width, height := size.Width, size.Height
+	if width*3 > height*2 {
+		width = height * 2 / 3
+	} else {
+		height = width * 3 / 2
+	}
+	if width < 1 || height < 1 {
+		return nil, fmt.Errorf("%w: a %dx%d image has no 2:3 crop", ErrInvalidImage, size.Width, size.Height)
+	}
+	out, err := bimg.NewImage(data).Process(bimg.Options{
+		Type:          bimg.JPEG,
+		Quality:       posterCropQuality,
+		StripMetadata: true,
+		// The offsets are in the stored orientation, the one Size reports.
+		NoAutoRotate: true,
+		Left:         (size.Width - width) / 2,
+		Top:          (size.Height - height) / 2,
+		AreaWidth:    width,
+		AreaHeight:   height,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("imageutil: crop to poster: %w", err)
+	}
+	return out, nil
 }
 
 // Thumbhash computes a base64-encoded thumbhash from raw image bytes.

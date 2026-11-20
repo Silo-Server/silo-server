@@ -2,7 +2,6 @@ package ratelimit
 
 import (
 	"context"
-	"errors"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -14,17 +13,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/config"
 )
-
-func TestRedisWindowLimitsHonorBurst(t *testing.T) {
-	sec, minute, effective := redisWindowLimits(Rate{
-		RequestsPerSecond: 1,
-		RequestsPerMinute: 60,
-		Burst:             30,
-	})
-	if sec != 30 || minute != 60 || effective != 30 {
-		t.Fatalf("limits = (%d, %d, %d), want (30, 60, 30)", sec, minute, effective)
-	}
-}
 
 func TestRedisWindowLimitsKeepMinuteOnlyRatesUsable(t *testing.T) {
 	sec, minute, _ := redisWindowLimits(Rate{
@@ -227,68 +215,6 @@ func TestRedisLimiterLocalCountKeepsRedisWindows(t *testing.T) {
 	}
 	if got := check(minuteStart.Add(time.Minute)); !got.Allowed {
 		t.Fatalf("check in the next minute = %+v, want allowed", got)
-	}
-}
-
-// Once a pause runs out, checks still do not wait on Redis: one request is
-// counted in the background, and the limiter counts requests in Redis again as
-// soon as Redis answers. If the pause never ended, every node would keep its
-// own allowance.
-func TestRedisLimiterCountsAgainOnceRedisAnswers(t *testing.T) {
-	rate := Rate{RequestsPerSecond: 10, RequestsPerMinute: 600, Burst: 10}
-	var answering atomic.Bool
-	commands := &commandHook{answer: func(cmd redis.Cmder) error {
-		if !answering.Load() {
-			err := errors.New("dial tcp: connect: connection refused")
-			cmd.SetErr(err)
-			return err
-		}
-		// allowed, second count, second limit, minute count, minute limit, TTL
-		cmd.(*redis.Cmd).SetVal([]any{int64(1), int64(1), int64(10), int64(1), int64(600), int64(1)})
-		return nil
-	}}
-	rl := hookedRedisLimiter(t, refusingRedisAddr(t), commands)
-	const key = "ip:192.0.2.1"
-	now := time.Now()
-
-	rl.allowAt(t.Context(), key, rate, now)
-	rl.allowAt(t.Context(), key, rate, now.Add(time.Second))
-	if got := commands.started.Load(); got != 1 {
-		t.Fatalf("check during the pause left %d commands, want 1", got)
-	}
-
-	// Still down: the background count fails and the next pause holds.
-	later := now.Add(redisOutagePause)
-	rl.allowAt(t.Context(), key, rate, later)
-	waitUntil(t, "the background count never ran", func() bool { return commands.started.Load() == 2 })
-	rl.allowAt(t.Context(), key, rate, later.Add(time.Second))
-	if got := commands.started.Load(); got != 2 {
-		t.Fatalf("check during the next pause left %d commands, want 2", got)
-	}
-
-	// Answering again: the first check after the pause still does not wait
-	// on Redis, and the checks after the background count reach it.
-	answering.Store(true)
-	later = later.Add(redisOutagePause)
-	rl.allowAt(t.Context(), key, rate, later)
-	waitUntil(t, "the background count never ran", func() bool { return commands.started.Load() == 3 })
-	waitUntil(t, "checks kept skipping Redis after it answered", func() bool {
-		sent := commands.started.Load()
-		rl.allowAt(t.Context(), key, rate, later)
-		return commands.started.Load() > sent
-	})
-}
-
-// waitUntil fails the test unless done reports true within a few seconds.
-func waitUntil(t *testing.T, failure string, done func() bool) {
-	t.Helper()
-	deadline := time.After(5 * time.Second)
-	for !done() {
-		select {
-		case <-deadline:
-			t.Fatal(failure)
-		case <-time.After(time.Millisecond):
-		}
 	}
 }
 

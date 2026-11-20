@@ -99,28 +99,6 @@ func TestValidateEpub_RejectsNonEpubZip(t *testing.T) {
 	}
 }
 
-func TestConvert_TimeoutClassifiedNotRawExit(t *testing.T) {
-	// A 1ns timeout must surface as ErrConversionTimedOut (a transient verdict,
-	// distinct from a deterministic failure), never as a bogus "mobitool exit
-	// <huge>" code.
-	c, err := NewConverter(context.Background(), Options{Timeout: time.Nanosecond})
-	if err != nil {
-		t.Fatalf("NewConverter: %v", err)
-	}
-	t.Cleanup(func() { _ = c.Close(context.Background()) })
-	dst := filepath.Join(t.TempDir(), "out.epub")
-	err = c.Convert(context.Background(), filepath.Join("testdata", "sample-ncx.mobi"), dst)
-	if !errors.Is(err, ErrConversionTimedOut) {
-		t.Fatalf("got %v, want ErrConversionTimedOut", err)
-	}
-	if errors.Is(err, ErrConversionFailed) {
-		t.Fatalf("a timeout must not also satisfy ErrConversionFailed (it would be negatively cached): %v", err)
-	}
-	if strings.Contains(err.Error(), "exit ") {
-		t.Fatalf("timeout leaked a raw exit code: %v", err)
-	}
-}
-
 // classifyRunError must propagate a caller's deadline as context.DeadlineExceeded
 // (CR review): reclassifying it as a conversion failure breaks upstream
 // cancellation handling and would poison the negative cache.

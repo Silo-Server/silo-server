@@ -42,7 +42,8 @@ seed or administrator filesystem operation.
 
 `GET /api/v2/admin/catalog/items` (`listAdminCatalogItems`) lets an administrator,
 or a tool holding an administrator's key, mirror the video catalog. Unlike the
-discovery operations above it returns no paths or storage keys.
+discovery operations above it returns no storage keys, and file paths only on
+request (see `include_file_paths` below).
 
 It lists movies, series and episodes that have a membership row in an enabled
 library. Books, podcasts and their episodes are left out, as are items that only
@@ -62,7 +63,7 @@ starts a new listing. `content_ids` is a set, so repeating or reordering ids
 keeps the cursor. Ids that are not present movies, series or episodes are left
 out without an error, which is how a caller learns an item left the catalog.
 Each page is read in one snapshot with at most two statements, whatever it
-holds, or three with `include_people`. Later pages read the live catalog, so an
+holds, or three with `include_people`; `include_file_paths` adds none. Later pages read the live catalog, so an
 item added behind the cursor appears on the next full pass, not this one.
 
 Each item carries `content_id`, `type`, `title`, `year`, the provider ids, and
@@ -70,6 +71,13 @@ Each item carries `content_id`, `type`, `title`, `year`, the provider ids, and
 filters. A movie or series also has `status`, its metadata match state. An
 episode has `series_id`, `series_title`, `season_number` and `episode_number`;
 its `year` is its air-date year.
+
+`poster_url` is the card-size poster of a movie or series, or of an episode's
+series, and is absent only when there is none. It is always a URL this server
+issued, never a metadata provider's, so a tool that cannot reach the
+providers' image hosts can load it; art not cached yet comes through a signed
+`getItemPoster` link (see "Admin poster URLs" in [images-api.md](images-api.md)).
+The URL expires: read it again from a later page rather than storing it.
 
 A movie or series also carries its stored metadata, so a tool can match rules
 across a library without reading each item as a profile: `genres`,
@@ -120,6 +128,17 @@ viewer has no language preference (the file's default track, else its first);
 a file-level value
 fills a field that track lacks. Fields the scanner has not probed are absent.
 
+`include_file_paths=true` also returns each version's `file_path`, so a tool
+can match files without reading every item. It is the path the scanning server
+stores, in that server's filesystem; a tool on another host maps it through the
+library's `paths`. Bytes of a file name that are not valid UTF-8 are stored as
+private-use code points, so a byte-exact comparison fails on those names. A
+login session, an unscoped administrator key, or a key holding
+`admin:catalog:paths` may send it; any other scoped key, such as one holding
+only `admin:monitor:read`, receives `403 permission_denied`, never a page
+without paths. Like every filter, it is bound into the cursor. A changed path
+raises `files_changed`.
+
 To keep a mirror current between full passes, subscribe to the `catalog` channel
 of the v2 events socket. An API key with the `admin:monitor:read` scope can mint
 its ticket (see [realtime-api.md](realtime-api.md#api-key-handshake)), as can an
@@ -132,11 +151,14 @@ with `content_ids`, and drop any the listing no longer returns. Fetch on
 `GET /api/v2/admin/catalog/capabilities` reports `item_listing`,
 `item_listing_max_content_ids`, `item_change_events`, true when the socket
 carries those changes, `item_match_hints`, true when
-`GET /api/v2/admin/items/{id}/match/hints` is served, and `item_metadata`, true
+`GET /api/v2/admin/items/{id}/match/hints` is served, `item_metadata`, true
 when items carry the stored metadata above and the listing accepts
-`include_people`. The listing and the events have no Apple, Android, or
-Jellyfin compatibility callers; Jellyfin clients read the catalog through their
-own item queries.
+`include_people`, `item_file_paths`, true when this caller may send
+`include_file_paths`, `item_posters`, true when items carry `poster_url` under
+that rule, and `item_metadata_reset`, true when
+`POST /api/v2/admin/items/{id}/refresh-metadata` accepts `mode: "reset"`. The
+listing and the events have no Apple, Android, or Jellyfin compatibility
+callers; Jellyfin clients read the catalog through their own item queries.
 
 ## Export and import
 
@@ -340,11 +362,39 @@ library deleted while it ran can still be stopped.
 ## Item metadata edits and refresh
 
 `POST /api/v2/admin/items/{id}/refresh-metadata` accepts `mode: "quick"` (the
-default) or `mode: "complete"`. The existing resolver chooses the refresh scope,
-then a job is persisted with the requesting account ID. Success is `202` with
-the typed administrator job, a job `Location`, and `Retry-After: 5`. Delegated
-curators receive the permitted job projection and can poll their own item jobs.
-The web waits on that job; it does not equate submission with completion.
+default), `mode: "complete"` or `mode: "reset"`. The existing resolver chooses
+the refresh scope, then a job is persisted with the requesting account ID.
+Success is `202` with the typed administrator job, a job `Location`, and
+`Retry-After: 5`. Delegated curators receive the permitted job projection and
+can poll their own item jobs. The web waits on that job; it does not equate
+submission with completion.
+
+`complete` clears the file links in the refresh scope and rescans it, so the
+files are matched again. A podcast library keeps its links: the podcast scanner
+finds a show through them and rewrites the show and its episodes from their tags
+on every scan, so clearing them would replace the show and episode IDs that
+favorites and progress refer to.
+
+`reset` is Reset to Provider: a quick refresh of the movie, series, season or
+episode that also removes its `locked_fields` and gives every lockable field,
+the credits and the rating sources the providers' values, empty when no
+provider has one. A season or episode the providers don't list is emptied too.
+A refresh keeps a stored value a provider sends empty, because it can't tell a
+value the provider lacks from one it failed to send; a reset clears it. So a
+reset fails, and the target keeps its values and locks, when a provider in the
+chain fails to answer, including a search and a fallback-language lookup. A
+not-found answer, or an enrichment provider whose key is missing or rejected, doesn't fail
+it. A reset of an item pinned unmatched fails too, since no provider describes
+it, and a reset whose write merges the item onto another existing item leaves
+that item's edits and locks alone. A reset through a library whose metadata language
+isn't the item's own writes that language's text to the localization rows, as
+any refresh does, and keeps the base row's title, overview and tagline. When
+the refresh adopts that language as the item's own, because every library
+holding the item uses it, the base row is rewritten in it instead. Clients
+that can't read the capability document, such as delegated curators, can send
+`reset` and treat a `422` as a server without it. A
+series reset leaves its seasons' and episodes' locks alone, and artwork follows
+the ordinary refresh rules.
 
 `PATCH /api/v2/admin/items/{id}/metadata` retains the existing partial metadata
 fields, including descriptions, dates, ratings, provider IDs, numbering and
@@ -359,12 +409,34 @@ dates. `null` on any other field preserves its value. Explicit empty strings,
 zeroes, and empty arrays remain edits. An air timezone must be empty or a valid
 IANA timezone. A date must be a `YYYY-MM-DD` calendar date; any other string,
 an empty one included, is `422 validation_failed` at that member and nothing is
-written. `status` is the item's match status and must be `pending`, `matched`,
+written. `imdb_id`, `tmdb_id` and `tvdb_id` are stored trimmed, an IMDb ID in
+lowercase, and a TMDB ID without the slug of a TMDB URL (`550-fight-club` saves as
+`550`). An empty string clears the ID. Any other value that isn't an IMDb title ID
+(`tt` and 7 to 10 digits) or a positive TMDB or TVDB number is
+`422 validation_failed` at that member. On an item (not a season or episode), an
+edit that changes an ID also replaces the item's durable provider ID for that
+provider, which lookups and refreshes read, or removes it when the ID is cleared.
+An ID resent unchanged (compared trimmed and in any case) leaves the durable ID as
+it is. When another item of the
+same type already holds the new ID, only the column changes, and the next refresh
+settles which item keeps it. `status` is the item's match status and must be `pending`, `matched`,
 or `unmatched`; any other value fails with `422`. The service tries item,
 season, then episode ownership and returns canonical catalog detail after the
 update and existing invalidation events.
 A follow-up detail-read failure can occur after persistence; it does not roll
 back the metadata change.
+
+A season stores `title`, `original_title`, `overview`, `tagline`, `air_date`,
+`season_number` and the `imdb_id`, `tmdb_id` and `tvdb_id` provider IDs. An
+episode stores the same text fields and IDs, plus `sort_title`,
+`episode_number`, `runtime`, `rating_imdb` and `rating_tmdb`. A season has no
+`sort_title`, since seasons order by number, and neither stores a
+`content_rating`: the series' rating decides age limits for its episodes. No
+metadata provider writes a season's or episode's original title or tagline, an
+episode's sort title, or a season's IDs, so a refresh keeps them without a lock.
+A refresh does write an episode's IDs. Reset to Provider empties them, except
+that a reset in another language than the series' own keeps the sort title,
+original title and tagline, as it keeps the title and overview.
 
 `locked_fields` holds the `MetadataField` numbers a refresh, library scan or
 seed import must keep. A season accepts the name, overview and release-date
@@ -374,8 +446,8 @@ their artwork locks on the parent series, and their numbers can't lock because
 refreshes find the rows by them. Each row's locks are its own, so clearing a
 series' locks leaves its seasons' and episodes' in place. A correction that
 replaces the show, by an Identify or a corrected NFO, clears the season and
-episode locks and resets the values they held; an Identify that confirms the same
-show keeps them. A locked title or overview
+episode locks, resets the values they held and empties the title details above;
+an Identify that confirms the same show keeps them. A locked title or overview
 shows in every language unless a manual or AI translation of the overview exists.
 
 Both operations preserve item-scoped `metadata_curation` authorization and are
@@ -610,6 +682,22 @@ is treated as an existing target. Split and merge require acting-administrator
 access. A policy refusal returns a 403 `permission_denied` problem. Each refused
 transaction rolls back; the multi-step match pipeline has no whole-request atomicity
 guarantee. Detached split identification retains the originating curation authority.
+
+Provider IDs a delegated curator stores are held to the same policy, because work
+that runs later with no curator present acts on them: a refresh, a refresh-debt
+retry or a scheduled refresh merges the item onto the item already at the anchor
+the IDs derive or holding one of them. A metadata edit that changes `tmdb_id`,
+`imdb_id` or `tvdb_id`, and a split that creates a target from chosen provider IDs,
+lock and authorise every such existing item (other than the edited item, or the
+split source and target) and are refused with 403 when one is out of scope. Unchanged
+IDs a form resends are not re-checked. An item refresh job a delegated curator
+queues records the curator's assigned libraries in its payload (`curation_scope`)
+and runs its metadata refresh under that scope on whichever node claims it; the job
+checks that snapshot rather than a fresh policy decision. A refresh refused for
+curation scope records no refresh failure or refresh debt, since debt retries run as
+automatic work. IDs a provider adds during a later automatic refresh, and identity
+overrides a split persists for scans, are not curator choices and converge as
+automatic work does.
 
 ### Match repair
 

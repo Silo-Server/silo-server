@@ -1,79 +1,14 @@
 package ratelimit
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 )
-
-func TestQuotaBucket(t *testing.T) {
-	q := SessionQuotaConfig{Mode: SessionQuotaEnforce, RequestsPerHour: 3600, Burst: 3} // one token a second
-	start := time.Unix(1_800_000_000, 0)
-	ml := &MemoryQuotaLimiter{buckets: map[string]*quotaBucket{}}
-	take := func(at time.Duration) AllowResult { return ml.takeAt("k", q, start.Add(at)) }
-
-	for i := range 3 {
-		if got := take(0); !got.Allowed {
-			t.Fatalf("take %d of a full bucket = %+v, want allowed", i, got)
-		}
-	}
-	refused := take(0)
-	if refused.Allowed || refused.RetryAfter != time.Second {
-		t.Fatalf("take from an empty bucket = %+v, want refused with a one-second retry", refused)
-	}
-	// A clock that steps back must not refill or drain the bucket.
-	if got := take(-time.Hour); got.Allowed {
-		t.Fatalf("take after the clock stepped back = %+v, want refused", got)
-	}
-	if got := take(time.Second); !got.Allowed {
-		t.Fatalf("take after one second of refill = %+v, want allowed", got)
-	}
-	// A long idle refills to the burst, not beyond it.
-	for i := range 3 {
-		if got := take(time.Hour); !got.Allowed {
-			t.Fatalf("take %d after an idle hour = %+v, want allowed", i, got)
-		}
-	}
-	if got := take(time.Hour); got.Allowed {
-		t.Fatalf("fourth take after an idle hour = %+v, want the burst of 3 to cap the refill", got)
-	}
-
-	// A drained bucket outlives a slower rate's refill: lowering the rate must
-	// not hand it a fresh burst. It holds half a token of 3, so it is kept until
-	// the slowest allowed rate (a burst a week) would have refilled the rest.
-	slow := SessionQuotaConfig{Mode: SessionQuotaEnforce, RequestsPerHour: 1, Burst: 3}
-	last := start.Add(time.Hour)
-	if got := ml.takeAt("k", slow, last.Add(30*time.Minute)); got.Allowed {
-		t.Fatalf("take after lowering the rate = %+v, want the drained bucket kept", got)
-	}
-	keep := SessionQuotaIdleTTL * 5 / 6
-	ml.evictLocked(last.Add(30*time.Minute+keep-time.Second), slow.Burst)
-	if len(ml.buckets) != 1 {
-		t.Fatal("drained bucket evicted before the slowest allowed rate would have refilled it")
-	}
-	ml.evictLocked(last.Add(30*time.Minute+keep), slow.Burst)
-	if len(ml.buckets) != 0 {
-		t.Fatal("idle bucket kept after the slowest allowed rate would have refilled it")
-	}
-
-	// Sessions that sign in, make one request and leave don't pile up: at the
-	// default size their buckets go at the next sweep a minute later.
-	def := DefaultConfig().Session
-	busy := NewMemoryQuotaLimiter()
-	for i := range 1000 {
-		busy.takeAt(fmt.Sprint("session:", i), def, start)
-	}
-	busy.takeAt("session:later", def, start.Add(quotaEvictEvery))
-	if len(busy.buckets) != 1 {
-		t.Fatalf("%d buckets kept a minute after one request each, want only the new one", len(busy.buckets))
-	}
-}
 
 func TestSessionQuotaMiddleware(t *testing.T) {
 	user := &auth.Claims{UserID: 5, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess}

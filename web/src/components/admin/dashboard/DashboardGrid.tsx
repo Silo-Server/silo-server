@@ -34,7 +34,7 @@ const GRID_COLUMNS = 12;
  * from the `text/plain` payload a grid reorder drag carries so neither path
  * can mistake the other's drag for its own.
  */
-export const WIDGET_ADD_DRAG_TYPE = "application/x-silo-widget-add";
+const WIDGET_ADD_DRAG_TYPE = "application/x-silo-widget-add";
 
 /**
  * Row height in CSS pixels.
@@ -109,6 +109,7 @@ export function DashboardGrid({
     moveWidget,
     resizeWidget,
     setWidgetRange,
+    setWidgetView,
     removeWidget,
     addWidget,
   } = layout;
@@ -567,6 +568,8 @@ export function DashboardGrid({
                 id={entry.id}
                 range={entry.range ?? widget.ranges?.default}
                 setRange={setWidgetRange}
+                view={entry.view ?? widget.views?.default}
+                setView={setWidgetView}
                 setCollapsed={setWidgetCollapsed}
               >
                 <WidgetComponent />

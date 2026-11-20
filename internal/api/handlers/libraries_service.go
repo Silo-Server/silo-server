@@ -318,7 +318,7 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		return LibraryView{}, err
 	}
 
-	err = h.folderRepo.Update(ctx, id, catalog.UpdateFolderInput{
+	_, err = h.folderRepo.Update(ctx, id, catalog.UpdateFolderInput{
 		Paths:                    req.Paths,
 		Type:                     req.Type,
 		Name:                     req.Name,

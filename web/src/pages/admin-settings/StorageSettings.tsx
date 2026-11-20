@@ -297,6 +297,7 @@ function S3Group({
         onChange={(v) => form.setValue(key("endpoint"), v)}
         disabled={secrets.disabled || locationFieldsDisabled}
         restartRequired={restartKeys.has(key("endpoint"))}
+        managedByEnv={form.envVar(key("endpoint"))}
       />
       <SettingField
         label="Bucket"
@@ -304,6 +305,7 @@ function S3Group({
         onChange={(v) => form.setValue(key("bucket"), v)}
         disabled={secrets.disabled || locationFieldsDisabled}
         restartRequired={restartKeys.has(key("bucket"))}
+        managedByEnv={form.envVar(key("bucket"))}
       />
       <SettingField
         label="Folder inside the bucket"
@@ -312,6 +314,7 @@ function S3Group({
         onChange={(v) => form.setValue(key("key_prefix"), v)}
         disabled={secrets.disabled || locationFieldsDisabled}
         restartRequired={restartKeys.has(key("key_prefix"))}
+        managedByEnv={form.envVar(key("key_prefix"))}
       />
       {(scope === "public" ? PUBLIC_S3_IDENTITY_KEYS : PRIVATE_S3_IDENTITY_KEYS).some((k) =>
         form.isDirty(k),
@@ -346,6 +349,7 @@ function S3Group({
         value={form.getValue(key("region"))}
         onChange={(v) => form.setValue(key("region"), v)}
         restartRequired={restartKeys.has(key("region"))}
+        managedByEnv={form.envVar(key("region"))}
       />
       <SettingField
         label="Put the bucket name in the URL path"
@@ -354,6 +358,7 @@ function S3Group({
         value={form.getValue(key("path_style"))}
         onChange={(v) => form.setValue(key("path_style"), v)}
         restartRequired={restartKeys.has(key("path_style"))}
+        managedByEnv={form.envVar(key("path_style"))}
       />
       {/*
         The access and secret keys must stay configured together, so clearing
@@ -371,6 +376,7 @@ function S3Group({
         onChange={(v) => secrets.setSecret(key("access_key"), v)}
         disabled={secrets.disabled}
         restartRequired={restartKeys.has(key("access_key"))}
+        managedByEnv={form.envVar(key("access_key"))}
       />
       <SecretField
         label="Secret Key"
@@ -382,6 +388,7 @@ function S3Group({
         onChange={(v) => secrets.setSecret(key("secret_key"), v)}
         disabled={secrets.disabled}
         restartRequired={restartKeys.has(key("secret_key"))}
+        managedByEnv={form.envVar(key("secret_key"))}
       />
       <ConnectionCheckAction
         onClick={handleCheckConnection}
@@ -403,6 +410,7 @@ function S3Group({
               { value: "cloudflare_token", label: "Cloudflare signed token" },
             ]}
             restartRequired={restartKeys.has("s3.public_url_auth")}
+            managedByEnv={form.envVar("s3.public_url_auth")}
           />
           {advancedCount > 0 && (
             <AdvancedSection
@@ -416,6 +424,7 @@ function S3Group({
                 value={form.getValue("s3.public_read_endpoint")}
                 onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
                 restartRequired={restartKeys.has("s3.public_read_endpoint")}
+                managedByEnv={form.envVar("s3.public_read_endpoint")}
               />
               {urlAuth === "cloudflare_token" && (
                 <>
@@ -435,6 +444,7 @@ function S3Group({
                     hint="Signing key configured in Cloudflare"
                     disabled={secrets.disabled}
                     restartRequired={restartKeys.has("s3.public_token_secret")}
+                    managedByEnv={form.envVar("s3.public_token_secret")}
                   />
                   <SettingField
                     label="Token query parameter"
@@ -442,6 +452,7 @@ function S3Group({
                     value={form.getValue("s3.public_token_param") || "verify"}
                     onChange={(v) => form.setValue("s3.public_token_param", v)}
                     restartRequired={restartKeys.has("s3.public_token_param")}
+                    managedByEnv={form.envVar("s3.public_token_param")}
                   />
                   <SettingField
                     label="Link lifetime"
@@ -450,6 +461,7 @@ function S3Group({
                     value={form.getValue("s3.public_token_ttl") || "10800"}
                     onChange={(v) => form.setValue("s3.public_token_ttl", v)}
                     restartRequired={restartKeys.has("s3.public_token_ttl")}
+                    managedByEnv={form.envVar("s3.public_token_ttl")}
                   />
                 </>
               )}
@@ -945,6 +957,7 @@ export default function StorageSettings() {
                 : "Where Silo keeps artwork, subtitles, and other library assets."
             }
             restartRequired={restartKeys.has("artwork.storage_backend")}
+            managedByEnv={form.envVar("artwork.storage_backend")}
           />
           <SettingField
             label="Local storage path"
@@ -965,6 +978,7 @@ export default function StorageSettings() {
                 : "Absolute path on the server. Mount a volume here in Docker."
             }
             restartRequired={restartKeys.has("artwork.local_path")}
+            managedByEnv={form.envVar("artwork.local_path")}
           />
           <SettingField
             label="Save provider artwork to storage"

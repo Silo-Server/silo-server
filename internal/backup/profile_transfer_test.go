@@ -32,7 +32,7 @@ func TestParseProfileExportRefusesHostileDocuments(t *testing.T) {
 	}{
 		{"a PIN hash", `{` + head + `,"pin_hash":"x","data":{},"items":[]}`, ErrProfileImportAccessFields},
 		{"access fields in preferences", `{` + head + `,"data":{"preferences":{"profile":{"max_playback_quality":"","library_restrictions_enabled":false}}},"items":[]}`, ErrProfileImportAccessFields},
-		{"a newer version", `{"format":"silo-profile-export","version":2,"data":{}}`, ErrProfileExportTooNew},
+		{"a newer version", fmt.Sprintf(`{"format":"silo-profile-export","version":%d,"data":{}}`, ProfileExportVersion+1), ErrProfileExportTooNew},
 		{"another format", `{"format":"silo-restore-set","version":1}`, nil},
 		{"unknown fields", `{` + head + `,"extra":true,"data":{},"items":[]}`, nil},
 		{"unknown data", `{` + head + `,"data":{"passwords":{}},"items":[]}`, nil},
@@ -149,7 +149,7 @@ var importerSamples = map[string]importerSample{
 	userdata.Collections: {`{"collections":[`, `{"id":"c1","name":"A","type":"mdblist","watch_filter":"all","media_filter":"all","items":[],"shared_with":[],` +
 		`"sort_config":{"field":"title","order":"asc"},"source_url":"https://mdblist.com/lists/a/b",` +
 		`"source_config":{"mode":"mdblist_json","url":"https://mdblist.com/lists/a/b","library_ids":[1]}}`, `]}`},
-	userdata.Preferences + " settings": {`{"settings":[`, `{"key":"playback.audio_language","scope":"profile_series","series":"s1","value":"\"en\""}`, `]}`},
+	userdata.Preferences + " settings": {`{"settings":[`, `{"key":"playback.audio_language","scope":"profile_series","series":"s1","value":"en"}`, `]}`},
 	userdata.Preferences + " audio":    {`{"audio":[`, `{"series":"s1","track_index":1,"language":"en","signature":null,"updated_at":` + sampleAt + `}`, `]}`},
 	userdata.Preferences + " subtitles": {`{"subtitles":[`,
 		`{"series":"s1","language":"en","track_index":1,"external_path":"","mode":"always","show_forced_subtitles":null,"signature":null,"updated_at":` + sampleAt + `}`, `]}`},

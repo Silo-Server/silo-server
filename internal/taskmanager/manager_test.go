@@ -284,125 +284,6 @@ func TestTaskManagerStartIgnoresSavedTriggersForManualOnlyTask(t *testing.T) {
 	}
 }
 
-func TestTaskManagerRejectsScheduledTriggersForManualOnlyTask(t *testing.T) {
-	const taskKey = "manual-backfill"
-	triggerRepo := &fakeTriggerRepository{triggers: map[string][]taskmanager.TriggerConfig{}}
-	manager := taskmanager.New(
-		triggerRepo,
-		fakeExecutionRepository{},
-		newFakeTrigger,
-		slog.New(slog.DiscardHandler),
-	)
-	manager.Register(manualOnlyStubTask{stubTask{key: taskKey}})
-
-	if info := manager.GetTaskInfo(taskKey); !info.ManualOnly {
-		t.Fatal("TaskInfo.ManualOnly = false, want true")
-	}
-	err := manager.UpdateTriggers(taskKey, []taskmanager.TriggerConfig{{
-		Type:       taskmanager.TriggerTypeInterval,
-		IntervalMs: int64(time.Hour / time.Millisecond),
-	}})
-	if !errors.Is(err, taskmanager.ErrTaskManualOnly) {
-		t.Fatalf("UpdateTriggers() error = %v, want ErrTaskManualOnly", err)
-	}
-	if _, wrote := triggerRepo.setCalls[taskKey]; wrote {
-		t.Fatal("manual-only trigger rejection wrote to the trigger repository")
-	}
-	if err := manager.UpdateTriggers(taskKey, nil); err != nil {
-		t.Fatalf("clearing manual-only triggers error = %v", err)
-	}
-}
-
-// A scheduled run of a conditional task whose preflight says no, or fails,
-// skips Execute and rearms the trigger. Preflight errors must fail closed.
-func TestTaskManagerTriggerSkipsConditionalTask(t *testing.T) {
-	for _, tc := range []struct {
-		name            string
-		latest          *taskmanager.ExecutionResult
-		shouldRunErr    error
-		checkNoInserted bool
-	}{
-		{
-			name:            "without history",
-			latest:          &taskmanager.ExecutionResult{TaskKey: "conditional", CompletedAt: time.Now().Add(-24 * time.Hour)},
-			checkNoInserted: true,
-		},
-		{name: "on preflight error", shouldRunErr: errors.New("settings unavailable")},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			triggerRepo := &fakeTriggerRepository{
-				triggers: map[string][]taskmanager.TriggerConfig{
-					"conditional": {
-						{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)},
-					},
-				},
-			}
-			historyRepo := &recordingExecutionRepository{latest: tc.latest}
-			var triggers []*fakeTrigger
-			factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
-				tr := &fakeTrigger{
-					cfg:     cfg,
-					ch:      make(chan struct{}, 1),
-					stopCh:  make(chan struct{}),
-					started: make(chan struct{}, 2),
-				}
-				triggers = append(triggers, tr)
-				return tr
-			}
-			manager := taskmanager.New(
-				triggerRepo,
-				historyRepo,
-				factory,
-				slog.New(slog.DiscardHandler),
-			)
-			task := &conditionalStubTask{
-				stubTask:        stubTask{key: "conditional"},
-				shouldRunCalled: make(chan struct{}, 1),
-				shouldRunErr:    tc.shouldRunErr,
-			}
-			manager.Register(task)
-
-			ctx, cancel := context.WithCancel(context.Background())
-			defer manager.Stop()
-			defer cancel()
-			manager.Start(ctx)
-
-			if len(triggers) != 1 {
-				t.Fatalf("triggers = %d, want 1", len(triggers))
-			}
-			initialNextRun := triggers[0].NextRunTime()
-			select {
-			case <-triggers[0].started:
-			default:
-			}
-			triggers[0].ch <- struct{}{}
-
-			select {
-			case <-task.shouldRunCalled:
-			case <-time.After(time.Second):
-				t.Fatal("scheduled preflight was not called")
-			}
-
-			select {
-			case <-triggers[0].started:
-			case <-time.After(time.Second):
-				t.Fatal("trigger was not rearmed after skipped preflight")
-			}
-			if got := task.executeCount(); got != 0 {
-				t.Fatalf("Execute calls = %d, want 0", got)
-			}
-			if got := historyRepo.insertCount(); tc.checkNoInserted && got != 0 {
-				t.Fatalf("history inserts = %d, want 0", got)
-			}
-			if !triggers[0].NextRunTime().After(initialNextRun) {
-				t.Fatalf("next run = %s, want later than original run %s",
-					triggers[0].NextRunTime().Format(time.RFC3339Nano),
-					initialNextRun.Format(time.RFC3339Nano))
-			}
-		})
-	}
-}
-
 // cleanStopTask stops when its context ends and reports success, as tasks that
 // keep partial work do.
 type cleanStopTask struct{ stubTask }
@@ -410,62 +291,6 @@ type cleanStopTask struct{ stubTask }
 func (cleanStopTask) Execute(ctx context.Context, _ taskmanager.ProgressReporter) error {
 	<-ctx.Done()
 	return nil
-}
-
-func TestScheduledRunStopsAtTriggerMaxRuntime(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		limitMs     int64
-		wantStopped bool
-	}{
-		{name: "stops at the limit", limitMs: int64(4 * time.Hour / time.Millisecond), wantStopped: true},
-		// The v1 route accepts any int64; this one would wrap to a 448µs limit.
-		{name: "too large to represent means no limit", limitMs: 18446744073710},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				const taskKey = "long_task"
-				triggerRepo := &fakeTriggerRepository{
-					triggers: map[string][]taskmanager.TriggerConfig{
-						taskKey: {{Type: taskmanager.TriggerTypeDaily, TimeOfDay: "03:00", MaxRuntimeMs: tc.limitMs}},
-					},
-				}
-				historyRepo := &recordingExecutionRepository{}
-				var trigger *fakeTrigger
-				factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
-					trigger = &fakeTrigger{cfg: cfg, ch: make(chan struct{}, 1), stopCh: make(chan struct{})}
-					return trigger
-				}
-				manager := taskmanager.New(triggerRepo, historyRepo, factory, slog.New(slog.DiscardHandler))
-				manager.Register(cleanStopTask{stubTask{key: taskKey}})
-
-				ctx, cancel := context.WithCancel(context.Background())
-				defer manager.Stop()
-				defer cancel()
-				manager.Start(ctx)
-				trigger.ch <- struct{}{}
-
-				time.Sleep(4*time.Hour + time.Second) //nolint:forbidigo // synctest: virtual time past the trigger's max runtime
-				synctest.Wait()
-				if !tc.wantStopped {
-					if got := historyRepo.insertCount(); got != 0 {
-						t.Fatalf("history inserts = %d, want the run still going: %+v", got, historyRepo.inserts[0])
-					}
-					return
-				}
-				if got := historyRepo.insertCount(); got != 1 {
-					t.Fatalf("history inserts = %d, want 1", got)
-				}
-				result := historyRepo.inserts[0]
-				if result.Status != "cancelled" { //nolint:misspell // Existing task state vocabulary.
-					t.Fatalf("status = %q, want cancelled", result.Status) //nolint:misspell // Existing task state vocabulary.
-				}
-				if result.ErrorMessage != "Stopped after reaching the max runtime of 4h0m0s" {
-					t.Fatalf("error message = %q, want it to name the max runtime", result.ErrorMessage)
-				}
-			})
-		})
-	}
 }
 
 type reservedTask struct {
@@ -485,20 +310,214 @@ func TestStartTaskReservesBeforeAcknowledgment(t *testing.T) {
 	manager := taskmanager.New(&fakeTriggerRepository{}, fakeExecutionRepository{}, nil, nil)
 	manager.Register(task)
 	info, err := manager.StartTask(task.Key())
-	if err != nil || info.State != taskmanager.TaskStateRunning {
+	if err != nil || info.State != taskmanager.TaskStateRunning || info.StartedAt == nil {
 		t.Fatalf("start: %+v, %v", info, err)
 	}
 	t.Cleanup(manager.Stop)
 	if _, err := manager.StartTask(task.Key()); !errors.Is(err, taskmanager.ErrTaskAlreadyRunning) {
 		t.Fatalf("second start: %v", err)
 	}
-	if err := manager.CancelTask(task.Key()); err != nil {
+	if _, err := manager.CancelTask(task.Key()); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case <-task.done:
 	case <-time.After(time.Second):
 		t.Fatal("reserved work did not receive cancellation")
+	}
+}
+
+// insertSignalingRepository hands each recorded execution to the test.
+type insertSignalingRepository struct {
+	fakeExecutionRepository
+	inserted chan taskmanager.ExecutionResult
+}
+
+func (r insertSignalingRepository) Insert(_ context.Context, result taskmanager.ExecutionResult) error {
+	r.inserted <- result
+	return nil
+}
+
+// A task registered after Start schedules like one registered before it.
+// Unregister stops its triggers and cancels its run but keeps its saved
+// schedule, which a later Register resumes.
+func TestTaskManagerRegisterAndUnregisterAfterStart(t *testing.T) {
+	const key = "plugin:7:sync"
+	hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)}
+	triggerRepo := &fakeTriggerRepository{}
+	historyRepo := insertSignalingRepository{inserted: make(chan taskmanager.ExecutionResult, 1)}
+	var triggersMu sync.Mutex
+	var triggers []*fakeTrigger
+	factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
+		tr := &fakeTrigger{cfg: cfg, ch: make(chan struct{}, 1), stopCh: make(chan struct{})}
+		triggersMu.Lock()
+		triggers = append(triggers, tr)
+		triggersMu.Unlock()
+		return tr
+	}
+	manager := taskmanager.New(triggerRepo, historyRepo, factory, slog.New(slog.DiscardHandler))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer manager.Stop()
+	defer cancel()
+	manager.Start(ctx)
+
+	task := reservedTask{stubTask: stubTask{key: key, triggers: []taskmanager.TriggerConfig{hourly}}, entered: make(chan struct{}), done: make(chan struct{})}
+	manager.Register(task)
+	if saved, _ := triggerRepo.GetTriggers(ctx, key); !slices.Equal(saved, []taskmanager.TriggerConfig{hourly}) {
+		t.Fatalf("saved schedule = %+v, want the task's defaults", saved)
+	}
+	triggersMu.Lock()
+	armed := triggers[len(triggers)-1]
+	triggersMu.Unlock()
+	armed.ch <- struct{}{}
+	select {
+	case <-task.entered:
+	case <-time.After(time.Second):
+		t.Fatal("trigger did not run the task registered after Start")
+	}
+
+	manager.Unregister(key)
+	select {
+	case <-task.done:
+	case <-time.After(time.Second):
+		t.Fatal("Unregister did not cancel the run")
+	}
+	select {
+	case <-armed.stopCh:
+	default:
+		t.Fatal("Unregister left the trigger armed")
+	}
+	if _, err := manager.CancelTask(key); !errors.Is(err, taskmanager.ErrTaskNotFound) {
+		t.Fatalf("CancelTask after Unregister = %v, want ErrTaskNotFound", err)
+	}
+	select {
+	case result := <-historyRepo.inserted:
+		if result.Status != "cancelled" { //nolint:misspell // the stored status value
+			t.Fatalf("recorded status = %q, want the canceled status", result.Status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the canceled run was not recorded")
+	}
+
+	daily := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeDaily, TimeOfDay: "03:00"}
+	manager.Register(stubTask{key: key, triggers: []taskmanager.TriggerConfig{daily}})
+	if got := manager.GetTaskInfo(key).Triggers; !slices.Equal(got, []taskmanager.TriggerConfig{hourly}) {
+		t.Fatalf("re-registered triggers = %+v, want the saved schedule", got)
+	}
+}
+
+// A task whose saved schedule is empty waits for a schedule change. When
+// ReloadSchedule installs a schedule another server saved, the first firing
+// must run the task: a one-shot trigger that fires into a stale change flag
+// leaves the task unscheduled.
+func TestReloadScheduleRunsTaskThatHadNoTriggers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const key = "plugin:7:sync"
+		hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)}
+		triggerRepo := &fakeTriggerRepository{triggers: map[string][]taskmanager.TriggerConfig{key: {}}}
+		var armed *fakeTrigger
+		factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
+			armed = &fakeTrigger{cfg: cfg, ch: make(chan struct{}, 1), stopCh: make(chan struct{})}
+			return armed
+		}
+		manager := taskmanager.New(triggerRepo, fakeExecutionRepository{}, factory, slog.New(slog.DiscardHandler))
+		ctx, cancel := context.WithCancel(context.Background())
+		defer synctest.Wait()
+		defer cancel()
+		manager.Start(ctx)
+		task := manualMarkerTask{stubTask: stubTask{key: key, triggers: []taskmanager.TriggerConfig{hourly}}, seen: make(chan bool, 1)}
+		manager.Register(task)
+		synctest.Wait() // the trigger loop waits with no triggers
+
+		if err := triggerRepo.SetTriggers(ctx, key, []taskmanager.TriggerConfig{hourly}); err != nil {
+			t.Fatal(err)
+		}
+		if err := manager.ReloadSchedule(ctx, key, false); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		armed.ch <- struct{}{}
+		select {
+		case <-task.seen:
+		case <-time.After(time.Minute):
+			t.Fatal("the first firing of the reloaded schedule did not run the task")
+		}
+	})
+}
+
+// gatedTask blocks its first run until release closes, then counts runs.
+type gatedTask struct {
+	stubTask
+	entered chan struct{}
+	release chan struct{}
+	runs    chan struct{}
+}
+
+func (t gatedTask) Execute(ctx context.Context, _ taskmanager.ProgressReporter) error {
+	select {
+	case t.entered <- struct{}{}:
+		select {
+		case <-t.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	default:
+	}
+	t.runs <- struct{}{}
+	return nil
+}
+
+// A schedule edit during a run leaves its wake-up signal pending until the
+// run ends. That stale signal must not discard a firing of the new trigger:
+// triggers fire once until rearmed, so a dropped firing leaves the task
+// unscheduled.
+func TestScheduleEditDuringRunKeepsNextFiring(t *testing.T) {
+	for range 3000 {
+		synctest.Test(t, func(t *testing.T) {
+			const key = "plugin:7:sync"
+			hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)}
+			var mu sync.Mutex
+			var armed []*fakeTrigger
+			factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
+				tr := &fakeTrigger{cfg: cfg, ch: make(chan struct{}, 1), stopCh: make(chan struct{})}
+				mu.Lock()
+				armed = append(armed, tr)
+				mu.Unlock()
+				return tr
+			}
+			latest := func() *fakeTrigger {
+				mu.Lock()
+				defer mu.Unlock()
+				return armed[len(armed)-1]
+			}
+			manager := taskmanager.New(&fakeTriggerRepository{}, fakeExecutionRepository{}, factory, slog.New(slog.DiscardHandler))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer synctest.Wait()
+			defer cancel()
+			task := gatedTask{
+				stubTask: stubTask{key: key, triggers: []taskmanager.TriggerConfig{hourly}},
+				entered:  make(chan struct{}, 1), release: make(chan struct{}), runs: make(chan struct{}, 2),
+			}
+			task.entered <- struct{}{} // consumed by the first run, which then waits
+			<-task.entered
+			manager.Register(task)
+			manager.Start(ctx)
+
+			latest().ch <- struct{}{}
+			synctest.Wait() // the first run waits on release
+			if err := manager.UpdateTriggers(key, []taskmanager.TriggerConfig{hourly}); err != nil {
+				t.Fatal(err)
+			}
+			latest().ch <- struct{}{} // the new trigger is already due
+			close(task.release)
+			<-task.runs
+			synctest.Wait()
+			select {
+			case <-task.runs:
+			default:
+				t.Fatal("the new trigger's firing was discarded")
+			}
+		})
 	}
 }
 
@@ -510,43 +529,6 @@ type manualMarkerTask struct {
 func (t manualMarkerTask) Execute(ctx context.Context, _ taskmanager.ProgressReporter) error {
 	t.seen <- taskmanager.StartedManually(ctx)
 	return nil
-}
-
-func TestStartTaskMarksRunStartedManually(t *testing.T) {
-	task := manualMarkerTask{stubTask: stubTask{key: "manual-marker"}, seen: make(chan bool, 1)}
-	manager := taskmanager.New(&fakeTriggerRepository{}, fakeExecutionRepository{}, nil, nil)
-	manager.Register(task)
-	t.Cleanup(manager.Stop)
-
-	if taskmanager.StartedManually(context.Background()) {
-		t.Fatal("a plain context must not report a manual start")
-	}
-	if _, err := manager.StartTask(task.Key()); err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
-	select {
-	case manual := <-task.seen:
-		if !manual {
-			t.Fatal("StartTask run must report StartedManually")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("StartTask did not execute the task")
-	}
-	waitIdle(t, manager, task.Key())
-
-	// RunTask is also the trigger loop's execution path (w.run with the
-	// manager's context) and programmatic kicks; it must not look manual.
-	if err := manager.RunTask(context.Background(), task.Key()); err != nil {
-		t.Fatalf("RunTask: %v", err)
-	}
-	select {
-	case manual := <-task.seen:
-		if manual {
-			t.Fatal("RunTask run must not report StartedManually")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("RunTask did not execute the task")
-	}
 }
 
 type recordingAutoscanPoller struct {

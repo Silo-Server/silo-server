@@ -36,7 +36,7 @@ const (
 // among what its own AI providers and ChatGPT account offer, which only
 // they can validate.
 var serverSpecificSettings = strings.Fields(`
-	server.identity_id server.public_url server.local_url
+	server.identity_id server.public_url server.local_url server.web_media_url
 	database. redis. userdb. storage. artwork. s3. backup. setup.
 	auth.jwt_secret audiobooks.abs.jwt_secret
 	ratelimit.

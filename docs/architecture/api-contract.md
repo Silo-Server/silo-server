@@ -456,8 +456,13 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   sets `Deprecation: @<unix-seconds>`, `Link: <link>; rel="deprecation"` (appended to any
   existing `Link`), and `Sunset: <IMF-fixdate>` only when a sunset is declared, in the API
   middleware chain ahead of the class gate, so a gate denial or validation problem carries them
-  as a 200 does. No v2 operation is deprecated yet; the only deprecated
-  operations are test probes, recorded in the `deprecated_ok` and `deprecated_problem` fixtures.
+  as a 200 does. The deprecated v2 operations are the four that take
+  a password reset or invitation token in the URL path (`lookupPasswordReset`,
+  `completePasswordReset`, `lookupInvitation`, `acceptInvitation`; their replacements take it in
+  the body). They are removed before the lock: reset links live at most 24 hours and no client
+  but the web app called the reset pair, and the invitation pair goes once a released Android
+  build uses the body forms. Test probes, recorded in the `deprecated_ok` and
+  `deprecated_problem` fixtures, exercise the headers.
 - **Accepted library jobs.** Library refresh and deletion use the durable admin-job runner
   with canonical `/api/v2/library-jobs/{job_id}` monitors, safe named results/failures,
   conditional polling, and durable refresh cancellation. Worker progress and terminal writes
@@ -481,7 +486,10 @@ members even where RFC 9457 makes them optional:
 
 Validation failures add an `errors` array. Each entry contains `location` using the documented
 `body.*`, `query.*`, `path.*`, or `header.*` grammar, a stable `code`, and a safe `detail`.
-Rejected values are never echoed. Stack traces, database/upstream errors, filesystem paths,
+When a validation failure has no explanation beyond its field errors, its `detail` is the
+summary "The request did not pass validation; see errors.", except that with exactly one field
+error the server sends that error's `detail` instead, so a client that shows only the problem
+`detail` still names the reason. Rejected values are never echoed. Stack traces, database/upstream errors, filesystem paths,
 internal node URLs, credentials, tokens, private media data, and other implementation detail are
 never returned to the client. Problem responses default to `Cache-Control: no-store` unless a
 specific public problem is reviewed as cacheable. Clients translate a problem by its type and
@@ -581,10 +589,10 @@ Enums are lowercase strings, never numbers. Request enums are closed and reject 
 with `422`; response enums are additive and clients retain an unknown/raw fallback. Existing
 values are never renamed or repurposed. A nullable enum lists `null` among its values, because
 JSON Schema applies `type` and `enum` separately: the generator adds it, and the spec lint fails a
-nullable enum anywhere in a component schema without it unless `apiv2.NullEnumWithheld` names the
-member. Polymorphic objects use a required string discriminator and named schemas. Request
-variants are closed; response variants are additive and native clients retain an unknown-variant
-representation. Untyped maps are limited to intentional named extension bags.
+nullable enum anywhere in a component schema without it. Polymorphic objects use a required string
+discriminator and named schemas. Request variants are closed; response variants are additive and
+native clients retain an unknown-variant representation. Untyped maps are limited to intentional
+named extension bags.
 
 ### Query and pagination conventions
 
@@ -730,6 +738,23 @@ resolves that profile's current limits and skips only the PIN proof the link sta
 does for the Apple display token. The link authorizes the start of a request; a transfer that
 began in time may run longer.
 
+The playback delivery routes (`getPlaybackMedia`, `getPlaybackManifest`, `getPlaybackSegment`,
+`getPlaybackSubtitle` and the HEAD forms of the media, manifest and subtitle routes) accept the plan's signed stream reference `st` the
+same way, for a receiver such as a Google Cast device that is handed only the plan URL. A request
+with an `Authorization` header or a `token` parameter takes the account path unchanged. Without
+either, a valid `st` that names a playback session (not a download, theme song or bandwidth
+probe) and the session in the path authorizes the request as its account, with the account's
+current role, while that session's playback attempt is live, owned by the reference's account and
+profile, and started by a login session that is still active. The attempt records that login
+session when playback starts. `X-Profile-Id` is rewritten to the reference's profile; viewer
+access then resolves that profile's limits and skips only the PIN proof, and the handlers apply
+the session-deny marker and ownership checks as for any request. A reference therefore ends when
+its session stops (even where no session-deny marker store is configured), when the login session
+signs out or is revoked (disabling an account revokes its sessions), or at the 24-hour
+stream-token expiry. An attempt with no login session, started with an API key or before attempts
+recorded one, keeps needing the account credential. Plans that negotiated
+`header_authenticated_media_v1` carry no `st`, so their media still needs the header.
+
 Household management (creating, editing, and deleting profiles, listing household sessions,
 managing another profile's devices or settings, importing history for another profile, and
 creating a personal API key, changing the account-wide Discord notification
@@ -766,7 +791,7 @@ permissions; no gate reads it.
 
 Routes outside the admin groups that widen what an admin sees or may do (another account's
 media requests and their download-server fields, another account's downloaded subtitles,
-on-disk file paths, job polls, administrator events, admin-only home-section recipes) take
+on-disk file paths and file names, job polls, administrator events, admin-only home-section recipes) take
 that reach from the same decision, the acting admin, never from the account role: handlers call `apimw.ActingAdmin`, which answers with
 the decider the router hands the acting-admin gate. It counts a declared profile only after the
 viewer gate verified it in the same request, so an operation that relies on it runs the viewer
@@ -1083,11 +1108,31 @@ and plugin pages use the server's own origin, while Apple, Android, and other na
 not governed by browser CORS. The narrow plugin launch cookie remains same-origin and path-scoped;
 it does not authorize cross-origin API access.
 
+Three kinds of native media response are readable cross-origin, each with
+`Access-Control-Allow-Origin: *` and no credentials:
+
+- The original-file stream route, `/api/v2/stream/{session_id}`. `GET` and `HEAD` set
+  `RawOperation.CrossOrigin`, so every answer, authorization refusals included, carries the
+  wildcard, allows the `Range` request header and exposes `Content-Range`; the web player reads ranges from the administrator's
+  media origin. The `OPTIONS` preflight is answered by the router's `playbackMediaCORS`
+  middleware with `204`, before authentication. Authorization stays in the URL's `token` and
+  `st`.
+- The HLS manifest and segment routes (`/api/v2/playback/transcode/{session_id}/...`), through
+  `RawOperation.CrossOrigin`, with the same wildcard and the `Range` request header allowed on
+  every answer. They answer no preflight.
+- Subtitle sidecar responses (`/api/v2/stream/{session_id}/subtitles/{track}`), which send the
+  wildcard from their handler; a refusal before the handler runs carries no CORS header.
+
+Every other native `/api/v2` route answers without CORS headers.
+
 Media proxy routes retain their explicit cross-origin behavior because a browser player can fetch
 streams from a separate proxy or transcode-node origin. Those routes still perform their normal
 token or bearer authorization and do not enable credentialed wildcard CORS; CORS is never an
 authorization mechanism. Jellyfin compatibility and other non-native surfaces retain their own
-tested policies. Support for a separately hosted browser client may later add an explicit
+tested policies. The native HLS manifest and segment routes send the same uncredentialed
+wildcard on every answer, authorization refusals included, because a Google Cast receiver plays
+them from a script on Google's origin; a raw operation opts in with `RawOperation.CrossOrigin`.
+Support for a separately hosted browser client may later add an explicit
 administrator-configured origin allowlist without changing the default native contract.
 
 ### What Huma covers
@@ -1154,6 +1199,16 @@ contract is:
   `Content-Type: application/json` on every branch. Revision (2026-09-15, with local artwork
   storage): storage outages no longer remove a node from rotation, because the API keeps
   answering and artwork routes fail on their own; `degraded` is additive to the frozen shape.
+  Dependency checks run concurrently with a shared one-second request budget, so a hung
+  dependency produces an answer instead of a request that never completes. A Postgres timeout,
+  including a wait for a free pool connection, returns `503`; a storage timeout reports
+  `degraded` when Postgres is healthy. Artwork probes remain shared and cached for 30 seconds;
+  a request stops waiting at its deadline without canceling the shared probe or starting
+  another while it is still running. While a refresh is still running, a request reports the
+  previous artwork result until the refresh's five-second timeout, then reports failure at once
+  without waiting out its deadline, until the stuck probe returns. Before the first artwork
+  probe finishes there is no previous result, so a request that reaches its deadline first
+  reports `artwork: false`; with Postgres healthy that answer is `200` with `degraded`.
   Revision (2026-10-11, with graceful shutdown): once the process receives SIGTERM or SIGINT it
   answers `503` with `{"status":"shutting_down","postgres":<bool>,"s3":<bool>,"artwork":<bool>}`
   while it keeps serving for `SILO_SHUTDOWN_DELAY`, so load balancers route away before the
@@ -1304,7 +1359,8 @@ paged with `limit` plus an opaque cursor whose cards are the shared `CatalogItem
 `{item_id, rating, rated_at}` entries instead), a membership read that answers the entry
 (`{item_id, added_at}`, or `{item_id, rating, rated_at}`) or `404`, a bodiless `PUT` add
 (ratings take `{rating}`) answering `204`, and a `DELETE` answering `204` whether or not
-the entry existed. The four favorites and watchlist mutations are `natural_idempotent`: each
+the entry existed. A rating, and an item's `user_rating`, run from 1 to 10, which clients show as
+five stars with half stars (7 is three and a half). The four favorites and watchlist mutations are `natural_idempotent`: each
 store add and remove reports whether it inserted or deleted the row, and the shared seam
 sends the provider list event, the recommendation refresh, and the user-state event only for a
 change, so a repeated add or remove answers `204` and notifies nobody. The notices run detached
@@ -1520,7 +1576,9 @@ and the client reads it from `getHomeSectionItems`. `included_sections` is `[]` 
 `listHomeSections` and `listLibrarySections` answer only rows that have items for the viewer: a row
 whose titles all sit outside the viewer's library access or rating limits, an off-season seasonal
 row, a row whose fetch failed, and a row whose recipe avoids duplicates and whose items all appeared
-in earlier rows are left out, so no client has to hide an empty row itself. The rule applies to the
+in earlier rows are left out, so no client has to hide an empty row itself. A row of collections
+(`collection_posters`) has no items: it counts as having something to show while its `collections`
+holds a card (see [Rows of collections](../catalog-api.md#rows-of-collections)). The rule applies to the
 rows each request resolves, so a web-only hero row or a different `item_limit` can still change
 which rows a client gets. The layout still lists every resolved row, because it is built before any row is fetched. `getHomeSectionItems` answers an
 empty row asked for by ID, and answers a row the duplicate filter emptied with its items, because
@@ -1949,10 +2007,11 @@ by TMDB ID, under the `watchlist` tag:
   library watchlist entry.
 
 The three operations belong to the requests surface: while requests are off
-they answer `409 capability_disabled` and the stored entries are kept. The two
+they answer `409 capability_disabled`, and for a profile blocked from requests
+they answer `403`; either way the stored entries are kept. The two
 mutations are profile-scoped, demo-restricted and `non_retryable`.
 `GET /api/v2/requests/status` advertises `watchlist_titles_supported`, false
-while requests are off, and
+while requests are off or the profile is blocked from requests, and
 `watchlist_requests` when an add by the acting profile will also request the
 title: requests are on, the admin's `watchlist_requests` setting and the
 profile's `requests.watchlist_auto_request` setting are both on, and the

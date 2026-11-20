@@ -237,12 +237,13 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		return access.Scope{}, access.ErrProfileNotFound
 	}
 	profileVerified := input.ProfileID == ""
+	pinSkipped := false
 	if input.ProfileID != "" {
 		if profile == nil || profile.ID != input.ProfileID {
 			return access.Scope{}, access.ErrProfileNotFound
 		}
 		var err error
-		profileVerified, err = access.VerifyProfileForRequest(profile, input, user.ID, r.tokens)
+		profileVerified, pinSkipped, err = access.VerifyProfileForRequest(profile, input, user.ID, r.tokens)
 		if err != nil {
 			return access.Scope{}, err
 		}
@@ -359,6 +360,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		NextUpMode:                 preferences.NextUpMode,
 		NextUpNewReleasesFirst:     preferences.NextUpNewReleasesFirst,
 		HideWatchedItemsOnHome:     preferences.HideWatchedItemsOnHome,
+		CardAvailability:           preferences.CardAvailability,
 		PreferencesDegraded:        preferences.Degraded,
 		PolicyRevision:             user.AccessPolicyRevision,
 		// The policy output is tighten-only (merged_profile_verified), so a
@@ -367,10 +369,10 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		// emitted true for an unverified profile.
 		ProfileVerified: profileVerified && decision.ProfileVerified,
 		// Same fact the legacy resolver records: the profile counts as
-		// verified only because the caller (an API key) skipped the PIN
-		// check. Mutations that v1 gates on a real verification read this.
-		PINVerificationSkipped: profileVerified && decision.ProfileVerified &&
-			profile != nil && profile.PINHash != "" && input.SkipPINVerification,
+		// verified only because the caller (an API key, a view-as session)
+		// skipped the PIN check without a valid profile token. Household
+		// management, which needs a real verification, reads this.
+		PINVerificationSkipped: profileVerified && decision.ProfileVerified && pinSkipped,
 	}, nil
 }
 

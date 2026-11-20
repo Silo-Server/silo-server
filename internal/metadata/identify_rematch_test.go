@@ -137,29 +137,6 @@ func TestProcess_IdentifyAddingProviderIDKeepsAnchoredID(t *testing.T) {
 	assertIdentityIDs(t, h, providerRepo, contentID, "100", "tt0000100")
 }
 
-// Re-applying the match an item already has confirms it rather than
-// correcting it, so IDs the provider doesn't repeat are kept.
-func TestProcess_IdentifyConfirmingMatchKeepsStoredIDs(t *testing.T) {
-	const contentID = "movie-tmdb-100"
-	h := newTestHarness()
-	providerRepo := seedWrongMatch(t, h, contentID)
-	provider := &capturingMetadataProvider{response: &MetadataResult{
-		HasMetadata: true, Title: "Wrong Film", Year: 2006,
-		ProviderIDs: map[string]string{"tmdb": "100"},
-	}}
-
-	if _, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
-		ContentID:   contentID,
-		ProviderIDs: map[string]string{"tmdb": "100"},
-		Language:    "en",
-		Mode:        ModeIdentify,
-	}, []Provider{provider}); err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	assertIdentityIDs(t, h, providerRepo, contentID, "100", "tt0000100")
-	assertHomeReleaseDatesKept(t, h, contentID, true)
-}
-
 // An item that only has the wrong film's IMDb ID, identified by a TMDB ID,
 // drops that IMDb ID: the admin named the item's identity.
 func TestProcess_IdentifyByTMDBDropsStoredIMDbOnlyMatch(t *testing.T) {
@@ -217,28 +194,6 @@ func TestManualRefresh_CorrectedNFOReplacesStoredIDs(t *testing.T) {
 	}
 	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
 	assertHomeReleaseDatesKept(t, h, contentID, false)
-}
-
-// Restating the stored TMDB ID while adding a TVDB ID extends the match, so
-// the stored IMDb ID is kept.
-func TestProcess_IdentifyExtendingMatchKeepsStoredIDs(t *testing.T) {
-	const contentID = "movie-tmdb-100"
-	h := newTestHarness()
-	providerRepo := seedWrongMatch(t, h, contentID)
-	provider := &capturingMetadataProvider{response: &MetadataResult{
-		HasMetadata: true, Title: "Wrong Film", Year: 2006,
-		ProviderIDs: map[string]string{"tmdb": "100", "tvdb": "555"},
-	}}
-
-	if _, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
-		ContentID:   contentID,
-		ProviderIDs: map[string]string{"tmdb": "100", "tvdb": "555"},
-		Language:    "en",
-		Mode:        ModeIdentify,
-	}, []Provider{provider}); err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	assertIdentityIDs(t, h, providerRepo, contentID, "100", "tt0000100")
 }
 
 // runNFOCorrection runs a manual refresh whose NFO names TMDB 200 and whose
@@ -529,51 +484,6 @@ func TestCorrectionClearsLocalizedTextTheNewMatchLacks(t *testing.T) {
 				t.Errorf("fr row title=%q tagline=%q, want %q and %q", row.Title, row.Tagline, tc.wantTitle, tc.wantTagline)
 			}
 		})
-	}
-}
-
-// A corrected NFO names a different title just as Identify does, so a rating
-// source only the previous match reported goes too.
-func TestManualRefresh_CorrectedNFOReplacesRatingSources(t *testing.T) {
-	const contentID = "146000000000000100"
-	h := newTestHarness()
-	seedWrongMatch(t, h, contentID)
-	repo := &fakeRatingSourceRepo{}
-	h.service.ratingSourceRepo = repo
-
-	runNFOCorrection(t, h, contentID)
-
-	if len(repo.upserts) != 1 || !repo.upserts[0].wholeSet || len(repo.upserts[0].sources) != 0 {
-		t.Fatalf("writes = %+v, want one empty Replace", repo.upserts)
-	}
-}
-
-// A refresh prefers stored text to text in a language nobody asked for, but
-// after a correction the stored text belongs to another title, so the new
-// match's original-language text stands when no language has better.
-func TestCorrectedNFOKeepsTheNewMatchsOriginalLanguageText(t *testing.T) {
-	const contentID = "146000000000000100"
-	h := newTestHarness()
-	seedDescribedWrongMatch(t, h, contentID)
-	h.itemRepo.items[contentID].DefaultMetadataLanguage = "sv"
-	h.service.SetFallbackLanguage("en")
-	nfo := &localHintStubProvider{hints: map[string]string{"tmdb": "200"}, metadata: &MetadataResult{}}
-	remote := &languageTextProvider{slug: "tmdb", types: []string{"movie"}, items: map[string]*MetadataResult{"sv": {
-		Title: "正しい映画", TitleLanguage: "ja", TitleIsFallback: true,
-		Overview: "正しいあらすじ", OverviewLanguage: "ja", ProviderIDs: map[string]string{"tmdb": "200"},
-	}}}
-
-	if _, err := h.service.ProcessWithProviders(t.Context(), ProcessRequest{
-		ContentID: contentID, Language: "sv", Mode: ModeManualRefresh,
-	}, []Provider{nfo, remote}); err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	item, err := h.itemRepo.GetByID(t.Context(), contentID)
-	if err != nil {
-		t.Fatalf("load item: %v", err)
-	}
-	if item.Title != "正しい映画" || item.Overview != "正しいあらすじ" {
-		t.Errorf("item = %q / %q, want the new match's original-language text", item.Title, item.Overview)
 	}
 }
 

@@ -53,6 +53,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
+// sharedSecretKeyring adapts Vio's shared auth secret to nodeauth.Keyring.
+type sharedSecretKeyring string
+
+func (k sharedSecretKeyring) KeyFor(nodeauth.Target, string) (string, error) {
+	return string(k), nil
+}
+
 // SessionManagerInterface defines the operations the PlaybackHandler needs
 // on the session manager.
 type SessionManagerInterface interface {
@@ -4169,7 +4176,7 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 	fullSize := transcodeproxy.FullRepresentationSize(resp)
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
 		sw.CompletedFullResponse(fullSize) {
-		if ackErr := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), transcodeNodeURL, path, h.JWTSecret, generation); ackErr != nil {
+		if ackErr := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), transcodeNodeURL, path, sharedSecretKeyring(h.JWTSecret), generation); ackErr != nil {
 			slog.WarnContext(r.Context(), "acknowledge transcode segment completion", "component", "api", "error", ackErr, "playback_session_id", sessionID)
 		}
 	}

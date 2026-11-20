@@ -39,7 +39,7 @@ export function useWatchlistTitles(options: { enabled?: boolean } = {}) {
  * While a title downloads, the list refreshes on the interval the other
  * request surfaces use, so its progress doesn't freeze.
  */
-export function watchlistTitlesRefetchInterval(
+function watchlistTitlesRefetchInterval(
   titles: readonly WatchlistTitle[] | undefined,
 ): number | false {
   return titles?.some((t) => t.request.download) ? REQUEST_DOWNLOAD_REFETCH_INTERVAL : false;
@@ -52,7 +52,7 @@ export function watchlistTitlesRefetchInterval(
  * the watchlist (the home row, item states) refresh too. That refresh reads
  * the titles once more, which finds nothing else gone, so it settles.
  */
-export function refreshAfterTitlesRead(
+function refreshAfterTitlesRead(
   queryClient: QueryClient,
   before: readonly WatchlistTitle[] | undefined,
   after: readonly WatchlistTitle[],
@@ -77,7 +77,7 @@ export interface ToggleWatchlistTitleInput {
 }
 
 /** The toast after an add: whether the title was also requested, and why not. */
-export function watchlistAddToast(
+function watchlistAddToast(
   entry: Pick<WatchlistTitleEntry, "item_id" | "request">,
   input: Pick<ToggleWatchlistTitleInput, "title" | "request">,
   watchlistRequests: boolean | undefined,
@@ -125,7 +125,7 @@ export function watchlistAddToast(
  * page's recommendations), so this walks plain objects and arrays, and keeps
  * the reference of anything it does not change.
  */
-export function patchCachedInWatchlist(
+function patchCachedInWatchlist(
   data: unknown,
   mediaType: RequestMediaType,
   tmdbID: number,

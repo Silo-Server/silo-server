@@ -19,11 +19,13 @@ shape.
 | `GET /unread-count` | `{ "count": 0 }` |
 | `POST /{id}/read` | 204; already read succeeds, unknown delivery is 404 |
 | `POST /read-all` | 204; body requires `{ "through": "<read_cutoff>" }` |
-| `GET /preferences` | Profile ID and five preference booleans |
+| `GET /preferences` | Profile ID, `enabled`, and `notify_next_up` |
 | `PUT /preferences` | Updated preferences; omitted fields retain their values |
 | `GET /series` | The series whose new episodes can notify the profile, as `items` and `page` |
 | `PUT /series/{series_id}/mute` | 204; mutes the series for the profile, already muted succeeds, a series the viewer may not see is 404 |
 | `DELETE /series/{series_id}/mute` | 204; unmutes the series, not muted succeeds |
+| `POST /series/mute` | `results`: an outcome per distinct series in `{ "series_ids": [...] }` (up to 500) |
+| `POST /series/unmute` | `results`: an outcome per distinct series in `{ "series_ids": [...] }` (up to 500) |
 
 The inbox list accepts `status=all|unread`, `limit` up to 200, and `cursor`.
 A cursor binds the acting account/profile, filter, page size, last delivery tuple,
@@ -33,7 +35,16 @@ signed cutoff describing an empty set.
 
 Delivery IDs and linked library/item IDs are strings. Public timestamps use UTC
 milliseconds; the signed cursors retain the database timestamp precision. The
-`reason_flags` object retains event-specific data used by existing clients.
+`reason_flags` object is returned as stored, and its keys depend on the
+delivery type. An `episode.available` delivery carries `{"next_up": true}`;
+older ones can also carry `favorite`, `watchlist` and `continue_watching`,
+which clients ignore. Request notices carry request identifiers instead. A
+`watchlist.available` delivery tells a profile that a title on its watchlist
+from before the library had it has arrived, unless a request of the title
+tells it. It names the arrived movie or series in `series_id`, carries
+`{"tmdb_id", "media_type"}` (`movie` or `series`) in `reason_flags`, and goes
+out once per account, profile and item. See
+[Watchlist arrivals](architecture/notifications.md#watchlist-arrivals).
 
 Delivery insertion serializes each profile's timestamp allocation through a
 database row lock held until commit. A trigger assigns `created_at` strictly
@@ -47,33 +58,49 @@ retain their timestamps, and migration seeds the boundary from their maximum.
 ## Notified series
 
 `GET /series` (`listNotificationSeries`) lists every series the acting profile
-favorited, put on its watchlist, is partway through, or waits on a next episode
-of, and every series it muted. It reads the same interest index and mutes
-episode fanout reads, so it names exactly the series a new episode is evaluated
-for. A series in several libraries is one entry carrying every library's
-reasons.
+has a Next Up position in (it finished an episode and waits on the next), and
+every series it muted. It reads the same interest index and mutes episode
+fanout reads, so it names exactly the series a new episode is evaluated for. A
+series in several libraries is one entry.
 
-Each entry has the series as a catalog card in `item`, the profile's
-relationships in `reasons`, and in `active_reasons` the ones the profile's
-preferences let notify. `muted` is true when the profile muted the series.
-`notifies` is true when any reason is active and the series is not muted. A
-muted series keeps its `active_reasons`, so a client can say what would notify
-after an unmute, and it is listed even with no reason left, so the profile can
-still unmute it. With an
-active Next Up reason, `next_up_after` names the last episode the profile
-finished; on that reason alone, only a new episode after it notifies. It names
-the finished episode rather than the next one because the next may not exist
-yet: after a season finale, the following season's first episode notifies.
-The other reasons notify on any new episode. Delivery still skips an episode the profile was
-already notified about and a series the profile can no longer open.
+A profile is told about a new episode only when it is the next one after what
+the profile has watched: the first episode the catalog lists at or after the
+one it waits for. A listed episode whose file has not arrived holds its place,
+so a later episode arriving first does not notify. Favorites,
+the watchlist and Continue Watching do not notify on their own. See
+[Eligibility rules](architecture/notifications.md#eligibility-rules).
+
+Each entry has the series as a catalog card in `item`, `reasons`, and
+`active_reasons`. Both reason objects carry one key, `next_up`. In `reasons`
+it is true when Next Up is on for the series: the profile has not dropped it,
+has not removed its Next Up card, and has no episode partly watched since its
+last completion. In `active_reasons` it is also false when the profile's
+preferences (`enabled`, `notify_next_up`) silence it. `muted` is true when the
+profile muted the series. `notifies` is true when the episode the profile waits for
+would notify on arrival: `next_up` is active, the series is not muted, and the
+profile is caught up, meaning the first episode the catalog lists at or after
+the one Next Up waits for has not arrived, or none is listed. While that
+episode is already available, the profile has something to watch first and
+`notifies` is false. A muted series keeps its
+`active_reasons`, so a client can say what would notify after an unmute, and it
+is listed even without an active reason, so the profile can still unmute it.
+
+With an active Next Up reason, `next_up_after` names the episode just before
+the one Next Up waits for, normally the last episode the profile finished;
+only a new episode after it can notify. It names that episode rather than the
+next one because the next may not exist yet: after a season finale, the
+following season's first episode notifies. Delivery still skips an episode
+the profile was already notified about and a series the profile can no longer
+open.
 
 Filters combine:
 
-- `status=active` keeps the series that notify, `status=inactive` the ones that
-  do not (the preferences silence every reason, or the profile muted the
-  series), and the default `all` keeps both.
-- `reason=favorite|watchlist|continue_watching|next_up` keeps the series with
-  that relationship, whether or not the preferences let it notify.
+- `status=active` keeps the series whose `notifies` is true. `status=inactive`
+  keeps the rest: the preferences silence Next Up, the profile has an
+  available episode to watch first, Next Up is off for the series (dropped,
+  its card removed, an episode partly watched), or the profile muted it.
+  `status=muted` keeps only the series the profile muted, and the default
+  `all` keeps every one.
 - `q` keeps the series whose title or sort title contains the text,
   case-insensitively.
 
@@ -91,8 +118,9 @@ check, so a cursor never names a hidden series. A page can still hold fewer
 than `limit` entries if access changes between that check and card resolution.
 `image_size` selects the card artwork variant.
 
-The interest index follows favorites, watchlist, and progress changes
-asynchronously, so a just-favorited series can take a moment to appear.
+The interest index follows watch progress, watch history, series drops, and
+Next Up card removals asynchronously, so a series can take a moment to appear
+after the profile finishes its first episode.
 `series.available` in `GET /capabilities` reports the operation.
 
 ### Muting one series
@@ -106,9 +134,9 @@ Muting a series already muted succeeds and changes nothing. An ID that names no
 series, or a series the viewer may not see, is 404.
 
 `DELETE /series/{series_id}/mute` (`unmuteNotificationSeries`) lifts the mute.
-The series notifies again for its active reasons. Fanout reads the mute when it
-evaluates a new episode, after the release settle delay (30 seconds by
-default): an episode it evaluated while the series was muted is not announced
+The series notifies again while Next Up is active for it. Fanout reads the mute when it
+evaluates a new episode, after the release settle delay (a fixed 30
+seconds): an episode it evaluated while the series was muted is not announced
 later, and one still waiting for fanout when the profile unmutes is announced.
 The same holds the other way: a mute made just after an episode arrives can
 still stop its notification. Unmuting a series that is not muted succeeds. Unmute runs no access check, so a
@@ -118,6 +146,24 @@ Notifications already delivered stay in the inbox, and a delivery fanout
 created before the mute committed can still reach its channels. Both writes
 answer 204 with no body. `series.mute` in `GET /capabilities` reports both
 operations and the `muted` field.
+
+### Muting many series
+
+`POST /series/mute` (`muteManyNotificationSeries`) and `POST /series/unmute`
+(`unmuteManyNotificationSeries`) do what the one-series operations do for up to
+500 series in one request, so a client can mute everything it selected or
+everything a filter matched. The body is `{ "series_ids": [...] }`; a repeated
+ID is answered once. The response is 200 with `results`, one
+`{ "series_id", "outcome" }` per distinct ID in request order:
+
+- `applied`: this call muted, or unmuted, the series.
+- `unchanged`: the series was already in the requested state.
+- `not_found`: a mute named no series, or a series the viewer may not see. Such
+  an ID is not written. An unmute never answers it, since unmute runs no access
+  check.
+
+One bad ID does not fail the rest. `series.bulk_mute` in `GET /capabilities`
+reports both operations and the `status=muted` filter.
 
 ## Fixed read cutoff
 
@@ -150,11 +196,13 @@ scope.
 
 ## Preference writes
 
-`enabled`, `notify_favorites`, `notify_watchlist`, `notify_continue_watching`, and
-`notify_next_up` are optional booleans. Explicit false is preserved; v2 rejects
-null. Partial fields apply in one database statement,
-preventing independent concurrent toggles from overwriting each other. Missing
-preference rows retain the existing all-enabled defaults.
+`enabled` (the master toggle) and `notify_next_up` are optional booleans.
+Explicit false is preserved; v2 rejects null and any other field, including
+the retired `notify_favorites`, `notify_watchlist` and
+`notify_continue_watching`, with a 422 `validation_failed` problem. Partial
+fields apply in one database statement, preventing independent concurrent
+toggles from overwriting each other. Missing preference rows default to both
+on.
 
 The web captures account/profile authority for requests and mutations, validates
 pagination, and surfaces initial and partial failures. It does not automatically
@@ -174,8 +222,10 @@ The route accepts ordinary bearer/API-key authentication with `X-Profile-Id`,
 or the existing Apple display token in the Authorization header. A display
 token binds its own profile, ignores a supplied profile header, and requires a
 valid login session and a still-owned profile. It is rejected by other API v2
-operations. Query-string display credentials are not accepted. Existing
-pre-auth and post-auth rate limits apply. This read neither marks a notification
+operations. Query-string display credentials are not accepted. A display
+token spends rate-limit budget once, after its signature checks out and before
+its login session is looked up; a credential that
+does not validate is refused without spending any. This read neither marks a notification
 read nor sends a push. Apple registration and display-token issuance use
 `registerApplePushDevice`; see
 [Apple registration and display renewal](#apple-registration-and-display-renewal).
@@ -291,8 +341,10 @@ until an administrator turns delivery on. Native clients see the effective
 state through `GET /api/v2/notifications/capabilities` and need no change.
 
 Relay errors are problem documents, with `Retry-After` retained when supplied.
-Validation failures are 422 and relay upstream failures are the shared 500
-`internal_error`. Native clients and Jellyfin compatibility do not manage relay
+A `relay_url` that is not a well-formed URI is a 422 (`validation_failed`);
+a well-formed URL the server rejects as a relay origin is a 400
+(`malformed_request`); a deployment the relay rejects is a 422; and relay
+upstream failures are the shared 500 `internal_error`. Native clients and Jellyfin compatibility do not manage relay
 credentials and need no consumer change.
 
 ### API v2 email and Discord preferences
@@ -464,8 +516,14 @@ Discord-link callers, and Jellyfin compatibility has no equivalent operation.
 `POST /api/v2/notifications/webhooks` creates a webhook for the active profile.
 `POST /api/v2/admin/notifications/server-channels` creates a server channel for
 an acting administrator. Both require `name` and `url`; optional type and event
-flags retain the existing service defaults. Creation validates and stores the
-destination through the notification service and does not send a message.
+flags retain the existing service defaults. A personal webhook's event flags
+are `notify_next_up` (new-episode notifications) and `notify_requests`
+(request notices), each on when omitted; the destination list returns the
+same two. A generic webhook's payload carries `reason_flags` as
+`{"next_up": <bool>}`; see
+[Generic payload and HMAC signing](architecture/notifications.md#generic-payload-and-hmac-signing).
+Creation validates and stores the destination through the notification
+service and does not send a message.
 
 Destinations require HTTPS without embedded credentials. Registration resolves
 the host with a two-second deadline and rejects failed, empty, or disallowed
@@ -503,7 +561,7 @@ The operation is **non-retryable**. A delayed repeat can clear an address reques
 
 ### Delete a personal webhook
 
-`DELETE /api/v2/notifications/webhooks/{id}` (`deleteNotificationWebhook`) requires the original row's strong validator in `If-Match`. The bounded webhook list supplies that quoted validator in each item's `etag`. Authenticated profile authority and the demo guard apply. Missing/foreign resources return `404` before precondition evaluation; an existing resource without `If-Match` returns `428`, a stale validator returns `412` with the current `ETag`, and an exact match returns bodyless `204`. Standard conditional-header grammar applies. The UI never supplies a wildcard.
+`DELETE /api/v2/notifications/webhooks/{id}` (`deleteNotificationWebhook`) requires the original row's strong validator in `If-Match`. The bounded webhook list supplies that quoted validator in each item's `etag`. Authenticated profile authority and the demo guard apply. Missing/foreign resources return `404` before precondition evaluation; an existing resource without `If-Match` returns `428`, a stale validator returns `412` with the current `ETag`, and an exact match returns bodyless `204`. Standard conditional-header grammar applies, so `If-Match: *` also passes for an existing row; the UI never sends it.
 
 A database sequence and insert/update trigger allocate a fresh revision for every row change, including configuration and provider outcome writers. Revision allocation is not based on timestamps and never reuses a deleted identity's validator. Deletion locks the profile-owned row, evaluates its current validator, and deletes within that same transaction; a concurrent editor that commits first is preserved by a stale-delete refusal. Stored delivery attempts cascade only on a successful deletion. Deploy the revision migration before code that reads the new column. This does not change provider delivery or recall an already-dispatched request.
 
@@ -525,7 +583,7 @@ This operation is non-retryable. The existing settings action captures ID and au
 
 ### Update personal webhook configuration
 
-`PUT /api/v2/notifications/webhooks/{id}` (`updateNotificationWebhook`) requires acting-profile authority, the demo guard and the original strong `If-Match` validator supplied with the listed row. Name, URL, enabled state and notification reason flags are optional; omitted fields stay unchanged. Type and signing secret are not configuration fields. Missing/foreign rows return `404`, missing preconditions `428`, stale validators `412`, invalid configuration `422`, and an unavailable service `503`. Success returns `200` with the destination and its new validator in both `etag` and `ETag`.
+`PUT /api/v2/notifications/webhooks/{id}` (`updateNotificationWebhook`) requires acting-profile authority, the demo guard and the original strong `If-Match` validator supplied with the listed row. Name, URL, enabled state, `notify_next_up` and `notify_requests` are optional; omitted fields stay unchanged. Type and signing secret are not configuration fields. Missing/foreign rows return `404`, missing preconditions `428`, stale validators `412`, invalid configuration `422`, and an unavailable service `503`. Success returns `200` with the destination and its new validator in both `etag` and `ETag`. As with delete, `If-Match: *` also passes for an existing row; the UI never sends it.
 
 The repository locks the profile's exact row, checks its current revision, applies existing validation and writes configuration in one transaction. URL replacement preserves type restrictions, destination validation and encrypted URL binding. URL changes and re-enabling retain the existing failure-reset behavior. The write does not copy secret, type or delivery outcome fields from an editor. The server-owned revision trigger remains required and covers provider bookkeeping; those changes can conservatively invalidate an editor. Other writers may still change the row after this operation commits. A successful response is an observation, not a lease.
 
@@ -548,6 +606,136 @@ The v2 repository reads the current row under a lock and commits configuration a
 This is a non-retryable operation: resubmitting a URL replacement advances the watermark again and can skip intervening events. There is no conditional revision contract for this administrator row. The lock protects the transaction; it does not reject stale editor observations or prevent later configuration writes. The actual editor and enabled toggle capture a copy of input and authority at invocation, send once without authentication replay, refuse stale dispatch/receipt/cache/error publication and invalidate only the captured administrator list after success. No automatic read, rebase, retry or compensating write follows uncertainty.
 
 No provider delivery is sent by the update, and already-dispatched work cannot be recalled. No attempt table, secret lease, fleet rollout or enrollment guarantee is introduced.
+
+## Plugin destinations
+
+A plugin with a `notification_channel.v1` capability provides a channel,
+such as ntfy or Pushover. A profile adds destinations on that channel next to
+its webhooks, and they receive the same deliveries webhooks do:
+new episodes when `notify_next_up` is on, and request updates and watchlist
+arrivals when `notify_requests` is on. Plugin destinations exist only when the server
+has an at-rest cipher, because their settings hold credentials.
+`GET /api/v2/notifications/capabilities` reports `plugin_destinations.available`
+(an enabled plugin provides at least one channel) and `max_per_profile` (10).
+
+All operations below are profile-scoped, demo-guarded when mutating, and
+identify the recipient by account and profile together. A destination that
+belongs to another account, including another account's profile with the
+same ID, answers `404`.
+
+### List the channels
+
+`GET /api/v2/notifications/plugin-channels` (`listNotificationPluginChannels`)
+returns the channels enabled plugins provide now, unpaginated. Each names its
+`plugin_id` and `capability_id`, which stay stable across plugin upgrades, a
+`display_name` and `description`, and `settings_form`
+(`NotificationPluginSettingsForm`): one flat list of `fields`, rendered in
+order. Each field has its `key` in `settings`, its `label`, `control`
+(`text`, `password`, `number`, `switch` or `select`), `type`, the JSON type the
+value is sent as (`string`, `integer`, `number` or `boolean`), `required` and
+`secret`. These members are optional and absent when the plugin declares
+none, never null or empty: `description` and `placeholder` (the plugin's
+text), `default_value` (of the field's `type`), `options` (a select field's
+`value` and `label` pairs, each `value` of the field's `type`, so a number
+for an `integer` or `number` field), and the checks the server applies on
+save: `minimum`/`maximum` (inclusive), `min_length`/`max_length` and
+`pattern`. `pattern` is Go RE2 syntax and matches anywhere in the string
+unless anchored; a client may check a value against it before saving, but
+the server's check is the one that counts. `required` is what the server
+enforces: it refuses a save without that setting, and a stored secret left
+blank on an edit counts as present. A client that meets a `control` it
+doesn't know renders the field by its `type`: a switch for `boolean`, a
+number input for `integer` and `number`, a text input otherwise. The
+SDK's `manifest.ValidateDestinationSchema` keeps a destination form to this
+shape, and the server refuses to install or upgrade a plugin whose form
+breaks it. A setting is write-only (`secret: true`) when the plugin marks
+its form field `secret`, gives it a password control, or gives its schema
+property `format: password`; the SDK refuses `writeOnly` in a destination
+schema.
+
+### List destinations
+
+`GET /api/v2/notifications/plugin-destinations` (`listNotificationPluginDestinations`)
+is cursor-paginated in creation order. Each item carries its `etag`,
+`notify_next_up` and `notify_requests`, the delivery bookkeeping webhooks carry (`consecutive_failures`,
+`disabled_reason`, `last_success_at`, `last_failure_at`,
+`last_failure_message`), `settings`, and `secret_settings_set`, the secret
+fields that have a stored value. `settings` holds only the fields the channel's
+current schema declares and doesn't mark secret: a stored field the schema no
+longer declares, such as a secret a plugin upgrade renamed, is never returned.
+A setting saved as secret stays write-only after a plugin upgrade drops its
+secret marking: it is listed in `secret_settings_set`, not returned in
+`settings`, until the owner replaces or clears it. Clients treat a field
+named in `secret_settings_set` as secret whatever its form field says.
+`available`
+is false, `channel_name` empty and `settings` empty while no enabled plugin
+provides the destination's channel; nothing is sent or queued then. Whether
+a channel is available is read in the same transaction that queues the
+notification, so enabling, disabling or removing a plugin takes effect for the
+next notification on every server.
+
+### Create a destination
+
+`POST /api/v2/notifications/plugin-destinations` (`createNotificationPluginDestination`)
+takes `plugin_id`, `capability_id`, `name` (1 to 64 characters, unique per
+account profile), `settings`, and optional `notify_next_up` and
+`notify_requests` (default on); `name` is required and `clear_secrets` isn't
+accepted. The
+server accepts only settings the schema or its form declares. It refuses
+keys a schema allows only through `additionalProperties`, which it could
+neither return nor keep secret. It checks each value against the form's
+JSON Schema: its declared scalar type (an object or array is refused),
+required fields, `enum`, string length and `pattern`, and numeric bounds.
+An `integer` setting is also limited to 2^53-1 (9007199254740991) in
+magnitude, the largest integer a JSON number carries exactly on its way to
+the plugin, and a larger one answers `out_of_range`. Each failing setting answers `422` with a field error at
+`body.settings.<field>` (`unknown_field`, `required`, `invalid_type`,
+`invalid_enum`, `out_of_range` or `invalid`). It then calls the plugin's
+`ValidateDestination`. A refusal answers `422` with the plugin's
+message, with the destination's secret values masked, in the problem's
+error detail at `body.settings`. A profile deleted meanwhile answers `404`.
+A channel no enabled plugin provides answers `422` with a field error at
+`body.capability_id`; so does a channel whose stored form the server can't
+use (its schema doesn't compile), which it treats as not provided. A plugin that provides it but fails to answer (it
+returns an error, times out or can't start) answers `503
+dependency_unavailable` with `Retry-After`; ten destinations answer `422`.
+Success is `201` with the destination and its `ETag`. The operation is
+non-retryable: a replay with the same name answers `422` with the field code
+`duplicate` at `body.name`, since names are unique per profile. A rename to a
+taken name answers the same.
+
+### Update a destination
+
+`PUT /api/v2/notifications/plugin-destinations/{id}` (`updateNotificationPluginDestination`)
+requires the original `If-Match` validator, like a webhook update. Omitted
+fields stay unchanged. `settings` merges over the stored settings: a
+non-secret field sent as `null` is removed, a secret field sent blank or left
+out keeps its stored value, and `clear_secrets` removes named secrets. A
+stored setting the channel's current form no longer declares, after a plugin
+update, is dropped on the next update. Merged settings are checked as on
+create; a stored secret left blank counts as present for `required`. When
+the server can't decrypt the stored settings, or no enabled plugin provides
+the destination's channel any more, a settings change answers `409
+conflict` and nothing is written; a plugin that fails to answer its check
+answers `503` with `Retry-After`.
+Changed settings are checked by the plugin again and, like a changed webhook
+URL, clear the failure streak and the disable reason; so does re-enabling.
+Missing preconditions answer `428`, stale validators `412`. The validator
+changes on the owner's edits and when the server disables the destination,
+not when a send updates its delivery bookkeeping. The plugin checks
+changed settings before the destination is locked for the write; if the
+destination changes meanwhile, the update answers `412` with the current
+`ETag` and writes nothing, even under `If-Match: *`.
+
+### Delete and test
+
+`DELETE /api/v2/notifications/plugin-destinations/{id}` (`deleteNotificationPluginDestination`)
+requires `If-Match` and removes the destination and its queued attempts.
+`POST /api/v2/notifications/plugin-destinations/{id}/test` (`testNotificationPluginDestination`)
+sends one test message now and answers `200` with `ok` and `duration_ms`,
+plus `message` when the send failed or the plugin gave one; a failed send is
+`ok: false`, not retried and not counted. It
+is non-retryable.
 
 ## Ordered Apple registration storage
 

@@ -36,14 +36,18 @@ export const SECTIONS: { key: Section; label: MessageKey; types: ItemDetail["typ
   {
     key: "general",
     label: "web.item.editMetadata.sectionGeneral",
-    types: ["movie", "series", "season", "episode"],
+    types: ["movie", "series", "season", "episode", "audiobook"],
   },
   {
     key: "dates",
     label: "web.item.editMetadata.sectionDates",
-    types: ["movie", "series", "season", "episode"],
+    types: ["movie", "series", "season", "episode", "audiobook"],
   },
-  { key: "tags", label: "web.item.editMetadata.sectionTags", types: ["movie", "series"] },
+  {
+    key: "tags",
+    label: "web.item.editMetadata.sectionTags",
+    types: ["movie", "series", "audiobook"],
+  },
   {
     key: "ids",
     label: "web.item.editMetadata.sectionIds",

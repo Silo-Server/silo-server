@@ -141,50 +141,6 @@ func (s *Service) ListPage(ctx context.Context, userID int, profileID, deviceID 
 func (r *Repository) ListPage(ctx context.Context, userID int, profileID, deviceID string, after *RegistryPosition, limit int) ([]*Download, error) {
 	return r.listRegistryPage(ctx, userID, profileID, deviceID, "", after, limit)
 }
-
-// Get returns one registry entry in the same mode listRegistryPage uses: the
-// device-managed row when deviceID is set (scoped on profile and device), else
-// the account's ephemeral row. A managed row is never reachable through the
-// device-less mode, so a caller cannot read another scope's entry by dropping
-// the device header. Preparation progress is attached exactly as it is for a
-// listed page, so a polling client sees the same shape either way.
-func (s *Service) Get(ctx context.Context, userID int, profileID, deviceID, downloadID string) (*Download, error) {
-	if downloadID == "" {
-		return nil, ErrNotFound
-	}
-	if deviceID != "" {
-		if profileID == "" {
-			return nil, ErrProfileRequired
-		}
-		dl, err := s.repo.GetManagedByID(ctx, downloadID, userID, profileID, deviceID)
-		if err != nil {
-			return nil, err
-		}
-		s.attachPreparation(ctx, dl)
-		return dl, nil
-	}
-	dl, err := s.repo.GetByID(ctx, downloadID)
-	if err != nil {
-		return nil, err
-	}
-	if dl.UserID != userID || dl.IsManaged() {
-		return nil, ErrNotFound
-	}
-	s.attachPreparation(ctx, dl)
-	return dl, nil
-}
-
-// attachPreparation decorates one entry with its preparation progress. Progress
-// is decoration; a failure to read it must not fail the entry read.
-func (s *Service) attachPreparation(ctx context.Context, dl *Download) {
-	if dl == nil {
-		return
-	}
-	rows := []*Download{dl}
-	if err := s.repo.attachPreparations(ctx, rows); err != nil {
-		slog.WarnContext(ctx, "download preparation progress unavailable", "component", "downloads", "download_id", dl.ID, "error", err)
-	}
-}
 func (r *Repository) listRegistryPage(ctx context.Context, userID int, profileID, deviceID, batchID string, after *RegistryPosition, limit int) ([]*Download, error) {
 	if limit < 1 || limit > registryPageMaxRows {
 		return nil, fmt.Errorf("download page limit must be 1 to %d", registryPageMaxRows)

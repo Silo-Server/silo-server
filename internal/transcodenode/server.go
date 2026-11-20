@@ -412,6 +412,16 @@ type Server struct {
 	// shuttingDown is guarded by reloadMu. Once set, no fresh or reconstructed
 	// session may register after the shutdown drain has taken its snapshot.
 	shuttingDown bool
+	// jobCap is the node's own job cap, 0 for none; admission guards
+	// admitted, the new work it let in that activeJobs does not count yet.
+	jobCap    atomic.Int32
+	admission sync.Mutex
+	admitted  int
+	// declaredHWAccel and artifactBudget are what the node's operator
+	// advertised; see SetDeclaredHWAccel and SetArtifactBudget.
+	declaredHWAccel string
+	artifactBudget  atomic.Int64
+
 	// startThrottler is a test seam; production falls back to session.StartThrottler.
 	startThrottler func(*playback.TranscodeSession, int)
 

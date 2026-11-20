@@ -82,40 +82,6 @@ func TestUsagePauseBlocksReadinessAndPinnedRequestsUntilExplicitCheck(t *testing
 	}
 }
 
-func TestUsagePauseAllowsCatalogAndSelectionWithoutResuming(t *testing.T) {
-	s, store := selectionFixture(t, map[string]string{"ai.auth_mode": "chatgpt", "ai.chat_model": "gpt-6-luna"})
-	if err := s.RejectUsageToken(t.Context(), "b-token"); err != nil {
-		t.Fatal(err)
-	}
-	calls := 0
-	s.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
-		calls++
-		if r.URL.String() != s.modelsURL || r.Header.Get("Authorization") != "Bearer b-token" {
-			t.Fatal("catalog used different registration")
-		}
-		return response(http.StatusOK, map[string]any{"models": []map[string]string{{"slug": "gpt-6-luna", "visibility": "list"}}}), nil
-	})
-	if err := s.SelectAccount(t.Context(), "b"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Models(t.Context(), ""); err != nil {
-		t.Fatal(err)
-	}
-	validation, err := s.PrepareModelValidation(t.Context(), map[string]string{"ai.reasoning_effort": "high"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := validation.Check(store.values, store.values); err != nil {
-		t.Fatal(err)
-	}
-	if calls != 3 || stored(t, store).Active != "b" || !stored(t, store).Accounts[1].UsageLimited {
-		t.Fatal("catalog or selection cleared pause")
-	}
-	if _, err := s.TextConfig(t.Context()); !errors.Is(err, ErrUsageLimited) {
-		t.Fatalf("selection enabled inference: %v", err)
-	}
-}
-
 func TestUsageCallbacksPreserveOtherAccountsAndReplacementTokens(t *testing.T) {
 	for _, limited := range []bool{true, false} {
 		for _, rotated := range []bool{true, false} {

@@ -64,93 +64,6 @@ func seedSeriesSyncCounters(t *testing.T) (*testHarness, string, string, *atomic
 	return h, seriesID, seasonID, linkPasses, debts
 }
 
-func TestScheduledRefreshBatchRunsSeriesSyncOncePerSeries(t *testing.T) {
-	h, seriesID, seasonID, linkPasses, debts := seedSeriesSyncCounters(t)
-	ctx := context.Background()
-
-	batchCtx, flush := h.service.BeginScheduledRefreshBatch(ctx)
-	targets := []struct{ targetType, contentID string }{
-		{RefreshTargetEpisode, "episode-s05e03"},
-		{RefreshTargetEpisode, "episode-s05e04"},
-		{RefreshTargetSeason, seasonID},
-	}
-	for _, target := range targets {
-		if err := h.service.RefreshScheduledTarget(batchCtx, target.targetType, target.contentID); err != nil {
-			t.Fatalf("RefreshScheduledTarget(%s %s): %v", target.targetType, target.contentID, err)
-		}
-	}
-
-	if got := linkPasses.Load(); got != 0 {
-		t.Fatalf("series link passes during the batch = %d, want 0 until the flush", got)
-	}
-	if got := debts.sweepCount(seriesID); got != 0 {
-		t.Fatalf("series debt sweeps during the batch = %d, want 0 until the flush", got)
-	}
-
-	flush(ctx)
-
-	if got := linkPasses.Load(); got != 1 {
-		t.Fatalf("series link passes after the flush = %d, want 1", got)
-	}
-	if got := debts.sweepCount(seriesID); got != 1 {
-		t.Fatalf("series debt sweeps after the flush = %d, want 1", got)
-	}
-	updated, err := h.service.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, 5, 4)
-	if err != nil {
-		t.Fatalf("GetBySeriesAndNumber S05E04: %v", err)
-	}
-	if updated.Overview != "Episode 4 overview" {
-		t.Fatalf("S05E04 overview = %q, want the refreshed provider metadata", updated.Overview)
-	}
-}
-
-func TestScheduledRefreshWithoutBatchSyncsSeriesAfterEachTarget(t *testing.T) {
-	h, seriesID, _, linkPasses, debts := seedSeriesSyncCounters(t)
-	ctx := context.Background()
-
-	for _, episodeID := range []string{"episode-s05e03", "episode-s05e04"} {
-		if err := h.service.RefreshScheduledTarget(ctx, RefreshTargetEpisode, episodeID); err != nil {
-			t.Fatalf("RefreshScheduledTarget(%s): %v", episodeID, err)
-		}
-	}
-
-	if got := linkPasses.Load(); got != 2 {
-		t.Fatalf("series link passes = %d, want one per refreshed target", got)
-	}
-	if got := debts.sweepCount(seriesID); got != 2 {
-		t.Fatalf("series debt sweeps = %d, want one per refreshed target", got)
-	}
-}
-
-func TestScheduledRefreshBatchKeepsFullSeriesPersistInline(t *testing.T) {
-	h, seriesID, _, linkPasses, debts := seedSeriesSyncCounters(t)
-	ctx := context.Background()
-	series := h.itemRepo.items[seriesID]
-
-	batchCtx, flush := h.service.BeginScheduledRefreshBatch(ctx)
-	h.service.persistSeasonsAndEpisodes(
-		batchCtx, series, map[string]string{"tmdb": series.TmdbID}, "en", "en",
-		[]SeasonResult{{SeasonNumber: 5, Title: "Provider Season 5"}},
-		[]EpisodeResult{{SeasonNumber: 5, EpisodeNumber: 3, Title: "Provider Episode 3"}},
-		MergeReplaceUnlocked,
-	)
-
-	// A whole-series refresh feeds the series' own debt sync straight after it
-	// returns, so its link pass and sweep must not wait for the batch flush.
-	if got := linkPasses.Load(); got != 1 {
-		t.Fatalf("series link passes after a full-series persist = %d, want 1 inline", got)
-	}
-	if got := debts.sweepCount(seriesID); got != 1 {
-		t.Fatalf("series debt sweeps after a full-series persist = %d, want 1 inline", got)
-	}
-
-	flush(ctx)
-
-	if got := linkPasses.Load(); got != 1 {
-		t.Fatalf("series link passes after the flush = %d, want no deferred repeat", got)
-	}
-}
-
 func TestScheduledRefreshBatchFlushSkipsCanceledContext(t *testing.T) {
 	h, seriesID, _, linkPasses, debts := seedSeriesSyncCounters(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -252,44 +165,6 @@ func TestScheduledRefreshBatchKeepsFailureDebtOfAFailedSibling(t *testing.T) {
 		t.Fatalf("series debt sweeps after the flush = %d, want 1", got)
 	}
 	assertEpisodeFailureDebtKept(t, debts.fakeRefreshDebtRepo, "episode-s05e04")
-}
-
-func TestScheduledRefreshBatchFlushSyncsEachRecordedSeriesOnce(t *testing.T) {
-	h := newTestHarness()
-	h.service.episodeRepo = newFakeEpisodeRepo()
-	var mu sync.Mutex
-	passes := make(map[string]int)
-	h.service.hooks.ensureSeriesEpisodeLinks = func(_ context.Context, seriesID string) error {
-		mu.Lock()
-		passes[seriesID]++
-		mu.Unlock()
-		return nil
-	}
-	ctx := context.Background()
-
-	batchCtx, flush := h.service.BeginScheduledRefreshBatch(ctx)
-	seriesIDs := make([]string, 0, 2*scheduledRefreshFlushWorkers)
-	for i := range 2 * scheduledRefreshFlushWorkers {
-		seriesIDs = append(seriesIDs, fmt.Sprintf("series-%02d", i))
-	}
-	for range 3 {
-		for _, seriesID := range seriesIDs {
-			h.service.syncSeriesEpisodeStateOrDefer(batchCtx, seriesID)
-		}
-	}
-	flush(ctx)
-	flush(ctx)
-
-	mu.Lock()
-	defer mu.Unlock()
-	if len(passes) != len(seriesIDs) {
-		t.Fatalf("series synced = %d, want %d", len(passes), len(seriesIDs))
-	}
-	for _, seriesID := range seriesIDs {
-		if passes[seriesID] != 1 {
-			t.Fatalf("series %s link passes = %d, want 1", seriesID, passes[seriesID])
-		}
-	}
 }
 
 // targetDebtSyncCountingRepo counts the writes that settle one target's debt

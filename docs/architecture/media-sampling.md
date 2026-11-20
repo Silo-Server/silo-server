@@ -112,7 +112,10 @@ statistics. Rules:
   explicit `file:` URL, and the input opens with
   `-protocol_whitelist file,pipe`; the concat demuxer otherwise refuses both.
   Paths are single-quoted, with a quote written as `'\''`; a path with a
-  line break or NUL is rejected, since the list is read line by line.
+  line break or NUL is rejected, since the list is read line by line. A
+  relayed input (a transcode node reading through the core) uses another form
+  of the list, which the capability check covers; see
+  [relayed concat](transcode-nodes.md#relayed-concat).
 - Inpoints are container timestamps, while sample times count from the
   start of the file like every other result time, hence the start-time
   offset. Files remuxed with their original timestamps (`copyts`) often
@@ -156,7 +159,8 @@ is held as PCM. Subtitle sync is its consumer.
 `POST /media-samples/run` on the transcode-node listener runs one `Request`
 with the node's ffmpeg and returns its `Result` as JSON
 (`mediasample.RemoteClient` is the caller). The node requires a
-[signed request](worker-http-protocol.md#authentication) and an input path it is allowed to read, accepts software attempts
+[signed request](worker-http-protocol.md#authentication) and a
+[source grant](transcode-nodes.md#source-grants) for the input, accepts software attempts
 only, and answers a failed run with `422` and a `RemoteFailure` whose reason is
 the run's `Classify` cause. `RemoteError.Infrastructure` tells a caller
 whether running the request elsewhere may succeed: an unreachable node, a 5xx,
@@ -257,8 +261,14 @@ before `-i`, so ffmpeg decodes from the previous keyframe up to the time),
 one frame (`-frames:v 1`), and the MJPEG encoder writing to stdout. ffmpeg's
 whole stdout is the image; a run that succeeds without writing one, such as
 a time past the end of the video, fails the attempt as `empty`.
-`ImageOutput.Width` scales the image to an even width, keeping the aspect
-ratio; zero keeps the source size.
+Every image chain ends by applying the stream's sample aspect ratio
+(`scale=if(between(sar\,0.25\,4)\,round(iw*sar)\,iw):ih`), so a frame from
+non-square-pixel video, such as 1440x1080 HDV or a DVD rip, comes out at its
+display width instead of squeezed. A square-pixel source, or one without a
+sample aspect ratio, scales to its own size, which ffmpeg passes through
+unchanged; a ratio outside 1:4 to 4:1 is taken for bad metadata and ignored.
+`ImageOutput.Width` then scales the image to an even width, keeping the
+aspect ratio; zero keeps that display size.
 
 A hardware image attempt downloads VAAPI surfaces as NV12
 (`hwdownload,format=nv12`) before any scaling; see
@@ -291,6 +301,22 @@ refused; every other failure moves on to the next planned attempt. When a
 frame was extracted but encoding or storing its image fails, the chapter
 records `chapter_upload_failed` and backs off on its own; the file is not
 marked failed.
+
+One extracted frame is bounded twice. `-max_pixels` before `-i` stops the
+decoder on a picture over `MaxImagePixels` (100 megapixels), and the runner
+reads at most `MaxImageBytes` (64 MiB) of stdout, failing the attempt with
+`ErrImageTooLarge` past it. ffmpeg compares the width rounded up to its
+stride alignment, so it gets the limit plus a sixteenth. `chapterthumbs`
+also refuses a file before extraction when every video track with known
+dimensions is over the pixel limit. Each of these is reported as
+`decode_invalid_data`. A transcode node's response is read with the same
+byte limit; one over it fails as the node being unavailable, since a node
+with the limit never sends one, and `prefer_transcode_nodes` then extracts
+locally. The pixel limit equals the source budget in `imageutil`, which
+rejects any larger frame afterwards anyway, so a frame at its decoded size
+or wider that yields a thumbnail is not refused. The limit is on the decoded
+size, which decides the decoder's memory, so a larger source whose sample
+aspect ratio narrows it to under the budget is refused.
 
 ## Sheets
 
@@ -392,8 +418,9 @@ must use the returned height and reject chunks whose geometry differs.
 - MPEG-4 Part 2 (`mpeg4`, `msmpeg4*`) adds `-flags:v +low_delay`. Its
   decoder otherwise holds each picture back for B-frames that a
   keyframes-only read never sends, and releases it when the next keyframe
-  arrives; in AVI, whose packets carry no PTS, the frame then takes that
-  keyframe's time, and every cell showed the keyframe a GOP before its own.
+  arrives, and a frame without a PTS of its own then takes that keyframe's
+  time: before windows demuxed with genpts (below), every cell of a
+  packed-bitstream AVI showed the keyframe a GOP before its own.
   Keyframes-only and reference-only reads decode no B-frames, so low delay
   changes no picture. The repeat repair keeps its own `noref`.
 - A window also copies the same input's video packets to a `framecrc`
@@ -416,15 +443,17 @@ must use the returned height and reject chunks whose geometry differs.
   its longest track, so without this the samples of such an audio tail
   failed every run; counting them as filled would still fail a short last
   chunk made mostly of tail samples.
-- A packet without a PTS counts by its DTS only when the decoder runs in
-  low delay (MPEG-4 Part 2, above). A DTS never runs ahead of its PTS, so
-  the extent can only shrink, by the reorder delay. Without a PTS the decoder
-  stamps each frame with the DTS of the packet that released it, which is
-  the frame's own only when the decoder releases each keyframe as it
-  arrives. A reordering decoder does not: H.264 with B-frames in AVI
-  releases each keyframe two GOPs late in a keyframes-only read, and low
-  delay does not change that. Such windows fail with no usable packet timing
-  rather than publish every cell at an earlier keyframe.
+- A window demuxes with `-fflags +genpts`. AVI packets carry a DTS but no
+  PTS, and without one the decoder stamps each frame with the DTS of the
+  packet that released it. A reordering decoder holds each keyframe of a
+  keyframes-only read back: H.264 with B-frames in AVI released each two
+  GOPs late, and low delay does not change that, so every cell showed an
+  earlier keyframe and the timing file had no packet time at all. genpts
+  fills each missing PTS from the stream's later DTS before the packet is
+  decoded or copied, so frames and the timing file keep their own times;
+  packets that carry a PTS keep it. A derived PTS can sit a frame after the
+  keyframe's true time, as it does in playback, which demuxes with genpts
+  too. A video packet still without a PTS has no usable time.
 - A cell without a frame shows the previous cell's frame, and cells before
   the first frame show the first, so the grid never shifts. A run that had
   to fill more than 10 % of its cells (and more than one) fails as `empty`,

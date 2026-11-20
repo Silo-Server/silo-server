@@ -5,7 +5,9 @@ MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
 SHARED_MAKEFILE_LOCAL := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/../Makefile.local))
 DEFAULT_PLUGIN_SDK_DIR := $(abspath ../silo-plugin-sdk)
 SHARED_PLUGIN_SDK_DIR := $(if $(MAIN_CHECKOUT_ROOT),$(abspath $(MAIN_CHECKOUT_ROOT)/../silo-plugin-sdk))
-GOOSE := go run github.com/pressly/goose/v3/cmd/goose@v3.27.1
+# The Goose CLI only creates and validates migration files here. Skip the
+# other database drivers when building it on a fresh runner.
+GOOSE := go run -tags=no_clickhouse,no_libsql,no_mssql,no_mysql,no_sqlite3,no_vertica,no_ydb github.com/pressly/goose/v3/cmd/goose@v3.27.1
 GOOSE_DIR := migrations/sql
 ENV_FILE ?= .env
 
@@ -47,9 +49,14 @@ dev-backend:
 dev-proxy:
 	go run ./cmd/silo/ --mode=proxy
 
-# Run a transcode node (HLS transcode worker, no DB required)
+# Run a transcode node against a running main server. It holds no database,
+# Redis or shared secret: it needs only SILO_CORE_URL (the main server's URL)
+# and SILO_NODE_KEY (the key the admin nodes page issued for it). PORT
+# defaults to 8090 so it does not collide with dev-backend on 8080.
 dev-transcode:
-	go run ./cmd/silo/ --mode=transcode
+	@test -n "$$SILO_CORE_URL" || { echo 'dev-transcode: set SILO_CORE_URL to the main server URL, e.g. http://localhost:8080' >&2; exit 1; }
+	@test -n "$$SILO_NODE_KEY" || { echo 'dev-transcode: set SILO_NODE_KEY to the key issued for this node on the admin nodes page' >&2; exit 1; }
+	MODE=transcode PORT=$${PORT:-8090} go run ./cmd/silo/
 
 # Lint Go and frontend code
 lint:
@@ -102,8 +109,9 @@ embed-stub:
 test: test-go test-web
 
 # The queryattr concurrency tests prove nothing without the race detector.
+GO_TEST_PACKAGES ?= ./...
 test-go: embed-stub
-	go test ./...
+	go test $(GO_TEST_PACKAGES)
 	go test -race -count=1 ./internal/database/queryattr/
 
 # Run the DB-backed query-budget pins listed in $(DB_PINS) and the database

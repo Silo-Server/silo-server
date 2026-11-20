@@ -7,15 +7,16 @@ import (
 	"time"
 )
 
-// Discord embed accent colors per reason (decimal RGB), in reason precedence
-// order: favorite, watchlist, continue_watching, next_up.
+// Discord embed accent colors (decimal RGB): the Next Up reason's, and the
+// default for an embed with no reason, such as a request notice.
 const (
 	discordColorFavorite         = 5814783
 	discordColorWatchlist        = 3066993
 	discordColorContinueWatching = 15844367
 	discordColorNextUp           = 15158332
 	// discordColorRating is a gold accent for rating.set embeds (0xFFD700).
-	discordColorRating = 16766720
+	discordColorRating  = 16766720
+	discordColorDefault = 5814783
 )
 
 // Discord embed limits (enforced by the builder).
@@ -136,6 +137,8 @@ func discordEmbedAuthorLine(row DeliveryRow) string {
 			return "Now available on Vio"
 		}
 		return "Your request is now available on Vio"
+	case DeliveryTypeWatchlistAvailable:
+		return "Now available on Vio"
 	case DeliveryTypeRequestApproved:
 		return "Your request was approved on Vio"
 	case DeliveryTypeRequestDeclined:
@@ -279,6 +282,11 @@ func discordEmbedTitle(row DeliveryRow) string {
 			return titleWithYear(row.SeriesTitle, row.Year)
 		}
 		return "Request fulfilled"
+	case DeliveryTypeWatchlistAvailable:
+		if row.SeriesTitle != "" {
+			return titleWithYear(row.SeriesTitle, row.Year)
+		}
+		return "Watchlist title available"
 	case DeliveryTypeRequestApproved, DeliveryTypeRequestDeclined:
 		// No catalog join exists for an unfulfilled request; the title rides
 		// in the reason flags.
@@ -313,18 +321,10 @@ func discordEmbedTitle(row DeliveryRow) string {
 }
 
 func discordEmbedColor(flags ReasonFlags) int {
-	switch {
-	case flags.Favorite:
-		return discordColorFavorite
-	case flags.Watchlist:
-		return discordColorWatchlist
-	case flags.ContinueWatching:
-		return discordColorContinueWatching
-	case flags.NextUp:
+	if flags.NextUp {
 		return discordColorNextUp
-	default:
-		return discordColorFavorite
 	}
+	return discordColorDefault
 }
 
 // discordEmbedTotal counts the embed text Discord's 6,000-character limit

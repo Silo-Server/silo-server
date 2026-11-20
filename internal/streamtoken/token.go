@@ -57,8 +57,14 @@ const (
 // (uid/pid/mfid) are lookup keys re-resolved against the authority on
 // reconstruct; they are never trusted on their own.
 type Claims struct {
-	SessionID              string  `json:"sid"`
-	MediaPath              string  `json:"path"`
+	SessionID string `json:"sid"`
+	// MediaPath is the file the token serves. It never goes on the wire in
+	// the clear: Sign seals it into SealedMediaPath and Verify opens it, so a
+	// client holding the token cannot read where the file lives. A token
+	// signed before sealing still carries it here and still verifies.
+	MediaPath string `json:"path,omitempty"`
+	// SealedMediaPath is MediaPath sealed by sealMediaPath.
+	SealedMediaPath        string  `json:"spath,omitempty"`
 	PlayMethod             string  `json:"method"`
 	TranscodeAudio         bool    `json:"ta,omitempty"`
 	TranscodeNode          string  `json:"tnode,omitempty"`
@@ -115,8 +121,10 @@ type Claims struct {
 	DownloadArtifactRowID        string `json:"darid,omitempty"`
 	DownloadArtifactSize         int64  `json:"dasz,omitempty"`
 	DownloadExecutionFingerprint string `json:"daef,omitempty"`
-	// DownloadFilename is the client-facing attachment name. Remote artifact
-	// ids are internal attempt handles and must never become saved filenames.
+	// DownloadFilename is the client-facing attachment name, for a source file
+	// and a prepared artifact alike: the API names the download for the
+	// caller, and remote artifact ids are internal attempt handles that must
+	// never become saved filenames.
 	DownloadFilename string `json:"dfn,omitempty"`
 	// ThemeID, ThemeSize and ThemeModifiedUnixNano identify the theme file a
 	// theme token authorizes. A worker refuses the file once its size or
@@ -150,6 +158,7 @@ type Claims struct {
 	VideoRange                 string  `json:"vr,omitempty"`
 	CopyVideoMPEGTS            bool    `json:"cvts,omitempty"`
 	KeyframePlaylist           bool    `json:"kfp,omitempty"`
+	KeyframePlanResume         bool    `json:"kfpr,omitempty"`
 	OutputSubdir               string  `json:"osd,omitempty"`
 	SeekSeconds                float64 `json:"seek,omitempty"`
 	StreamOriginSeconds        float64 `json:"origin,omitempty"`
@@ -220,6 +229,13 @@ func Sign(c Claims, secret string, ttl time.Duration) (string, error) {
 	if strings.TrimSpace(secret) == "" {
 		return "", ErrNoSecret
 	}
+	if c.MediaPath != "" {
+		sealed, err := sealMediaPath(c.MediaPath, secret)
+		if err != nil {
+			return "", err
+		}
+		c.MediaPath, c.SealedMediaPath = "", sealed
+	}
 	now := time.Now()
 	c.RegisteredClaims = jwt.RegisteredClaims{
 		ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
@@ -227,6 +243,20 @@ func Sign(c Claims, secret string, ttl time.Duration) (string, error) {
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, c)
 	return token.SignedString([]byte(secret))
+}
+
+// AuthorizesPlaybackMedia reports whether the token is a playback session's
+// stream reference: it names a session and a playback recipe, not a
+// download, a theme song or a bandwidth probe.
+func (c *Claims) AuthorizesPlaybackMedia() bool {
+	if c == nil || c.SessionID == "" || c.UserID <= 0 {
+		return false
+	}
+	switch c.PlayMethod {
+	case "", PlayMethodBandwidthProbe, PlayMethodDownload, PlayMethodToneMapDownload, PlayMethodThemeDirect, PlayMethodThemeAAC:
+		return false
+	}
+	return true
 }
 
 // Verify parses and validates a stream token JWT string.
@@ -246,6 +276,13 @@ func Verify(tokenString, secret string) (*Claims, error) {
 	claims, ok := token.Claims.(*Claims)
 	if !ok || !token.Valid {
 		return nil, fmt.Errorf("invalid stream token claims")
+	}
+	if claims.SealedMediaPath != "" {
+		path, err := openMediaPath(claims.SealedMediaPath, secret)
+		if err != nil {
+			return nil, fmt.Errorf("invalid stream token claims: %w", err)
+		}
+		claims.MediaPath, claims.SealedMediaPath = path, ""
 	}
 	return claims, nil
 }

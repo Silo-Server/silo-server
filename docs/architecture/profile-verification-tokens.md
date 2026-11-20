@@ -42,6 +42,22 @@ Before this binding, a household parent whose PIN-locked profile saved a child's
 parental controls advanced the account revision and lost its own token on the
 next request.
 
+## Credentials that need no token
+
+API keys and administrator view-as (impersonation) sessions act as a
+PIN-locked profile without its token (`auth.Claims.SkipsProfilePIN`). An API
+key has no way to carry a PIN proof. An administrator viewing as an account
+can already reset its profiles' PINs, so the PIN guards nothing from them. Every
+gate that resolves the acting profile for a request applies the same rule: the
+HTTP viewer gate, the events sockets, watch-together, progress bootstrap and
+plugin pages. The profile's own limits still apply. Without a valid token
+such a scope is marked `access.Scope.PINVerificationSkipped`, so the household
+writes below refuse it. A valid token bound to a login session still counts
+as a real proof, so an administrator viewing as an account manages its
+household by entering the primary profile's PIN, as the account holder would.
+An API key has no login session, so it stays marked skipped whatever token it
+sends.
+
 ## Household writes
 
 Managing the household (creating, editing or deleting profiles, writing another

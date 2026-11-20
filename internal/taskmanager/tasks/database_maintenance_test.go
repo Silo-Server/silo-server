@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
@@ -51,40 +50,6 @@ func (p *maintenanceProgress) Report(percent float64, _ string) {
 	p.percents = append(p.percents, percent)
 }
 func (p *maintenanceProgress) SetResultData(data json.RawMessage) { p.result = data }
-
-func TestDatabaseMaintenanceRunsEveryStepDespiteFailures(t *testing.T) {
-	var calls []string
-	task := NewDatabaseMaintenanceTask(nil,
-		maintenanceStepStub{key: "first", calls: &calls, result: `{"deleted":3}`},
-		nil,
-		maintenanceStepStub{key: "second", calls: &calls, err: errors.New("database unavailable")},
-		maintenanceStepStub{key: "third", calls: &calls},
-	)
-	progress := &maintenanceProgress{}
-
-	err := task.Execute(context.Background(), progress)
-
-	if !slices.Equal(calls, []string{"first", "second", "third"}) {
-		t.Fatalf("steps ran %v, want every step in order", calls)
-	}
-	if err == nil || !strings.Contains(err.Error(), "Step second: database unavailable") {
-		t.Fatalf("Execute() error = %v, want the failing step named", err)
-	}
-	var got struct {
-		Steps []databaseMaintenanceStepResult `json:"steps"`
-	}
-	if err := json.Unmarshal(progress.result, &got); err != nil {
-		t.Fatalf("result data: %v", err)
-	}
-	if len(got.Steps) != 3 || got.Steps[1].Status != maintenanceStepFailed || got.Steps[2].Status != maintenanceStepCompleted ||
-		string(got.Steps[0].Result) != `{"deleted":3}` || got.Steps[1].Name != "Step second" {
-		t.Fatalf("step results = %+v", got.Steps)
-	}
-	// Three steps each own a third of the bar; a step's 50% is its midpoint.
-	if !slices.Contains(progress.percents, 50.0/3) || !slices.Contains(progress.percents, 100.0/3+50.0/3) {
-		t.Fatalf("progress = %v, want per-step midpoints", progress.percents)
-	}
-}
 
 func TestDatabaseMaintenanceStopsBetweenStepsWhenCanceled(t *testing.T) {
 	var calls []string

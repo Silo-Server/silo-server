@@ -34,7 +34,9 @@ fails closed, so the page waits for the acting profile before it decides.
 - **Everything else waits for Save.** Name, description, libraries, a Smart collection's rules and
   Order, artwork and the switches in Where it shows are a draft (`CollectionDraft`, `web/src/lib/collections/scope.ts`). The save bar
   names the fields that are pending and says titles are already saved. Discard never touches
-  titles.
+  titles. When the server refuses the name (another collection in one of its libraries has it,
+  see [Server collection names](../catalog-api.md#server-collection-names)), the Name field shows
+  the refusal until the name changes.
 - **Before the collection exists**, picked titles are staged in the draft. Create sends the POST,
   then one `PUT` per staged title in order. Titles that fail stay listed and marked, with Try
   again.
@@ -241,7 +243,10 @@ show it, from `listAdminCollectionSections`, and offers **Add as a row** (Home, 
 pages of the collection's own libraries, then the other libraries). The same rows give the header
 its "On Home and the _Kids_ page" (turned-off rows left out). Rows profiles add to their own Home
 are not listed, because the route reads the administrator page layouts only. When the collections
-capabilities don't report `section_references`, the list is left out and Add as a row stays.
+capabilities don't report `section_references`, the list is left out and Add as a row stays. A row
+of collections (`collection_posters`, see
+[Rows of collections](../catalog-api.md#rows-of-collections)) that lists the collection is listed
+like a collection row; its `collection_count` says how many collections it lists.
 
 - **Add as a row** goes to admin Sections with `?page=…&add=collection:library:<id>` and, from the
   editor, `?return=` set to the editor's own URL (see Links into the row pages). The List's Add to Home
@@ -262,11 +267,23 @@ capabilities don't report `section_references`, the list is left out and Add as 
   the collection still triggers the question, without naming pages. The switch stays part of the
   draft until Save.
 - **Deleting** a collection rows show lists them, each with Open row, and offers to delete the
-  rows and then the collection. Before any row goes, the editor (and the List) reads the collection
+  rows and then the collection. A row of collections that also lists other collections is not
+  deleted: the delete takes this collection out of its `collections` (`updateAdminSection`) and the
+  row keeps the rest, and the dialog says so under that row ("Removes it from the row …") with the
+  button reading "Delete it and change N rows". A row of collections that lists only this one is
+  deleted like a collection row. Deleting or changing a row moves the collection's revision (a
+  section write locks the collections it referenced before and after), so after a run that wrote
+  a row the collection is read once more and its `DELETE` sends that ETag
+  (`deleteAdminCollectionRows` returns it). The run also reads the collection before it touches a
+  row. When that read fails or no longer carries the ETag the delete would send, the run writes
+  no row. It returns the new ETag only when the two reads show the same collection (image URLs
+  aside, which are signed per read).
+  Otherwise someone else changed the collection during the run, the old ETag is sent, and the
+  `DELETE` answers `412`. Before any row goes, the editor (and the List) reads the collection
   again: when its ETag no longer matches the one the delete would send, nothing is deleted (the
   collection's `DELETE` would answer `412` after its rows were gone) and the new copy is taken,
-  so the next Delete sends the current token. Each row is read again for its ETag right before its `DELETE`; a
-  row that is already gone, or that now shows another collection, is left alone (the list of rows
+  so the next Delete sends the current token. Each row is read again for its ETag right before its `DELETE`
+  or `PATCH`; a row that is already gone, or that no longer shows the collection, is left alone (the list of rows
   can be stale, and the collection's own `DELETE` still refuses while any row uses it). The first
   row that fails stops the run before the collection is touched, and the dialog names the rows
   that still show it. When the rows list fails to load, the delete waits for Retry only if the

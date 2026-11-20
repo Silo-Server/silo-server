@@ -1913,7 +1913,7 @@ func (h *PlaybackHandler) transcodeRecoveryEpoch(nodeURL string) uint64 {
 }
 
 func fetchRemoteTranscodeCapabilities(ctx context.Context, nodeURL, jwtSecret string) (playback.HWAccelInfo, error) {
-	info, status, err := transcodenode.FetchHWCapabilities(ctx, transcodeproxy.NodeClient(), nodeURL, jwtSecret)
+	info, status, err := transcodenode.FetchHWCapabilities(ctx, transcodeproxy.NodeClient(), nodeURL, nodeauth.TargetProxy, sharedSecretKeyring(jwtSecret))
 	if err != nil {
 		return playback.HWAccelInfo{}, err
 	}

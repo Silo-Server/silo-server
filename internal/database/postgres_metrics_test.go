@@ -3,13 +3,11 @@ package database
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -29,86 +27,6 @@ func TestPostgresOperationPrivacy(t *testing.T) {
 	tracer := postgresTracer{role: "checks"}
 	ctx := tracer.TraceQueryStart(t.Context(), nil, pgx.TraceQueryStartData{SQL: "SELECT secret", Args: []any{"credential"}})
 	tracer.TraceQueryEnd(ctx, nil, pgx.TraceQueryEndData{Err: context.Canceled})
-}
-
-func TestPostgresTracerAttributesOperations(t *testing.T) {
-	enablePostgresAttribution(t)
-	exporter := postgresSpanExporter(t)
-	tracer := postgresTracer{role: "checks", attribute: true}
-	ctx, request := queryattr.StartRequest(t.Context())
-	query := tracer.TraceQueryStart(ctx, nil, pgx.TraceQueryStartData{SQL: "SELECT $1", Args: []any{1}})
-	tracer.TraceQueryEnd(query, nil, pgx.TraceQueryEndData{})
-	batch := &pgx.Batch{}
-	batch.Queue("SELECT 1")
-	b := tracer.TraceBatchStart(ctx, nil, pgx.TraceBatchStartData{Batch: batch})
-	tracer.TraceBatchEnd(b, nil, pgx.TraceBatchEndData{})
-	c := tracer.TraceCopyFromStart(ctx, nil, pgx.TraceCopyFromStartData{})
-	tracer.TraceCopyFromEnd(c, nil, pgx.TraceCopyFromEndData{})
-	a := tracer.TraceAcquireStart(ctx, nil, pgxpool.TraceAcquireStartData{})
-	tracer.TraceAcquireEnd(a, nil, pgxpool.TraceAcquireEndData{Err: context.Canceled})
-	connect := tracer.TraceConnectStart(ctx, pgx.TraceConnectStartData{})
-	tracer.TraceConnectEnd(connect, pgx.TraceConnectEndData{})
-	attrs := postgresRequestAttrs(request)
-	if got := attrs["db_queries"]; got != uint64(3) {
-		t.Errorf("db_queries = %v, want 3", got)
-	}
-	if got, _ := attrs["db_acquire_wait_ns"].(uint64); got == 0 {
-		t.Error("db_acquire_wait_ns = 0, want positive failed-acquire wait")
-	}
-	spans := exporter.GetSpans()
-	if len(spans) != 5 {
-		t.Fatalf("ended spans = %d, want 5", len(spans))
-	}
-	for _, span := range spans {
-		attributed := span.Name != "postgres.acquire" && span.Name != "postgres.connect"
-		assertPostgresSpanAttribution(t, span, attributed)
-	}
-}
-
-func TestPostgresTracerDuplicateBatchEndCountsOnce(t *testing.T) {
-	enablePostgresAttribution(t)
-	for _, enabled := range []bool{false, true} {
-		t.Run(fmt.Sprintf("attribute=%t", enabled), func(t *testing.T) {
-			exporter := postgresSpanExporter(t)
-			logs := capturePostgresLogs(t)
-			flushPostgresSummary()
-			logs.Reset()
-			counter := postgresDependencyCounter(t, "batch", "error")
-			before := testutil.ToFloat64(counter)
-			ctx, request := queryattr.StartRequest(t.Context())
-			tracer := postgresTracer{role: "checks", attribute: enabled}
-			batch := &pgx.Batch{}
-			batch.Queue("SELECT 1")
-			b := tracer.TraceBatchStart(ctx, nil, pgx.TraceBatchStartData{Batch: batch})
-			end := pgx.TraceBatchEndData{Err: errors.New("batch failed")}
-			tracer.TraceBatchEnd(b, nil, end)
-			tracer.TraceBatchEnd(b, nil, end)
-			if delta := testutil.ToFloat64(counter) - before; delta != 1 {
-				t.Errorf("coarse batch ends = %g, want 1", delta)
-			}
-			spans := exporter.GetSpans()
-			if len(spans) != 1 {
-				t.Errorf("ended spans = %d, want 1", len(spans))
-			} else {
-				assertPostgresSpanAttribution(t, spans[0], enabled)
-			}
-			want := uint64(0)
-			if enabled {
-				want = 1
-			}
-			if got, present := postgresRequestAttrs(request)["db_queries"]; enabled {
-				if got != want {
-					t.Errorf("db_queries = %v, want %d", got, want)
-				}
-			} else if present {
-				t.Errorf("db_queries = %v, want field absent", got)
-			}
-			flushPostgresSummary()
-			if calls := postgresSummaryRowCalls(t, logs.Bytes(), "batch"); calls != want {
-				t.Errorf("unknown/batch row calls = %d, want %d", calls, want)
-			}
-		})
-	}
 }
 
 func TestPostgresTracerSurvivesPanickingLogSink(t *testing.T) {

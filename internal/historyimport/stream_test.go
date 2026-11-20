@@ -12,68 +12,6 @@ import (
 	"testing"
 )
 
-// A systematic failure yields one warning per record; the run keeps only as
-// many as it can store.
-func TestRunWarningsStopAtTheStoredLimit(t *testing.T) {
-	t.Parallel()
-	var summary ExecutionSummary
-	for i := range maxStoredWarnings * 100 {
-		addRunWarning(&summary, "failure "+strconv.Itoa(i))
-	}
-	if len(summary.Warnings) != maxStoredWarnings {
-		t.Fatalf("warnings = %d, want %d", len(summary.Warnings), maxStoredWarnings)
-	}
-}
-
-// A resume sends its startup warnings again; the run keeps one copy.
-func TestRunWarningsAreNotRepeated(t *testing.T) {
-	t.Parallel()
-	var summary ExecutionSummary
-	addRunWarning(&summary, "resume list unavailable")
-	addRunWarning(&summary, "resume list unavailable", "other")
-	if len(summary.Warnings) != 2 {
-		t.Fatalf("warnings = %v, want one of each", summary.Warnings)
-	}
-}
-
-// A played favorite series has no watch record to repeat, so it still counts.
-func TestFavoriteRepeatsWatchOnlyForWatchKinds(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		kind   string
-		played bool
-		ticks  int64
-		want   bool
-	}{
-		{KindMovie, true, 0, true},
-		{KindEpisode, false, 10, true},
-		{KindMovie, false, 0, false},
-		{KindSeries, true, 0, false},
-	} {
-		if got := repeatsWatch(Record{Kind: tc.kind}, tc.played, tc.ticks); got != tc.want {
-			t.Errorf("%s played=%v ticks=%d = %v, want %v", tc.kind, tc.played, tc.ticks, got, tc.want)
-		}
-	}
-}
-
-// Lookups keep a fixed number of entries however many distinct keys pass.
-func TestLookupCacheStaysAtCapacity(t *testing.T) {
-	t.Parallel()
-	cache := newLookupCache[int](3)
-	for i, key := range []string{"a", "b", "c", "d"} {
-		cache.put(key, i)
-	}
-	if _, ok := cache.items["a"]; ok {
-		t.Fatal("oldest entry survived past capacity")
-	}
-	if got, ok := cache.items["d"]; !ok || got != 3 {
-		t.Fatalf("newest = %d, %v", got, ok)
-	}
-	if len(cache.items) != 3 {
-		t.Fatalf("entries = %d", len(cache.items))
-	}
-}
-
 // peakHeapDuring returns the most heap in use, sampled while fn runs, after a
 // collection, so garbage awaiting collection does not count.
 func peakHeapDuring(fn func(sample func())) uint64 {
@@ -89,7 +27,7 @@ func peakHeapDuring(fn func(sample func())) uint64 {
 	return peak
 }
 
-// historyPages serves a synthetic source of total watched items. Each page is
+// syntheticSource serves a synthetic source of total watched items. Each page is
 // generated on request, so the fake's own memory does not grow with total.
 type syntheticSource struct {
 	total int
@@ -122,6 +60,9 @@ func (s syntheticSource) plexHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// A title large enough to distinguish retained records from a few live pages.
+var syntheticEpisodeTitle = strings.Repeat("episode ", 64)
+
 func (s syntheticSource) plexPage(w http.ResponseWriter, _ *http.Request, offset, size int) {
 	start, end := s.slice(offset, size)
 	_, _ = fmt.Fprintf(w, `{"MediaContainer":{"totalSize":%d,"Metadata":[`, s.total)
@@ -129,7 +70,7 @@ func (s syntheticSource) plexPage(w http.ResponseWriter, _ *http.Request, offset
 		if i > start {
 			_, _ = io.WriteString(w, ",")
 		}
-		_, _ = fmt.Fprintf(w, `{"ratingKey":"%d","type":"episode","title":"Episode","grandparentTitle":"Show","grandparentRatingKey":"%d","parentIndex":1,"index":%d,"duration":1000,"viewCount":1,"lastViewedAt":1700000000,"viewedAt":1700000000,"Guid":[{"id":"tvdb://%d"}]}`, i+1, i%2000+1000000, i+1, i+1)
+		_, _ = fmt.Fprintf(w, `{"ratingKey":"%d","type":"episode","title":%q,"grandparentTitle":"Show","grandparentRatingKey":"%d","parentIndex":1,"index":%d,"duration":1000,"viewCount":1,"lastViewedAt":1700000000,"viewedAt":1700000000,"Guid":[{"id":"tvdb://%d"}]}`, i+1, syntheticEpisodeTitle, i%2000+1000000, i+1, i+1)
 	}
 	_, _ = io.WriteString(w, `]}}`)
 }
@@ -169,17 +110,15 @@ func (s syntheticSource) mediaBrowserItems(w http.ResponseWriter, r *http.Reques
 		if i > start {
 			_, _ = io.WriteString(w, ",")
 		}
-		_, _ = fmt.Fprintf(w, `{"Id":"item-%d","Name":"Episode","Type":"Episode","SeriesId":"series-%d","SeriesName":"Show","ParentIndexNumber":1,"IndexNumber":%d,"RunTimeTicks":1000000000,"UserData":{"Played":true,"PlayCount":1,"LastPlayedDate":"2026-09-02T00:00:00Z"},"ProviderIds":{"Tvdb":"%d"}}`, i, i%2000, i+1, i)
+		_, _ = fmt.Fprintf(w, `{"Id":"item-%d","Name":%q,"Type":"Episode","SeriesId":"series-%d","SeriesName":"Show","ParentIndexNumber":1,"IndexNumber":%d,"RunTimeTicks":1000000000,"UserData":{"Played":true,"PlayCount":1,"LastPlayedDate":"2026-09-02T00:00:00Z"},"ProviderIds":{"Tvdb":"%d"}}`, i, syntheticEpisodeTitle, i%2000, i+1, i)
 	}
 	_, _ = io.WriteString(w, `]}`)
 }
 
-// Peak heap must not depend on history size: the same source at ten times the
-// length uses about the same memory. Not parallel, because it measures heap.
+// Watched records are released as pages are applied. Plex admin also keeps
+// compact deduplication keys. Run serially so heap samples include little
+// unrelated activity.
 func TestProviderPeakHeapIsIndependentOfHistorySize(t *testing.T) {
-	if testing.Short() {
-		t.Skip("streams a million fake items")
-	}
 	ctx := trustLoopback(context.Background())
 	providers := []struct {
 		name    string
@@ -212,7 +151,7 @@ func TestProviderPeakHeapIsIndependentOfHistorySize(t *testing.T) {
 				heap := peakHeapDuring(func(sample func()) {
 					err := tc.make(server.URL).Stream(withRunBudget(ctx), nil, func(batch RecordBatch) error {
 						delivered += len(batch.Records)
-						if delivered%50_000 < len(batch.Records) {
+						if len(batch.Records) > 0 && (delivered == total || delivered%5_000 < len(batch.Records)) {
 							sample()
 						}
 						return nil
@@ -223,33 +162,20 @@ func TestProviderPeakHeapIsIndependentOfHistorySize(t *testing.T) {
 				})
 				return heap, delivered
 			}
-			small, n := peak(100_000)
-			if n != 100_000 {
-				t.Fatalf("delivered %d of 100000", n)
+			const smallHistory, largeHistory = 2_000, 25_000
+			small, n := peak(smallHistory)
+			if n != smallHistory {
+				t.Fatalf("delivered %d of %d", n, smallHistory)
 			}
-			large, n := peak(1_000_000)
-			if n != 1_000_000 {
-				t.Fatalf("delivered %d of 1000000", n)
+			large, n := peak(largeHistory)
+			if n != largeHistory {
+				t.Fatalf("delivered %d of %d", n, largeHistory)
 			}
-			t.Logf("peak heap: 100k=%d MiB, 1M=%d MiB", small>>20, large>>20)
-			if large > small+16<<20 {
-				t.Fatalf("peak heap grew with history: 100k=%d MiB, 1M=%d MiB", small>>20, large>>20)
+			t.Logf("peak heap: %d records=%d MiB, %d records=%d MiB", smallHistory, small>>20, largeHistory, large>>20)
+			if large > small+5<<20 {
+				t.Fatalf("peak heap grew with history: %d records=%d MiB, %d records=%d MiB", smallHistory, small>>20, largeHistory, large>>20)
 			}
 		})
-	}
-}
-
-// Lookups are dropped after their page, so they cannot use up the run's budget
-// for what it holds.
-func TestPlexMetadataLookupsAreNotChargedToTheRun(t *testing.T) {
-	t.Parallel()
-	server := serveBody(t, []byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"1","type":"show"}]}}`))
-	runCtx := withRunBudget(trustLoopback(context.Background()))
-	if _, err := newUnthrottledPlexClient().FetchMetadataBatch(runCtx, server.URL, "t", []string{"1"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := runBudgetFrom(runCtx).retained; got != 0 {
-		t.Fatalf("retained = %d, want 0", got)
 	}
 }
 

@@ -24,15 +24,6 @@ const (
 	recentTVArrivalGap = 2 * time.Hour
 )
 
-// recentTVMembershipJoinSQL resolves an episode_libraries row to the canonical
-// episode it belongs to. An alias row's membership and files belong to its
-// canonical episode; every other row resolves to itself.
-const recentTVMembershipJoinSQL = "LEFT JOIN episode_aliases ea_recent ON ea_recent.alias_episode_id = el.episode_id"
-
-// recentTVCanonicalEpisodeIDSQL is the canonical identity of an availability
-// row joined through recentTVMembershipJoinSQL.
-const recentTVCanonicalEpisodeIDSQL = "COALESCE(ea_recent.canonical_episode_id, el.episode_id)"
-
 // RecentTVTarget is one card-producing TV availability event: a run of a
 // show's episode arrivals with no gap longer than recentTVArrivalGap. An event
 // with one episode targets that episode; a larger event targets the series. By
@@ -45,12 +36,10 @@ type RecentTVTarget struct {
 	Type      string
 	AddedAt   time.Time
 	// PlayContentID is a profile-INDEPENDENT anchor hint: the episode this
-	// availability event is about. It is deliberately not filtered by the
-	// viewing profile's playback-quality ceiling, because List results are
-	// stored in the process-global resolved-list cache whose key excludes
-	// MaxPlaybackQuality (see AccessFilter.WriteAccessScopeCacheKey) — a
-	// quality-dependent value here would leak one profile's ceiling to
-	// another. Feed it to PlayableTargetResolver as
+	// availability event is about. It ignores progress and other per-profile
+	// state. (Events form only from arrivals within the playback-quality
+	// ceiling, so the resolved-list cache keys recently added rows by the
+	// normalized ceiling.) Feed it to PlayableTargetResolver as
 	// PlayableTargetInput.PreferredContentID; that post-cache, profile-aware
 	// pass is the only authority on the final play target.
 	PlayContentID string
@@ -345,7 +334,7 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 					arrivalRowsSQL:    recentTVArrivalRowsSQL(episodeRowConditions),
 					eventKeyFilter:    eventKeyFilter,
 					seriesWithoutEpisodesSQL: recentTVSeriesWithoutEpisodesSQL(seriesConditions,
-						"SELECT 1 FROM raw_event_keys rek WHERE rek.series_id = mi.content_id"),
+						c.seriesProbe("SELECT 1 FROM raw_event_keys rek WHERE rek.series_id = mi.content_id")),
 					limitIdx:      limitIdx,
 					offsetIdx:     offsetIdx,
 					totalsCTE:     totalsCTE,
@@ -387,7 +376,7 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 			JOIN media_items mi ON mi.content_id = mil.content_id
 			WHERE %[3]s
 			  AND NOT EXISTS (
-				SELECT 1 FROM raw_event_keys rek WHERE rek.series_id = mi.content_id
+				%[8]s
 			  )
 			GROUP BY mi.content_id
 		),
@@ -407,20 +396,22 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 			) ranked
 			WHERE added_rank <= $%[4]d::bigint + $%[5]d::bigint
 		),
-		deduped_episode_rows AS MATERIALIZED (
-			-- Availability facts for the page's shows only. Canonical and alias
-			-- memberships collapse per (canonical episode, folder) with their
-			-- earliest arrival, matching the event keys above, so an episode
-			-- belongs to at most one event per folder.
-			%[9]s
-		),
 		episode_events AS (
 			SELECT pk.series_id, pk.event_start, agg.added_at, agg.episode_count, agg.episode_id, agg.anchor_season_number
 			FROM page_keys pk
 			CROSS JOIN LATERAL (
 				-- An event's arrivals are exactly the series' rows inside its
 				-- time bounds: events of one series never overlap.
-				%[8]s
+				SELECT MAX(el.first_seen_at) AS added_at,
+				       COUNT(DISTINCT el.episode_id) AS episode_count,
+				       (array_agg(el.episode_id ORDER BY el.first_seen_at DESC, e.season_number DESC, e.episode_number DESC, el.episode_id ASC))[1] AS episode_id,
+				       (array_agg(e.season_number ORDER BY el.first_seen_at DESC, e.season_number DESC, e.episode_number DESC, el.episode_id ASC))[1] AS anchor_season_number
+				FROM episodes e
+				JOIN episode_libraries el
+				  ON el.episode_id = e.content_id
+				 AND el.first_seen_at BETWEEN pk.event_start AND pk.added_at
+				WHERE e.series_id = pk.series_id
+				  AND %[1]s
 			) agg
 			-- An aggregate over zero rows still returns one row; this keeps
 			-- the series_without_episode_events keys (no availability rows)
@@ -449,8 +440,7 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 		)
 			`, episodeRowConditions, eventKeyFilter, seriesConditions, limitIdx, offsetIdx, totalsCTE,
 				recentTVArrivalEventsSQL(recentTVArrivalRowsSQL(episodeRowConditions)),
-				recentTVEpisodeEventAggregateSQL(),
-				recentTVDedupedEpisodeRowsSQL(episodeRowConditions))
+				c.seriesProbe("SELECT 1 FROM raw_event_keys rek WHERE rek.series_id = mi.content_id"))
 			sqlText += buildRecentTVResultQuery(totalColumn, fromClause)
 		}
 	} else {
@@ -505,9 +495,7 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 			JOIN media_items mi ON mi.content_id = mil.content_id
 			WHERE %s
 			  AND NOT EXISTS (
-				SELECT 1
-				FROM available_episode_rows aer
-				WHERE aer.series_id = mi.content_id
+				%s
 			  )
 			GROUP BY mi.content_id
 		),
@@ -534,8 +522,18 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 			ORDER BY added_at DESC, target_type ASC, target_id ASC, event_start ASC NULLS FIRST
 			LIMIT $%d OFFSET $%d
 		)
-		`, recentTVArrivalEventsSQL(recentTVArrivalRowsSQL(episodeRowConditions)),
-			eventWhere, seriesConditions, filteredSQL, totalsCTE, pageWhere, limitIdx, offsetIdx)
+		`, recentTVArrivalEventsSQL(`SELECT el.episode_id,
+			       el.first_seen_at,
+			       e.series_id,
+			       e.season_number,
+			       e.episode_number,
+			       e.title AS episode_title
+			FROM episode_libraries el
+			JOIN episodes e ON e.content_id = el.episode_id
+			WHERE `+episodeRowConditions),
+			eventWhere, seriesConditions,
+			c.seriesProbe("SELECT 1 FROM available_episode_rows aer WHERE aer.series_id = mi.content_id"),
+			filteredSQL, totalsCTE, pageWhere, limitIdx, offsetIdx)
 		sqlText += buildRecentTVResultQuery(totalColumn, fromClause)
 	}
 
@@ -621,13 +619,10 @@ func (r *RecentTVRepository) listNewestBounded(ctx context.Context, q RecentTVQu
 			SELECT recent.first_seen_at
 			FROM unnest($1::int[]) AS folder(id)
 			CROSS JOIN LATERAL (
-				SELECT MIN(el.first_seen_at) AS first_seen_at
+				SELECT el.first_seen_at
 				FROM episode_libraries el
-				LEFT JOIN episode_aliases ea_cutoff
-				  ON ea_cutoff.alias_episode_id = el.episode_id
 				WHERE el.media_folder_id = folder.id
-				GROUP BY COALESCE(ea_cutoff.canonical_episode_id, el.episode_id)
-				ORDER BY first_seen_at DESC
+				ORDER BY el.first_seen_at DESC
 				LIMIT $2
 			) recent
 			ORDER BY recent.first_seen_at DESC
@@ -667,31 +662,24 @@ func buildRecentTVNewestQuery(q RecentTVQuery, cutoff time.Time) (string, []any)
 	// DISTINCT runs once over the few index rows past the cutoff; the lateral
 	// then reads each active show's history through episodes(series_id).
 	// Shows the caller cannot see are skipped here, not after grouping, so a
-	// restricted profile's windows stay as cheap as an open one's. Membership
-	// rows resolve to their canonical episode throughout, so an alias row
-	// cannot make a show active or add a second arrival key.
-	activeSeries := fmt.Sprintf(`SELECT DISTINCT e.series_id
+	// restricted profile's windows stay as cheap as an open one's.
+	arrivalRows := fmt.Sprintf(`SELECT active.series_id, history.episode_id, history.first_seen_at
+		FROM (
+			SELECT DISTINCT e.series_id
 			FROM episode_libraries el
-			`+recentTVMembershipJoinSQL+`
-			JOIN episodes e ON e.content_id = `+recentTVCanonicalEpisodeIDSQL+`
+			JOIN episodes e ON e.content_id = el.episode_id
 			JOIN media_items si ON si.content_id = e.series_id
 			WHERE el.media_folder_id = ANY($1)
-			  AND el.first_seen_at >= $%[1]d
-			  AND %[2]s`, cutoffIdx, c.eventWhere)
-	// The history lateral mirrors recentTVArrivalRowsSQL: one row per canonical
-	// episode and folder, carrying the earliest membership time.
-	history := fmt.Sprintf(`SELECT `+recentTVCanonicalEpisodeIDSQL+` AS episode_id,
-			       el.media_folder_id,
-			       MIN(el.first_seen_at) AS first_seen_at
-			FROM episode_libraries el
-			`+recentTVMembershipJoinSQL+`
-			JOIN episodes e ON e.content_id = `+recentTVCanonicalEpisodeIDSQL+`
+			  AND el.first_seen_at >= $%[2]d
+			  AND %[3]s
+		) active
+		CROSS JOIN LATERAL (
+			SELECT el.episode_id, el.first_seen_at
+			FROM episodes e
+			JOIN episode_libraries el ON el.episode_id = e.content_id
 			WHERE e.series_id = active.series_id
 			  AND %[1]s
-			GROUP BY `+recentTVCanonicalEpisodeIDSQL+`, el.media_folder_id`, c.episodeRows)
-	arrivalRows := `SELECT active.series_id, history.episode_id, history.first_seen_at
-		FROM (` + activeSeries + `) active
-		CROSS JOIN LATERAL (` + history + `) history`
+		) history`, c.episodeRows, cutoffIdx, c.eventWhere)
 	recentSeries := fmt.Sprintf(`%s
 		  AND mi.content_id IN (
 			SELECT mil_recent.content_id
@@ -704,11 +692,9 @@ func buildRecentTVNewestQuery(q RecentTVQuery, cutoff time.Time) (string, []any)
 		arrivalRowsSQL:    arrivalRows,
 		eventKeyFilter:    c.eventKeyFilter,
 		// raw_event_keys covers active shows only, so the anti-join must
-		// probe availability directly. Membership rows resolve to their
-		// canonical episode, matching the arrival rows above.
+		// probe availability directly.
 		seriesWithoutEpisodesSQL: recentTVSeriesWithoutEpisodesSQL(recentSeries,
-			"SELECT 1 "+recentTVAvailabilityFromSQL()+
-				" WHERE e.series_id = mi.content_id AND "+c.episodeRows),
+			c.seriesProbe(recentTVSeriesEpisodeRowsProbe(c.episodeRows))),
 		limitIdx:      limitIdx,
 		offsetIdx:     offsetIdx,
 		fromClause:    "FROM page",
@@ -722,29 +708,41 @@ func buildRecentTVNewestQuery(q RecentTVQuery, cutoff time.Time) (string, []any)
 type recentTVConditions struct {
 	args   []any
 	argIdx int // next free bind placeholder
-	// episodeRows scope availability rows and may only reference el/e/ea_recent
-	// and the mf alias of CanonicalEpisodeFileExistsSQL: series-level access
-	// conditions belong in eventWhere so the series_without_episode_events
-	// anti-join still sees every series that has any present episode file.
-	episodeRows    string
-	eventWhere     string // series-level conditions over si (and aer with a name prefix)
-	eventKeyFilter string // join+WHERE applying eventWhere to raw_event_keys rek, or empty
-	series         string // conditions over mil/mi for series without episode events
+	// episodeRows scope availability rows and may only reference el/e/mf_event:
+	// series-level access conditions belong in eventWhere so the
+	// series_without_episode_events anti-join still sees every series that has
+	// any present episode file.
+	episodeRows string
+	// seriesHasEpisodeRows is the anti-join probe for a series with no
+	// availability rows. With a quality ceiling, episodeRows also drops rows
+	// whose files exceed it, but a series must still not turn into a bare
+	// "series added" card because its episodes were filtered for this caller,
+	// so the probe then reads the unfiltered rows directly.
+	seriesHasEpisodeRows string
+	eventWhere           string // series-level conditions over si (and aer with a name prefix)
+	eventKeyFilter       string // join+WHERE applying eventWhere to raw_event_keys rek, or empty
+	series               string // conditions over mil/mi for series without episode events
 }
 
 func buildRecentTVConditions(q RecentTVQuery) recentTVConditions {
 	args := []any{sortedUniqueInts(q.LibraryIDs)}
 	argIdx := 2
-	episodeRowConditions := []string{
-		"el.media_folder_id = ANY($1)",
-		CanonicalEpisodeFileExistsSQL(recentTVCanonicalEpisodeIDSQL,
-			"mf.media_folder_id = el.media_folder_id AND mf.missing_since IS NULL"),
+	// episodeRows reads availability rows whose arrival brought a present
+	// file; fileCondition narrows that file further.
+	var episodeRowScope []string
+	episodeRows := func(fileCondition string) string {
+		return strings.Join(append([]string{"el.media_folder_id = ANY($1)", `EXISTS (
+			SELECT 1 FROM media_files mf_event
+			WHERE mf_event.episode_id = el.episode_id
+			  AND mf_event.media_folder_id = el.media_folder_id
+			  AND mf_event.missing_since IS NULL` + fileCondition + `
+		)`}, episodeRowScope...), " AND ")
 	}
 	eventConditions := []string{}
 	seriesConditions := []string{"mil.media_folder_id = ANY($1)", "mi.type = 'series'"}
 
 	if q.SnapshotAt != nil {
-		episodeRowConditions = append(episodeRowConditions, fmt.Sprintf("el.first_seen_at <= $%d", argIdx))
+		episodeRowScope = append(episodeRowScope, fmt.Sprintf("el.first_seen_at <= $%d", argIdx))
 		seriesConditions = append(seriesConditions, fmt.Sprintf("mil.first_seen_at <= $%d", argIdx))
 		args = append(args, *q.SnapshotAt)
 		argIdx++
@@ -782,9 +780,15 @@ func buildRecentTVConditions(q RecentTVQuery) recentTVConditions {
 	c := recentTVConditions{
 		args:        args,
 		argIdx:      argIdx,
-		episodeRows: strings.Join(episodeRowConditions, " AND "),
+		episodeRows: episodeRows(""),
 		eventWhere:  "TRUE",
 		series:      strings.Join(seriesConditions, " AND "),
+	}
+	// A viewer with a quality ceiling sees only arrivals they can play: an
+	// episode whose files all exceed it has not arrived for them yet.
+	if ceiling := MediaFileQualityCeilingSQL("mf_event", q.Access.MaxPlaybackQuality); ceiling != "" {
+		c.seriesHasEpisodeRows = recentTVSeriesEpisodeRowsProbe(c.episodeRows)
+		c.episodeRows = episodeRows("\n\t\t\t  AND " + ceiling)
 	}
 	// eventKeyFilter scopes the no-prefix event keys. Without series-level
 	// conditions it skips the media_items join: episodes.series_id is a
@@ -795,6 +799,22 @@ func buildRecentTVConditions(q RecentTVQuery) recentTVConditions {
 	}
 	return c
 
+}
+
+// recentTVSeriesEpisodeRowsProbe probes a series mi for availability rows
+// matching episodeRows directly, without an arrival-events CTE.
+func recentTVSeriesEpisodeRowsProbe(episodeRows string) string {
+	return "SELECT 1 FROM episodes e JOIN episode_libraries el ON el.episode_id = e.content_id WHERE e.series_id = mi.content_id AND " + episodeRows
+}
+
+// seriesProbe returns the series_without_episode_events anti-join probe: the
+// query shape's own probe over its availability rows, or under a quality
+// ceiling the probe over the unfiltered rows (see seriesHasEpisodeRows).
+func (c recentTVConditions) seriesProbe(shapeProbe string) string {
+	if c.seriesHasEpisodeRows != "" {
+		return c.seriesHasEpisodeRows
+	}
+	return shapeProbe
 }
 
 // queryRecentTVTargets runs one rendered recently-added TV query and scans its
@@ -929,21 +949,19 @@ func buildRecentTVNoPrefixQuery(k recentTVKeysQuery) string {
 		FROM page_keys pk
 		LEFT JOIN LATERAL (
 			-- An event's arrivals are exactly the series' rows inside its time
-			-- bounds: events of one series never overlap. Membership rows resolve
-			-- to their canonical episode, so an alias row's arrival still picks
-			-- the canonical metadata.
-			SELECT (array_agg(e.season_number ORDER BY el.first_seen_at DESC, e.season_number DESC, e.episode_number DESC, %[10]s ASC))[1] AS anchor_season_number
-			FROM episode_libraries el
-			%[11]s
-			JOIN episodes e ON e.content_id = %[10]s
+			-- bounds: events of one series never overlap.
+			SELECT (array_agg(e.season_number ORDER BY el.first_seen_at DESC, e.season_number DESC, e.episode_number DESC, el.episode_id ASC))[1] AS anchor_season_number
+			FROM episodes e
+			JOIN episode_libraries el
+			  ON el.episode_id = e.content_id
+			 AND el.first_seen_at BETWEEN pk.event_start AND pk.added_at
 			WHERE pk.target_type = 'series'
 			  AND e.series_id = pk.series_id
-			  AND el.first_seen_at BETWEEN pk.event_start AND pk.added_at
 			  AND %[1]s
 		) anchor ON true
 	)
 	`, k.episodeConditions, k.eventKeyFilter, k.seriesWithoutEpisodesSQL, k.limitIdx, k.offsetIdx, k.totalsCTE, selection, k.pageWhere,
-		recentTVArrivalEventsSQL(k.arrivalRowsSQL), recentTVCanonicalEpisodeIDSQL, recentTVMembershipJoinSQL) + buildRecentTVResultQuery(k.totalColumn, k.fromClause)
+		recentTVArrivalEventsSQL(k.arrivalRowsSQL)) + buildRecentTVResultQuery(k.totalColumn, k.fromClause)
 }
 
 // recentTVSeriesWithoutEpisodesSQL selects series memberships that have no
@@ -959,65 +977,13 @@ func recentTVSeriesWithoutEpisodesSQL(seriesConditions, hasAvailableEpisodeSQL s
 		GROUP BY mi.content_id`
 }
 
-// recentTVAvailabilityFromSQL starts an availability-row scan over
-// episode_libraries that resolves each membership to its canonical episode and
-// metadata. Callers add WHERE conditions and aggregation on top.
-func recentTVAvailabilityFromSQL() string {
-	return "FROM episode_libraries el\n\t\t" + recentTVMembershipJoinSQL +
-		"\n\t\tJOIN episodes e ON e.content_id = " + recentTVCanonicalEpisodeIDSQL
-}
-
 // recentTVArrivalRowsSQL selects the narrow availability rows arrival events
-// are built from. A membership row resolves to its canonical episode, so an
-// alias row contributes its membership and files to that episode instead of
-// arriving as a separate identity. Rows collapse to one per canonical episode
-// and folder with the earliest first_seen_at, so a canonical membership and its
-// alias membership cannot produce two arrivals for the same folder.
+// are built from.
 func recentTVArrivalRowsSQL(episodeConditions string) string {
-	return `SELECT e.series_id,
-		       ` + recentTVCanonicalEpisodeIDSQL + ` AS episode_id,
-		       el.media_folder_id,
-		       MIN(el.first_seen_at) AS first_seen_at,
-		       e.season_number,
-		       e.episode_number,
-		       e.title AS episode_title
-		` + recentTVAvailabilityFromSQL() + `
-		WHERE ` + episodeConditions + `
-		GROUP BY e.series_id, ` + recentTVCanonicalEpisodeIDSQL + `, el.media_folder_id,
-		         e.season_number, e.episode_number, e.title`
-}
-
-// recentTVDedupedEpisodeRowsSQL materializes availability facts for the shows
-// on the current page. Canonical and alias memberships collapse per (canonical
-// episode, folder) with the earliest first_seen_at, so an alias membership
-// cannot add a second arrival for the same folder.
-func recentTVDedupedEpisodeRowsSQL(episodeConditions string) string {
-	canonical := recentTVCanonicalEpisodeIDSQL
-	return `SELECT e.series_id,
-		       ` + canonical + ` AS episode_id,
-		       el.media_folder_id,
-		       MIN(el.first_seen_at) AS first_seen_at,
-		       e.season_number,
-		       e.episode_number
-		` + recentTVAvailabilityFromSQL() + `
-		WHERE e.series_id IN (SELECT DISTINCT series_id FROM page_keys)
-		  AND ` + episodeConditions + `
-		GROUP BY e.series_id, ` + canonical + `, el.media_folder_id,
-		         e.season_number, e.episode_number`
-}
-
-// recentTVEpisodeEventAggregateSQL aggregates one arrival event's canonical
-// episodes for the plain List shape from the deduped availability rows, so an
-// episode belongs to at most one event per folder and an alias membership
-// neither adds to the count nor shifts the event's anchor.
-func recentTVEpisodeEventAggregateSQL() string {
-	return `SELECT MAX(der.first_seen_at) AS added_at,
-		       COUNT(DISTINCT der.episode_id) AS episode_count,
-		       (array_agg(der.episode_id ORDER BY der.first_seen_at DESC, der.season_number DESC, der.episode_number DESC, der.episode_id ASC))[1] AS episode_id,
-		       (array_agg(der.season_number ORDER BY der.first_seen_at DESC, der.season_number DESC, der.episode_number DESC, der.episode_id ASC))[1] AS anchor_season_number
-		FROM deduped_episode_rows der
-		WHERE der.series_id = pk.series_id
-		  AND der.first_seen_at BETWEEN pk.event_start AND pk.added_at`
+	return `SELECT e.series_id, el.episode_id, el.first_seen_at
+		FROM episode_libraries el
+		JOIN episodes e ON e.content_id = el.episode_id
+		WHERE ` + episodeConditions
 }
 
 // recentTVArrivalEventsSQL passes every column of rowsSQL through and adds
@@ -1057,15 +1023,6 @@ func recentTVEventIDSQL(eventStart string) string {
 // buildRecentTVResultQuery renders the common result projection after each
 // query shape has produced the same page columns.
 func buildRecentTVResultQuery(totalColumn, fromClause string) string {
-	playMembership := episodeLibraryMembershipSQL(
-		"e_play.content_id",
-		"el_play",
-		"el_play.media_folder_id = ANY($1)",
-	)
-	playFiles := CanonicalEpisodeFileExistsSQL(
-		"e_play.content_id",
-		"mf.media_folder_id = ANY($1) AND mf.missing_since IS NULL",
-	)
 	return fmt.Sprintf(`
 	SELECT page.target_id, page.target_type, page.added_at,
 	       COALESCE(page.single_episode_id, play_target.content_id) AS play_content_id, %[3]s AS event_id%[1]s
@@ -1080,15 +1037,23 @@ func buildRecentTVResultQuery(totalColumn, fromClause string) string {
 		WHERE page.target_type = 'series'
 		  AND e_play.series_id = page.series_id
 		  AND e_play.season_number = page.anchor_season_number
-		  AND %[4]s
-		  AND %[5]s
-		  AND %[6]s
+		  AND EXISTS (
+			SELECT 1
+			FROM episode_libraries el_play
+			WHERE el_play.episode_id = e_play.content_id
+			  AND el_play.media_folder_id = ANY($1)
+			  AND EXISTS (
+				SELECT 1 FROM media_files mf_play
+				WHERE mf_play.episode_id = el_play.episode_id
+				  AND mf_play.media_folder_id = el_play.media_folder_id
+				  AND mf_play.missing_since IS NULL
+			  )
+		  )
 		ORDER BY e_play.episode_number ASC, e_play.content_id ASC
 		LIMIT 1
 	) play_target ON true
 	ORDER BY page.added_at DESC, page.target_type ASC, page.target_id ASC, page.event_start ASC NULLS FIRST
-	`, totalColumn, fromClause, recentTVEventIDSQL("page.event_start"),
-		EpisodeAliasExclusionSQL("e_play.content_id"), playMembership, playFiles)
+	`, totalColumn, fromClause, recentTVEventIDSQL("page.event_start"))
 }
 
 func appendAllowedContentCondition(column string, allowed []string, conditions *[]string, args *[]any, argIdx *int) {

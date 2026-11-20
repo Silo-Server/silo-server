@@ -2,9 +2,10 @@
 
 `GET /api/v2/events/capabilities` describes the shared event subscription
 protocol. It requires an authenticated account; no active profile is required.
-`allowed` is true for a current access-token login session and for an
-administrator's `admin:monitor:read` API key sent with no profile, the callers
-that may mint an events socket ticket.
+`allowed` is true for a current access-token login session, for an
+administrator's `admin:monitor:read` API key sent with no profile, and for a
+user API key holding `catalog:read`, `watch:read` or `notifications`, the callers that may mint
+an events socket ticket.
 When the event service is unavailable, the capability response remains `200` with `state: not_configured` and `allowed: false`.
 
 The response contains `schema_version`, `subscribe_frame`, `declared_channels`,
@@ -73,8 +74,9 @@ that requires a profile, gets the user channels.
 Connections end at access-token expiry or after five minutes, whichever comes
 first. Current session/account/profile policy is rechecked every 15 seconds;
 a failed check closes the connection, with a two-second bound on authority
-lookups. Clients must reconnect with a newly minted credential. This is bounded
-revocation detection, not an instantaneous revocation guarantee.
+lookups. Every such close carries a close code that says what to do next (see
+[Close codes](#close-codes)). This is bounded revocation detection, not an
+instantaneous revocation guarantee.
 
 The selected message protocol retains the existing event frames (`hello`,
 `subscribe`, `subscribed`, `snapshot`, `event`, `error`) and per-channel payloads,
@@ -98,21 +100,50 @@ account, its configuration revision and the events socket, and the response
 carries `max_connection_seconds` (14400). The handshake is the same as for a
 login session.
 
-A key connection may subscribe to `sessions` and `catalog` only; the hello
-frame's `available_channels` lists exactly those, and other declared channels
-come back rejected. Jobs and scans carry artifact URLs, request payloads and
-library paths, which the monitoring scope never reads. The admin log stream,
+A key connection may subscribe to `sessions`, `catalog` and `downloads` only; the
+hello frame's `available_channels` lists exactly those, and other declared
+channels come back rejected. Jobs and scans carry artifact URLs, request payloads
+and library paths, which the monitoring scope never reads. The admin log stream,
 playback-control, Watch Together and Apple push sockets stay login-only.
 
 The connection ends after four hours. Every 15 seconds it rechecks that the key
 exists with the same owner and revision, still holds `admin:monitor:read`, and
 that its account is enabled, still an administrator, and still admitted by the
-acting-admin decision. Deleting the key or disabling the account closes the
-connection. Editing the key (any change to its scopes, label or rate tier
+acting-admin decision. Deleting the key or disabling or deleting the account
+closes the connection with `4002` `credential_invalid`. Editing the key (any change to its scopes, label or rate tier
 advances its revision), demoting the account, or an acting-admin refusal sends
 `access_changed` (see [Access changes](#access-changes)); the tool mints a new
 ticket, which a key that lost the scope or an account that lost the admin role
 cannot do.
+
+#### User keys
+
+A user key (see [User keys](api-keys-api.md#user-keys)) opens the events socket
+when it holds `catalog:read`, `watch:read` or `notifications`; any other user key is refused with
+`403 permission_denied`. The ticket names the key, its configuration revision,
+the profile the request acted as, and that profile's resolved access policy. A
+profile key always acts as its profile. An account key acts as the profile it
+names in `X-Profile-Id`, or as none. The connection holds the user role
+whatever its account's role is, so it never receives administrator events.
+
+Channels follow the key's scopes, and the hello frame's `available_channels`
+lists exactly these:
+
+| Scope | Channel |
+|---|---|
+| `catalog:read` | `catalog` |
+| `watch:read` | `user_state` |
+| `notifications` | `notifications` |
+
+`user_state` delivers only the acting profile's events, so a connection minted
+with no profile receives none, and `notifications` is rejected with
+`profile_required` on such a connection. `user_settings` and `history_import`
+have no user scope and come back rejected.
+
+The connection lasts up to four hours (`max_connection_seconds` 14400) and is
+rechecked every 15 seconds. Deleting the key or its profile, or disabling the
+account, closes it with `4002` `credential_invalid`. Editing the key, or a change to the profile's access policy,
+sends `access_changed`; the tool mints a new ticket.
 
 ### Personal event recipients
 
@@ -156,8 +187,13 @@ listing (`listAdminCatalogItems`, see
 | `files_changed` | One of the item's versions in `library_id` was added, removed (deleted, gone missing, or turned into an extra), moved or renamed on disk, or changed what the listing shows (size, resolution, codecs, tracks, container, bitrate, edition, or the item or library it belongs to) |
 
 ```json
-{"type":"event","channel":"catalog","event":"catalog.item.changed","event_id":"01J…","timestamp":"2026-10-27T20:00:00Z","data":{"library_id":3,"content_id":"movie-tmdb-949","change":"added"}}
+{"type":"event","channel":"catalog","event":"catalog.item.changed","event_id":"01J…","timestamp":"2026-10-27T20:00:00Z","data":{"library_id":"3","content_id":"movie-tmdb-949","change":"added"}}
 ```
+
+`library_id` is a string, like every v2 identifier, on this event and on the
+other `catalog` events (`catalog.library.changed`, `library.changed`,
+`library.item_added`, `metadata.updated`). A `metadata_updated` change made
+outside one library, such as an artwork edit, has no `library_id`.
 
 `content_id` names a movie, series or episode. Books, podcasts and their
 episodes produce none of these, except when one is deleted outright and its type
@@ -169,7 +205,9 @@ the old ID and `added` for the new one. The events carry ids only. A consumer
 fetches the named items with the listing's `content_ids` filter (up to 200 per
 request) and treats an id the listing no longer returns as gone. Turning a
 library off or on sends no per-item changes; it changes `library_ids` and which
-items the listing returns, so re-list after a `catalog.library.changed`. Metadata
+items the listing returns, so re-list after the `catalog.library.changed` it
+sends administrators, whose `reason` is `library_disabled` or `library_enabled`
+and whose counts are zero. Metadata
 edits arrive as `metadata_updated`, which names the item but not what changed. A
 few repairs send nothing, such as merging duplicate series, which moves their
 episodes to the surviving series; a mirror that must not drift re-lists
@@ -219,8 +257,7 @@ Delivery is at most once and nothing is replayed. A monitor reconciles:
 
 1. On subscribe, and after each `sessions.replaced`, read every page of
    `GET /api/v2/admin/sessions`. The `sessions.replaced` frame and the channel's
-   snapshot keep the older row shape and at most 200 rows; use them only as a
-   cue to re-read.
+   subscribe snapshot carry `data: null`; they are only the cue to re-read.
 2. Per session id, the record with the higher `lifecycle_seq` or `seq` decides whether
    the session is live and whether it is paused. A row and an event with equal numbers
    carry the same state. Position and stream fields are observations: take them from
@@ -240,6 +277,45 @@ Delivery is at most once and nothing is replayed. A monitor reconciles:
 Rows and entries without `lifecycle_seq` (sessions that started before the server
 recorded lifecycle transitions) count as number 0. During a rolling deploy, servers
 without this change send no lifecycle events.
+
+### Download changes
+
+The admin-only `downloads` channel carries `download.changed` for managed
+(device) downloads: when one is registered, changes status or is registered
+again at a new revision (preparation finishing or failing, the device's own
+status reports, a revocation), when a catalog merge moves it to another
+title or episode, and when it is removed (the device
+deletes it, a revoked row is purged, or its account, profile or title is
+deleted). `GET /api/v2/admin/downloads/storage/capabilities` reports
+`change_events: true` when the server sends them. Ephemeral web downloads, which
+no administrator route lists, send none. The per-user `download` event on
+`user_state` is unchanged.
+
+```json
+{"type":"event","channel":"downloads","event":"download.changed","event_id":"download-change:812","timestamp":"2026-11-19T02:30:00.120Z","data":{"download_id":"3f6c…","user_id":"12","profile_id":"8d1e…","device_id":"ios-5B2…","content_id":"series-tvdb-81189","episode_id":"episode-tvdb-349232","status":"downloading","change":"changed","at":"2026-11-19T02:30:00.064Z"}}
+```
+
+`data` holds identifiers and state only, every id a string: `download_id`,
+`user_id`, `profile_id`, `device_id`, `content_id` (the movie, or the series of
+an episode), `episode_id` (absent for a movie), `status` (as the admin download
+rows report it; for `removed`, the status the row had), `change` (`created`,
+`changed` or `removed`) and `at`, when the change was written, UTC milliseconds.
+A failure is `changed` with `status: "failed"` and a revocation `changed` with
+`status: "revoked"`. Events never carry prepared-file ids, URLs, storage keys,
+paths, error text or revocation reasons; read those, where the caller may, from
+the admin download routes.
+
+The channel's subscribe snapshot is `null`. On subscribe and after a reconnect,
+re-read `GET /api/v2/admin/downloads/entries` (or
+`GET /api/v2/admin/users/{id}/downloads`). Database triggers record the changes
+from every code path that writes a managed download, so an event is published
+only after its write commits; every API server drains them, at most 32 every
+100 ms across the cluster, and each reaches sockets on every server. Delivery is
+at most once; changes still unpublished after a day are dropped. Two changes to
+one download written close together can arrive out of order and can share an
+`at`, which has millisecond precision. The envelope's `event_id` is an opaque
+identifier and carries no order. Treat an event as a sign that the download
+changed, and read its current state from the admin routes.
 
 ### Access changes
 
@@ -261,8 +337,8 @@ bitrate limits, and `access_policy_revision`, which a group move, a permission,
 role or quality change, and a group quality edit all bump. It also covers the
 profile's metadata-language and hidden-library preferences and the server's
 unrated-content setting, so changing those sends the signal too. A revoked or
-expired login session and a disabled or deleted account still close the
-connection without it.
+expired login session and a disabled or deleted account close the connection
+with `4002` `credential_invalid` instead, with no frame.
 
 On either the frame or the close code, a client refetches the data the viewer's
 access decides (libraries, home sections, search, item details, collections,
@@ -283,8 +359,37 @@ refreshes the session, mints the ticket again with the new token, and does not
 sign out. The new ticket carries the new role, so the socket does not close
 again for the same change.
 
-The playback-control and Watch Together sockets share the recheck but still
-close without a frame or dedicated code when it fails.
+The admin log stream, playback-control and Watch Together sockets close with
+`4001` and no frame when the access check fails.
+
+### Close codes
+
+When the server ends a v2 socket because of the credential it was opened with,
+it sends a close frame with one of these codes and reasons, then waits up to one
+second for the client's close reply before dropping the connection. The events,
+admin log stream, playback-control and Watch Together sockets all use them.
+
+| Code | Reason | Cause | What the client does |
+|---|---|---|---|
+| `4001` | `access_changed` | The credential still holds, but the access the ticket was minted under changed (see [Access changes](#access-changes)). | Refetch access-dependent data, mint a new ticket and reconnect at once. |
+| `4002` | `credential_invalid` | The API key was deleted, the account was disabled or deleted, the login session was revoked or expired, or the profile was deleted. | Do not reconnect with the same credential. A login client refreshes its session, which fails for a revoked one; a monitoring tool needs a new key. |
+| `4003` | `lifetime_ended` | The connection reached `max_connection_seconds`, or the access token it was opened under expired. | Mint a new ticket (refreshing the access token first if needed) and reconnect. |
+| `4004` | `authority_unavailable` | The server could not recheck the credential: a lookup failed or took longer than two seconds. Nothing is known to have changed. | Reconnect with backoff, with the same credential. |
+
+Only `4001` comes with a frame (`access_changed`) before the close. A failed
+lookup never closes with `4002`, so a client can treat `4002` as final.
+Likewise a ticket mint whose check fails answers `503 dependency_unavailable`
+with `Retry-After` rather than `403`, and an upgrade whose credential cannot
+be checked answers `503` rather than `401`. A ticket store failure during the
+upgrade still answers `401`; mint a new ticket.
+
+Other closes keep their standard codes: `1008` (policy violation) for a
+missing subscribe or a malformed frame, and `1009` for an oversized message. A
+connection whose peer stops answering pings, or whose server process goes away,
+ends without a close frame (`1006` at the client). Two closes still send no
+frame: a playback-control lane that a newer connection from the same owner took
+over, or whose session or installation no longer matches, and a Watch Together
+connection whose room can no longer be read.
 
 ### Owner-bound playback control handshake (v2)
 
@@ -296,9 +401,27 @@ playback session. The body's `installation_id` is optional: send the value
 Minting checks, in order: a bounded
 login session; the current session, enabled account, role and viewer/PIN proof;
 that the playback session exists in the session manager and belongs to the
-caller's account and profile (`404 not_found` when it does not exist,
-`403 permission_denied` when it belongs to someone else); and that a
-presented `installation_id` matches the server's (`409 conflict`). A lane
+caller's account and profile (`403 permission_denied` when it belongs to someone
+else); and that a presented `installation_id` matches the server's
+(`409 conflict`). A session the manager does not hold is read from its durable
+playback attempt, because a restart empties the manager and a live session is
+rebuilt under the same id by the player's next media request, on the replica
+that serves it (see
+[restart-resilient playback](architecture/restart-resilient-playback.md)). For
+the session's owner the answer separates three cases:
+
+- the attempt was stopped (by the player, an administrator, expiry or an
+  abort): `410 playback_session_ended`. The session is gone for good, so the
+  client stops minting and does not retry;
+- the attempt is still live and this replica has not rebuilt the session:
+  `503 dependency_unavailable` with `Retry-After`. Retry the mint later. The
+  control socket still needs the session affinity the other session routes
+  need, so a replica that never serves the player's media keeps answering this;
+- no attempt exists, or it has expired: `404 not_found`.
+
+A caller that is not the attempt's account and profile gets `404 not_found`,
+the same as when no attempt exists, so a session's state is not disclosed to
+anyone else. A durable store that cannot be read answers `503` too. A lane
 already held by a different account, profile or installation is also `409`. The
 response carries `ticket`, `expires_in` (at most 30 seconds),
 `max_connection_seconds` (14400) and `protocol` (`silo.playback-control.v2`).
@@ -315,7 +438,7 @@ credential is consumed atomically (Redis `GETDEL`; process-local without
 Redis), login authority is re-validated, and ownership and installation are
 re-admitted against the credential's captured binding: a binding that moved
 since minting is `409` and the credential is spent. A credential presented for
-another session is `403`; an ended session is `404`.
+another session is `403`; a session this replica no longer holds is `404`.
 
 The connection is the session's single realtime lane. A reconnect resumes the
 lane only for the same account, profile and installation: it takes the lane
@@ -329,15 +452,18 @@ already accepted progress does not undo a confirmation; progress accepted after
 its receipt supersedes a queued confirmation. A completed stop or terminate ends
 session authority before ordered watch-provider finalization. Login authority and session ownership are
 re-checked every 15 seconds and the connection ends when either is lost, at
-access-token expiry, or after four hours. The frames are `hello`, command,
+access-token expiry, or after four hours, with the close codes in
+[Close codes](#close-codes). The frames are `hello`, command,
 `ack`, `result` and event. A client message larger than 64 KiB closes the
 connection with `1009` (message too big).
 
 `GET /api/v2/playback/sessions/control/capabilities` reports `available` and
 `protocol`, an empty string when this server does not serve the handshake. The web
 player mints under captured profile authority for every connection, offers the
-protocol pair, discards frames once that authority changes, and retries a refused
-mint with bounded backoff under the same authority.
+protocol pair, and discards frames once that authority changes. It stops minting
+after a `410 playback_session_ended`. Any other refused mint is retried under the
+same authority with a backoff that grows to one attempt every 30 seconds, and
+never sooner than the refusal's `Retry-After` (capped at 60 seconds).
 
 
 ### V2 suggestion reads and vote membership
@@ -534,7 +660,7 @@ This storage foundation does not expose a socket or validate current account/ses
 
 Connect with `GET /api/v2/watch-together/rooms/{room_id}/ws` (`connectWatchTogetherSocket`), offering exactly `silo.room.v2` and `silo.ticket.<ticket>` in that order. Only `silo.room.v2` is echoed. Request bodies and all query strings are refused, including legacy bearer/profile/PIN/room credentials. A supplied browser Origin must pass the same check as the events socket: the configured public origin, the request's own scheme and host, or a connected overlay origin; absent, opaque (`null`) and non-http(s) Origins are permitted for independently authenticated native callers and packaged apps. Forwarded host headers do not authorize an Origin; only a trusted proxy's single `X-Forwarded-Proto` value can supply the scheme for the request-origin match. Malformed upgrades are refused before consuming the credential. After consumption, current session/account/profile/PIN/scope and room existence are checked again before 101.
 
-The handler closes the underlying socket at the earlier of five minutes, access expiry, or original room-proof expiry. Every 15 seconds it rechecks current authority and room existence with a two-second validation timeout; errors close the connection rather than extending its deadline. Revocation is therefore bounded by that polling interval and timeout, not instantaneous. Missing Redis prevents runtime socket wiring; Redis errors never use an in-memory fallback.
+The handler closes the underlying socket at the earlier of five minutes, access expiry, or original room-proof expiry. Every 15 seconds it rechecks current authority and room existence with a two-second validation timeout; errors close the connection rather than extending its deadline, with the close codes in [Close codes](#close-codes). Revocation is therefore bounded by that polling interval and timeout, not instantaneous. Missing Redis prevents runtime socket wiring; Redis errors never use an in-memory fallback.
 
 After the upgrade, Connect, Disconnect(false), initial snapshots, attach-session/transport/state-report/ready/buffering messages and ping/pong run through the room service. A client message larger than 64 KiB closes the connection with `1009` (message too big) and runs the disconnect callback. There is no leave message. Membership and readiness are shared through the room coordinator. V2 cancellation closes the transport so a blocked read releases and executes the existing disconnect callback. These raw frame shapes are not the typed HTTP room snapshot schema. No playback/provider operation is implied by obtaining a ticket.
 

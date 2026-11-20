@@ -12,7 +12,7 @@ func TestComposeInvitationEmailEscapesNote(t *testing.T) {
 	now := time.Now()
 	content := composeInvitationEmail(
 		mail.Brand{}, "quick", "Silo", "marco@example.com",
-		"https://silo.example.com/invite/tok",
+		"https://silo.example.com/invite#tok",
 		`<script>alert("hi")</script>`,
 		now.Add(7*24*time.Hour), now,
 	)

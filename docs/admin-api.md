@@ -364,6 +364,45 @@ container), `direct_stream` (copied video with converted audio), or `transcode`
 Per-stream Copy means no re-encoding; it does not promise byte-identical packets
 after a permitted bitstream transformation.
 
+`adaptation_reasons: true` on the capability response advertises an optional
+`adaptation_reasons` list on v2 session rows: why the route converts or
+repackages the file instead of playing it as it is. The playback planner derives
+the list from the facts it chose the route by and stores it with the live
+session. The plan's own `decision_reason` can't stand in for it: that field names
+only the last step that shaped the recipe, so a video the device can't decode
+reports its quality step. The list follows the order of
+`adaptation_reason_values`, video causes first:
+
+| Value | Meaning |
+| --- | --- |
+| `video_codec_unsupported` | The device can't decode the video codec, profile, level or bit depth. |
+| `video_capability_unconfirmed` | The client's capability evidence can't confirm it decodes the video. |
+| `dynamic_range_unsupported` | The output can't show the source's HDR or Dolby Vision as it is (tone mapping or a Dolby Vision conversion). |
+| `resolution_limit` | The source is taller than the device's maximum resolution. |
+| `bandwidth_limit` | The client's bandwidth estimate can't carry the source. |
+| `buffering` | Earlier buffering lowered the estimate: the player reported rebuffering during this play, or the server applied a limit learned from recent rebuffering on this device and connection. |
+| `bandwidth_cap` | The viewer's Maximum bitrate setting (`playback.max_bitrate_kbps`, profile or device), sent as the request's cap, is below the source. |
+| `server_bitrate_limit` | The user's access group Max local or remote stream bitrate binds, being lower than any request cap. |
+| `quality_selected` | The viewer chose a quality below the source. |
+| `subtitle_burn_in` | The selected subtitle is rendered into the video. |
+| `direct_play_failed` | The client already tried the original file, or every copy route, and it failed; nothing else forced the change. |
+| `audio_codec_unsupported` | The device, or the delivery it needs, can't carry the audio codec. |
+| `audio_channels_unsupported` | The audio has more channels than the output allows. |
+| `device_workaround` | A known device quirk needs the audio converted. |
+| `audio_track_selection` | The selected audio track is not the one the original file plays. |
+| `container_unsupported` | The device can't open the container, or offers no original-file delivery. |
+| `subtitle_unsupported` | The selected subtitle can't be delivered with the original file. |
+
+A video transcode lists audio reasons only when the audio alone couldn't have
+been copied, because every encode also converts the audio. The field is absent
+for Direct Play, for a session planned before the server recorded reasons, and
+for Jellyfin-protocol sessions, whose route decision doesn't come from this
+planner. Reasons survive a seek reanchor (they ride on the executable recipe)
+and a rebuild after a restart (from the recovery card, or from the live row for
+a session rebuilt from a stream token). Values are additive; clients ignore
+values they don't know, and the server drops stored values it doesn't know. The
+frozen v1 row never carries the field.
+
 `output_format: true` on the same capability response advertises optional
 `output_container` and `output_protocol` fields on v2 session rows. The serving
 transport reports the container (`fmp4`, `mpegts`, or the source container for
@@ -391,10 +430,17 @@ state, semantic readiness, and links to the search maintenance tasks.
 `active_provider` describes the route requests actually take; it is not merely
 the configured provider. `degraded` and the optional `degraded_reason` explain
 temporary fallback or keyword-only operation. `index.rebuild_required` is true
-when the active index does not match the current settings. Background search
-maintenance runs at startup and every minute: it rebuilds a missing or stale
-index, then resumes incremental event sync. When the prior index is known to
-have the same document and media scope, Meilisearch continues serving keyword
+when the active index's document schema does not match the current search
+settings, or when Meilisearch no longer has it (for example after its data
+directory was emptied); in that case `index.document_count` is 0 and searches
+use PostgreSQL, while `meilisearch.healthy` still reports whether Meilisearch
+itself answers. A status read learns that the index is missing from the
+semantic capability probe, so it can take up to five minutes to show.
+Background search maintenance runs at startup and every minute: it rebuilds a
+missing or stale index, applies changed index settings to a current one in
+place (not a rebuild, so not `rebuild_required`), then resumes incremental
+event sync. When the prior index is known to have the same document and media
+scope, Meilisearch continues serving keyword
 search while the replacement is built; otherwise searches use PostgreSQL.
 
 ## `GET /api/v2/admin/nodes`
@@ -413,6 +459,8 @@ configuration, last health result, and last stored hardware inventory. See
 | `healthy` | bool | Result of the last health check. |
 | `drain_requested` | bool | An administrator asked this transcode node to drain: it stays listed and health-checked, but new work goes to other nodes while its sessions finish. See [node drain (v2)](#node-drain-v2). Always `false` on a proxy. |
 | `drain_state` | string | What the node reported on its last health check: `none`, `draining` (after a drain request or SIGTERM, while it finishes its work) or `drained` (nothing left; safe to stop). `none` for a proxy, a node that predates draining, and a node that did not answer. |
+| `key_issued` | bool | A node key has been issued to this transcode node. The key itself is shown only in the response that issues it. Always `false` on a proxy. See [node keys (v2)](#node-keys-v2). |
+| `source_access` | string | How this transcode node reads source media: `local` through its own library mount at the API servers' paths, `core` over HTTP from the API servers. Omitted on a proxy. See [node source access (v2)](#node-source-access-v2). |
 | `active_jobs`, `egress_kbps` | int | Last health-reported load. `egress_kbps` is a rolling average and is currently non-zero for proxy nodes only. |
 | `group` | string \| null | Co-location group. A group is only eligible while every enabled member is healthy. |
 | `max_jobs`, `max_bandwidth_kbps` | int \| null | Capacity caps. `null` means unlimited. `max_jobs` limits streams and file downloads on a proxy and transcodes on a transcode node. `max_bandwidth_kbps` limits a proxy's egress, and a proxy with it set takes no file downloads, because a download's rate is unknown and cannot be reserved; it is stored for a transcode node but not enforced, because a transcode node's output leaves through a proxy or the API server. |
@@ -480,13 +528,18 @@ provider origin, or the file is served from the API server when the planned
 proxy has none. The Jellyfin-compatible playback redirects use the same
 accessor.
 
-A node finds its own row by URL first: `NODE_URL` on the node is matched
-against `stream_nodes.url`, ignoring a trailing slash on either side. A proxy
-or transcode node refuses to start without `NODE_URL`: a URL guessed from its
-listen port could match a different machine's row and adopt its policy.
+A transcode node needs no matching: its key (`SILO_NODE_KEY`) names its row,
+and the API serves it that row's overrides already applied in its
+configuration document (`GET /api/internal/nodes/self/config`), at its
+30-second poll and at once after an admin change to the row.
 
-If the URL does not match, the node falls back to `NODE_NAME` against the
-registered name. This covers split-horizon topologies where `stream_nodes.url`
+A proxy finds its own row by URL first: `SILO_NODE_URL` (or the older
+`NODE_URL`) on the proxy is matched against `stream_nodes.url`, ignoring a
+trailing slash on either side. A proxy refuses to start without either: a URL guessed from its listen port could
+match a different machine's row and adopt its policy.
+
+If the URL does not match, the node falls back to `SILO_NODE_NAME` (or
+`NODE_NAME`) against the registered name. This covers split-horizon topologies where `stream_nodes.url`
 was registered as a public address the node's own `NODE_URL` never equals —
 with `public_url` carrying the client-facing address, `url` can simply be the
 node's internal address and match `NODE_URL` directly, which is the
@@ -501,8 +554,8 @@ goes on dispatching that row's backend and a row that has gone is not evidence
 an operator cleared the override. Fix the mismatch: the node adopts whatever it
 finds on its next poll.
 
-The node overlays its row onto the cluster-wide playback settings on every
-config reload, so the override is what that node probes with, advertises in
+A proxy overlays its row onto the cluster-wide playback settings on every
+config reload, and a transcode node receives them overlaid, so the override is what that node probes with, advertises in
 `capabilities.resolved`, and falls back to when a start request names no
 backend. The API dispatches remote transcodes with the node's
 `hw_accel_override` in preference to its own cluster setting, so the request
@@ -535,6 +588,78 @@ things do wait for a restart: the hardware encoder warmup that ran at boot,
 which stays primed for the old backend, and sessions already transcoding, which
 keep the backend they started with. Restart the node when you want all four in
 agreement immediately.
+
+### Node-declared configuration
+
+A node can declare part of its own row from its environment instead of an
+administrator entering it. `stream_nodes.env_managed` (`env_managed` on the
+node rows of `listAdminNodes` and the update response) names the fields the
+node declared at its last start, using the update body's field names.
+`updateAdminNode` refuses a change to any of them with `422 validation_failed`
+and one `errors[]` entry per field at `body.<field>`, code
+`managed_by_environment`. Restating a declared field's stored value passes, so
+the editor's full-form save keeps working. Enabling, disabling, draining,
+deleting and issuing a key are unaffected. `GET /admin/nodes/capabilities`
+reports `env_declarations`. Writing `env_managed` alone is not a configuration
+change: it moves neither the node's ETag nor the pool generation.
+
+A proxy declares once per start; a transcode node declares at startup and
+again every minute while it runs, so a row or lock changed behind its back is
+put back (`nodedeclare`, `nodepool.Declare`). An unset or blank variable
+declares nothing and leaves that field to the administrator, so removing a
+variable unlocks its field at the next start.
+Values follow the update body: `0` for a cap is unlimited, `0` for the
+download budget is no budget. A node checks each value before sending it and
+refuses to start on a bad one, naming the variable.
+
+| Field | Proxy | Transcode node |
+|---|---|---|
+| `name` | — (identity, set at self-registration) | `SILO_NODE_NAME` |
+| `url` | — (identity, set at self-registration) | `SILO_NODE_URL` |
+| `public_url` | `SILO_NODE_PUBLIC_URL` | — |
+| `group` | `SILO_NODE_GROUP` | `SILO_NODE_GROUP` |
+| `max_jobs` | `SILO_NODE_MAX_STREAMS` | `SILO_NODE_MAX_TRANSCODES` |
+| `max_bandwidth_kbps` | `SILO_NODE_MAX_BANDWIDTH_KBPS` | — |
+| `source_access` | — | `SILO_NODE_SOURCE_ACCESS` |
+| `hw_accel_override` | — | `SILO_NODE_HW_ACCEL` |
+| `hw_device_override` | — | `SILO_NODE_HW_DEVICE` |
+| `download_artifact_dir_override` | — | `SILO_NODE_DOWNLOAD_ARTIFACT_DIR` |
+| `download_artifact_max_bytes_override` | — | `SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES` |
+
+A proxy writes its declaration to the database before its configuration
+watcher first reads its row (`declareProxyNode` in `cmd/silo`), then publishes
+`node_pool_changed`. It finds its row as the watcher does, by
+`SILO_NODE_URL` (or `NODE_URL`) and then by `SILO_NODE_NAME` (or `NODE_NAME`)
+when exactly one row has that name. With neither name variable set it uses the
+watcher's fallback name `proxy`, unless it registers itself: an unnamed proxy
+with `SILO_NODE_REGISTER=true` is found by URL only, so several of them each
+get their own row. A proxy that matches no row starts as it
+always has when it declares nothing, and refuses to start when it declares
+something. With `SILO_NODE_REGISTER=true` it registers itself instead: a new
+enabled proxy row at its URL, named by its name variable or, with none set, by
+the URL's host. Registration is opt-in because a proxy can match no row and
+still have one, registered at an address clients reach it by; a second row at
+`SILO_NODE_URL` would hand clients an address they cannot reach. A match on a
+row that is not a proxy refuses
+startup when the proxy declares anything and is only logged when it does not.
+A transcode node declares through the core; see
+[transcode nodes](architecture/transcode-nodes.md#registration). A transcode
+node also enforces the values it acts on itself, its job cap, acceleration,
+device, source access and prepared-download directory and budget, whatever
+its row says; its group, name and URL are placement and identity on the main
+server's side and hold only through the row. See
+[what the node enforces](architecture/transcode-nodes.md#what-the-node-enforces).
+A proxy reads its row from the database the main server owns, so it is run
+by the same operator and enforces nothing beyond its row.
+
+Upgrade order: the main server first, since its migration adds the column.
+Proxies read node rows with it, so they follow the main server. A proxy that
+starts while the column is still missing (its main server is migrating beside
+it) starts without its declaration and applies it every 30 seconds until the
+column exists. Transcode
+nodes can go before or after: against an older main server a node that
+declares something logs a warning, starts on its row as it is, and offers the
+declaration again every 30 seconds until the main server takes it.
 
 ### `last_stats`
 
@@ -779,14 +904,18 @@ selection, which is round-robin and does no GPU work.
 ## `POST /api/v2/admin/nodes`
 
 Registers a node. Body: `name`, `type` (`proxy` or `transcode`), `url`, and the
-optional `public_url`, `group`, `max_jobs`, `max_bandwidth_kbps`. A
-non-positive cap and an empty group mean "unlimited" and "ungrouped"; an empty
-`public_url` means clients use `url`.
+optional `public_url`, `group`, `max_jobs`, `max_bandwidth_kbps` and
+`source_access`. A non-positive cap and an empty group mean "unlimited" and
+"ungrouped"; an empty `public_url` means clients use `url`; an omitted
+`source_access` means `local`, and a proxy accepts only `local`
+(`422 validation_failed` otherwise).
 
 `201 Created` with the created node in the same shape as one list entry (with
 no capability fields yet: nothing has been fetched). `422 validation_failed` when a
 required field is missing or `type` is not one of the two allowed values, and
-`409` when a node with that URL already exists with a different configuration; see
+`409` when a node with that URL already exists with a different configuration, or
+when another transcode node already has the same address spelled differently
+(`http://gpu`, `HTTP://GPU:80/`); see
 [node configuration lifecycle (v2)](#node-configuration-lifecycle-v2). The
 node pools are reloaded afterwards.
 
@@ -796,7 +925,8 @@ Updates a node's mutable fields. Every field is optional; an omitted field is
 left unchanged. An empty-string `group` clears the group, and a non-positive
 `max_jobs` or `max_bandwidth_kbps` clears that cap. The request needs the node's
 `config_etag` in `If-Match`: `428` without one, `412` when it is stale. A new
-`url` that belongs to another node gets `409`. See
+`url` that belongs to another node gets `409`, and so does a transcode node's
+new `url` that another transcode node already has under another spelling. See
 [node configuration lifecycle (v2)](#node-configuration-lifecycle-v2).
 
 `public_url` follows the same convention as the overrides below: `null` or an
@@ -825,14 +955,41 @@ when the node restarts; files in the old directory are not moved, so in-use file
 prepared again and cached ones are dropped. See
 [prepared download storage](architecture/download-storage.md).
 
+`source_access` (`local` or `core`) is writable here for a transcode node; a
+proxy accepts only `local`, and anything else is `422 validation_failed`. See
+[node source access (v2)](#node-source-access-v2).
+
 Capability fields are not writable here. They are owned by the health sweep,
 because only the node can say what hardware it has.
+
+### Node source access (v2)
+
+A transcode node reads the source media of its jobs in one of two ways, its
+`source_access`:
+
+- `local` (the default): from its own library mount, which must show every
+  file at the API servers' paths with the same size.
+- `core`: over HTTP from the API servers. The node needs no library mount, and
+  every byte it reads passes through the API servers, so they need the
+  bandwidth for it. `silo_node_source_bytes_sent_total{node}` on each API
+  server shows what each node reads.
+
+The setting is stored configuration: a change advances the node's `config_etag`
+and the pool generation, and the API server pushes `/admin/reload-config` to the
+node. The node applies it to the jobs it starts afterwards; running jobs keep
+their mode. `GET /api/v2/admin/nodes/capabilities` advertises
+`source_access: true` when the server takes the field.
+[Transcode nodes: core source access](architecture/transcode-nodes.md#core-source-access)
+describes the design.
 
 ## `DELETE /api/v2/admin/nodes/{id}`
 
 Removes a node. `204 No Content`, or `404 Not Found` for an unknown id. The
-node pools are reloaded afterwards. Sessions already streaming from the node
-are not torn down by this call. Like PUT, it needs the node's `config_etag` in
+node pools are reloaded afterwards. The node's credential is gone from the
+answering server before the `204`, and from the other API servers and proxies
+once `node_pool_changed` reaches them: nothing signs requests to the node or
+accepts its calls, so its sessions stop serving viewers (relays answer them as
+"node unavailable" and do not move them). The call sends the node nothing. Like PUT, it needs the node's `config_etag` in
 `If-Match`: `428` without one, `412` when it is stale.
 
 ## `POST /api/v2/admin/nodes/{id}/check`
@@ -1212,6 +1369,7 @@ though layout save and reset are served; see
 | `downloads_stats` | `GET /admin/stats/downloads` serves the offline-download aggregate, and timeseries points carry the additive `download_egress_kbps` split. |
 | `egress_totals` | `GET /admin/stats/timeseries` carries the window's additive `egress_bytes` and `download_egress_bytes` totals. |
 | `egress_by_source` | `GET /admin/stats/timeseries` carries `egress_sources` and each point's `egress_by_source` split. |
+| `streams_by_method` | `GET /admin/stats/timeseries` points carry the `streams_by_method` split. |
 | `api_clients` | `GET /admin/stats/api-clients` and `GET /admin/stats/api-clients/{session_id}/endpoints` serve per-session API request counts. |
 
 ```json
@@ -1226,6 +1384,7 @@ though layout save and reset are served; see
   "downloads_stats": true,
   "egress_totals": true,
   "egress_by_source": true,
+  "streams_by_method": true,
   "api_clients": true
 }
 ```
@@ -1423,6 +1582,14 @@ also covers sources that never served at a bucket's peak minute. Each carries
 sampled minute like the window's own `egress_bytes`. Rank sources by that, not
 by summing the per-point split, which only sees peak minutes.
 
+`direct`, `remux` and `transcode` each take their own per-bucket peak, like
+`streams`, so past the one-minute resolution they may come from different
+minutes and can add up to more than `streams`. `streams_by_method` is the
+stackable form: the same three counts read from the minute whose `streams`
+peaked in the bucket (the earliest such minute on a tie), so they add up to no
+more than that point's `streams`. The remainder is sessions with any other
+play method.
+
 A bucket with no sample in it is absent from `points` rather than zero — a gap
 (a restart, a stopped server) and an idle bucket are different facts. Stream
 telemetry being disabled means no `proc:` rows, not an error.
@@ -1450,7 +1617,8 @@ fresh install renders "collecting data" instead of an empty chart.
       "transcode": 2,
       "egress_kbps": 48211,
       "download_egress_kbps": 6100,
-      "egress_by_source": { "api": 9211, "node:4": 39000 }
+      "egress_by_source": { "api": 9211, "node:4": 39000 },
+      "streams_by_method": { "direct": 1, "remux": 0, "transcode": 2 }
     }
   ]
 }
@@ -1555,7 +1723,7 @@ so summing that would report three hours for a movie someone abandoned after a
 minute. An entry with no finalized session in the window reports `0`. Each
 session contributes its measured watch time (`played_seconds`, below). A
 session recorded before watch time was measured only knows where it ended
-(`watched_seconds`), so its end position is capped at its wall-clock length;
+(`end_position_seconds`), so its end position is capped at its wall-clock length;
 that estimate still counts pauses and seeks.
 
 Profile display names live in the per-user stores rather than in watch history,
@@ -1749,22 +1917,33 @@ from one window is refused under another. Each entry also carries `series_title`
 episode and its series (`series_title` is empty when the series left the catalog); for
 anything else they are empty and null.
 
-`watched_seconds` is where the attempt ended, not how long it was watched: an attempt
-resumed partway through reports the resume point plus what was watched. `played_seconds`
-is the measured watch time: media advanced through by normal playback, without pauses,
-seeks or buffering. The playback session measures it from its progress reports
-(`playback.WatchTime`): a position advance between two reports counts as watched when it
-fits playback at up to twice normal speed plus a short allowance for report jitter, and
-anything larger is a seek. Time after the last progress report before the stop is not
-counted. A session finalized more than once keeps the largest measurement when the
-copies overlap in time (copies on several replicas), and adds them when one began
-measuring after the other ended (a session rebuilt under the same id after it was
-finalized). `measured` says whether the attempt has a measurement. With one,
-`start_position_seconds` is the first position it saw (where the play began or
-resumed), `paused_seconds` the time spent paused between reports, and `measured_since`
-and `measured_until` the first and last report behind it. Without one, which includes
-every attempt recorded before measurement existed, `played_seconds` and those four
-fields are null.
+`end_position_seconds` is where the attempt ended, not how long it was watched: an
+attempt resumed partway through ends past its resume point. `played_seconds` is the
+measured watch time: media advanced through by normal playback, without pauses, seeks or
+buffering. The playback session measures it from position samples
+(`playback.WatchTime`): the start position once the start has prepared its stream, each
+progress report, and the final position the stop carries. A position advance between two
+samples counts as watched when it fits playback at up to twice normal speed plus a short
+allowance for report jitter, and anything larger is a seek. Time after the last sample is
+not counted, so a stop without a final position, such as an administrator stop the
+player confirms, ends the measurement at the last progress report.
+
+The measurement survives the session's live copy. The server holding the session saves
+it with the session's lifecycle state when the session starts and on every live-session
+sync (every 15 seconds, and once more at a graceful shutdown). A session rebuilt after a
+restart or on another server carries on from the saved measurement, and so does a stop
+recorded by a server that does not hold the session, which then measures the stop's own
+final position. Such a stop can miss reports that arrived since the last save, so its
+`played_seconds` may fall short by up to one sync interval; it is never credited time the
+position does not account for. A session finalized more than once keeps the largest
+measurement when the copies overlap in time (copies on several replicas), and adds them
+when one began measuring after the other ended (a session rebuilt under the same id
+after it was finalized). `measured` says whether the attempt has a measurement. With one,
+`start_position_seconds` is the first position it saw (where the play began or resumed),
+`paused_seconds` the time spent paused between samples, and `measured_since` and
+`measured_until` the first and last sample behind it. Without one, which includes every
+attempt recorded before measurement existed, `played_seconds` and those four fields are
+null.
 
 `client_ip` is the viewer's last address on the playback session, or null when none was
 recorded. Rows written by earlier server versions hold the address of the request that
@@ -2202,6 +2381,37 @@ The detailed session list also accepts `user_id` to filter by login account
 before pagination. Cursors bind that filter, the page size and caller authority;
 changing a filter requires a fresh first page.
 
+A row names what is playing as [playback history](#playback-history)
+names it, so a live row and the history entry its play leaves agree: for an
+episode, `media_type` is `episode`, `media_title` is the episode's title,
+`series_title` is the show's, and `media_item_id` is the episode's content ID,
+the value history's `media_item_id` and its filter take. The summary items, the
+household sessions listing and the row in each `session.*` WebSocket event share this
+naming.
+
+With `subtitle: true` in the capabilities, each row carries `subtitle`: the
+subtitle the session's current playback plan delivers, or null when it shows
+none. It uses the plan's names: `track_id` is the inventory `track_id` the plan
+selected, `language`, `codec`, `source` (`embedded`, `external`, `downloaded`),
+`forced` and `hearing_impaired` come from that inventory row, and `delivery`
+says how the plan delivers it: `burn_in` (burned into the video), `embedded`
+(carried in the stream the client plays, `subtitle.embedded`), `hls_rendition`
+(a WebVTT rendition of the HLS stream) or `sidecar` (a file the client fetches,
+`subtitle.artifact`). `format` is the format the client receives for a sidecar
+or HLS rendition, and null otherwise. The value follows every replan, including
+the `track_change` a client sends when it switches subtitles, and survives a
+restart and a move to another server, because the session's recovery card and
+its shared row carry it. The row in each `session.*` event carries it too, and
+each [playback history](#playback-history) entry keeps the one the play ended
+on.
+
+The server sees only what reaches it as a plan. A client that turns an already
+delivered sidecar on or off in its own player without a replan changes what is
+on screen and not `subtitle`; every sidecar URL in the inventory stays
+published whatever is selected, and progress reports carry no subtitle. Jellyfin-protocol
+and Audiobookshelf sessions always report null: their progress reports name a
+Jellyfin stream index, not a plan the server made.
+
 `GET /api/v2/admin/sessions/summary` returns `{count, items}`. Optional `user_id`
 filters by account; omitted means all accounts. `limit` chooses a sample of 1–100
 observations (default 20), ordered by start time descending and session identity
@@ -2209,8 +2419,8 @@ as the tie-breaker. The count includes every matching observation and shares the
 sample's database snapshot. Missing accounts or no activity return zero and an
 empty array. The summary has no pagination.
 
-Summary items expose only account ID, media title/type, optional series/episode
-labels and numbers, and paused state. They omit session/profile identifiers,
+Summary items expose only account ID, media title/type, the optional series
+title and episode numbers, and paused state. They omit session/profile identifiers,
 client network/device details, file IDs and playback controls. The summary reuses
 the live session loader and inherits its synchronization and cleanup delay.
 `admin:sessions:summary:read` grants only this summary and session capabilities;
@@ -2318,7 +2528,8 @@ file paths.
 take `{"ids": [...]}` (1–500 job ids) and return one `{id, outcome}` per
 distinct id in request order. `outcome` is `applied`, `unchanged` (already in
 the requested state), `not_found` (no such job is being prepared: it finished,
-was canceled, or never existed), or `not_applicable` (pausing or resuming a
+was canceled, was stopped because no download needs it any more, or never
+existed), or `not_applicable` (pausing or resuming a
 failed job). Pause keeps a job's queue position but no worker claims it until
 it is resumed; a running encode stops and restarts from the beginning on resume,
 and the stopped attempt does not count against the job. Its waiting downloads
@@ -2332,8 +2543,8 @@ preparing is never touched. The three operations are idempotent.
 the realtime channel (`download_preparations`), the failure window in seconds,
 and `controls` when pause, resume, and cancel are available. The admin-only channel publishes `download_preparation.changed`
 (`{id}`) when a job is queued, claimed, assigned a worker, finishes, fails, is
-requeued, paused, resumed, or canceled, and when a user adds or removes a
-download waiting on it, and `download_preparation.progress` (`{id, progress}`) at most every
+requeued, paused, resumed, canceled, or stopped because no download needs it,
+and when a user adds or removes a download waiting on it, and `download_preparation.progress` (`{id, progress}`) at most every
 five seconds per running job. The subscription snapshot is `null`; re-read the
 list after subscribing. See
 [preparation progress](downloads-api.md#preparation-progress-admin) for how the
@@ -2348,8 +2559,11 @@ retention rule, budgets, measurement, and revocation they act on. Every operatio
 requires an acting administrator; the mutations are refused in demo mode.
 
 `GET /api/v2/admin/downloads/storage/capabilities` reports `available`, the realtime
-channel (`download_preparations`), and `devices` and `revocation` when device copies
-can be listed and revoked.
+channel (`download_preparations`), `devices` and `revocation` when device copies
+can be listed and revoked, `client_ip` when download rows carry
+`created_client_ip` and `last_client_ip`, and `change_events` when the admin-only
+`downloads` realtime channel carries `download.changed` (see
+[download changes](realtime-api.md#download-changes)).
 
 `GET /api/v2/admin/downloads/storage` returns one entry per location, the server
 first and then transcode nodes by name, plus the settings that govern them
@@ -2411,7 +2625,9 @@ not yet confirmed deleting), and active series `monitors`.
 Filters: `q`, `stale`, `platform`; `sort` is `last_seen` (longest unseen first,
 default) or `size`. `GET /api/v2/admin/downloads/entries` lists the managed
 downloads themselves, filtered by `user_id`, `profile_id`, `device_id`, or `status`,
-with where each one's prepared file is and any revocation.
+with where each one's prepared file is, any revocation, and the device's
+`created_client_ip` and `last_client_ip` (see
+[client addresses](downloads-api.md#client-addresses-admin)).
 
 `POST /api/v2/admin/downloads/revoke` takes either `ids` (up to 500 download ids)
 or `user_id`, `profile_id`, and `device_id` for every download on one device, plus
@@ -2439,7 +2655,11 @@ Every request body carries `command_id` (a client-allocated canonical UUID) and
 client can represent it exactly, that must rise within the session), plus optional `reason` and `deadline_ms` (bounded to 10000, default
 3000; ignored by message). Message adds a required `message` and optional
 `title`. Allocate the identity once per intended command and preserve the
-whole body on retry.
+whole body on retry. A delivered command carries `reason` as the frame's
+top-level `reason`, and a player that supports it shows it with its notice
+for a stop (and for a terminate, below); a message's text and title travel in the frame's payload,
+which omits `title` when none was given
+([control socket](architecture/playback-protocol-v3.md#25-session-liveness)).
 
 The server keeps one ledger per playback session in the process that serves
 the session's realtime lane. With several API replicas, a command that reaches
@@ -2546,12 +2766,24 @@ The JSON body is required (`{}` when there is no reason) and carries an optional
 `session_id`, `authority_revoked`, `already_revoked`, `durable_state`,
 `client_notified`, `delivery` (`dispatched`, `unavailable`, `failed`, `none`)
 and `command_id` when a dismissal was issued. `durable_state` reports `stopped`:
-a terminate that succeeds always commits the terminal stop. `already_revoked`
-stays `false`, because a repeat against a session this server no longer holds is
-`404` rather than a converged receipt. A player that is offline yields
-`authority_revoked: true` with `client_notified: false` and `200`. The ledger
-row keeps `natural_idempotent`. An unknown or already-ended session is `404`; a
-session whose stop cannot be committed in its current state is `409`. The
+a terminate that succeeds always commits the terminal stop. The answer to a
+session that is no longer live depends on which stop its playback attempt
+record shows. When the record shows an administrator's end, the terminate
+converges on every replica: `200` with `authority_revoked: true`,
+`already_revoked: true`, `delivery: "none"` and `client_notified: false`, and
+nothing is dispatched to the player. That end can come from an earlier
+terminate, from the stop fallback above, or from a player confirming an
+administrator's stop over the control socket. When the record shows the
+player's own stop, the answer is `404`. That includes a player that carried
+out an administrator's stop when its HTTP stop reached the server before its
+confirmation did. An expired or abandoned session is `404` too. The record
+stays readable for at least 24 hours after the play started (a replan onto a
+new stream extends it). After it lapses the session is unknown and the answer
+is `404`. A Jellyfin-protocol play keeps no attempt record, so a repeat
+terminate of one is `404` too. A player that is offline
+yields `authority_revoked: true` with `client_notified: false` and `200`. The
+ledger row keeps `natural_idempotent`. An unknown session is `404`; a session
+whose stop cannot be committed in its current state is `409`. The
 operation requires an acting administrator, is restricted in demo mode, and is
 registered unconditionally: it answers `503` and the shared command capability
 lists `terminate` with `terminate_revokes_authority: true` only when the durable
@@ -2628,12 +2860,13 @@ invalidates the exact compatibility status scope only for the active authority.
 
 ### Dashboard capability discovery in v2
 
-`GET /api/v2/admin/dashboard/capabilities` returns the eleven dashboard support
+`GET /api/v2/admin/dashboard/capabilities` returns the twelve dashboard support
 flags to an acting administrator. These describe the v2 surface in the API build;
 they do not promise that a database or other runtime dependency is healthy.
 
 `timeseries`, `playback_activity`, `top_activity`, `health`, `watch_providers`,
-`downloads_stats`, `egress_totals`, `egress_by_source` and `api_clients` are true for
+`downloads_stats`, `egress_totals`, `egress_by_source`, `streams_by_method` and
+`api_clients` are true for
 the existing v2 dashboard operations. `server_layouts` remains false until the full
 layout lifecycle is accepted, although layout read, save and reset are served.
 `log_level_list` is true for the accepted multi-level application-log reader.
@@ -3039,11 +3272,11 @@ change logging have an empty list. Each change has `source_path` (as reported),
 `outcome`: `queued` (created a scan run), `joined` (coalesced into a run for the
 same scope that was already queued or running), `suppressed` (debounced),
 `unresolved` (did not map to a scannable library location), `ignored` (empty path,
-or a file change that resolved to a whole library) or `error` (resolve or enqueue
-failure). `reason` is a machine code for unresolved, ignored and error outcomes:
-resolver reasons such as `no_library_match`, `library_root_offline` or
-`unsupported_extension`, plus `resolves_to_library`, `resolve_failed` and
-`enqueue_failed`; clients treat unknown codes and unknown outcomes as opaque and
+a file change that resolved to a whole library, or a file the library's ignore files
+exclude) or `error` (resolve or enqueue failure). `reason` is a machine code for
+unresolved, ignored and error outcomes: resolver reasons such as `no_library_match`,
+`library_root_offline`, `unsupported_extension` or `path_ignored`, plus
+`resolves_to_library`, `resolve_failed` and `enqueue_failed`; clients treat unknown codes and unknown outcomes as opaque and
 may show `detail`. Resolved changes include `library_id`, `target_mode` and
 `target_path`; queued and joined changes include the covering `scan_run_id`, which
 is how a joined change names a run another event created. A change that joins a
@@ -3369,6 +3602,28 @@ served. The web nodes page shows `Draining · N transcodes left` and then
 `Drained · safe to stop` from these fields. See
 [node drain](architecture/node-drain.md) for the protocol.
 
+### Node keys (v2)
+
+`POST /api/v2/admin/nodes/{id}/key` (`issueAdminNodeKey`) issues a transcode
+node its own key and returns it once: `201 {"node_key": "snk1_<id>_<random>"}`
+with `Cache-Control: no-store`. The key is never returned again; the node row
+only reports `key_issued`. Every call rotates: the previous key is gone from
+this server's credential registry before the response, and from the other API
+servers and proxies once `node_pool_changed` reaches them (within a minute
+without it). The node's running streams fail until it restarts with the new
+key, so drain it first. A disabled node can take a key. The operation requires an acting
+administrator, rejects demo mode, takes no body and is non_retryable: after a
+lost response, issue again rather than replaying. A proxy node returns 409 (a
+proxy takes no key), a missing node 404, a server without the data cipher 503,
+invalid IDs 422, and repository failures a private 500 problem.
+
+The key is stored encrypted in `stream_nodes.node_key_ciphertext` (see
+[secret encryption](architecture/secret-encryption.md)). It is a credential, not
+configuration: issuing it advances neither `config_etag` nor the pool
+generation. `GET /api/v2/admin/nodes/capabilities` advertises `node_keys: true`
+when this server can issue keys. The node starts with this key and the API's
+URL; see [transcode nodes](architecture/transcode-nodes.md).
+
 ### Force reload nodes (v2)
 
 `POST /api/v2/admin/nodes/force-reload` (`forceReloadAdminNodes`) takes a snapshot
@@ -3480,6 +3735,16 @@ check records it on the installation row, so every node returns it. It disappear
 installed version changes or a later check handles the plugin without failing; a check that
 cannot reach the plugin's repository leaves it in place.
 
+Every installation carries `signature`, the release signature check Silo ran when it installed
+the package ([plugin trust](architecture/plugin-trust.md#release-signatures)). `state` is
+`verified`, `unsigned` (nothing to check: an upload, an archive install, or a catalog entry
+without `bundle_url`), `invalid` (a bundle was checked and did not prove the policy), or
+`unknown` (installed before Silo checked signatures, or the check could not run). A verified
+installation also has `source_repo`, the repository its signing certificate names, and
+`verified_at`. The check is recorded once on the installation row and is not re-run; replacing
+the package records the new package's result. Catalog entries carry no signature, because
+nothing is verified before download.
+
 Both reads require an acting administrator and answer 503 when the
 plugin service or stores are not wired. The web plugins page and admin sidebar read these
 routes under captured profile authority and drain pages with a bounded loop; a stale
@@ -3492,14 +3757,26 @@ authority or a duplicated identifier fails the read rather than merging pages.
 `archive_url`; mixing the two or supplying neither is a 422 naming the field. Both paths
 fetch over the network. An installation with the same manifest `plugin_id` is stopped and
 replaced rather than duplicated, and metadata-provider capabilities are appended to the
-library chains. Success is 201 with the installation. There is no replay identity
-and no database uniqueness, so the row is non-retryable: a lost response may follow a
-committed install and the client reconciles from the installation list.
+library chains. Success is 201 with the installation. There is no replay identity, so the
+row is non-retryable: a lost response may follow a committed install and the client
+reconciles from the installation list. A plugin has at most one installation, enforced in
+the database: when two installs or uploads of a plugin that isn't installed yet run at once,
+or an automatic install of a default plugin runs alongside one, the one that finishes second
+is refused with 409 `conflict` and installs nothing. An automatic install that loses is
+skipped.
 
 A manifest whose ID or version maps to an empty, `.` or `..` directory name (after the host
 replaces `/`, `\`, `:` and `@` with `_`) is an invalid package, as is a replacement package
 that names a different plugin ID than the installation. Both are refused as package errors
 (422) and nothing is installed.
+
+A replacement applies only to the installation it was read against. When another install,
+update or upload of the same plugin replaced the installation while this one looked up its
+catalog entry or downloaded its package, the later one is refused with 409 `conflict` and
+writes nothing: the newer release, its stored package and its files stay. It is refused
+before it stops the plugin, unless both finish at the same moment, when the newer release's
+process may be stopped and started again once. This covers catalog installs, `/update` and
+uploads; an automatic update in the same situation is skipped without recording a refusal.
 
 `PUT /api/v2/admin/plugins/installations/{id}` assigns `enabled` and/or `update_policy`
 (`auto`, `notify`, `off`, `manual`); an empty body is 422. Disabling stops the running plugin
@@ -3525,7 +3802,8 @@ names a different `plugin_id` or `version` than the catalog entry, or a catalog 
 longer lists the requested version. A catalog, checksum or download host that cannot be
 reached, answers 429 or 5xx, or cuts the response short is 503 `dependency_unavailable`
 with `Retry-After: 30`. Nothing is written in either case; an update leaves the installed
-version in place.
+version in place, and a running plugin keeps running, because the installed plugin is
+stopped only after the new package passed these checks.
 
 `POST /api/v2/admin/plugins/installations/{id}/restart` stops the installation's process
 and, for a resident plugin, starts it again with a fresh failure budget; a non-resident plugin
@@ -3601,7 +3879,18 @@ so the plugin's default applies; fields the manifest does not declare (plugin-ow
 are kept. Manifest-declared secret fields left blank keep their stored value, and a secret is
 removed only when named in `clear_secrets`. The
 connection test (`.../config/test` and the auth connection test) merges a staged entry the
-same way without storing it. The server validates the merged entry against the
+same way without storing it, with one difference: a blank secret reuses the stored secret
+only while the entry is otherwise unchanged. Unchanged means no secret is typed and every
+other field, after clears, matches the stored entry; a field the stored entry lacks
+matches its declared default. A secret object or list (such as a map of servers with keys
+inside) counts as typed whenever it is sent, because its contents are secret. A staged entry that changes a server URL, issuer, CA or any
+other setting, or types a secret, is tested with only the secrets the administrator typed
+and without undeclared stored top-level fields, so a destination changed in an entry never
+receives the saved secrets that entry declares. An undeclared key stored inside a declared
+object is kept, and an entry whose schema declares no secret is merged as a save would
+merge it, undeclared stored fields included. The rule is per entry: the other stored entries go to the
+plugin unchanged, so a plugin that keeps a credential in one entry and its destination in
+another is not covered. The server validates the merged entry against the
 plugin's schema and returns 422 with the plugin's own message on failure, then persists
 under a compare-and-swap on the stored revision and stops the running plugin so it rebinds.
 Success is 204. Repeating the same request converges on one stored entry, so the row is
@@ -3617,6 +3906,12 @@ A metadata provider is checked with a movie search; a marker provider is asked f
 account statistics, which need the staged credentials.
 A completed failed check, including a plugin without connection-check support, is a 200
 result with `success` false and the message; only transport or store failures are problems.
+Each installation's `connection_check_supported` says whether the check contacts the
+provider: true for a marker provider and for a metadata provider that serves movies, since
+the probe is a movie search. A metadata provider without movie priority, such as a
+series-only one, reports false; its check succeeds without contacting anything. Clients
+offer the check only when the field is true. A marker provider without account statistics
+can still answer that checks are not supported, since only running it tells.
 The probe launches a process and may call a billed provider, so it is non-retryable: the
 web hook disables mutation retries and authentication replay and reports an uncertain
 result to the operator instead of resubmitting.
@@ -3627,9 +3922,16 @@ whole binding row keyed by installation and capability. The auth binding answers
 `X-Silo-Restart-Required: false`: sign-in providers rebuild on every node without a
 restart. An omitted `auto_provision` is true, and enabling an auth binding while another
 is enabled is 409 `provider_already_enabled`
-([external-sign-in.md](architecture/external-sign-in.md)). The task binding marks a server
-restart required and answers 200 with `restart_required` true.
-An omitted task trigger stores an empty object. Both are naturally idempotent upserts.
+([external-sign-in.md](architecture/external-sign-in.md)). The task binding applies on
+every API server without a restart and answers 200 with `restart_required` false: a disabled
+binding removes the task from the task manager and cancels a run in progress, an enabled one registers it while its
+installation is enabled, and a changed trigger becomes the task's default schedule. Each
+server applies it at its next successful plugin task sync; this server attempts one before
+answering and retries a failed one. `restart_required` is true only on a server with
+no task manager, where the binding applies at the next start. An omitted task trigger stores an empty object. A runnable binding
+trigger outranks the manifest's `scheduled_task.default_trigger`; a schedule saved on the task
+page outranks both ([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)). Both
+are naturally idempotent upserts.
 
 All four require an acting administrator, restrict demo access, answer 404 for an unknown
 installation, 409 for the reserved built-in host row, 422 for a blank key or capability, and
@@ -3654,7 +3956,7 @@ identifies the acting administrator. Actor filters use
 | `user.impersonation_ended` | `endImpersonation` | `impersonation_session_id` (before) |
 | `user.ownership_transferred` | `transferAdminUserOwnership`; target is the new Owner | `owner_user_id` |
 | `user.password_reset_link_created` | `createAdminUserPasswordReset` | `delivery`, `expires_at` |
-| `user.password_reset_completed` | `completePasswordReset` | `password` (field name only) |
+| `user.password_reset_completed` | `completePasswordResetLink`, `completePasswordReset` (deprecated) | `password` (field name only) |
 | `user.password_changed` | `changePassword` | `password` (field name only) |
 | `user.login_session_revoked` | `deleteSession`, `deleteAdminUserLoginSession` | `login_session_id` (before) |
 | `user.login_sessions_revoked` | `deleteAdminUserLoginSessions` | `revoked_login_sessions` count; recorded when the call ended any login session or Audiobookshelf, Jellyfin-compatible or device sign-in |
@@ -3673,9 +3975,11 @@ profile. Login session IDs identify sessions and are not credentials.
 
 Audit rows never contain a password, password or PIN hash, PIN, access or
 refresh token, API key or its prefix, reset link, its token or digest, or an
-arbitrary request body or header. The path of `completePasswordReset` is stored
-with its link token replaced by `[redacted]`, and that row has no `user_id`
-because the request is unauthenticated.
+arbitrary request body or header. `completePasswordResetLink` takes the link
+token in its body, so its path has none; the path of the deprecated
+`completePasswordReset` is stored with its link token replaced by
+`[redacted]`. Neither row has a `user_id`, because the request is
+unauthenticated.
 
 Rollbacks and refused requests record no domain action, and neither does a
 write that changes no allowlisted value: a repeated identical policy write,

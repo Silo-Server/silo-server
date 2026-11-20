@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router";
+import { Link, Navigate, useNavigate } from "react-router";
 import { captureSessionIdentity, isSessionIdentityCurrent, getAccessToken } from "@/api/client";
 import {
   acceptPublicInvitation,
@@ -22,10 +22,11 @@ import { buildInviteDeepLink, detectMobilePlatform } from "@/lib/appDeepLink";
 import { Smartphone } from "lucide-react";
 import { toast } from "sonner";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
+import { useLinkToken } from "@/hooks/useLinkToken";
 import { useT } from "@/i18n";
 
 export default function InviteClaim() {
-  const { token = "" } = useParams();
+  const token = useLinkToken();
   return <ClaimForm key={token} token={token} />;
 }
 
@@ -47,12 +48,20 @@ function ClaimForm({ token }: { token: string }) {
     data?: InvitationLookup;
     pending: boolean;
     unavailable?: boolean;
-  }>({ pending: true });
+  }>(
+    // Opened without its token, as when something on the way dropped the
+    // link's fragment, there is nothing to look up: the invitation is
+    // unavailable, and a fresh one is the remedy.
+    token ? { pending: true } : { pending: false, unavailable: true },
+  );
   const [reload, setReload] = useState(0);
   const [recovery, setRecovery] = useState(false);
   // The server refused the acceptance because password sign-in is off; the
   // invitation stays unspent, and no account was created.
   const [localLoginDisabled, setLocalLoginDisabled] = useState(false);
+  // The server refused the acceptance before anything committed: no account
+  // was created and the invitation is unspent, so the invitee can try again.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [createdUsername, setCreatedUsername] = useState<string | null>(null);
   const busy = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
@@ -62,7 +71,7 @@ function ClaimForm({ token }: { token: string }) {
     return () => controller.abort();
   }, []);
   useEffect(() => {
-    if (loading || user) return;
+    if (loading || user || !token) return;
     const controller = new AbortController();
     const identity = captureSessionIdentity();
     lookupPublicInvitation(token, controller.signal)
@@ -151,6 +160,26 @@ function ClaimForm({ token }: { token: string }) {
     setReload((value) => value + 1);
   }
 
+  // A refusal the server answers before anything commits, as the accept
+  // contract states: a rate limit, a store that can't create the profile, an
+  // address already in use, or a request that didn't validate. Anything else,
+  // a 5xx or a lost response included, may have created the account.
+  function unspentRefusalMessage(error: unknown): string | null {
+    if (!(error instanceof V2ProblemError)) return null;
+    switch (error.problemType) {
+      case "rate_limited":
+        return t("web.auth.forgotPassword.rateLimited");
+      case "capability_unsupported":
+        return t("web.auth.invite.profileUnavailable");
+      case "conflict":
+        return t("web.auth.invite.emailTaken");
+      case "validation_failed":
+        return error.message;
+      default:
+        return null;
+    }
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (
@@ -181,6 +210,7 @@ function ClaimForm({ token }: { token: string }) {
     const identity = captureSessionIdentity();
     busy.current = true;
     setSubmitting(true);
+    setRefusal(null);
     try {
       const data = await acceptPublicInvitation(token, password, controller.signal, enteredEmail);
       if (controller.signal.aborted || !isSessionIdentityCurrent(identity)) return;
@@ -221,6 +251,11 @@ function ClaimForm({ token }: { token: string }) {
           setEmailError(invalidEmailMessage());
           return;
         }
+      }
+      const refused = unspentRefusalMessage(error);
+      if (refused) {
+        setRefusal(refused);
+        return;
       }
       setRecovery(true);
     } finally {
@@ -298,6 +333,11 @@ function ClaimForm({ token }: { token: string }) {
                   {invitation.inviter_name
                     ? t("web.auth.invite.localLoginDisabled", { inviter: invitation.inviter_name })
                     : t("web.auth.invite.localLoginDisabledNoInviter")}
+                </p>
+              )}
+              {refusal && (
+                <p role="alert" className="mb-4">
+                  {refusal}
                 </p>
               )}
               {recovery && (

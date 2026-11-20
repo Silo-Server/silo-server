@@ -42,7 +42,7 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, absUserObject(a.UserID, name, a.Token, defaultLibID, time.Now()))
+	writeJSON(w, http.StatusOK, absUserObject(a.UserID, name, a.Token, defaultLibID, h.mayDownload(r.Context(), a.UserID), time.Now()))
 }
 
 // audiobookLibraryID returns the ABS-wire library ID string for an
@@ -59,7 +59,7 @@ func audiobookLibraryID(lib AudiobookLibrary) string {
 // /libraries (list) and /libraries/{id} (detail). Plugin parity:
 // {id, name, mediaType} only — the extra folders/displayOrder/icon
 // fields some servers emit are ignored by real ABS clients and adding
-// them risks behavior drift.
+// them risks behaviour drift.
 func audiobookLibraryMap(lib AudiobookLibrary) map[string]any {
 	name := strings.TrimSpace(lib.Name)
 	if name == "" {

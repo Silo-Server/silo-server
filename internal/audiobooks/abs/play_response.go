@@ -2,6 +2,8 @@ package abs
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -27,7 +29,7 @@ import (
 // Silo's implementation:
 //   - Looks up the audiobook via MediaStore.GetAudiobookByID.
 //   - Loads all media files via MediaStore.GetMediaFiles (sorted by ID ASC).
-//   - Synthesizes a ULID session ID (in-memory; no play-session table yet).
+//   - Synthesises a ULID session ID (in-memory; no play-session table yet).
 //   - Builds contentUrls that point at the session-scoped public track route,
 //     avoiding bearer tokens in URLs while preserving ABS DirectPlay behavior.
 //   - Returns a JSON playbackSession matching the shape real ABS emits, with
@@ -81,7 +83,13 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 	// that handleFileStream can reverse without a database lookup.
 	baseURL := h.absBaseURL(r)
 	sessionID := ulid.Make().String()
-	if nativeSession, err := h.startNativePlaybackSession(r, a, files, currentTime); err != nil {
+	// The body is optional; Audiobookshelf clients send their deviceInfo in
+	// it, which names the client in the admin session views.
+	var body struct {
+		DeviceInfo absDeviceInfo `json:"deviceInfo"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&body)
+	if nativeSession, err := h.startNativePlaybackSession(r, a, files, currentTime, body.DeviceInfo); err != nil {
 		writeNativePlaybackStartError(w, err)
 		return
 	} else if nativeSession != nil {
@@ -467,7 +475,7 @@ func nilIfEmpty(s string) any {
 }
 
 // titleIgnorePrefix strips leading articles for sort-key purposes,
-// matching real ABS LibraryItemController behavior.
+// matching real ABS LibraryItemController behaviour.
 func titleIgnorePrefix(title string) string {
 	lower := strings.ToLower(title)
 	for _, p := range []string{"the ", "a ", "an "} {

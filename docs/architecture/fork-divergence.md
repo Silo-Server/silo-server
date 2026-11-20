@@ -43,6 +43,22 @@ that before it ships.
   session does not yet end the Jellyfin play attached to it.
 - Upstream-added tests whose subject the fork does not implement were dropped;
   tests for surfaces upstream retired with `/api/v1` were removed with them.
+- Signed node source grants and the core loopback relay (#4337/#4338) are not
+  adopted. The fork keeps `CatalogPathAuthorizer`
+  (`internal/transcodenode/path_authorizer.go`) and its direct `virtual://`
+  dispatch: a transcode node approves its input against the catalog, and
+  virtual sources arrive as pre-resolved relay URLs. Upstream's
+  `internal/nodesource` grant minting, grant-open endpoint, and loopback relay
+  are not wired into the fork's node runtime. Adopting them (per-node keys,
+  thin nodes, core-authoritative source access) is a separate project, not a
+  merge-time change.
+- The copy-group rework (#1770/#4400/#4434/#2515) is deferred. The fork keeps
+  its copy planner — `copySegmentPlan.seekTarget`/`segmentSeekPosition`,
+  `StartSegmentNumber`, `StreamOriginSeconds`, and `CopySeekAnchorResolved` —
+  and the files that only make sense with upstream's `copyGroupAssembler`
+  (`copy_fmp4.go`, `copy_group_assembler.go`, `copy_keyframe_resume_test.go`)
+  are not carried. The deferral preserves the fork's segment numbering and
+  seek-anchor behavior; porting the assembler is a separate project.
 
 ## Merge procedure
 

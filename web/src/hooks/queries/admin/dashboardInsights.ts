@@ -55,17 +55,17 @@ function clampWindow(value: number, min: number, max: number, fallback: number):
 }
 
 /** Hours window accepted by the timeseries and playback-activity endpoints. */
-export function normalizeInsightHours(hours: number = DEFAULT_INSIGHT_HOURS): number {
+function normalizeInsightHours(hours: number = DEFAULT_INSIGHT_HOURS): number {
   return clampWindow(hours, MIN_HOURS, MAX_HOURS, DEFAULT_INSIGHT_HOURS);
 }
 
 /** Days window accepted by the top-activity endpoint. */
-export function normalizeTopActivityDays(days: number = DEFAULT_TOP_ACTIVITY_DAYS): number {
+function normalizeTopActivityDays(days: number = DEFAULT_TOP_ACTIVITY_DAYS): number {
   return clampWindow(days, MIN_DAYS, MAX_DAYS, DEFAULT_TOP_ACTIVITY_DAYS);
 }
 
 /** Top-list size accepted by the downloads stats endpoint. */
-export function normalizeDownloadsTopLimit(limit: number = DEFAULT_DOWNLOADS_TOP_LIMIT): number {
+function normalizeDownloadsTopLimit(limit: number = DEFAULT_DOWNLOADS_TOP_LIMIT): number {
   return clampWindow(
     limit,
     MIN_DOWNLOADS_TOP_LIMIT,

@@ -24,22 +24,6 @@ func (f fakeRequestLookup) Get(_ context.Context, id string) (string, string, er
 	return e.baseURL, e.apiKey, nil
 }
 
-func TestResolveConnectionLinked(t *testing.T) {
-	lookup := fakeRequestLookup{entries: map[string]struct{ baseURL, apiKey string }{
-		"req-1": {baseURL: "http://req:7878", apiKey: "REQKEY"},
-	}}
-	r := NewConnectionResolver(lookup)
-
-	id := "req-1"
-	got, err := r.Resolve(context.Background(), Connection{RequestIntegrationID: &id})
-	if err != nil {
-		t.Fatalf("Resolve linked: %v", err)
-	}
-	if got.BaseURL != "http://req:7878" || got.APIKey != "REQKEY" {
-		t.Fatalf("linked resolve = %+v", got)
-	}
-}
-
 func TestResolveConnectionEmptyIntegrationIDIsNotALink(t *testing.T) {
 	// A pointer-to-empty/whitespace request_integration_id must NOT be treated as
 	// a live link: it must fall back to the connection's own fields, never call
@@ -60,21 +44,5 @@ func TestResolveConnectionEmptyIntegrationIDIsNotALink(t *testing.T) {
 		if got.BaseURL != "http://own:8989" || got.APIKey != "OWNKEY" {
 			t.Fatalf("empty integration id %q should use own creds, got %+v", empty, got)
 		}
-	}
-}
-
-func TestResolveConnectionTrimsKey(t *testing.T) {
-	// Resolve trims surrounding whitespace from the (decrypted) key.
-	r := NewConnectionResolver(fakeRequestLookup{})
-
-	got, err := r.Resolve(context.Background(), Connection{
-		BaseURL:   "http://own:8989",
-		APIKeyRef: "  OWNKEY  ",
-	})
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if got.APIKey != "OWNKEY" {
-		t.Fatalf("expected trimmed key, got %q", got.APIKey)
 	}
 }

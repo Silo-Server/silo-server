@@ -263,6 +263,16 @@ export default defineConfig(({ mode }) => {
       precompressStaticAssets(),
       moveManifestOutOfDist(),
     ],
+    json: {
+      // With named exports on, Vite turns every top-level key of a JSON file
+      // into JavaScript source, so each precompiled message in src/locales
+      // (about 30 MB) becomes object and array AST nodes that Rollup keeps for
+      // the whole build. That alone roughly doubles the heap `vite build`
+      // needs. Off, any file over 10 kB becomes one `JSON.parse("...")` string,
+      // which also parses faster in the browser. Nothing imports named exports
+      // from JSON.
+      namedExports: false,
+    },
     define: {
       // Reported in X-Silo-Client-Version on every v2 request (src/api/v2/request.ts).
       __SILO_WEB_VERSION__: JSON.stringify(webVersion),
@@ -324,6 +334,12 @@ export default defineConfig(({ mode }) => {
       environment: "jsdom",
       globals: true,
       setupFiles: ["./src/test-setup.ts"],
+      // vmThreads workers are threads in one process, and vitest's default
+      // recycle limit is total RAM divided by the worker count, so together
+      // they may grow to nearly all of the machine's memory. Recycling each
+      // worker at 512MB bounds that without lowering the worker count or
+      // slowing the run; a lower limit recycles so often that it does slow.
+      vmMemoryLimit: "512MB",
       projects: [
         {
           extends: true,

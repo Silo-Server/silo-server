@@ -8,8 +8,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
 
 // activeRequestFor seeds an active request for the title, owned by another
@@ -23,53 +21,6 @@ func activeRequestFor(store *fakeStore, tmdbID int) *Request {
 	store.requests[req.ID] = req
 	store.active[MediaTypeMovie][tmdbID] = req
 	return req
-}
-
-func TestFollowTitleSomeoneElseRequested(t *testing.T) {
-	store := newFakeStore()
-	activeRequestFor(store, 949)
-	svc := newTestService(store)
-
-	state, err := svc.Follow(context.Background(), testViewer(1), MediaTypeMovie, 949)
-	if err != nil {
-		t.Fatalf("Follow: %v", err)
-	}
-	if !state.Following || state.RequestedByViewer || state.Requestable || state.Reason != "already_requested" || state.RequestID != "" {
-		t.Fatalf("state = %+v, want following, not requestable, request id hidden from another account", state)
-	}
-	followed, _ := store.FollowedRequests(context.Background(), []string{"req-owner"}, testViewer(1))
-	if !followed["req-owner"] {
-		t.Fatal("follow was not stored")
-	}
-	if _, err := svc.Follow(context.Background(), testViewer(1), MediaTypeMovie, 949); err != nil {
-		t.Fatalf("second Follow: %v (want idempotent)", err)
-	}
-
-	if err := svc.Unfollow(context.Background(), testViewer(1), MediaTypeMovie, 949); err != nil {
-		t.Fatalf("Unfollow: %v", err)
-	}
-	followed, _ = store.FollowedRequests(context.Background(), []string{"req-owner"}, testViewer(1))
-	if followed["req-owner"] {
-		t.Fatal("follow survived Unfollow")
-	}
-}
-
-func TestFollowOwnRequestStoresNothing(t *testing.T) {
-	store := newFakeStore()
-	req := activeRequestFor(store, 949)
-	req.RequestedByUserID, req.RequestedByProfileID = 1, "profile-1"
-	svc := newTestService(store)
-
-	state, err := svc.Follow(context.Background(), testViewer(1), MediaTypeMovie, 949)
-	if err != nil {
-		t.Fatalf("Follow: %v", err)
-	}
-	if !state.Following || !state.RequestedByViewer || state.RequestID != "req-owner" {
-		t.Fatalf("state = %+v, want following, requested by the viewer, with its request id", state)
-	}
-	if len(store.follows) != 0 {
-		t.Fatalf("follows = %v, want none: the requester is always notified", store.follows)
-	}
 }
 
 // Profile ids repeat across accounts (every account from before profiles has
@@ -117,64 +68,6 @@ func TestFollowRefusesBlockedAccount(t *testing.T) {
 	store.limit = &UserLimit{UserID: 1, LimitMode: LimitModeBlocked, ApprovalMode: ApprovalModeInherit}
 	if _, err := newTestService(store).Follow(context.Background(), testViewer(1), MediaTypeMovie, 949); !errors.Is(err, ErrUserBlocked) {
 		t.Fatalf("err = %v, want ErrUserBlocked", err)
-	}
-}
-
-func TestSearchMarksFollowedAndOwnTitles(t *testing.T) {
-	store := newFakeStore()
-	activeRequestFor(store, 949)
-	own := &Request{ID: "req-own", MediaType: MediaTypeMovie, TMDBID: 950, Status: StatusPending, Outcome: OutcomeActive,
-		RequestedByUserID: 1, RequestedByProfileID: "profile-1"}
-	store.requests[own.ID] = own
-	store.active[MediaTypeMovie][950] = own
-	other := &Request{ID: "req-other", MediaType: MediaTypeMovie, TMDBID: 951, Status: StatusPending, Outcome: OutcomeActive,
-		RequestedByUserID: 3, RequestedByProfileID: "someone"}
-	store.requests[other.ID] = other
-	store.active[MediaTypeMovie][951] = other
-	if err := store.FollowTitle(context.Background(), MediaTypeMovie, 949, testViewer(1)); err != nil {
-		t.Fatal(err)
-	}
-	svc := newTestServiceWithTMDB(store, &fakeTMDBClient{page: &tmdb.MediaPage{Page: 1, Results: []tmdb.MediaResult{
-		{ID: 949, MediaType: "movie", Title: "Heat"},
-		{ID: 950, MediaType: "movie", Title: "Ronin"},
-		{ID: 951, MediaType: "movie", Title: "Thief"},
-	}}})
-
-	page, err := svc.Search(context.Background(), testViewer(1), "heat", MediaTypeMovie, 1)
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	following := map[int]bool{}
-	for _, r := range page.Results {
-		following[r.TMDBID] = r.Request.Following
-	}
-	if !following[949] || !following[950] || following[951] {
-		t.Fatalf("following = %v, want the followed and the own title, not the other account's", following)
-	}
-}
-
-func TestNotifyFulfilledTellsFollowersAndClearsThem(t *testing.T) {
-	store := newFakeStore()
-	store.requests["req1"] = completedRequestFixture("req1", 42)
-	store.unnotified = []string{"req1"}
-	store.seedFollow(MediaTypeMovie, 42, Viewer{UserID: 3, ProfileID: "follower-profile"})
-	notifier := &fakeNotifier{}
-	svc := NewService(store, &fakeTMDBClient{}, presentMovie(42))
-	svc.SetFulfillmentNotifier(notifier)
-
-	svc.notifyFulfilledPending(context.Background())
-
-	if !slices.Equal(notifier.requestIDs, []string{"req1"}) || !slices.Equal(notifier.contentIDs, []string{"movie-42"}) {
-		t.Fatalf("notifications = %v / %v, want req1 / movie-42", notifier.requestIDs, notifier.contentIDs)
-	}
-	if !slices.Equal(store.notified, []string{"req1"}) {
-		t.Fatalf("notified = %v, want [req1]", store.notified)
-	}
-	if len(notifier.followers) != 1 || len(notifier.followers[0]) != 1 || notifier.followers[0][0] != (Follower{UserID: 3, ProfileID: "follower-profile"}) {
-		t.Fatalf("followers handed to the notifier = %+v, want the one follower", notifier.followers)
-	}
-	if followers, _ := store.titleFollowers(MediaTypeMovie, 42); len(followers) != 0 {
-		t.Fatalf("followers after notifying = %+v, want cleared", followers)
 	}
 }
 

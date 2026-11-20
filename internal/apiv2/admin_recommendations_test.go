@@ -66,8 +66,8 @@ func (f *fakeAdminRecommendations) LastRuns(context.Context) (map[recommendation
 		},
 	}, nil
 }
-func (f *fakeAdminRecommendations) EmbeddingLockConflict(context.Context) (string, error) {
-	return f.conflict, f.conflictErr
+func (f *fakeAdminRecommendations) EmbeddingLockConflict(context.Context) (string, string, map[string]string, error) {
+	return f.conflict, "", nil, f.conflictErr
 }
 func (f *fakeAdminRecommendations) CacheRefreshedAt(context.Context) (*time.Time, error) {
 	if f.refreshErr != nil || f.noRefresh {

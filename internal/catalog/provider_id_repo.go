@@ -84,13 +84,6 @@ func (r *ProviderIDRepository) AttachTMDBID(ctx context.Context, contentID, item
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// Exclusive content lock first (see lockReleaseContentTx): release
-	// readers hold it shared, so this attach serializes fully before or
-	// after their alias-set observations.
-	if err := lockReleaseContentTx(ctx, tx, contentID, true); err != nil {
-		return fmt.Errorf("lock release content for tmdb attach: %w", err)
-	}
-
 	tmdbText := strconv.Itoa(tmdbID)
 	var existingType, existingTMDBID string
 	if err := tx.QueryRow(ctx, `
@@ -264,7 +257,6 @@ func normalizeDurableProviderIDs(providerIDs map[string]string) []models.MediaIt
 	return entries
 }
 
-//nolint:unused // Retained for compatibility with dormant integration paths.
 func scanProviderID(row pgx.Row) (*models.MediaItemProviderID, error) {
 	var id models.MediaItemProviderID
 	if err := row.Scan(
@@ -378,9 +370,11 @@ func (r *ProviderIDRepository) ReplaceByContentID(ctx context.Context, contentID
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// ReplaceByContentIDTx takes the exclusive content lock first thing.
+	// Lock the item before its provider rows, as an admin's ID edit does. A
+	// replace that deleted the rows first would wait on the edit's item lock
+	// for its inserts while the edit waits on the deleted rows: a deadlock.
 	var itemType string
-	if err := tx.QueryRow(ctx, `SELECT type FROM media_items WHERE content_id = $1`, contentID).Scan(&itemType); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT type FROM media_items WHERE content_id = $1 FOR NO KEY UPDATE`, contentID).Scan(&itemType); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("loading item type for %s: content not found", contentID)
 		}
@@ -411,14 +405,6 @@ func (r *ProviderIDRepository) ReplaceByContentIDTx(
 	itemType = strings.TrimSpace(itemType)
 	if itemType == "" {
 		return fmt.Errorf("item_type is required")
-	}
-	// Callers running inside their own transaction take this exclusive lock
-	// here; like all content locks it must precede item-row and identity
-	// locks in the global order (see lockReleaseContentTx). Release readers
-	// never evaluate audiobook/ebook content, so enrichment pipelines
-	// sharing this helper cannot contend with them.
-	if err := lockReleaseContentTx(ctx, tx, contentID, true); err != nil {
-		return fmt.Errorf("lock release content for provider id replace: %w", err)
 	}
 	entries := normalizeDurableProviderIDs(providerIDs)
 

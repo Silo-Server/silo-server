@@ -32,16 +32,36 @@ default, adds a keyframe-planned mode. With it on, a fresh copy-video
 `POST /transcode/start` carries `keyframe_playlist: true` and the node echoes
 `keyframe_playlist: true` in the start response; the API rejects a missing echo
 and stops the transport. The echo confirms the node understood the request, not
-that it planned. A copy serves one complete playlist planned from the source's
-keyframes only when it starts at the beginning of the source, the duration is
-known, the keyframe index exists and records where the video ends, the plan
-fits within the synthetic playlist's 50,000-segment limit, and the node can
-record the plan in the session's output directory. Any other copy keeps
-FFmpeg's playlist. A keyframe-planned copy never seek-restarts. While FFmpeg is
-running, a request for a segment past the last one it produced waits up to 30
-seconds for the copy to get there. When FFmpeg has stopped, or the segment is
-behind the produced head and gone, the copy restarts from the beginning, so
-FFmpeg cuts the same segments.
+that it planned. `keyframe_planned: true` in the response reports that the
+session serves the plan. The API records it in the session's recipe, and a
+Jellyfin audio switch restarts a session planned from the beginning at the
+beginning again so the node plans the same segments; any other session restarts
+at the playback position. Older nodes omit the field, which reads as FFmpeg's
+playlist. A copy serves one complete playlist planned from the source's
+keyframes only when it starts at the beginning of the source, or resumes at a
+resolved copy seek anchor (`copy_seek_anchor_resolved` with a positive
+`stream_origin_seconds`) that a single keyframe within 0.1 seconds before it
+fits, the duration is known, the keyframe index exists and records where the
+video ends, the plan fits within the synthetic playlist's 50,000-segment limit,
+and the node can record the plan in the session's output directory. Any other
+copy keeps FFmpeg's playlist. A resume's plan starts at that keyframe, so its
+segment numbers and boundaries differ from FFmpeg's playlist. A node that plans
+a resume answers `keyframe_plan_resume: true`, which the recipe records. A
+start that carries `keyframe_plan_resume: true`, a move of that resume to
+another node, must plan it again or fails, and the API rejects a node that
+doesn't echo it. A rebuilt resume whose recipe lacks
+it keeps FFmpeg's playlist. The plan comes from the Cues, which the node checks against
+only a few clusters. A keyframe-planned copy has FFmpeg cut at every keyframe and
+joins those groups into the planned segments, so it can restart anywhere and
+still produce them. A group that starts where the plan has no keyframe, or a
+planned keyframe FFmpeg doesn't cut at, stops that run with a transcode failure,
+and later playbacks of that file version on that process keep FFmpeg's
+playlist, until the file changes or the process restarts. While FFmpeg is
+running, a request for a segment up to 10 past the last one assembled waits for
+the copy to get there. Any other missing segment restarts FFmpeg at the keyframe
+before that segment. Assembled segments outlive the restart unless the audio
+changes. The session's recipe keeps the position its first run started from,
+the beginning or the resume's, so a rebuilt session plans the same segments.
 
 The throttle fields belong to the internal API-to-node contract. Apple and
 Android clients require no request or response changes.
@@ -50,9 +70,13 @@ When the API relays a transcode whose node it can no longer reach, it moves
 the transcode to another node with an ordinary `POST /transcode/start`: the
 same `session_id` (transport id), the recorded recipe, `throttle_seconds` from
 that recipe, `require_ready`, and a start position resumed at the requested
-segment. The response is checked with the same attestations as a fresh start,
-and a node that fails them is stopped and skipped. The API then sends a
-best-effort `DELETE /transcode/{session_id}` to the node it left. See
+segment, plus a fresh `start_id`. The response is checked with the same
+attestations as a fresh start, and a node that fails them is released with
+`fence=0&start_id=<that id>` and skipped, so the release cannot end a later
+start of the same transport there. The API then sends a
+best-effort release (`DELETE /transcode/{session_id}?fence=0`, no `start_id`)
+to the node it left, which ends the job running there when the release arrives, or a rebuild
+that publishes while it waits, but not a newer start's job. See
 [Transcode node lost under the API relay](architecture/restart-resilient-playback.md#transcode-node-lost-under-the-api-relay).
 
 The start response also reports `hw_accel`, the backend retained for video
@@ -85,7 +109,7 @@ start response. For copied AAC into fMP4, protocol-v3 and jellycompat starts
 and protocol-v3 rehoming reject a missing or different echo and stop the
 transport, so they never start that stream on a node that predates the field.
 The receipt is checked only on `POST /transcode/start`: a jellycompat move and
-a node rebuilding a lost session from its token or stored recipe don't check
+a node rebuilding a lost session from the recipe the core resolves don't check
 it, so an older node reached that way still fails after the first segment. The
 check applies to every copied AAC track, including MKV and MP4 sources whose
 AAC an older node copies correctly without the filter, so update transcode
@@ -138,3 +162,26 @@ and the API stops a node whose count differs. Recipe cards carry the whole
 list; signed reconstruction claims carry only the track numbers, the default
 and the source version, under a method older nodes refuse, so a session
 rebuilt from a token names its renditions `Track <n>`.
+
+## Source grants
+
+Every `POST /transcode/start` request carries `source_grant`, the core's
+source grant for its file, naming the node the request is sent to, and the
+node requires it. Download preparation (`/downloads/prepare`), trickplay
+(`/trickplay/extract`), chapter thumbnails (`/chapter-thumbnails/extract`) and
+media sampling (`/media-samples/run`) carry it the same way, and the core's
+resolve answer adds one for rebuilds, progressive remux and theme conversion.
+A node exchanges it at the core's `sources/open` route, runs FFmpeg on the path
+the core approves, never on `input_path`, and renews it while the job runs; a
+source the core stops renewing ends the job. A missing or refused grant answers
+`400`, a node mount that does not show the approved file at its size `409`, and a core
+the node cannot reach `503`. A node with core source access reads the approved
+revision from the core through a loopback relay instead of its own mount, and
+answers a start `409` when its text subtitle burn-in cannot be staged. The
+download execution fingerprint leaves `source_grant` out. See
+[source grants](architecture/transcode-nodes.md#source-grants) and
+[core source access](architecture/transcode-nodes.md#core-source-access).
+
+A start also names the playback session it serves: `playback_session_id`,
+`user_id`, `profile_id` and `media_file_id`. The node files its session record
+and stream telemetry under them; it verifies no stream token to learn them.

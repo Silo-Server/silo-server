@@ -390,6 +390,10 @@ func (m *TranscodeManager) CancelRemoteTranscode(ctx context.Context, sessionID,
 
 // TranscodeStopFenceQueryParam set to "0" on a node stop asks the node not to
 // fence the transport against reconstruction.
+// TranscodeStopStartIDQueryParam on a release names the start it releases;
+// a job another start published under the ID is left running.
+const TranscodeStopStartIDQueryParam = "start_id"
+
 const TranscodeStopFenceQueryParam = "fence"
 
 // ReleaseRemoteTranscode stops a remote job whose transport id lives on: the

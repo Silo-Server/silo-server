@@ -704,7 +704,7 @@ func checkRecommendationsEmbeddingConnection(
 		return failed("The stored embedding lock cannot be read. Reset embeddings to clear it.")
 	}
 	if lock != nil {
-		if conflict := recommendations.DescribeEmbeddingLockConflict(*lock, cfg.Recommendations.EmbeddingBaseURL, cfg.Recommendations.EmbeddingModel, dimensions); conflict != "" {
+		if conflict, _, _ := recommendations.DescribeEmbeddingLockConflict(*lock, cfg.Recommendations.EmbeddingBaseURL, cfg.Recommendations.EmbeddingModel, dimensions); conflict != "" {
 			return failed(conflict)
 		}
 	}

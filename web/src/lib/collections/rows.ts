@@ -1,4 +1,5 @@
 import type { SettingsSectionEntry } from "@/api/types";
+import { collectionRefsOf } from "@/lib/homeRows/collectionList";
 import { homeRowsPath, type RowLinkCollection } from "@/lib/homeRows/rowLinks";
 import type { PageRef, Surface } from "@/lib/homeRows/types";
 
@@ -22,6 +23,19 @@ export interface CollectionRow {
   position: number;
   /** How many rows the page has, turned-off rows included. */
   pageRowCount: number;
+  /**
+   * A row of collections: how many collections it lists, this one included.
+   * Absent on a row that shows one collection.
+   */
+  listCount?: number;
+}
+
+/**
+ * Whether deleting the collection leaves this row in place: a row of
+ * collections that lists others too loses only this one.
+ */
+export function keepsRowWithoutCollection(row: Pick<CollectionRow, "listCount">): boolean {
+  return (row.listCount ?? 0) > 1;
 }
 
 /** The rows that show a collection, as read for the editor or a delete. */
@@ -190,21 +204,31 @@ export function profileCollectionRows(
   pages: ReadonlyArray<{ page: PageRef; sections: readonly SettingsSectionEntry[] }>,
 ): CollectionRow[] {
   return pages.flatMap(({ page, sections }) =>
-    sections.flatMap((section, index) =>
-      section.section_type === "collection" && section.config?.user_collection_id === collectionId
-        ? [
-            {
-              id: section.id,
-              page,
-              surface: "profile" as const,
-              title: section.title,
-              enabled: !section.hidden,
-              position: index + 1,
-              pageRowCount: sections.length,
-            },
-          ]
-        : [],
-    ),
+    sections.flatMap((section, index) => {
+      const listed =
+        section.section_type === "collection_posters"
+          ? collectionRefsOf(section.config ?? {}).filter((ref) => ref.source === "user")
+          : [];
+      const shows =
+        (section.section_type === "collection" &&
+          section.config?.user_collection_id === collectionId) ||
+        listed.some((ref) => ref.id === collectionId);
+      if (!shows) return [];
+      return [
+        {
+          id: section.id,
+          page,
+          surface: "profile" as const,
+          title: section.title,
+          enabled: !section.hidden,
+          position: index + 1,
+          pageRowCount: sections.length,
+          ...(section.section_type === "collection_posters"
+            ? { listCount: collectionRefsOf(section.config ?? {}).length }
+            : {}),
+        },
+      ];
+    }),
   );
 }
 
@@ -219,4 +243,17 @@ export function matchedLibraries<Library extends { id: number }>(
   if (libraryIds.length === 0) return [...libraries];
   const ids = new Set(libraryIds);
   return libraries.filter((library) => ids.has(library.id));
+}
+
+/** The button when some rows lose only this collection and stay: "Delete it and change 2 rows". */
+export function deleteWithRowChangesLabel(rowCount: number): string {
+  return t("web.collections.copy.deleteWithRowChangesLabel", {
+    count: rowCount,
+    count_text: rowCount,
+  });
+}
+
+/** Under a row of collections that stays: it loses only this collection. */
+export function removedFromRow(title: string): string {
+  return t("web.collections.copy.removedFromRow", { title });
 }

@@ -13,6 +13,7 @@ import {
   type AdminUserSettingEntry,
 } from "@/hooks/queries/admin/users";
 import { useAppLanguage, useT, type MessageKey, type Translate } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 import {
   formatSettingValue,
   getSettingDefinition,
@@ -170,7 +171,10 @@ function SettingRow({
       <div className="col-start-2 flex min-w-0 flex-wrap items-center gap-2 md:col-start-auto md:justify-end">
         {jsonOnly ? (
           <>
-            <span className="text-muted-foreground max-w-[14rem] truncate font-mono text-xs">
+            <span
+              title={formatSettingValue(entry.key, entry.value)}
+              className="text-muted-foreground max-w-[14rem] truncate font-mono text-xs"
+            >
               {formatSettingValue(entry.key, entry.value)}
             </span>
             {/* Without a definition the save can't keep the value's JSON type,
@@ -373,6 +377,7 @@ export function LevelSettings({
               })
             : t("web.admin.users.detail.preferences.removal.confirmDefault")
         }
+        className={TOUCH_TARGETS}
         onConfirm={() => {
           if (removing) {
             deleteSetting.mutate({ userId, key: removing.key, identity: identityOf(removing) });
@@ -392,6 +397,7 @@ export function LevelSettings({
             profile: level.profileName,
           })}
           confirmLabel={t("web.admin.users.detail.preferences.clear.confirm")}
+          className={TOUCH_TARGETS}
           variant="destructive"
           onConfirm={() => {
             clearDevice.mutate({

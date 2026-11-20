@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"sync"
@@ -17,8 +18,6 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/lock"
-
-	"github.com/Silo-Server/silo-server/internal/database/pglock"
 )
 
 // migrationWrapperLockID spells "SILOMIGR". It wraps the whole startup
@@ -35,6 +34,13 @@ const (
 	defaultMigrationWait = 60 * time.Minute
 	// wrapperCheckInterval is how often the wrapper's session is checked.
 	wrapperCheckInterval = 10 * time.Second
+	// A waiting server tries the wrapper lock again after a random pause of
+	// migrationWrapperRetryMin plus up to migrationWrapperRetryJitter. Short
+	// and random, so servers started together do not retry in step and each
+	// take a turn per round; a holder with nothing pending keeps the lock for
+	// only tens of milliseconds.
+	migrationWrapperRetryMin    = 50 * time.Millisecond
+	migrationWrapperRetryJitter = 100 * time.Millisecond
 )
 
 // ErrMigrationLockLost reports that the session holding the migration
@@ -276,9 +282,15 @@ func acquireMigrationWrapper(ctx context.Context, pool *pgxpool.Pool, wait time.
 	return &migrationWrapper{conn: conn, lost: make(chan struct{}), stop: make(chan struct{})}, nil
 }
 
-// waitForMigrationWrapper blocks on the wrapper lock for up to wait, logging
-// the wait. After an error the lock may have been granted just before it, so
-// the caller closes the session, which releases it.
+// waitForMigrationWrapper waits for the wrapper lock for up to wait, or
+// indefinitely when wait is zero or less, logging the wait. After an error
+// the lock may have been granted just before it, so the caller closes the
+// session, which releases it.
+//
+// It retries pg_try_advisory_lock instead of blocking in pg_advisory_lock: a
+// statement waiting for a lock holds a snapshot, and CREATE INDEX
+// CONCURRENTLY in the holder's migrations waits for every older snapshot, so
+// the two servers would wait for each other until SILO_MIGRATE_TIMEOUT.
 func waitForMigrationWrapper(ctx context.Context, conn *pgx.Conn, wait time.Duration, logger *slog.Logger) error {
 	waitFor := "indefinitely"
 	if wait > 0 {
@@ -291,23 +303,30 @@ func waitForMigrationWrapper(ctx context.Context, conn *pgx.Conn, wait time.Dura
 		logger.InfoContext(ctx, "still waiting for another server's database migrations (not ready)", "elapsed", elapsed)
 	})
 	defer stop()
-	var acquired bool
-	var err error
-	if wait > 0 {
-		acquired, err = pglock.LockWithin(ctx, conn, migrationWrapperLockID, wait)
-	} else {
-		_, err = conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationWrapperLockID)
-		acquired = err == nil
+	deadline := started.Add(wait)
+	for {
+		pause := migrationWrapperRetryMin + rand.N(migrationWrapperRetryJitter) //nolint:gosec // retry jitter, not a secret
+		if wait > 0 {
+			pause = min(pause, time.Until(deadline))
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for the migration lock: %w", ctx.Err())
+		case <-time.After(pause):
+		}
+		var acquired bool
+		if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, migrationWrapperLockID).Scan(&acquired); err != nil {
+			return fmt.Errorf("waiting for the migration lock: %w", err)
+		}
+		if acquired {
+			logger.InfoContext(ctx, "the other server's migration sequence finished", "waited", roundMigrationDuration(time.Since(started)))
+			return nil
+		}
+		if wait > 0 && !time.Now().Before(deadline) {
+			return fmt.Errorf("another server held the database migration lock for longer than %s; "+
+				"raise %s if its backup and migrations need longer", wait, migrationWaitEnv)
+		}
 	}
-	switch {
-	case err != nil:
-		return fmt.Errorf("waiting for the migration lock: %w", err)
-	case !acquired:
-		return fmt.Errorf("another server held the database migration lock for longer than %s; "+
-			"raise %s if its backup and migrations need longer", wait, migrationWaitEnv)
-	}
-	logger.InfoContext(ctx, "the other server's migration sequence finished", "waited", roundMigrationDuration(time.Since(started)))
-	return nil
 }
 
 // watch checks the session every interval and closes lost once it ended.

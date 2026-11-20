@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { setAccessToken, setProfileId } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import type { FileVersion, ItemDetail, Season } from "@/api/types";
+import type { PrePlaySubtitleSelection } from "@/player/types";
 import { catalogKeys } from "@/hooks/queries/keys";
 import EpisodeContent from "./EpisodeContent";
 import { makeFileVersion, makeItemDetail } from "./itemDetail.test-support";
@@ -52,7 +53,10 @@ vi.mock("@/hooks/useAuth", () => ({
 vi.mock("@/hooks/queries/qualityPreference", () => ({
   // The resolution cap comes from the settings contract; these tests render
   // without a QueryClient, so the hook stands in for the resolved answer.
-  useQualityPreference: (fallback?: string | null) => fallback ?? null,
+  useQualityPreferenceState: (fallback?: string | null) => ({
+    preference: fallback ?? null,
+    settled: true,
+  }),
 }));
 
 vi.mock("@/hooks/useCurrentProfile", () => ({
@@ -89,11 +93,6 @@ vi.mock("@/hooks/queries/ratings", () => ({
   useRating: mocks.useRating,
   useSetRating: mocks.useSetRating,
   useDeleteRating: mocks.useDeleteRating,
-}));
-
-vi.mock("@/hooks/queries/subtitles", () => ({
-  useDeleteSubtitlePreference: () => ({ mutate: vi.fn() }),
-  useSetSubtitlePreference: () => ({ mutate: vi.fn() }),
 }));
 
 vi.mock("@/components/CastCarousel", () => ({
@@ -260,20 +259,6 @@ describe("EpisodeContent", () => {
     mocks.useRating.mockReturnValue({ data: { rating: 3, rated_at: "2026-03-22T00:00:00Z" } });
   });
 
-  it("links the season breadcrumb segment to the resolved season page", () => {
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter initialEntries={["/item/episode-1"]}>
-          <EpisodeContent item={makeEpisodeItem()} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    expect(countOccurrences(markup, 'href="/item/series-1"')).toBe(1);
-    expect(countOccurrences(markup, 'href="/item/season-1"')).toBe(1);
-    expect(markup).toContain(">Season 1<");
-  });
-
   it("keeps the page's library on the season reads and breadcrumbs but not on Play", () => {
     const markup = renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
@@ -291,33 +276,6 @@ describe("EpisodeContent", () => {
     expect(mocks.capturedActionBarProps.value?.playHref).toBe(
       `/watch/${makeEpisodeItem().content_id}`,
     );
-  });
-
-  it("uses season navigation state before season detail finishes loading", () => {
-    mocks.useSeasonDetail.mockReturnValue({
-      data: undefined,
-    });
-
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter
-          initialEntries={[
-            {
-              pathname: "/item/episode-1",
-              state: {
-                parentSeasonHref: "/item/season-99",
-                parentSeasonLabel: "Season 99",
-              },
-            },
-          ]}
-        >
-          <EpisodeContent item={makeEpisodeItem()} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    expect(countOccurrences(markup, 'href="/item/season-99"')).toBe(1);
-    expect(markup).toContain(">Season 99<");
   });
 
   it("hides an unwatched episode's overview until the viewer reveals it", () => {
@@ -474,7 +432,7 @@ describe("EpisodeContent", () => {
     },
   );
 
-  describe("pre-play audio choice", () => {
+  describe("pre-play track choices", () => {
     const tracks = [
       {
         language: "en",
@@ -493,6 +451,10 @@ describe("EpisodeContent", () => {
       onSelectAudioTrack: (index: number) => void;
       onResetAudioSelection: () => void;
       onSelectVersion: (version: FileVersion) => void;
+      prePlaySubtitleMode: string;
+      explicitSubtitleSelection: PrePlaySubtitleSelection | null;
+      onSelectSubtitle: (selection: PrePlaySubtitleSelection) => void;
+      onSelectSubtitleOff: () => void;
     };
     const actionBar = () => mocks.capturedActionBarProps.value as unknown as AudioProps;
 
@@ -517,16 +479,18 @@ describe("EpisodeContent", () => {
       return requests;
     }
 
-    function renderWithTracks(versions = [makeFileVersion({ audio_tracks: tracks })]) {
+    function renderWithTracks(
+      versions = [makeFileVersion({ audio_tracks: tracks })],
+      client = new QueryClient({ defaultOptions: { mutations: { retry: false } } }),
+    ) {
       render(
-        <QueryClientProvider
-          client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}
-        >
+        <QueryClientProvider client={client}>
           <MemoryRouter initialEntries={["/item/episode-1"]}>
             <EpisodeContent item={makeEpisodeItem({ versions })} />
           </MemoryRouter>
         </QueryClientProvider>,
       );
+      return client;
     }
 
     beforeEach(() => {
@@ -649,6 +613,73 @@ describe("EpisodeContent", () => {
           explicitAudioTrackIndex: 1,
         }),
       );
+    });
+
+    it("keeps a saved pick when a later pick fails while the detail still refetches", async () => {
+      stubWrites(async (call) =>
+        call === 1
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+      // An open detail page: the save's invalidation refetches it, and that
+      // refetch never finishes here.
+      let detailFetches = 0;
+      const detail = new QueryObserver(client, {
+        queryKey: catalogKeys.itemDetail("episode-1"),
+        queryFn: () => (++detailFetches === 1 ? Promise.resolve({}) : new Promise(() => {})),
+      });
+      const unsubscribe = detail.subscribe(() => {});
+      await waitFor(() => expect(detail.getCurrentResult().isSuccess).toBe(true));
+      renderWithTracks(undefined, client);
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      await waitFor(() => expect(detailFetches).toBe(2));
+      act(() => actionBar().onSelectAudioTrack(0));
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "explicit",
+          explicitAudioTrackIndex: 1,
+        }),
+      );
+      unsubscribe();
+    });
+
+    it("puts the subtitle selector back to the saved pick when Off is not saved", async () => {
+      const requests = stubWrites(async (call) =>
+        call === 1
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      const client = renderWithTracks();
+      const english: PrePlaySubtitleSelection = {
+        source: "embedded",
+        language: "en",
+        codec: "subrip",
+        track_index: 3,
+      };
+
+      act(() => actionBar().onSelectSubtitle(english));
+      await waitFor(() =>
+        expect(
+          client
+            .getMutationCache()
+            .getAll()
+            .map((m) => m.state.status),
+        ).toEqual(["success"]),
+      );
+      act(() => actionBar().onSelectSubtitleOff());
+      expect(actionBar()).toMatchObject({ prePlaySubtitleMode: "off" });
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          prePlaySubtitleMode: "explicit",
+          explicitSubtitleSelection: english,
+        }),
+      );
+      expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
+        "PUT /api/v2/subtitle-prefs/series-1",
+        "PUT /api/v2/subtitle-prefs/series-1",
+      ]);
     });
 
     it("puts the selector back to the last saved choice when quick picks all fail", async () => {

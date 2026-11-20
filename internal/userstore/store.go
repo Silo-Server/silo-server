@@ -84,9 +84,10 @@ type AuditedProfileWriter interface { //nolint:iface // implemented by pgstore, 
 // runs audit in the same PostgreSQL transaction, after the delete and before
 // the commit; an audit error rolls the delete back. audit receives the
 // profile as the transaction locked and deleted it, so a concurrent update
-// that committed first is reflected.
+// that committed first is reflected. It returns the deleted personal
+// collections' IDs as DeleteProfile does.
 type AuditedProfileDeleter interface { //nolint:iface // implemented by pgstore, asserted by the profile handlers
-	DeleteProfileAudited(ctx context.Context, id string, audit func(tx pgx.Tx, deleted *Profile) error) error
+	DeleteProfileAudited(ctx context.Context, id string, audit func(tx pgx.Tx, deleted *Profile) error) (deletedCollectionIDs []string, err error)
 }
 
 // UserStore defines the interface for per-user data storage.
@@ -98,7 +99,10 @@ type UserStore interface {
 	GetProfile(ctx context.Context, id string) (*Profile, error)
 	ListProfiles(ctx context.Context) ([]Profile, error)
 	UpdateProfile(ctx context.Context, id string, u UpdateProfileInput) error
-	DeleteProfile(ctx context.Context, id string) error
+	// DeleteProfile deletes a profile and its rows and returns the IDs of the
+	// personal collections it deleted with them, whose artwork the caller
+	// removes once the delete has committed.
+	DeleteProfile(ctx context.Context, id string) (deletedCollectionIDs []string, err error)
 
 	// Progress
 	UpdateProgress(ctx context.Context, profileID, mediaItemID string, position, duration float64, thresholds ProgressThresholds) error
@@ -125,6 +129,10 @@ type UserStore interface {
 	// past the key between calls are neither repeated nor cause gaps, which the
 	// offset form cannot promise while playback keeps reordering the set.
 	ListProgressPage(ctx context.Context, profileID, status string, after *ProgressKey, limit int) ([]WatchProgress, error)
+	// ListProgressItemIDs returns the media item of every progress row the
+	// full ListProgress listing would return, in no particular order, in one
+	// read instead of one sorted read per page.
+	ListProgressItemIDs(ctx context.Context, profileID string) ([]string, error)
 	// ListCompletedProgressSince returns at most limit completed rows, with the
 	// hidden-item exclusion, whose updated_at at whole-second precision (the
 	// precision WatchProgress.UpdatedAt carries) is after since and, when until

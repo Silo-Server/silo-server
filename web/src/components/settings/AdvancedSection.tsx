@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import "@/styles/admin-settings.css";
 
@@ -126,7 +126,7 @@ export function AdvancedSection({
         <span className="min-w-0 font-medium">{title}</span>
         {typeof count === "number" ? (
           <span aria-hidden="true" className="text-muted-foreground ms-auto shrink-0 text-xs">
-            {count}
+            {numberText(count)}
           </span>
         ) : null}
       </button>

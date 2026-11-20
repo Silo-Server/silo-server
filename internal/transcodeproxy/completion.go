@@ -84,8 +84,9 @@ func FullRepresentationSize(resp *http.Response) int64 {
 
 // Acknowledge reports a completed downstream response to the transcode node at
 // nodeURL for the segment at segmentPath. The opaque generation token makes
-// delayed acknowledgements harmless after a restart or reconstruction.
-func Acknowledge(ctx context.Context, client *http.Client, nodeURL, segmentPath, jwtSecret, generation string) error {
+// delayed acknowledgements harmless after a restart or reconstruction. The
+// request is signed with the node's own key from keys.
+func Acknowledge(ctx context.Context, client *http.Client, nodeURL, segmentPath string, keys nodeauth.Keyring, generation string) error {
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -99,7 +100,7 @@ func Acknowledge(ctx context.Context, client *http.Client, nodeURL, segmentPath,
 	if err != nil {
 		return fmt.Errorf("build acknowledgement: %w", err)
 	}
-	if err := nodeauth.Sign(req, nodeURL, jwtSecret); err != nil {
+	if err := nodeauth.SignTranscode(req, nodeURL, keys); err != nil {
 		return fmt.Errorf("sign acknowledgement: %w", err)
 	}
 	req.Header.Set(GenerationHeader, generation)

@@ -138,3 +138,22 @@ it.each([
     expect(toastError).toHaveBeenCalledWith(detail);
   },
 );
+
+it("refreshes the installation list when another install replaced the plugin first", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValue(
+      problem(
+        "conflict",
+        409,
+        "Another install or update replaced this plugin while its package downloaded, so Silo didn't install it. Check the installed version and try again.",
+      ),
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  const context = fixture();
+  const invalidate = vi.spyOn(context.client, "invalidateQueries");
+  const { result } = renderHook(useApplyPluginUpdate, context);
+  act(() => result.current.mutate(7));
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: adminKeys.pluginInstallations() });
+});

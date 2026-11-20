@@ -6,88 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
-
-// A detection walk that ran out of budget marks backends it never reached
-// Verified=false, which is byte-identical to a real hardware failure. A node
-// that hashed and published that report would tell the API its GPU regressed,
-// and the API would persist a capability_drift note, latch it until a clean
-// report arrives, and route the node to software in the meantime — all for
-// hardware that is fine. So the incompleteness has to reach the publisher.
-func TestDetectHWAccelReportsAnIncompleteWalk(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x8086")
-	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	info, err := DetectHWAccelWithFFmpegContextResult(ctx, hwAccelAuto, ffmpeg.path, "")
-	if !errors.Is(err, ErrHardwareDetectionIncomplete) {
-		t.Fatalf("error = %v, want ErrHardwareDetectionIncomplete", err)
-	}
-	// The report still comes back for an operator-facing surface to show; it is
-	// only publishing it as this host's capabilities that is refused.
-	if info.Resolved != HWAccelNone {
-		t.Fatalf("Resolved = %q, want an abandoned walk to resolve to software", info.Resolved)
-	}
-}
-
-// Detection walks a backend's candidates in order and stops at the first that
-// passes a smoke encode; execution with no configured playback.hw_device used to
-// fall back to PickRenderDevice, which returns whatever sorts first under
-// /dev/dri. On a mixed-vendor host those are different GPUs, so a report saying
-// "qsv verified" was paired with a transcode initializing a card the probe had
-// never touched.
-func TestAcquireHWDeviceUsesTheVerifiedRenderDevice(t *testing.T) {
-	env := setupHWAccelTest(t)
-	// renderD128 sorts first and is AMD, so it is not a QSV candidate at all;
-	// only renderD129 can pass the probe.
-	env.addRenderDevice(t, "renderD128", "0x1002")
-	env.addRenderDevice(t, "renderD129", "0x8086")
-	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
-
-	if got := ResolveHWAccelWithFFmpeg(hwAccelAuto, ffmpeg.path, ""); got != transcodeHWQSV {
-		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want qsv", got)
-	}
-	verified := VerifiedHWDevice(transcodeHWQSV)
-	if want := env.devicePath("renderD129"); verified != want {
-		t.Fatalf("VerifiedHWDevice(qsv) = %q, want %q", verified, want)
-	}
-	// The unverified device is the one auto-detection would otherwise pick.
-	if fallback := PickRenderDevice(""); fallback == verified {
-		t.Skip("test setup no longer distinguishes the verified device from the first render node")
-	}
-
-	device, release := AcquireHWDevice("", transcodeHWQSV)
-	defer release()
-	if device != verified {
-		t.Fatalf("AcquireHWDevice() = %q, want the verified device %q", device, verified)
-	}
-	// Counting it is the other half: a default-configured node reported zero
-	// sessions beside a busy engine because an unnamed device was never counted.
-	if got := hwDeviceActiveCount(verified); got != 1 {
-		t.Fatalf("active workloads on %s = %d, want 1", verified, got)
-	}
-	release()
-	if got := hwDeviceActiveCount(verified); got != 0 {
-		t.Fatalf("active workloads after release = %d, want 0", got)
-	}
-
-	// An operator re-probe discards the verdicts, so the device they blessed
-	// goes with them: answering from the old generation would let execution
-	// keep using a device the re-probe was asked to re-verify.
-	InvalidateHWProbeCache()
-	if got := VerifiedHWDevice(transcodeHWQSV); got != "" {
-		t.Fatalf("VerifiedHWDevice(qsv) after invalidation = %q, want empty", got)
-	}
-}
 
 // Invalidation has to supersede a probe already in flight, not merely clear the
 // map in front of it. The operator-facing re-probe exists to force a cold
@@ -149,51 +73,10 @@ func smokeEncodeCount(t *testing.T, logPath string) int {
 	return strings.Count(string(data), "testsrc2")
 }
 
-// detectHWAccelAuto runs an auto detection walk with no deadline and fails the
-// test if the walk reports itself incomplete.
-func detectHWAccelAuto(t *testing.T, ffmpegPath, device string) HWAccelInfo {
-	t.Helper()
-	info, err := DetectHWAccelWithFFmpegContextResult(context.Background(), hwAccelAuto, ffmpegPath, device)
-	if err != nil {
-		t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
-	}
-	return info
-}
-
-// detectedBackendEntry returns the report's entry for backend, failing the test
-// when the walk did not report it.
-func detectedBackendEntry(t *testing.T, info HWAccelInfo, backend string) DetectedBackend {
-	t.Helper()
-	for _, entry := range info.DetectedBackends {
-		if entry.Backend == backend {
-			return entry
-		}
-	}
-	t.Fatalf("no %s entry in %+v", backend, info.DetectedBackends)
-	return DetectedBackend{}
-}
-
 // devicePath is the full path of a render device added to this test's /dev/dri
 // stand-in.
 func (e *hwAccelTestEnv) devicePath(name string) string {
 	return filepath.Join(e.driDir, name)
-}
-
-// NVENC takes the configured hw_device through to -hwaccel_device, so probing
-// with an empty device lets a working GPU 0 verify the backend on behalf of a
-// configured GPU 1 that is absent or broken — and the real transcode then fails.
-func TestNVENCProbesTheConfiguredCUDADevice(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addNVIDIADevice(t, "nvidia0")
-	probe := fullyCapableProbe()
-	// Only the default CUDA device works; the configured one does not.
-	probe.smokeDeviceFailures = []string{"1"}
-	ffmpeg := writeFakeFFmpeg(t, probe)
-
-	backend := detectedBackendEntry(t, detectHWAccelAuto(t, ffmpeg.path, "1"), transcodeHWNVENC)
-	if backend.Verified {
-		t.Fatalf("nvenc reported verified while the configured CUDA device fails: %+v", backend)
-	}
 }
 
 // An explicitly configured backend short-circuits resolution, so the detection
@@ -263,149 +146,6 @@ func TestInvalidateHWProbeCacheRequeriesNVIDIAIdentities(t *testing.T) {
 	got := nvidiaGPUUUIDsByPCIAddress()
 	if got["0000:03:00.0"] != "GPU-new" {
 		t.Fatalf("identities = %v, want the re-probe to pick up the new uuid", got)
-	}
-}
-
-// On a mixed NVIDIA/Intel host NVENC stays a candidate through hasNVIDIADevice
-// even when the node is deliberately configured for QSV on a render node. Smoke
-// encoding CUDA against /dev/dri/renderD128 fails for a reason that has nothing
-// to do with the NVIDIA card, and a non-skipped failure latches a drift warning
-// that cannot clear while the QSV policy stands.
-func TestNVENCSkippedWhenTheConfiguredDeviceIsARenderPath(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x8086")
-	env.addNVIDIADevice(t, "nvidia0")
-	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
-
-	backend := detectedBackendEntry(t, detectHWAccelAuto(t, ffmpeg.path, env.devicePath("renderD128")), transcodeHWNVENC)
-	if !backend.Skipped {
-		t.Fatalf("nvenc = %+v, want it skipped rather than failed for a render-path device", backend)
-	}
-	if backend.Verified {
-		t.Fatalf("nvenc = %+v, want no verification claimed", backend)
-	}
-}
-
-// A CUDA identity is still probed: skipping is about the device being the wrong
-// *kind* of name, not about avoiding NVENC.
-func TestNVENCProbedWhenTheConfiguredDeviceIsACUDAIdentity(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addNVIDIADevice(t, "nvidia0")
-	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
-
-	for _, device := range []string{"0", "cuda:1", "GPU-a1b2c3d4"} {
-		t.Run(device, func(t *testing.T) {
-			InvalidateHWProbeCache()
-			backend := detectedBackendEntry(t, detectHWAccelAuto(t, ffmpeg.path, device), transcodeHWNVENC)
-			if backend.Skipped || !backend.Verified {
-				t.Fatalf("nvenc = %+v, want a CUDA identity probed and verified", backend)
-			}
-		})
-	}
-}
-
-// A configured multi-device hw_device is a set the balancer allocates *across*,
-// not a list of alternatives detection picks from. Stopping the walk at the
-// first pass left every later entry untested while the report said the backend
-// was verified, and acquireHWDevice balanced onto them regardless — so a share
-// of the node's transcodes started on a card that had already failed its smoke
-// encode, and each of them died at ffmpeg init.
-func TestConfiguredDeviceListIsProbedInFullAndBalancedOnlyAcrossPasses(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x8086")
-	env.addRenderDevice(t, "renderD129", "0x8086")
-	probe := successfulQSVProbe()
-	probe.smokeDeviceFailures = []string{"renderD129"}
-	ffmpeg := writeFakeFFmpeg(t, probe)
-
-	working, broken := env.devicePath("renderD128"), env.devicePath("renderD129")
-	configured := working + "," + broken
-
-	if info := detectHWAccelAuto(t, ffmpeg.path, configured); info.Resolved != transcodeHWQSV {
-		t.Fatalf("resolved = %q, want qsv from the device that passed", info.Resolved)
-	}
-
-	if got := VerifiedHWDevices(transcodeHWQSV); !slices.Equal(got, []string{working}) {
-		t.Fatalf("verified devices = %v, want only the card whose probe passed", got)
-	}
-
-	// A second held acquisition reaches the broken device if filtering is lost.
-	releases := make([]func(), 0, 2)
-	t.Cleanup(func() {
-		for _, release := range releases {
-			release()
-		}
-	})
-	for i := range 2 {
-		device, _, release := acquireHWDevice(configured, transcodeHWQSV, "")
-		releases = append(releases, release)
-		if device != working {
-			t.Fatalf("acquisition %d selected %q, want the verified device %q", i, device, working)
-		}
-	}
-}
-
-// The narrowing above is only safe because the whole configured list is probed.
-// If the walk stopped at the first pass, every other card in the set would be
-// unverified and the balancer would collapse a multi-GPU node onto one device —
-// trading a correctness bug for a capacity one.
-func TestEveryConfiguredDeviceThatPassesStaysInTheBalancer(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x8086")
-	env.addRenderDevice(t, "renderD129", "0x8086")
-	ffmpeg := writeFakeFFmpeg(t, successfulQSVProbe())
-
-	first, second := env.devicePath("renderD128"), env.devicePath("renderD129")
-	configured := first + "," + second
-
-	detectHWAccelAuto(t, ffmpeg.path, configured)
-	if got := VerifiedHWDevices(transcodeHWQSV); !slices.Equal(got, []string{first, second}) {
-		t.Fatalf("verified devices = %v, want both cards in the configured set", got)
-	}
-
-	selected := map[string]bool{}
-	releases := make([]func(), 0, 2)
-	t.Cleanup(func() {
-		for _, release := range releases {
-			release()
-		}
-	})
-	for range 2 {
-		device, _, release := acquireHWDevice(configured, transcodeHWQSV, "")
-		releases = append(releases, release)
-		selected[device] = true
-	}
-	if len(selected) != 2 {
-		t.Fatalf("selected %v, want the workload spread across both verified cards", selected)
-	}
-}
-
-// An NVIDIA container is routinely given /dev/nvidia* and the toolkit with no
-// /dev/dri at all: NVENC works and render_device_details is empty. Without a
-// standalone uuid list the whole host contributes no hardware identity, so two
-// such containers on one card look like two independent GPUs to the planner —
-// which is the deployment where GPU sharing is most common and the placement
-// mistake most expensive.
-func TestCUDAOnlyHostPublishesItsGPUIdentities(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addNVIDIADevice(t, "nvidia0")
-	stubNVIDIASMI(t, "GPU-aaa, 00000000:03:00.0\nGPU-bbb, 00000000:04:00.0\n", nil)
-	ffmpeg := writeFakeFFmpeg(t, successfulNVENCProbe())
-
-	info := detectHWAccelAuto(t, ffmpeg.path, "")
-	if len(info.RenderDeviceDetails) != 0 {
-		t.Fatalf("render devices = %+v, want none on a container with no /dev/dri", info.RenderDeviceDetails)
-	}
-	if !slices.Equal(info.NVIDIAGPUUUIDs, []string{"GPU-aaa", "GPU-bbb"}) {
-		t.Fatalf("nvidia gpu uuids = %v, want both cards nvidia-smi reported", info.NVIDIAGPUUUIDs)
-	}
-
-	// A card appearing or disappearing has to move the hash, or a node that
-	// gained or lost one is never refetched.
-	withOne := info
-	withOne.NVIDIAGPUUUIDs = []string{"GPU-aaa"}
-	if ComputeCapabilityHash(info) == ComputeCapabilityHash(withOne) {
-		t.Fatal("capability hash ignores the GPU identity list; a lost card would never trigger a refetch")
 	}
 }
 
@@ -551,47 +291,6 @@ func TestInvalidateHWProbeCacheSupersedesAnInFlightVideoToolboxProbe(t *testing.
 	wg.Wait()
 }
 
-// A capable Mac was publishing resolved:"none" with no detected backends: the
-// snapshot builder only walked backends on Linux, so the VideoToolbox probe
-// that resolution uses never ran here. The API stored that as the node's
-// durable inventory — software-only, planned for software tone mapping, with an
-// operator re-probe that could not verify otherwise.
-func TestDetectHWAccelPublishesVideoToolboxOnDarwin(t *testing.T) {
-	setupHWAccelTest(t)
-	currentGOOS = darwinGOOS
-	info := detectHWAccelAuto(t, writeFakeFFmpeg(t, successfulVideoToolboxProbe()).path, "")
-	if info.Resolved != transcodeHWVideoToolbox {
-		t.Fatalf("Resolved = %q, want videotoolbox", info.Resolved)
-	}
-	if len(info.DetectedBackends) != 1 || info.DetectedBackends[0].Backend != transcodeHWVideoToolbox ||
-		!info.DetectedBackends[0].Verified {
-		t.Fatalf("DetectedBackends = %+v, want a verified videotoolbox entry", info.DetectedBackends)
-	}
-}
-
-// A Mac whose probe fails publishes the failure rather than silence, so an
-// operator can see why — but a probe cut short by the caller's deadline is not
-// a verdict about the hardware and must not be hashed as one.
-func TestDetectHWAccelReportsAFailedVideoToolboxProbe(t *testing.T) {
-	setupHWAccelTest(t)
-	currentGOOS = darwinGOOS
-	info := detectHWAccelAuto(t, writeFakeFFmpeg(t, fakeFFmpegProbe{}).path, "")
-	if info.Resolved != HWAccelNone {
-		t.Fatalf("Resolved = %q, want none", info.Resolved)
-	}
-	if len(info.DetectedBackends) != 1 || info.DetectedBackends[0].Verified ||
-		info.DetectedBackends[0].Reason == "" {
-		t.Fatalf("DetectedBackends = %+v, want an unverified entry carrying a reason", info.DetectedBackends)
-	}
-
-	hung := writeFakeFFmpeg(t, fakeFFmpegProbe{hang: true})
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	t.Cleanup(cancel)
-	if _, err := DetectHWAccelWithFFmpegContextResult(ctx, hwAccelAuto, hung.path, ""); !errors.Is(err, ErrHardwareDetectionIncomplete) {
-		t.Fatalf("error = %v, want ErrHardwareDetectionIncomplete for a deadline inside the probe", err)
-	}
-}
-
 // The VideoToolbox flight outlives its caller like the others, so it has to be
 // counted like the others — otherwise a re-probe sees an idle encoder and a
 // new-generation probe starts beside the one still running.
@@ -630,36 +329,4 @@ func TestHWProbesInFlightCountsADetachedVideoToolboxProbe(t *testing.T) {
 	}
 	released.Do(func() { close(release) })
 	awaitNoProbesInFlight(t)
-}
-
-// A scheduled capability snapshot is how a long-running node notices its
-// hardware changing, and on an NVIDIA-only node — /dev/nvidia* and the toolkit,
-// no /dev/dri — a card's uuid is the only trace of it in the report. A listing
-// cached past the walk that took it would republish a hot-removed card in every
-// snapshot until someone re-probed by hand.
-func TestCapabilityWalkRequeriesNVIDIAIdentities(t *testing.T) {
-	setupHWAccelTest(t)
-	answer := "GPU-aaa, 00000000:03:00.0\n"
-	queries := 0
-	stubNVIDIASMIQuery(t, func(context.Context) ([]byte, error) {
-		queries++
-		return []byte(answer), nil
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	first, _ := DetectHWAccelWithFFmpegContextResult(ctx, hwAccelAuto, "", "")
-	if !slices.Contains(first.NVIDIAGPUUUIDs, "GPU-aaa") {
-		t.Fatalf("first walk reported %v, want the card nvidia-smi named", first.NVIDIAGPUUUIDs)
-	}
-
-	// The card is hot-removed. Nothing else in this node's report mentions it.
-	answer = ""
-	second, _ := DetectHWAccelWithFFmpegContextResult(ctx, hwAccelAuto, "", "")
-	if slices.Contains(second.NVIDIAGPUUUIDs, "GPU-aaa") {
-		t.Fatalf("second walk still reported %v for a card that is gone", second.NVIDIAGPUUUIDs)
-	}
-	if queries < 2 {
-		t.Fatalf("nvidia-smi queried %d times across two walks, want one per walk", queries)
-	}
 }

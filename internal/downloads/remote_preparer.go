@@ -5,9 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
+	"maps"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -16,7 +15,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
@@ -28,10 +30,13 @@ import (
 // The node retains completed bytes behind an authenticated opaque-id endpoint;
 // integrated installations and unavailable pools fall back to local work.
 type NodeAwarePreparer struct {
-	local            EncodePreparer
-	planner          nodepool.TranscodeWorkPlanner
-	liveCfg          func() *config.Config
-	remote           downloadprepare.RemotePreparer
+	local   EncodePreparer
+	planner nodepool.TranscodeWorkPlanner
+	liveCfg func() *config.Config
+	remote  downloadprepare.RemotePreparer
+	// nodeKeys signs every request to a node; without it every job runs
+	// locally and remote artifacts are unreachable.
+	nodeKeys         nodeauth.Keyring
 	originLookup     artifactOriginLookup
 	settings         SettingsReader
 	probeClient      *http.Client
@@ -47,6 +52,18 @@ type NodeAwarePreparer struct {
 	// storageFull reports a node over its prepared-file budget or disk
 	// ceiling with nothing left to free; such a node gets no new jobs.
 	storageFull func(nodeID int) bool
+	// sourceGrants grants a node each job's source; nil sends none.
+	sourceGrants nodesource.FileGranter
+}
+
+// SetNodeKeys wires the keyring that signs requests to transcode nodes.
+func (p *NodeAwarePreparer) SetNodeKeys(keys nodeauth.Keyring) {
+	p.nodeKeys = keys
+}
+
+// SetSourceGrants wires the grants every remote job's source is sent with.
+func (p *NodeAwarePreparer) SetSourceGrants(grants nodesource.FileGranter) {
+	p.sourceGrants = grants
 }
 
 // SetStorageGate wires the storage check placement applies to every job.
@@ -148,118 +165,30 @@ func (p *NodeAwarePreparer) prepareLocally(ctx context.Context, artifactID strin
 	return p.local.PrepareFile(ctx, artifactID, opts, outputPath)
 }
 
-// isLoopbackPrepareInput reports whether a prepare input is a URL that only
-// this host can open. It matches the playback relay's concrete address shape:
-// an http(s) URL whose host is localhost or a loopback IP (the relay binds
-// 127.0.0.1). A blank input, an ordinary filesystem path (which a node
-// resolves through the media mount it shares), and a routable host — including
-// a private-network API address a node can reach — are all node-reachable and
-// return false.
-func isLoopbackPrepareInput(inputPath string) bool {
-	parsed, err := url.Parse(strings.TrimSpace(inputPath))
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return false
-	}
-	host := parsed.Hostname()
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
-	}
-	return false
-}
+// maxCapacityRefusals bounds how many nodes in a row may refuse one
+// preparation at their own job cap or prepared-download budget before it
+// takes the path any other refusal takes.
+const maxCapacityRefusals = 4
 
 // PrepareFile routes an artifact job to a compatible node or allowed local fallback.
 func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, opts playback.TranscodeOpts, outputPath string) (PreparedArtifact, error) {
-	// A provider-backed (virtual) download resolves its input through
-	// ResolveVirtualDownloadInput, which returns the playback relay
-	// registration: an in-process listener bound to 127.0.0.1:0 on this host.
-	// That concrete address is node-unreachable — a node handed it would open
-	// its own loopback interface and fetch nothing — so such a job is confined
-	// to API-host execution here, at the one place a node URL is ever built.
-	//
-	// This is a property of the loopback registration, not a blanket ban on
-	// remote relay preparation. The fork already dispatches node-reachable relay
-	// URLs (the `/source/<token>/...` shape transcodenode's path authorizer
-	// approves) to pooled worker nodes; a prepare input with that reachable
-	// shape is not loopback and falls through to the dispatch path below
-	// unchanged. Should the download path ever hand us a node-reachable relay
-	// URL, the ordinary route below already carries it, so no separate
-	// transport is required for remote preparation.
-	if isLoopbackPrepareInput(opts.InputPath) {
-		if !p.LocalFallbackAllowed(ctx) {
-			return PreparedArtifact{}, errors.New("a provider-backed download can only be prepared on the API host, where local download transcoding is disabled")
-		}
-		slog.InfoContext(ctx, "download prepare input is only reachable from this host; preparing locally", "component", "downloads", "artifact_id", artifactID)
-		return p.prepareLocally(ctx, artifactID, opts, outputPath)
-	}
+	return p.prepareFile(ctx, artifactID, opts, outputPath, 0, nil)
+}
+
+// prepareFile is PrepareFile after refusals nodes gave it at their own job
+// cap or prepared-download budget. Such a node started nothing. One at its
+// job cap is held back by the planner; one at its budget is in storageFull,
+// which the next reservation leaves out and counts as turned away for space.
+// Either way the next reservation picks another node, or none and the local
+// fallback.
+func (p *NodeAwarePreparer) prepareFile(ctx context.Context, artifactID string, opts playback.TranscodeOpts, outputPath string, refusals int, storageFull map[string]struct{}) (PreparedArtifact, error) {
 	cfg := p.config()
-	jwtSecret := ""
-	if cfg != nil {
-		jwtSecret = strings.TrimSpace(cfg.Auth.JWTSecret)
-	}
-	if cfg == nil || jwtSecret == "" || p.remote == nil || p.planner == nil || !downloadprepare.ValidArtifactID(artifactID) {
+	keys := p.nodeKeys
+	if cfg == nil || keys == nil || p.remote == nil || p.planner == nil || !downloadprepare.ValidArtifactID(artifactID) {
 		return p.prepareLocally(ctx, artifactID, opts, outputPath)
 	}
 	request := downloadprepare.NewRequest(artifactID, opts)
-	var node *nodepool.Node
-	var release func()
-	// storageRejected records a node turned away only for want of space, so a
-	// job no node can take says it waits for space rather than failing.
-	storageRejected := false
-	hasStorage := func(n *nodepool.Node) bool {
-		if p.hasStorage(n) {
-			return true
-		}
-		storageRejected = true
-		return false
-	}
-	if request.ToneMapRequested() || request.StereoDownmixBoostRequested() || request.PreparedTracksRequested() {
-		selector, ok := p.planner.(eligibleTranscodeWorkPlanner)
-		if ok {
-			toneMapCapable := map[string]struct{}{}
-			if request.ToneMapRequested() {
-				toneMapCapable = p.capableToneMapNodeURLs(ctx, opts.ToneMapMode, opts.ToneMapSourceKind)
-			}
-			audioBoostCapable := map[string]struct{}{}
-			if request.StereoDownmixBoostRequested() {
-				audioBoostCapable = p.audioBoostCapableNodeURLs(ctx)
-			}
-			tracksCapable := map[string]struct{}{}
-			if request.PreparedTracksRequested() {
-				tracksCapable = p.preparedTracksCapableNodeURLs(ctx)
-			}
-			node, release = selector.ReserveTranscodeWorkWith("download-prepare-"+artifactID, func(candidate *nodepool.Node) bool {
-				if candidate == nil {
-					return false
-				}
-				nodeURL := strings.TrimRight(candidate.URL, "/")
-				if request.ToneMapRequested() {
-					if _, supported := toneMapCapable[nodeURL]; !supported {
-						return false
-					}
-				}
-				if request.StereoDownmixBoostRequested() {
-					if _, supported := audioBoostCapable[nodeURL]; !supported {
-						return false
-					}
-				}
-				if request.PreparedTracksRequested() {
-					if _, supported := tracksCapable[nodeURL]; !supported {
-						return false
-					}
-				}
-				// Last, so only a node that could run the recipe counts as
-				// turned away for space.
-				return hasStorage(candidate)
-			})
-		}
-	} else if selector, ok := p.planner.(eligibleTranscodeWorkPlanner); ok && p.storageFull != nil {
-		node, release = selector.ReserveTranscodeWorkWith("download-prepare-"+artifactID, hasStorage)
-	} else {
-		node, release = p.planner.ReserveTranscodeWork("download-prepare-" + artifactID)
-	}
+	node, release, storageRejected := p.reserveNode(ctx, artifactID, request, opts, storageFull)
 	if node == nil {
 		if storageRejected && !p.LocalFallbackAllowed(ctx) {
 			return PreparedArtifact{}, ErrStorageFull
@@ -267,14 +196,37 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 		return p.prepareLocally(ctx, artifactID, opts, outputPath)
 	}
 
+	grant, err := nodesource.GrantFile(ctx, p.sourceGrants, node.ID, &models.MediaFile{ID: opts.MediaFileID, FilePath: opts.InputPath})
+	if err != nil {
+		release()
+		slog.WarnContext(ctx, "remote download artifact prepare cannot grant its source; falling back to local", "component", "downloads", "artifact_id", artifactID, "node", node.URL, "error", err)
+		return p.prepareLocally(ctx, artifactID, opts, outputPath)
+	}
+	request.SourceGrant = grant
 	slog.InfoContext(ctx, "dispatching download artifact prepare", "component", "downloads", "artifact_id", artifactID, "node", node.URL)
 	observer := prepareObserverFrom(ctx)
 	nodeID := node.ID
 	observer.prepareWorker(&nodeID, node.Name)
-	stopProgress := p.pollRemoteProgress(ctx, node.URL, jwtSecret, artifactID, observer)
-	result, err := p.remote.Prepare(ctx, node.URL, jwtSecret, request)
+	stopProgress := p.pollRemoteProgress(ctx, node.URL, keys, artifactID, observer)
+	result, err := p.remote.Prepare(ctx, node.URL, keys, request)
 	stopProgress()
 	release()
+	if errors.Is(err, downloadprepare.ErrNodeAtCapacity) {
+		nodepool.ReportAtCapacity(p.planner, node.URL)
+	}
+	if errors.Is(err, downloadprepare.ErrNodeAtCapacity) && refusals+1 < maxCapacityRefusals && ctx.Err() == nil {
+		slog.InfoContext(ctx, "transcode node is at its job limit; placing the download artifact prepare again", "component", "downloads", "artifact_id", artifactID, "node", node.URL)
+		return p.prepareFile(ctx, artifactID, opts, outputPath, refusals+1, storageFull)
+	}
+	if errors.Is(err, downloadprepare.ErrNodeStorageFull) && refusals+1 < maxCapacityRefusals && ctx.Err() == nil {
+		slog.InfoContext(ctx, "transcode node's prepared-download directory is at its budget; placing the download artifact prepare again", "component", "downloads", "artifact_id", artifactID, "node", node.URL)
+		full := maps.Clone(storageFull)
+		if full == nil {
+			full = map[string]struct{}{}
+		}
+		full[strings.TrimRight(node.URL, "/")] = struct{}{}
+		return p.prepareFile(ctx, artifactID, opts, outputPath, refusals+1, full)
+	}
 	prepareReturned := err == nil
 	if prepareReturned {
 		if remotePrepareResultMatches(result, artifactID, request) {
@@ -286,7 +238,7 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 		return remotePreparedArtifact(node, downloadprepare.Result{ArtifactID: artifactID}), ctx.Err()
 	}
 	if prepareReturned {
-		if deleteErr := p.remote.Delete(ctx, node.URL, jwtSecret, artifactID); deleteErr != nil {
+		if deleteErr := p.remote.Delete(ctx, node.URL, keys, artifactID); deleteErr != nil {
 			return remotePreparedArtifact(node, downloadprepare.Result{ArtifactID: artifactID}),
 				errors.Join(err, fmt.Errorf("delete rejected remote download artifact: %w", deleteErr))
 		}
@@ -295,13 +247,13 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 	}
 	// A completed encode can outlive a lost HTTP response. Probe the same opaque
 	// id before falling back so retry/recovery does not duplicate expensive work.
-	if recovered, statErr := p.remote.Stat(ctx, node.URL, jwtSecret, artifactID); statErr == nil {
+	if recovered, statErr := p.remote.Stat(ctx, node.URL, keys, artifactID); statErr == nil {
 		if remotePrepareResultMatches(recovered, artifactID, request) {
 			slog.InfoContext(ctx, "recovered completed download artifact after lost response", "component", "downloads", "artifact_id", artifactID, "node", node.URL)
 			return remotePreparedArtifact(node, recovered), nil
 		}
 		recoveryErr := rejectedRemotePrepareResultError("recovery", recovered, artifactID)
-		if deleteErr := p.remote.Delete(ctx, node.URL, jwtSecret, artifactID); deleteErr != nil {
+		if deleteErr := p.remote.Delete(ctx, node.URL, keys, artifactID); deleteErr != nil {
 			return remotePreparedArtifact(node, downloadprepare.Result{ArtifactID: artifactID}),
 				errors.Join(err, recoveryErr, fmt.Errorf("delete rejected remote download artifact: %w", deleteErr))
 		}
@@ -320,10 +272,77 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 	return p.prepareLocally(ctx, artifactID, opts, outputPath)
 }
 
+// reserveNode reserves the node a preparation runs on: one that can run its
+// recipe and has room for it. storageRejected reports a node turned away only
+// for want of space, so a job no node can take says it waits for space rather
+// than failing. A nil node means none. refusedForStorage holds the nodes that
+// already refused this preparation at their own budget: they are left out,
+// and count as turned away for space.
+func (p *NodeAwarePreparer) reserveNode(ctx context.Context, artifactID string, request downloadprepare.Request, opts playback.TranscodeOpts, refusedForStorage map[string]struct{}) (node *nodepool.Node, release func(), storageRejected bool) {
+	hasStorage := func(n *nodepool.Node) bool {
+		if n != nil {
+			if _, refused := refusedForStorage[strings.TrimRight(n.URL, "/")]; refused {
+				storageRejected = true
+				return false
+			}
+		}
+		if p.hasStorage(n) {
+			return true
+		}
+		storageRejected = true
+		return false
+	}
+	workID := "download-prepare-" + artifactID
+	selector, selective := p.planner.(eligibleTranscodeWorkPlanner)
+	switch {
+	case request.ToneMapRequested() || request.StereoDownmixBoostRequested() || request.PreparedTracksRequested():
+		if selective {
+			node, release = selector.ReserveTranscodeWorkWith(workID, p.recipeCapable(ctx, request, opts, hasStorage))
+		}
+	case selective && (p.storageFull != nil || len(refusedForStorage) > 0):
+		node, release = selector.ReserveTranscodeWorkWith(workID, hasStorage)
+	case len(refusedForStorage) > 0:
+		// This planner cannot leave a node out, so no other node is tried.
+		storageRejected = true
+	default:
+		node, release = p.planner.ReserveTranscodeWork(workID)
+	}
+	return node, release, storageRejected
+}
+
+// recipeCapable is the reservation predicate of a preparation whose recipe
+// needs node capabilities: tone mapping, the stereo downmix boost, or
+// prepared tracks. hasStorage runs last, so only a node that could run the
+// recipe counts as turned away for space.
+func (p *NodeAwarePreparer) recipeCapable(ctx context.Context, request downloadprepare.Request, opts playback.TranscodeOpts, hasStorage func(*nodepool.Node) bool) func(*nodepool.Node) bool {
+	var required []map[string]struct{}
+	if request.ToneMapRequested() {
+		required = append(required, p.capableToneMapNodeURLs(ctx, opts.ToneMapMode, opts.ToneMapSourceKind))
+	}
+	if request.StereoDownmixBoostRequested() {
+		required = append(required, p.audioBoostCapableNodeURLs(ctx))
+	}
+	if request.PreparedTracksRequested() {
+		required = append(required, p.preparedTracksCapableNodeURLs(ctx))
+	}
+	return func(candidate *nodepool.Node) bool {
+		if candidate == nil {
+			return false
+		}
+		nodeURL := strings.TrimRight(candidate.URL, "/")
+		for _, capable := range required {
+			if _, supported := capable[nodeURL]; !supported {
+				return false
+			}
+		}
+		return hasStorage(candidate)
+	}
+}
+
 // remoteProgressReader is implemented by remote preparers that can read a
 // node's live progress for an attempt in flight.
 type remoteProgressReader interface {
-	Progress(ctx context.Context, nodeURL, jwtSecret, artifactID string) (downloadprepare.Progress, error)
+	Progress(ctx context.Context, nodeURL string, keys nodeauth.Keyring, artifactID string) (downloadprepare.Progress, error)
 }
 
 // remoteProgressPollInterval matches the attempt observer's flush interval, so
@@ -333,7 +352,7 @@ var remoteProgressPollInterval = progressFlushInterval
 // pollRemoteProgress relays a node's progress for one attempt to observer
 // until the returned stop function is called. A node that predates the
 // progress endpoint is reported once as unable to report progress.
-func (p *NodeAwarePreparer) pollRemoteProgress(ctx context.Context, nodeURL, jwtSecret, artifactID string, observer prepareObserver) func() {
+func (p *NodeAwarePreparer) pollRemoteProgress(ctx context.Context, nodeURL string, keys nodeauth.Keyring, artifactID string, observer prepareObserver) func() {
 	reader, ok := p.remote.(remoteProgressReader)
 	if !ok {
 		observer.prepareProgressUnavailable()
@@ -351,7 +370,7 @@ func (p *NodeAwarePreparer) pollRemoteProgress(ctx context.Context, nodeURL, jwt
 				return
 			case <-ticker.C:
 			}
-			progress, err := reader.Progress(pollCtx, nodeURL, jwtSecret, artifactID)
+			progress, err := reader.Progress(pollCtx, nodeURL, keys, artifactID)
 			switch {
 			case errors.Is(err, downloadprepare.ErrProgressUnsupported):
 				observer.prepareProgressUnavailable()
@@ -617,15 +636,14 @@ func (p *NodeAwarePreparer) fetchToneMapCapabilitiesForNode(ctx context.Context,
 	// Snapshotted before the node is asked anything, so an invalidation landing
 	// during the request is visible at install time.
 	generation := p.capabilityInvalidationsFor(nodeURL)
-	cfg := p.config()
-	if cfg == nil || strings.TrimSpace(cfg.Auth.JWTSecret) == "" {
+	if p.nodeKeys == nil {
 		err := errors.New("transcode node credentials unavailable")
 		p.cacheToneMapCapabilityFailure(nodeURL, generation, err)
 		return nil, err
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, p.remoteToneMapProbeTimeout(nodeURL))
 	defer cancel()
-	info, status, err := transcodenode.FetchHWCapabilities(requestCtx, p.probeClient, nodeURL, cfg.Auth.JWTSecret)
+	info, status, err := transcodenode.FetchHWCapabilities(requestCtx, p.probeClient, nodeURL, nodeauth.TargetTranscode, p.nodeKeys)
 	if err != nil {
 		p.cacheToneMapCapabilityFailure(nodeURL, generation, err)
 		return nil, err
@@ -840,11 +858,11 @@ func (p *NodeAwarePreparer) StatArtifact(ctx context.Context, artifact *Artifact
 	if err := p.ResolveArtifact(ctx, artifact); err != nil {
 		return downloadprepare.Result{}, err
 	}
-	secret, err := p.remoteCredentials(artifact)
+	keys, err := p.remoteCredentials(artifact)
 	if err != nil {
 		return downloadprepare.Result{}, err
 	}
-	return p.remote.Stat(ctx, artifact.OriginNodeURL, secret, artifact.OriginArtifactID)
+	return p.remote.Stat(ctx, artifact.OriginNodeURL, keys, artifact.OriginArtifactID)
 }
 
 func (p *NodeAwarePreparer) DeleteArtifact(ctx context.Context, artifact *Artifact) error {
@@ -852,22 +870,21 @@ func (p *NodeAwarePreparer) DeleteArtifact(ctx context.Context, artifact *Artifa
 	// deleted node has no newer record, so retain the last persisted URL as the
 	// best-effort cleanup target.
 	_ = p.ResolveArtifact(ctx, artifact)
-	secret, err := p.remoteCredentials(artifact)
+	keys, err := p.remoteCredentials(artifact)
 	if err != nil {
 		return err
 	}
-	return p.remote.Delete(ctx, artifact.OriginNodeURL, secret, artifact.OriginArtifactID)
+	return p.remote.Delete(ctx, artifact.OriginNodeURL, keys, artifact.OriginArtifactID)
 }
 
-func (p *NodeAwarePreparer) remoteCredentials(artifact *Artifact) (string, error) {
+func (p *NodeAwarePreparer) remoteCredentials(artifact *Artifact) (nodeauth.Keyring, error) {
 	if artifact == nil || strings.TrimSpace(artifact.OriginNodeURL) == "" || !downloadprepare.ValidArtifactID(artifact.OriginArtifactID) {
-		return "", errors.New("remote artifact locator is incomplete")
+		return nil, errors.New("remote artifact locator is incomplete")
 	}
-	cfg := p.config()
-	if cfg == nil || strings.TrimSpace(cfg.Auth.JWTSecret) == "" || p.remote == nil {
-		return "", errors.New("remote artifact credentials are unavailable")
+	if p.nodeKeys == nil || p.remote == nil {
+		return nil, errors.New("remote artifact credentials are unavailable")
 	}
-	return strings.TrimSpace(cfg.Auth.JWTSecret), nil
+	return p.nodeKeys, nil
 }
 
 func (p *NodeAwarePreparer) config() *config.Config {

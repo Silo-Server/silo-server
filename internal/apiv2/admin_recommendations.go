@@ -17,7 +17,7 @@ type AdminRecommendationsService interface {
 	StatusCounts(context.Context) (int, int, int, int, int, error)
 	IsRunning(recommendations.JobName) bool
 	LastRuns(context.Context) (map[recommendations.JobName]recommendations.JobRuns, error)
-	EmbeddingLockConflict(context.Context) (string, error)
+	EmbeddingLockConflict(context.Context) (string, string, map[string]string, error)
 	CacheRefreshedAt(context.Context) (*time.Time, error)
 	StaleSweep(context.Context) (recommendations.StaleSweepStatus, error)
 	TriggerEmbeddings() error
@@ -153,7 +153,7 @@ func (reg *Registry) getAdminRecommendationsStatus(ctx context.Context, _ *struc
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	conflict, err := w.EmbeddingLockConflict(ctx)
+	conflict, _, _, err := w.EmbeddingLockConflict(ctx)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

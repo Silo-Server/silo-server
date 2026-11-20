@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createProfile } from "@/hooks/queries/profiles";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
+import { newPasswordProblem } from "@/lib/newPassword";
 
 import { StepFrame, StepSkeleton } from "../StepFrame";
 import { useWizardContext } from "../WizardContext";
@@ -50,6 +51,11 @@ export function AccountStep() {
     setEmailInvalid(badEmail);
     setMismatch(badMatch);
     if (badEmail || badMatch) return;
+    const passwordProblem = newPasswordProblem(password, confirmPassword);
+    if (passwordProblem) {
+      toast.error(passwordProblem);
+      return;
+    }
 
     setSubmitting(true);
     try {

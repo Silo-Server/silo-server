@@ -1175,7 +1175,7 @@ func validateToneMapSource(ctx context.Context, opts TranscodeOpts) error {
 	if isVirtualOrHTTP {
 		return nil
 	}
-	if err := opts.ToneMapSourceRevision.ValidatePath(opts.InputPath); err != nil {
+	if err := opts.ToneMapSourceRevision.ValidatePath(ctx, opts.InputPath); err != nil {
 		if errors.Is(err, tonemap.ErrSourceRevisionChanged) {
 			return err
 		}

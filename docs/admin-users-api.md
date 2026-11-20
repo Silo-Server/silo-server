@@ -197,6 +197,10 @@ It creates a login session and has no replay identity. Clients must not retry an
 uncertain response automatically. The web client checks its captured authority
 before installing returned credentials.
 
+The impersonation session opens a PIN-locked profile without its PIN; managing
+the household still needs the primary profile's PIN (see
+[profile-verification-tokens.md](architecture/profile-verification-tokens.md#credentials-that-need-no-token)).
+
 ## Server Owner
 
 The account created by first-run setup is the server Owner. On a server set up
@@ -328,7 +332,7 @@ empty when the profile no longer exists.
 The watch summary accepts `days` from 1 to 365 (default 30) and an optional
 `profile_id`. It totals the finalized attempts that ended at or after `since` (now
 minus `days`): `plays`, `completed_plays`, `watched_seconds` and `last_played_at`
-(null when none). `watched_seconds` here is watch time: each attempt's measured
+(null when none). `watched_seconds` is watch time, not a position: each attempt's measured
 `played_seconds`, or, for an attempt recorded before measurement, its end position
 capped at its wall-clock length. Those are the attempts `listAdminPlaybackHistory` lists with the
 same `user_id`, `profile_id` and `ended_after` set to `since`.

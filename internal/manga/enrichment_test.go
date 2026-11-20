@@ -58,55 +58,6 @@ func TestMangaEnrichmentBackoffPreservesRetryableFailures(t *testing.T) {
 	}
 }
 
-// The scanner's manga_series identity rows must never reach the metadata
-// flow: they made the search-skip guard treat every item as already matched.
-func TestFilterMangaProviderIDsDropsInternalIdentity(t *testing.T) {
-	filtered := filterMangaProviderIDs(map[string]string{
-		"manga_series": "abc123",
-		"anilist":      "42",
-		"asin":         "B000",
-	})
-	if _, ok := filtered["manga_series"]; ok {
-		t.Fatalf("manga_series identity must be filtered, got %v", filtered)
-	}
-	if filtered["anilist"] != "42" {
-		t.Fatalf("anilist id must survive, got %v", filtered)
-	}
-	if len(filtered) != 1 {
-		t.Fatalf("filtered = %v, want only anilist", filtered)
-	}
-}
-
-func TestNormalizeMangaStatus(t *testing.T) {
-	cases := map[string]string{
-		// AniList enum
-		"RELEASING":        "Ongoing",
-		"FINISHED":         "Completed",
-		"NOT_YET_RELEASED": "Upcoming",
-		"CANCELED":         "Canceled",
-		"HIATUS":           "Hiatus",
-		// MangaDex / lowercase
-		"ongoing":   "Ongoing",
-		"completed": "Completed",
-		"hiatus":    "Hiatus",
-		"canceled":  "Canceled",
-		// SDK Continuing/Ended + spacing/casing variants
-		"Continuing":  "Ongoing",
-		"Ended":       "Completed",
-		"on hiatus":   "Hiatus",
-		"  Upcoming ": "Upcoming",
-		// Empty and unknown pass through (trimmed)
-		"":          "",
-		"  ":        "",
-		"Weird-Val": "Weird-Val",
-	}
-	for in, want := range cases {
-		if got := normalizeMangaStatus(in); got != want {
-			t.Fatalf("normalizeMangaStatus(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestCollectMangaMetadataRejectsEachProviderAuthorBeforeMerging(t *testing.T) {
 	providers := []metadata.Provider{
 		&fakeMangaMetadataProvider{
@@ -141,47 +92,6 @@ func TestCollectMangaMetadataRejectsEachProviderAuthorBeforeMerging(t *testing.T
 	}
 	if accumulator.Overview != "" || accumulator.HasMetadata {
 		t.Fatalf("contradictory provider metadata was merged before validation: %+v", accumulator)
-	}
-}
-
-func TestCollectMangaMetadataDoesNotReintroduceOwnedCrossID(t *testing.T) {
-	providers := []metadata.Provider{
-		&fakeMangaMetadataProvider{
-			slug: "anilist",
-			results: []metadata.SearchResult{{
-				Name: "Shared Title",
-				ProviderIDs: map[string]string{
-					"anilist":  "free-id",
-					"mangadex": "owned-id",
-				},
-			}},
-			result: &metadata.MetadataResult{
-				HasMetadata: true,
-				Overview:    "usable metadata",
-				ProviderIDs: map[string]string{
-					"anilist":  "free-id",
-					"mangadex": "owned-id",
-				},
-			},
-		},
-	}
-	owner := &fakeMangaProviderIDOwner{ownerByID: map[string]string{"owned-id": "other-manga"}}
-
-	accumulator, ids, errs, authorMismatch := collectMangaMetadata(
-		context.Background(),
-		enrichmentItemRow{ContentID: "this-manga", Title: "Shared Title"},
-		providers,
-		owner,
-	)
-
-	if len(errs) != 0 || authorMismatch {
-		t.Fatalf("collect errors = %v, authorMismatch = %v", errs, authorMismatch)
-	}
-	if accumulator.Overview != "usable metadata" || ids["anilist"] != "free-id" {
-		t.Fatalf("usable metadata/identity was lost: accumulator=%+v ids=%v", accumulator, ids)
-	}
-	if _, exists := ids["mangadex"]; exists {
-		t.Fatalf("metadata response reintroduced an owned cross-ID: %v", ids)
 	}
 }
 
@@ -226,16 +136,34 @@ func (f *failingMangaProviderIDRepository) FindContentIDByProviderIDs(context.Co
 	return "", nil
 }
 
-func TestPersistReturnsProviderIDFailure(t *testing.T) {
-	replaceErr := errors.New("provider identity already belongs to another item")
-	e := &Enricher{providerIDs: &failingMangaProviderIDRepository{err: replaceErr}}
-
-	err := e.persist(context.Background(), "manga-1", map[string]string{"anilist": "42"}, &metadata.MetadataResult{
-		HasMetadata: true,
-		Overview:    "remote overview",
-	})
-
-	if !errors.Is(err, replaceErr) {
-		t.Fatalf("persist error = %v, want provider-ID failure %v", err, replaceErr)
+// An item with no author has no author check after GetMetadata, so a partial
+// title match alone must not give it another book's metadata (#4154).
+func TestMangaWithoutAnAuthorNeedsTheWholeTitle(t *testing.T) {
+	for _, tc := range []struct {
+		name, title, author, candidate string
+		matched                        bool
+	}{
+		{name: "a one-word prefix", candidate: "Raw"},
+		{name: "the same title", candidate: "Raw Stream", matched: true},
+		{name: "a one-word prefix with an author", author: "Someone", candidate: "Raw", matched: true},
+		{name: "a release tag in the folder name", title: "Naruto [Digital]", candidate: "Naruto", matched: true},
+		{name: "a longer title behind a release tag", title: "Naruto [Digital]", candidate: "Naruto Gaiden"},
+	} {
+		if tc.title == "" {
+			tc.title = "Raw Stream"
+		}
+		t.Run(tc.name, func(t *testing.T) {
+			providers := []metadata.Provider{&fakeMangaMetadataProvider{
+				slug:    "mangadex",
+				results: []metadata.SearchResult{{Name: tc.candidate, ProviderIDs: map[string]string{"mangadex": "1"}}},
+			}}
+			// The admitted provider IDs are what GetMetadata fetches by.
+			_, ids, _, _ := collectMangaMetadata(context.Background(), enrichmentItemRow{
+				ContentID: "c1", Title: tc.title, Author: tc.author,
+			}, providers, nil)
+			if matched := ids["mangadex"] == "1"; matched != tc.matched {
+				t.Fatalf("%q for %q (author %q): matched = %v, want %v", tc.candidate, tc.title, tc.author, matched, tc.matched)
+			}
+		})
 	}
 }

@@ -104,6 +104,7 @@ import (
 	// entries in-process (no gRPC).
 	_ "github.com/Silo-Server/silo-server/internal/metadata/nfo"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -163,6 +164,14 @@ const serverModeTranscode = "transcode"
 // resolveNodeIdentity returns a stable node identifier used by the
 // heartbeat writer, reconciler, and shutdown cleanup. Resolution order:
 // SILO_NODE_NAME > NODE_NAME > os.Hostname().
+
+// sharedSecretKeyring adapts Vio's shared auth secret to nodeauth.Keyring.
+type sharedSecretKeyring string
+
+func (k sharedSecretKeyring) KeyFor(nodeauth.Target, string) (string, error) {
+	return string(k), nil
+}
+
 func resolveNodeIdentity() string {
 	if v := os.Getenv("SILO_NODE_NAME"); v != "" {
 		return v
@@ -207,7 +216,7 @@ func nodeCapabilityFetcher(jwtSecret string, budget func(*nodepool.Node) time.Du
 		}
 		ctx, cancel := context.WithTimeout(ctx, budget(node))
 		defer cancel()
-		info, payload, status, err := transcodenode.FetchHWCapabilitiesPayload(ctx, client, node.URL, jwtSecret)
+		info, payload, status, err := transcodenode.FetchHWCapabilitiesPayload(ctx, client, node.URL, nodeauth.TargetProxy, sharedSecretKeyring(jwtSecret))
 		if err != nil {
 			return nil, "", err
 		}
@@ -3506,7 +3515,7 @@ func main() {
 			if sweeper := blobgc.NewSweeper(deps.DB, deps.Blobs.Assets, mediaImages...); sweeper != nil {
 				taskMgr.Register(tasks.NewSweepOrphanedMediaImagesTask(sweeper))
 			}
-			trickplayExtractor := trickplay.NewNodeExtractor(trickplay.NewLocalExtractor(settingsRepo), deps.NodePlanner, settingsRepo)
+			trickplayExtractor := trickplay.NewNodeExtractor(trickplay.NewLocalExtractor(settingsRepo), deps.NodePlanner, settingsRepo, nil)
 			if trickplayService := trickplay.NewService(deps.DB, deps.Blobs.Assets, settingsRepo, trickplayExtractor, deps.NodeID); trickplayService != nil {
 				trickplayReader := trickplay.NewReader(deps.DB, deps.Blobs.Assets, trickplayURLResolver(&deps))
 				if checker, ok := deps.Blobs.Assets.(trickplay.DeliveryChecker); ok && deps.ArtworkDelivery.External {
@@ -3854,12 +3863,9 @@ func main() {
 			taskMgr.Register(tasks.NewRecheckExternalIdentitiesTask(deps.DB, deps.AuthProviderRecheck))
 		}
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
-			pluginTasks, err := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService).Tasks(appCtx)
-			if err != nil {
+			pluginTasks := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService, taskMgr)
+			if err := pluginTasks.Sync(appCtx); err != nil {
 				log.Fatalf("plugin task registry: %v", err)
-			}
-			for _, pluginTask := range pluginTasks {
-				taskMgr.Register(pluginTask)
 			}
 		}
 

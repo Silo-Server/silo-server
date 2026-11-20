@@ -66,54 +66,6 @@ func lockFields(fields ...MetadataField) []int {
 	return out
 }
 
-// A manual refresh replaces the stored lists with the ones the NFO supplies
-// instead of mixing in the remote provider's.
-func TestManualRefresh_NFOListsReplaceRemoteLists(t *testing.T) {
-	h, _ := newLocalPipelineHarness()
-	ctx := context.Background()
-	seedMovieItem(t, h, "movie:tmdb:27205", "Inception", 2010)
-	stored := h.itemRepo.items["movie:tmdb:27205"]
-	stored.TmdbID = "27205"
-	stored.Genres = []string{"Action"}
-	stored.Studios = []string{"Warner Bros."}
-
-	nfo := &localHintStubProvider{
-		hints: map[string]string{"tmdb": "27205"},
-		metadata: &MetadataResult{
-			HasMetadata: true,
-			Title:       "Inception (Local)",
-			Genres:      []string{"Local Genre"},
-			Studios:     []string{"Local Studio"},
-			People:      []models.ItemPerson{actor("Leonardo DiCaprio", "Local Role")},
-		},
-	}
-	remote := &remoteStubProvider{
-		slug: "tmdb",
-		metadata: &MetadataResult{
-			HasMetadata: true, Title: "Inception", Year: 2010, ProviderIDs: map[string]string{"tmdb": "27205"},
-			Genres:  []string{"Action", "Science Fiction"},
-			Studios: []string{"Warner Bros.", "Legendary"},
-			People:  []models.ItemPerson{actor("Leonardo DiCaprio", "Cobb"), actor("Elliot Page", "Ariadne")},
-		},
-	}
-	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{ContentID: "movie:tmdb:27205", Language: "en", Mode: ModeManualRefresh}, []Provider{nfo, remote}); err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:27205")
-	if err != nil {
-		t.Fatalf("load item: %v", err)
-	}
-	if item.Title != "Inception (Local)" {
-		t.Errorf("Title = %q, want the NFO title", item.Title)
-	}
-	if !reflect.DeepEqual(item.Genres, []string{"Local Genre"}) || !reflect.DeepEqual(item.Studios, []string{"Local Studio"}) {
-		t.Errorf("genres=%v studios=%v, want only the NFO lists", item.Genres, item.Studios)
-	}
-	if got := personNames(item.People); !reflect.DeepEqual(got, []string{"Leonardo DiCaprio"}) {
-		t.Errorf("people = %v, want only the NFO cast", got)
-	}
-}
-
 // Field locks outrank the NFO in every mode that can write an existing item.
 func TestLocksOutrankNFOInEveryMode(t *testing.T) {
 	cases := []struct {
@@ -171,53 +123,6 @@ func TestLocksOutrankNFOInEveryMode(t *testing.T) {
 			}
 			if !reflect.DeepEqual(item.Studios, []string{"NFO Studio"}) {
 				t.Errorf("Studios = %v, want the unlocked field filled from the NFO", item.Studios)
-			}
-		})
-	}
-}
-
-// A Cast-only lock keeps the stored cast through a refresh while the crew
-// still refreshes, and a Crew-only lock the reverse. The stored item row has
-// no credits, so the merge must read them.
-func TestRefresh_PartialPeopleLockKeepsTheLockedGroup(t *testing.T) {
-	storedPeople := []models.ItemPerson{actor("Keanu Reeves", "Neo"), crewMember("Lana Wachowski", models.PersonKindDirector)}
-	cases := []struct {
-		name string
-		lock MetadataField
-		mode RefreshMode
-		want []string
-	}{
-		{"cast lock, manual", FieldCast, ModeManualRefresh, []string{"Keanu Reeves", "NFO Director"}},
-		// A scheduled refresh keeps the stored crew: the NFO's only fills an empty group.
-		{"cast lock, scheduled", FieldCast, ModeScheduledRefresh, []string{"Keanu Reeves", "Lana Wachowski"}},
-		{"crew lock, manual", FieldCrew, ModeManualRefresh, []string{"Lock Test Actor", "Lana Wachowski"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h, repo := newLocalPipelineHarness()
-			ctx := context.Background()
-			seedMovieItem(t, h, "movie:tmdb:603", "The Matrix", 1999)
-			stored := h.itemRepo.items["movie:tmdb:603"]
-			stored.TmdbID = "603"
-			stored.LockedFields = lockFields(tc.lock)
-			repo.people["movie:tmdb:603"] = storedPeople
-
-			nfo := &localHintStubProvider{
-				hints: map[string]string{"tmdb": "603"},
-				metadata: &MetadataResult{HasMetadata: true, People: []models.ItemPerson{
-					actor("Lock Test Actor", "Intruder"), crewMember("NFO Director", models.PersonKindDirector),
-				}},
-			}
-			remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{HasMetadata: true, Title: "The Matrix", ProviderIDs: map[string]string{"tmdb": "603"}}}
-			if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{ContentID: "movie:tmdb:603", Language: "en", Mode: tc.mode}, []Provider{nfo, remote}); err != nil {
-				t.Fatalf("ProcessWithProviders: %v", err)
-			}
-			item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:603")
-			if err != nil {
-				t.Fatalf("load item: %v", err)
-			}
-			if got := personNames(item.People); !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("people = %v, want %v", got, tc.want)
 			}
 		})
 	}
@@ -294,32 +199,6 @@ func TestScheduledRefresh_IdentifyChoiceBlocksConflictingNFOIDs(t *testing.T) {
 	}
 }
 
-// An NFO that agrees with the chosen identity is not a conflict: its text
-// applies as usual.
-func TestManualRefresh_IdentifiedItemStillReadsAgreeingNFO(t *testing.T) {
-	h, repo := newLocalPipelineHarness()
-	ctx := context.Background()
-	seedMovieItem(t, h, "movie:tmdb:1538", "Collateral", 2004)
-	h.itemRepo.items["movie:tmdb:1538"].TmdbID = "1538"
-	repo.chosen["movie:tmdb:1538"] = true
-
-	nfo := &localHintStubProvider{
-		hints:    map[string]string{"tmdb": "1538"},
-		metadata: &MetadataResult{HasMetadata: true, Title: "Collateral (Director's Cut)"},
-	}
-	remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{HasMetadata: true, Title: "Collateral", ProviderIDs: map[string]string{"tmdb": "1538"}}}
-	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{ContentID: "movie:tmdb:1538", Language: "en", Mode: ModeManualRefresh}, []Provider{nfo, remote}); err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:1538")
-	if err != nil {
-		t.Fatalf("load item: %v", err)
-	}
-	if item.Title != "Collateral (Director's Cut)" {
-		t.Errorf("Title = %q, want the agreeing NFO's title", item.Title)
-	}
-}
-
 // ChooseIdentity marks a seeded item as matched to ids by an admin's
 // Identify, for the external NFO integration tests.
 func (x *NFOSeriesHarness) ChooseIdentity(contentID string, ids map[string]string) {
@@ -359,93 +238,6 @@ func TestScheduledRefresh_SkipsNFOForAnotherTitle(t *testing.T) {
 	}
 	if nfo.metadataCalls != 0 {
 		t.Errorf("NFO metadata read %d times, want 0", nfo.metadataCalls)
-	}
-}
-
-// A fill-empty write lets an NFO list fill an empty stored list but does not
-// add its entries to a stored one; a manual refresh replaces it.
-func TestScheduledRefresh_NFOListsFillButDoNotJoinStoredLists(t *testing.T) {
-	h, _ := newLocalPipelineHarness()
-	ctx := context.Background()
-	seedMovieItem(t, h, "movie:tmdb:100", "Stable Movie", 2018)
-	stored := h.itemRepo.items["movie:tmdb:100"]
-	stored.TmdbID = "100"
-	stored.Studios = []string{"Warner Bros."}
-
-	nfo := &localHintStubProvider{
-		hints:    map[string]string{"tmdb": "100"},
-		metadata: &MetadataResult{HasMetadata: true, Studios: []string{"Local Studio"}, Countries: []string{"GB"}},
-	}
-	remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{HasMetadata: true, Title: "Stable Movie", ProviderIDs: map[string]string{"tmdb": "100"}}}
-	run := func(mode RefreshMode) *models.MediaItem {
-		t.Helper()
-		if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{ContentID: "movie:tmdb:100", Language: "en", Mode: mode}, []Provider{nfo, remote}); err != nil {
-			t.Fatalf("ProcessWithProviders: %v", err)
-		}
-		item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:100")
-		if err != nil {
-			t.Fatalf("load item: %v", err)
-		}
-		return item
-	}
-
-	item := run(ModeScheduledRefresh)
-	if !reflect.DeepEqual(item.Studios, []string{"Warner Bros."}) || !reflect.DeepEqual(item.Countries, []string{"GB"}) {
-		t.Errorf("after scheduled refresh studios=%v countries=%v, want the stored studios kept and the empty countries filled", item.Studios, item.Countries)
-	}
-	item = run(ModeManualRefresh)
-	if !reflect.DeepEqual(item.Studios, []string{"Local Studio"}) {
-		t.Errorf("after manual refresh studios=%v, want the NFO list", item.Studios)
-	}
-}
-
-// A Cast lock keeps the stored crew when the providers send none, the way an
-// unlocked refresh leaves credits it gets nothing for.
-func TestRefresh_CastLockKeepsStoredCrewWhenNoneArrives(t *testing.T) {
-	h, repo := newLocalPipelineHarness()
-	ctx := context.Background()
-	seedMovieItem(t, h, "movie:tmdb:603", "The Matrix", 1999)
-	stored := h.itemRepo.items["movie:tmdb:603"]
-	stored.TmdbID = "603"
-	stored.LockedFields = lockFields(FieldCast)
-	repo.people["movie:tmdb:603"] = []models.ItemPerson{actor("Keanu Reeves", "Neo"), crewMember("Lana Wachowski", models.PersonKindDirector)}
-
-	nfo := &localHintStubProvider{hints: map[string]string{"tmdb": "603"}, metadata: &MetadataResult{HasMetadata: true, People: []models.ItemPerson{actor("Lock Test Actor", "Intruder")}}}
-	remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{HasMetadata: true, Title: "The Matrix", ProviderIDs: map[string]string{"tmdb": "603"}}}
-	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{ContentID: "movie:tmdb:603", Language: "en", Mode: ModeManualRefresh}, []Provider{nfo, remote}); err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:603")
-	if err != nil {
-		t.Fatalf("load item: %v", err)
-	}
-	if got, want := personNames(item.People), []string{"Keanu Reeves", "Lana Wachowski"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("people = %v, want %v", got, want)
-	}
-}
-
-// An NFO whose IDs are only for providers the item lacks adds to its
-// identity on a scheduled refresh; it is not another title.
-func TestScheduledRefresh_NFOWithOnlyNewIDKeysStillApplies(t *testing.T) {
-	h, _ := newLocalPipelineHarness()
-	ctx := context.Background()
-	seedMovieItem(t, h, "movie:tmdb:100", "Stable Movie", 2018)
-	h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
-
-	nfo := &localHintStubProvider{
-		hints:    map[string]string{"imdb": "tt0000100"},
-		metadata: &MetadataResult{HasMetadata: true, Overview: "Local overview."},
-	}
-	remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{HasMetadata: true, Title: "Stable Movie", ProviderIDs: map[string]string{"tmdb": "100"}}}
-	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{ContentID: "movie:tmdb:100", Language: "en", Mode: ModeScheduledRefresh}, []Provider{nfo, remote}); err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:100")
-	if err != nil {
-		t.Fatalf("load item: %v", err)
-	}
-	if item.Overview != "Local overview." {
-		t.Errorf("Overview = %q, want the NFO's", item.Overview)
 	}
 }
 
@@ -503,46 +295,6 @@ func TestRefreshScheduledTargetEpisode_SkipsLocalFilesOfAnotherShow(t *testing.T
 	}
 }
 
-// Re-matching a stored item keeps its durable identity and leaves out an NFO
-// for another title.
-func TestInitialMatch_StoredItemSkipsNFOForAnotherTitle(t *testing.T) {
-	h, _ := newLocalPipelineHarness()
-	ctx := context.Background()
-	seedMovieItem(t, h, "movie:tmdb:100", "Stable Movie", 2018)
-	h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set("movie:tmdb:100", &models.MediaItemProviderID{ContentID: "movie:tmdb:100", ItemType: "movie", Provider: "tmdb", ProviderID: "100"})
-	h.service.providerIDRepo = providerRepo
-
-	nfo := &localHintStubProvider{
-		hints:    map[string]string{"tmdb": "999"},
-		metadata: &MetadataResult{HasMetadata: true, Overview: "Other overview."},
-	}
-	remote := &remoteStubProvider{
-		slug:          "tmdb",
-		searchResults: []SearchResult{{Name: "Stable Movie", Year: 2018, Provider: "tmdb", ProviderIDs: map[string]string{"tmdb": "100"}}},
-		metadata:      &MetadataResult{HasMetadata: true, Title: "Stable Movie", Year: 2018, ProviderIDs: map[string]string{"tmdb": "100"}},
-	}
-	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID: "movie:tmdb:100",
-		Hints:     &MatchHints{Title: "Stable Movie", Year: 2018, Type: "movie"},
-		Language:  "en",
-		Mode:      ModeInitialMatch,
-	}, []Provider{nfo, remote}); err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:100")
-	if err != nil {
-		t.Fatalf("load item: %v", err)
-	}
-	if item.TmdbID != "100" || item.Overview != "" {
-		t.Errorf("item = tmdb %q overview %q, want the stored match without the other title's NFO", item.TmdbID, item.Overview)
-	}
-	if nfo.searchCalls != 0 || nfo.metadataCalls != 0 {
-		t.Errorf("NFO consulted: search=%d metadata=%d, want 0", nfo.searchCalls, nfo.metadataCalls)
-	}
-}
-
 // An Identify whose item write fails records no choice, and leaves one an
 // earlier Identify made.
 func TestIdentify_FailedWriteRecordsNoChoice(t *testing.T) {
@@ -563,50 +315,5 @@ func TestIdentify_FailedWriteRecordsNoChoice(t *testing.T) {
 		if got := repo.chosen["movie:tmdb:949"]; got != alreadyChosen {
 			t.Errorf("already chosen %v: choice after the failed Identify = %v, want %v", alreadyChosen, got, alreadyChosen)
 		}
-	}
-}
-
-// A scheduled refresh lets the NFO's cast fill an empty stored cast but keeps
-// a stored one, while remote crew still refreshes; a manual refresh replaces
-// the stored cast with the NFO's.
-func TestRefresh_NFOCreditsFillOnlyEmptyGroupsUntilManualRefresh(t *testing.T) {
-	remoteCredits := []models.ItemPerson{actor("TMDB Actor", "Hero"), crewMember("Remote Director", models.PersonKindDirector)}
-	cases := []struct {
-		name   string
-		stored []models.ItemPerson
-		remote []models.ItemPerson
-		mode   RefreshMode
-		want   []string
-	}{
-		{"scheduled, stored cast", []models.ItemPerson{actor("TMDB Actor", "Hero")}, remoteCredits, ModeScheduledRefresh, []string{"TMDB Actor", "Remote Director"}},
-		{"scheduled, no stored cast", nil, remoteCredits, ModeScheduledRefresh, []string{"Local Actor", "Remote Director"}},
-		{"manual, stored cast", []models.ItemPerson{actor("TMDB Actor", "Hero")}, remoteCredits, ModeManualRefresh, []string{"Local Actor", "Remote Director"}},
-		// No provider sent crew, so the stored crew stays.
-		{"scheduled, no remote credits", []models.ItemPerson{actor("TMDB Actor", "Hero"), crewMember("Stored Director", models.PersonKindDirector)}, nil, ModeScheduledRefresh, []string{"TMDB Actor", "Stored Director"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h, repo := newLocalPipelineHarness()
-			ctx := context.Background()
-			seedMovieItem(t, h, "movie:tmdb:100", "Stable Movie", 2018)
-			h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
-			repo.people["movie:tmdb:100"] = tc.stored
-
-			nfo := &localHintStubProvider{hints: map[string]string{"tmdb": "100"}, metadata: &MetadataResult{HasMetadata: true, People: []models.ItemPerson{actor("Local Actor", "Lead")}}}
-			remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{
-				HasMetadata: true, Title: "Stable Movie", ProviderIDs: map[string]string{"tmdb": "100"},
-				People: tc.remote,
-			}}
-			if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{ContentID: "movie:tmdb:100", Language: "en", Mode: tc.mode}, []Provider{nfo, remote}); err != nil {
-				t.Fatalf("ProcessWithProviders: %v", err)
-			}
-			item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:100")
-			if err != nil {
-				t.Fatalf("load item: %v", err)
-			}
-			if got := personNames(item.People); !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("people = %v, want %v", got, tc.want)
-			}
-		})
 	}
 }

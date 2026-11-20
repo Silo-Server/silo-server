@@ -77,7 +77,7 @@ function useSidebarPinsOverlay() {
  * Accepts the canonical object value, the legacy JSON-string encoding, or
  * null/undefined (the contract default), and always lands on a usable map.
  */
-export function parseSidebarPins(value: unknown): SidebarPins {
+function parseSidebarPins(value: unknown): SidebarPins {
   if (value == null) return {};
   let parsed: unknown = value;
   if (typeof value === "string") {
@@ -110,7 +110,7 @@ export function parseSidebarPins(value: unknown): SidebarPins {
   return parsed as SidebarPins;
 }
 
-export function sidebarPinsToShortcuts(pins: SidebarPins): ShortcutDocument {
+function sidebarPinsToShortcuts(pins: SidebarPins): ShortcutDocument {
   return {
     items: Object.entries(pins).flatMap(([libraryId, entries]) => {
       const id = Number(libraryId);
@@ -160,7 +160,7 @@ function shortcutDocumentFromSidebarValue(value: unknown): ShortcutDocument {
   return sidebarPinsToShortcuts(parseSidebarPins(parsed));
 }
 
-export function setNavigationShortcutPresence(
+function setNavigationShortcutPresence(
   value: unknown,
   target: ShortcutTarget,
   present: boolean,
@@ -188,7 +188,7 @@ interface SidebarPinsOptimisticMutation {
   revision: number;
 }
 
-export function createSidebarPinsOptimisticMutation({
+function createSidebarPinsOptimisticMutation({
   currentValue,
   currentRevision,
   libraryId,
@@ -217,7 +217,7 @@ export function createSidebarPinsOptimisticMutation({
   };
 }
 
-export function rollbackSidebarPinsOptimisticMutation({
+function rollbackSidebarPinsOptimisticMutation({
   currentRevision,
   mutation,
 }: {

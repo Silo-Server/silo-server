@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { pickerGroups, rowKindLabel } from "./catalog";
-import { recipeCatalogFixture } from "./recipeCatalogFixture.test-support";
+import { everyRecipe, recipeCatalogFixture } from "./recipeCatalogFixture.test-support";
 
 describe("row kind catalog", () => {
   it("gives each stored row type a plain name and never a raw type key", () => {
     expect(rowKindLabel("next_up")).toBe("Next up");
-    expect(rowKindLabel("custom_filter")).toBe("Titles matching rules");
+    expect(rowKindLabel("custom_filter")).toBe("Smart row");
     expect(rowKindLabel("award_winners")).toBe("Award winners (no longer offered)");
     expect(rowKindLabel("some_future_type")).toBe("Row");
   });
@@ -56,9 +56,21 @@ describe("picker groups", () => {
     const types = pickerGroups(withRetired).flatMap((group) =>
       group.cards.map((card) => card.type),
     );
+    expect(types).toContain("custom_filter");
     expect(types).not.toContain("admin_curated_list");
     expect(types).not.toContain("genre");
     expect(types).not.toContain("award_winners");
     expect(types).not.toContain("next_up");
+  });
+
+  it("never offers a kind the server marks admin-only", () => {
+    const offered = pickerGroups(recipeCatalogFixture).flatMap((group) =>
+      group.cards.map((card) => card.type),
+    );
+    const adminOnly = everyRecipe()
+      .filter((def) => def.admin_only)
+      .map((def) => def.type);
+    expect(adminOnly.length).toBeGreaterThan(0);
+    expect(offered.some((type) => adminOnly.includes(type))).toBe(false);
   });
 });

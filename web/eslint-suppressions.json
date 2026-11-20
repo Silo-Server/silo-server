@@ -4,22 +4,6 @@
       "count": 2
     }
   },
-  "src/components/DownloadVersionPicker.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 25
-    },
-    "silo/no-physical-direction": {
-      "count": 1
-    }
-  },
-  "src/components/EpisodeRow.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 9
-    },
-    "silo/no-physical-direction": {
-      "count": 1
-    }
-  },
   "src/components/GlobalSearch.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
@@ -56,11 +40,6 @@
       "count": 3
     }
   },
-  "src/components/RequestSeasonsDialog.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 16
-    }
-  },
   "src/components/ServerActivity.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
@@ -71,50 +50,9 @@
       "count": 1
     }
   },
-  "src/components/admin/libraries/LibraryFormSections.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 1
-    },
-    "silo/no-physical-direction": {
-      "count": 1
-    }
-  },
   "src/components/admin/plugins/PluginConfigForm.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
-    }
-  },
-  "src/components/catalog/SaveFiltersAsSmartCollection.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 2
-    },
-    "silo/no-physical-direction": {
-      "count": 1
-    }
-  },
-  "src/components/streaming/IndexerReleaseList.tsx": {
-    "silo/no-physical-direction": {
-      "count": 1
-    }
-  },
-  "src/components/streaming/ProviderResultDisplay.tsx": {
-    "silo/no-physical-direction": {
-      "count": 1
-    }
-  },
-  "src/components/streaming/QualityProfileModal.tsx": {
-    "silo/no-physical-direction": {
-      "count": 1
-    }
-  },
-  "src/components/streaming/QualityRankingSummary.tsx": {
-    "silo/no-physical-direction": {
-      "count": 3
-    }
-  },
-  "src/components/streaming/VioScoringProfilesCard.tsx": {
-    "silo/no-physical-direction": {
-      "count": 12
     }
   },
   "src/components/subtitles/SubtitleUploadForm.tsx": {
@@ -137,11 +75,6 @@
       "count": 1
     }
   },
-  "src/hooks/queries/admin/collections.ts": {
-    "no-restricted-syntax": {
-      "count": 4
-    }
-  },
   "src/hooks/queries/admin/nodes.ts": {
     "no-restricted-syntax": {
       "count": 2
@@ -155,29 +88,9 @@
       "count": 2
     }
   },
-  "src/hooks/queries/items.ts": {
-    "no-restricted-syntax": {
-      "count": 9
-    }
-  },
   "src/hooks/queries/notInterested.test.tsx": {
     "no-restricted-syntax": {
       "count": 1
-    }
-  },
-  "src/hooks/queries/profiles.ts": {
-    "no-restricted-syntax": {
-      "count": 5
-    }
-  },
-  "src/hooks/queries/useRequests.test.tsx": {
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
-  "src/hooks/queries/useRequests.ts": {
-    "no-restricted-syntax": {
-      "count": 8
     }
   },
   "src/hooks/useIntersectionObserver.ts": {
@@ -200,24 +113,9 @@
       "count": 1
     }
   },
-  "src/pages/AdminLibraries.tsx": {
-    "react-hooks/exhaustive-deps": {
-      "count": 1
-    }
-  },
-  "src/pages/AdminRequests.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 105
-    }
-  },
   "src/pages/AdminTasks.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
-    }
-  },
-  "src/pages/AdminVirtualLibrary.tsx": {
-    "silo/no-physical-direction": {
-      "count": 5
     }
   },
   "src/pages/Catalog.tsx": {
@@ -225,98 +123,9 @@
       "count": 1
     }
   },
-  "src/pages/ItemDetail/EpisodeContent.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 6
-    }
-  },
-  "src/pages/ItemDetail/MovieContent.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 2
-    }
-  },
-  "src/pages/ItemDetail/components/ActionBar.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 46
-    },
-    "silo/no-physical-direction": {
-      "count": 3
-    }
-  },
-  "src/pages/ItemDetail/components/AudioTracksPopover.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 15
-    },
-    "silo/no-physical-direction": {
-      "count": 1
-    }
-  },
-  "src/pages/ItemDetail/components/CollectionsSection.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 1
-    }
-  },
-  "src/pages/ItemDetail/components/EpisodeCarousel.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 2
-    }
-  },
-  "src/pages/ItemDetail/components/SeasonEpisodeGrid.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 2
-    }
-  },
-  "src/pages/ItemDetail/components/SubtitlesPopover.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 23
-    },
-    "silo/no-physical-direction": {
-      "count": 2
-    }
-  },
-  "src/pages/ItemDetail/components/VersionDropdown.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 12
-    },
-    "silo/no-physical-direction": {
-      "count": 6
-    }
-  },
-  "src/pages/ItemDetail/components/VersionFlyout.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 10
-    },
-    "silo/no-physical-direction": {
-      "count": 2
-    }
-  },
   "src/pages/LibraryRecommended.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 2
-    }
-  },
-  "src/pages/SetupWizard.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 3
-    }
-  },
-  "src/pages/admin-settings/StorageSettings.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 114
-    },
-    "no-restricted-syntax": {
-      "count": 9
-    },
-    "silo/no-physical-direction": {
-      "count": 1
-    }
-  },
-  "src/pages/admin-settings/StreamingSettings.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 62
-    },
-    "silo/no-physical-direction": {
-      "count": 3
     }
   },
   "src/pages/audiobooks/player/AudiobookPlayer.tsx": {
@@ -335,103 +144,12 @@
     }
   },
   "src/pages/settings/DeviceSettings.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 41
-    },
-    "no-restricted-syntax": {
-      "count": 2
-    },
     "react-hooks/set-state-in-effect": {
       "count": 1
-    },
-    "silo/no-physical-direction": {
-      "count": 1
-    }
-  },
-  "src/pages/settings/HistoryImportSettings.test.tsx": {
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
-  "src/pages/setup-wizard/StepFrame.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 2
-    }
-  },
-  "src/pages/setup-wizard/StepRail.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 1
-    }
-  },
-  "src/pages/setup-wizard/steps/AccountStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 14
-    }
-  },
-  "src/pages/setup-wizard/steps/ConnectStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 8
-    }
-  },
-  "src/pages/setup-wizard/steps/DoneStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 6
-    },
-    "silo/no-physical-direction": {
-      "count": 1
-    }
-  },
-  "src/pages/setup-wizard/steps/FeaturesStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 28
-    }
-  },
-  "src/pages/setup-wizard/steps/LibraryStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 18
-    }
-  },
-  "src/pages/setup-wizard/steps/MetadataProvidersSection.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 10
-    }
-  },
-  "src/pages/setup-wizard/steps/PlaybackStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 18
-    }
-  },
-  "src/pages/setup-wizard/steps/RequestsStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 4
-    }
-  },
-  "src/pages/setup-wizard/steps/ServerStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 12
-    }
-  },
-  "src/pages/setup-wizard/steps/StorageStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 59
-    }
-  },
-  "src/pages/setup-wizard/steps/StreamingStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 24
-    },
-    "silo/no-physical-direction": {
-      "count": 2
     }
   },
   "src/pages/setup-wizard/steps/SubtitlesStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 16
-    },
     "react-hooks/set-state-in-effect": {
-      "count": 1
-    },
-    "silo/no-physical-direction": {
       "count": 1
     }
   },
@@ -448,11 +166,6 @@
       "count": 1
     }
   },
-  "src/pages/watchtogether/room/browse/BrowseShelf.test.tsx": {
-    "no-restricted-syntax": {
-      "count": 2
-    }
-  },
   "src/pages/watchtogether/room/picker/SeriesDrilldown.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
@@ -464,64 +177,16 @@
     }
   },
   "src/player/components/AudioTrackMenu.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 11
-    },
     "react-hooks/exhaustive-deps": {
-      "count": 2
-    },
-    "react-hooks/preserve-manual-memoization": {
-      "count": 2
-    },
-    "silo/no-physical-direction": {
-      "count": 2
-    }
-  },
-  "src/player/components/ChaptersMenu.tsx": {
-    "react-hooks/exhaustive-deps": {
-      "count": 3
-    },
-    "react-hooks/preserve-manual-memoization": {
-      "count": 2
-    }
-  },
-  "src/player/components/DiscoveryRetryButton.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
       "count": 1
-    }
-  },
-  "src/player/components/PlayerControls.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 35
     },
-    "silo/no-physical-direction": {
-      "count": 3
+    "react-hooks/preserve-manual-memoization": {
+      "count": 1
     }
   },
   "src/player/components/PlayingNextScreen.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
-    }
-  },
-  "src/player/components/ProvisionalTrackBadge.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 2
-    }
-  },
-  "src/player/components/QualityMenu.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 11
-    },
-    "silo/no-physical-direction": {
-      "count": 8
-    }
-  },
-  "src/player/components/SubtitleMenu.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 29
-    },
-    "silo/no-physical-direction": {
-      "count": 8
     }
   },
   "src/player/components/SubtitleSearchModal.tsx": {
@@ -531,27 +196,6 @@
   },
   "src/player/components/SubtitleTranslateModal.tsx": {
     "react-hooks/exhaustive-deps": {
-      "count": 1
-    }
-  },
-  "src/player/components/VideoPlayer.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 36
-    },
-    "no-restricted-syntax": {
-      "count": 2
-    },
-    "silo/no-physical-direction": {
-      "count": 6
-    }
-  },
-  "src/player/components/WatchPage.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 17
-    }
-  },
-  "src/player/hooks/useNextEpisode.ts": {
-    "react-hooks/set-state-in-effect": {
       "count": 1
     }
   },

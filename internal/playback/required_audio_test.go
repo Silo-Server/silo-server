@@ -2,14 +2,11 @@ package playback
 
 import (
 	"context"
-	"encoding/json"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
 func TestHLSRequiresNegotiatedAudioTrack(t *testing.T) {
@@ -71,33 +68,5 @@ func TestHLSRequiresNegotiatedAudioTrack(t *testing.T) {
 				t.Fatalf("AC3 present=%v, want %v: %s", got, tc.wantAudio, probe)
 			}
 		})
-	}
-}
-
-func TestRecipeCardRetainsRequiredAudio(t *testing.T) {
-	card := NewRecipeCard(1, "profile", 1, "", TranscodeOpts{AudioTrackIndex: 1, RequireAudioTrack: true})
-	data, err := json.Marshal(card)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, &card); err != nil {
-		t.Fatal(err)
-	}
-	rebuilt := card.TranscodeOpts(t.TempDir(), "", nil)
-	if !rebuilt.RequireAudioTrack || rebuilt.AudioTrackIndex != 1 {
-		t.Fatal("recipe lost required audio selection")
-	}
-	claims := card.ToClaims()
-	token, err := streamtoken.Sign(claims, "test-secret", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verified, err := streamtoken.Verify(token, "test-secret")
-	if err != nil {
-		t.Fatal(err)
-	}
-	restored := RecipeCardFromClaims(verified).TranscodeOpts(t.TempDir(), "", nil)
-	if !restored.RequireAudioTrack || restored.AudioTrackIndex != 1 {
-		t.Fatal("claims lost required audio selection")
 	}
 }

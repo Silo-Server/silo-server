@@ -451,6 +451,7 @@ const CHANGE_REASON_TEXT: Record<string, MessageKey> = {
   path_not_inspectable: "web.admin.autoscan.activity.reason.pathNotInspectable",
   path_not_file_or_dir: "web.admin.autoscan.activity.reason.pathNotFileOrDir",
   path_required: "web.admin.autoscan.activity.reason.pathRequired",
+  path_ignored: "web.admin.autoscan.activity.reason.pathIgnored",
   resolves_to_library: "web.admin.autoscan.activity.reason.resolvesToLibrary",
   enqueue_failed: "web.admin.autoscan.activity.reason.enqueueFailed",
 };

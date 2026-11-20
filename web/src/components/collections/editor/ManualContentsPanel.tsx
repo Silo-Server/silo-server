@@ -24,10 +24,10 @@ import {
   SortableContext,
   arrayMove,
   sortableKeyboardCoordinates,
-  useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useMotionSafeSortable } from "@/hooks/useSortableList";
 import { Check, GripVertical, Loader2, Plus, Search, Undo2, X } from "lucide-react";
 
 import type { BrowseItem } from "@/api/types";
@@ -62,10 +62,13 @@ import {
   removedTitle,
 } from "@/lib/collections/copy";
 import type { CollectionScope } from "@/lib/collections/scope";
+import { joinList } from "@/lib/appLocale";
 import { cn } from "@/lib/utils";
 
 import { OrderBlock } from "../fields/OrderBlock";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
+import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
+import { isImeComposing } from "@/lib/imeComposition";
 
 const SEARCH_LIMIT = 12;
 const DEBOUNCE_MS = 250;
@@ -188,7 +191,7 @@ function TitleSearch({
   const debounced = useDebounce(query.trim(), DEBOUNCE_MS);
   const libraryIds = useMemo(() => libraries.map((library) => library.id), [libraries]);
   const scopeText =
-    libraries.length > 0 ? libraries.map((library) => library.name).join(", ") : allYourLibraries();
+    libraries.length > 0 ? joinList(libraries.map((library) => library.name)) : allYourLibraries();
 
   const results = useQuery({
     queryKey: [...catalogKeys.all, "collectionTitleSearch", libraryIds, debounced],
@@ -201,6 +204,7 @@ function TitleSearch({
   const active = showList ? found[Math.min(highlight, found.length - 1)] : undefined;
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (isImeComposing(event)) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       setOpen(true);
@@ -226,7 +230,7 @@ function TitleSearch({
 
   return (
     <div className="relative grid gap-2">
-      <div className="border-border bg-background/40 focus-within:ring-ring/50 flex h-11 items-center gap-2.5 rounded-xl border px-3 focus-within:ring-[3px]">
+      <div className="border-input bg-background/40 focus-within:ring-ring/50 flex h-11 items-center gap-2.5 rounded-xl border px-3 focus-within:ring-[3px]">
         <Search aria-hidden className="text-muted-foreground size-4 shrink-0" />
         <input
           role="combobox"
@@ -354,10 +358,11 @@ function TitleRow({
 }) {
   const t = useT();
   const label = row.info?.title || row.id;
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: row.id,
-    disabled: !canReorder,
-  });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useMotionSafeSortable({
+      id: row.id,
+      disabled: !canReorder,
+    });
   return (
     <li
       ref={setNodeRef}
@@ -381,7 +386,9 @@ function TitleRow({
       ) : (
         <span />
       )}
-      <span className="text-muted-foreground text-end text-[13px] tabular-nums">{index + 1}</span>
+      <span className="text-muted-foreground text-end text-[13px] tabular-nums">
+        {numberText(index + 1)}
+      </span>
       <Poster url={row.info?.posterUrl} />
       <span className="min-w-0">
         <span className="block truncate text-[14.5px] font-semibold">{label}</span>
@@ -471,6 +478,14 @@ export interface ManualContentsPanelProps {
   itemCount?: number;
   /** After every title write, so the editor refreshes its save token. */
   onItemsChanged: () => void;
+  /** Whether a title write is running, and how many have failed so far. */
+  onWritesChange?: (writes: TitleWrites) => void;
+}
+
+export interface TitleWrites {
+  writing: boolean;
+  /** Title writes that have failed since the panel opened; it only goes up. */
+  failures: number;
 }
 
 /**
@@ -488,6 +503,7 @@ export function ManualContentsPanel({
   onRetryStaged,
   itemCount = 0,
   onItemsChanged,
+  onWritesChange,
 }: ManualContentsPanelProps) {
   const t = useT();
   const queryClient = useQueryClient();
@@ -513,6 +529,15 @@ export function ManualContentsPanel({
   const [expanded, setExpanded] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [undo, setUndo] = useState<{ id: string; title: string; position: number } | null>(null);
+  // Title writes still running: several can overlap, and the first to finish
+  // sets `saved`, so Save waits on the count instead.
+  const [running, setRunning] = useState(0);
+  // Failed title writes so far. A count, not the message on screen: a later
+  // write clears the message, and Save must still see the earlier failure.
+  const [failures, setFailures] = useState(0);
+  const failedWrite = () => setFailures((count) => count + 1);
+  const writing = running > 0;
+  useEffect(() => onWritesChange?.({ writing, failures }), [onWritesChange, writing, failures]);
   const dragOrder = useRef<typeof orderSnapshot>(undefined);
 
   // Posters and years for titles saved before the editor opened.
@@ -577,6 +602,16 @@ export function ManualContentsPanel({
   // so an add picked before the list refreshes goes after the one before it.
   const claimed = useRef(0);
 
+  /** Counts a title write while it runs. */
+  async function tracked(write: () => Promise<void>) {
+    setRunning((count) => count + 1);
+    try {
+      await write();
+    } finally {
+      setRunning((count) => count - 1);
+    }
+  }
+
   async function afterWrite() {
     await scope.invalidate(queryClient, collectionId);
     setSaved("saved");
@@ -593,19 +628,22 @@ export function ManualContentsPanel({
     setSaved("saving");
     const position = Math.max(nextPosition, claimed.current);
     claimed.current = position + 1;
-    try {
-      await putCollectionItem(scope, collectionId, item.content_id, position);
-      await afterWrite();
-    } catch (error) {
-      setSaved("idle");
-      setProblem(
-        t("web.collections.manual.addFailed", {
-          title: item.title,
-          detail:
-            error instanceof Error ? error.message : t("web.collections.manual.tryAgainSentence"),
-        }),
-      );
-    }
+    await tracked(async () => {
+      try {
+        await putCollectionItem(scope, collectionId, item.content_id, position);
+        await afterWrite();
+      } catch (error) {
+        setSaved("idle");
+        failedWrite();
+        setProblem(
+          t("web.collections.manual.addFailed", {
+            title: item.title,
+            detail:
+              error instanceof Error ? error.message : t("web.collections.manual.tryAgainSentence"),
+          }),
+        );
+      }
+    });
   }
 
   async function remove(row: Row) {
@@ -615,49 +653,59 @@ export function ManualContentsPanel({
       return;
     }
     setSaved("saving");
-    try {
-      await v2(
-        source === "user"
-          ? "DELETE /api/v2/collections/{id}/items/{item_id}"
-          : "DELETE /api/v2/admin/collections/{id}/items/{item_id}",
-        { path: { id: collectionId, item_id: row.id } },
-      );
-      setUndo({ id: row.id, title: row.info?.title || row.id, position: row.position ?? 0 });
-      if (row.info) setKnown((current) => ({ ...current, [row.id]: row.info! }));
-      setPage({ collectionId, cursor: "" });
-      await afterWrite();
-    } catch (error) {
-      setSaved("idle");
-      setProblem(
-        t("web.collections.manual.removeFailed", {
-          title: row.info?.title || row.id,
-          detail: error instanceof Error ? error.message : "",
-        }).trim(),
-      );
-    }
+    await tracked(async () => {
+      try {
+        await v2(
+          source === "user"
+            ? "DELETE /api/v2/collections/{id}/items/{item_id}"
+            : "DELETE /api/v2/admin/collections/{id}/items/{item_id}",
+          { path: { id: collectionId, item_id: row.id } },
+        );
+        setUndo({ id: row.id, title: row.info?.title || row.id, position: row.position ?? 0 });
+        if (row.info) setKnown((current) => ({ ...current, [row.id]: row.info! }));
+        setPage({ collectionId, cursor: "" });
+        await afterWrite();
+      } catch (error) {
+        setSaved("idle");
+        failedWrite();
+        setProblem(
+          t("web.collections.manual.removeFailed", {
+            title: row.info?.title || row.id,
+            detail: error instanceof Error ? error.message : "",
+          }).trim(),
+        );
+      }
+    });
   }
 
   async function restore(removed: NonNullable<typeof undo>) {
     setUndo(null);
     if (!collectionId) return;
     setSaved("saving");
-    try {
-      await putCollectionItem(scope, collectionId, removed.id, removed.position);
-      await afterWrite();
-    } catch (error) {
-      setSaved("idle");
-      setProblem(
-        t("web.collections.manual.restoreFailed", {
-          title: removed.title,
-          detail: error instanceof Error ? error.message : "",
-        }).trim(),
-      );
-    }
+    await tracked(async () => {
+      try {
+        await putCollectionItem(scope, collectionId, removed.id, removed.position);
+        await afterWrite();
+      } catch (error) {
+        setSaved("idle");
+        failedWrite();
+        setProblem(
+          t("web.collections.manual.restoreFailed", {
+            title: removed.title,
+            detail: error instanceof Error ? error.message : "",
+          }).trim(),
+        );
+      }
+    });
   }
 
+  const scrollBehavior = useMotionScrollBehavior();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      scrollBehavior,
+    }),
   );
   const lastOver = useRef<UniqueIdentifier | null>(null);
   const announcements = useMemo<Announcements>(() => {
@@ -710,15 +758,20 @@ export function ManualContentsPanel({
     const token = dragOrder.current;
     if (!canReorder || !token) return;
     setSaved("saving");
-    reorder.mutate(
-      { orderedIds: next, etag: token.etag },
-      {
-        onSuccess: () => {
+    // Per-call `mutate` callbacks run only for the latest call, so each
+    // reorder settles its own count through its promise.
+    void tracked(() =>
+      reorder.mutateAsync({ orderedIds: next, etag: token.etag }).then(
+        () => {
           setSaved("saved");
           onItemsChanged();
         },
-        onError: () => setSaved("idle"),
-      },
+        // The reorder hook's toast says what went wrong.
+        () => {
+          setSaved("idle");
+          failedWrite();
+        },
+      ),
     );
   }
 

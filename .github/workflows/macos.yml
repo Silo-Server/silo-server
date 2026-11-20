@@ -53,13 +53,13 @@ jobs:
         working-directory: web
         run: pnpm run build
 
-      # The archive ships the standard library, so build it on the latest 1.26
+      # The archive ships the standard library, so build it on the latest 1.27
       # patch as CI and the Docker image do, not the go.mod minimum.
-      # check-latest keeps an older cached 1.26 on the runner from winning.
+      # check-latest keeps an older cached 1.27 on the runner from winning.
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '>=1.26 <1.27'
+          go-version: '>=1.27 <1.28'
           check-latest: true
           cache: true
           cache-dependency-path: go.sum

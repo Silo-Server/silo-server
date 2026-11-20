@@ -27,6 +27,8 @@ import { useSortableAccessibility } from "@/hooks/useSortableAccessibility";
 import { useT } from "@/i18n";
 import type { RecipeCatalogResponse } from "@/lib/recipes";
 import { useSectionTitle } from "@/lib/sectionTitle";
+import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
+import { useMotionSafeOverlay } from "@/hooks/useSortableList";
 
 function toEditableSection(
   section: SettingsSectionEntry,
@@ -73,10 +75,15 @@ export function SectionOrderList({
   const sortableAccessibility = useSortableAccessibility(
     sections.map((section) => ({ id: section.id, name: sectionTitle(section) })),
   );
+  const scrollBehavior = useMotionScrollBehavior();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      scrollBehavior,
+    }),
   );
+  const overlayMotion = useMotionSafeOverlay();
 
   function handleDragStart(event: DragStartEvent) {
     if (disabled) return;
@@ -125,7 +132,7 @@ export function SectionOrderList({
           )}
         </div>
       </SortableContext>
-      <DragOverlay>
+      <DragOverlay {...overlayMotion}>
         {activeSection ? (
           <SectionDragOverlay
             section={toEditableSection(activeSection, sectionTitle)}

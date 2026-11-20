@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { joinList } from "@/lib/appLocale";
 import { BookOpen, Check, Download } from "lucide-react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import type { FileVersion, ItemDetail } from "@/api/types";
@@ -142,7 +143,7 @@ export default function EbookContent({
               {t("web.detail.books.byAuthor", {
                 label: (chunks) => <span className="text-muted-foreground/60">{chunks}</span>,
                 name: (chunks) => <span className="text-foreground/70 font-medium">{chunks}</span>,
-                author: authors.join(", "),
+                author: joinList(authors),
               })}
             </div>
           ) : undefined

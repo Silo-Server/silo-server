@@ -9,6 +9,7 @@ import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { PortalContainerContext } from "./portal-container-context";
 import { formatLocale } from "@/lib/appLocale";
+import { isImeComposing } from "@/lib/imeComposition";
 
 interface FacetValuePickerProps {
   facet: CatalogFacetName;
@@ -75,7 +76,7 @@ export function FacetValuePicker({
           aria-expanded={open}
           aria-controls={open ? listboxId : undefined}
           className={cn(
-            "border-border bg-background hover:bg-accent focus-visible:border-ring focus-visible:ring-ring/50 flex h-9 min-w-0 items-center justify-between gap-2 rounded-md border px-3 text-start text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px]",
+            "border-input bg-background hover:bg-accent focus-visible:border-ring focus-visible:ring-ring/50 flex h-9 min-w-0 items-center justify-between gap-2 rounded-md border px-3 text-start text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px]",
             className,
           )}
           onKeyDown={(event) => {
@@ -185,6 +186,7 @@ function FacetValueList({
   }, [activeId]);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (isImeComposing(event)) return;
     const last = options.length - 1;
     const moves: Record<string, () => number> = {
       ArrowDown: () => Math.min(active + 1, last),

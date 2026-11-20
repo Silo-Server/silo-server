@@ -946,12 +946,12 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 	var auditErr error
 	var deleteErr error
 	if deleter, ok := store.(userstore.AuditedProfileDeleter); ok && auditmutation.Recording(ctx) {
-		deleteErr = deleter.DeleteProfileAudited(ctx, profileID, func(tx pgx.Tx, deleted *userstore.Profile) error {
+		_, deleteErr = deleter.DeleteProfileAudited(ctx, profileID, func(tx pgx.Tx, deleted *userstore.Profile) error {
 			audit, auditErr = recordProfileMutation(ctx, tx, deleted, nil)
 			return auditErr
 		})
 	} else {
-		deleteErr = store.DeleteProfile(ctx, profileID)
+		_, deleteErr = store.DeleteProfile(ctx, profileID)
 	}
 	if auditErr != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete profile")

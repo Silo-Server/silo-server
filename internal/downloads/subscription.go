@@ -111,7 +111,7 @@ func (s *Subscription) Admits(usedBytes, addBytes int64) bool {
 }
 
 // SubscriptionRequest is the input to create (or re-create) a subscription. The
-// identity fields are taken from the X-Vio-Device-Id header and the
+// identity fields are taken from the X-Silo-Device-Id header and the
 // viewer-access profile, never the body.
 type SubscriptionRequest struct {
 	SeriesID        string

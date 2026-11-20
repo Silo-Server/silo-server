@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
@@ -44,7 +45,7 @@ type NodeSource interface {
 
 // remoteRunner runs one request on a node; mediasample.RemoteClient is one.
 type remoteRunner interface {
-	Run(ctx context.Context, endpoint, secret string, req mediasample.Request) (mediasample.Result, error)
+	Run(ctx context.Context, endpoint string, keys nodeauth.Keyring, req mediasample.Request) (mediasample.Result, error)
 }
 
 // localRunner runs one request with this server's ffmpeg.
@@ -133,7 +134,7 @@ func (s *sampler) run(ctx context.Context, reqs []mediasample.Request, done func
 func (s *sampler) runRemote(ctx context.Context, endpoint, secret string, req mediasample.Request) (mediasample.Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, remoteRequestTimeout)
 	defer cancel()
-	return s.remote.Run(ctx, endpoint, secret, req)
+	return s.remote.Run(ctx, endpoint, sharedSecretKeyring(secret), req)
 }
 
 // runLocal runs reqs here, appending their results to those already done.
@@ -198,4 +199,11 @@ func nodeLabel(node *nodepool.Node) string {
 		return "node:" + node.Name
 	}
 	return fmt.Sprintf("node:%d", node.ID)
+}
+
+// sharedSecretKeyring adapts Vio's shared auth secret to nodeauth.Keyring.
+type sharedSecretKeyring string
+
+func (k sharedSecretKeyring) KeyFor(nodeauth.Target, string) (string, error) {
+	return string(k), nil
 }

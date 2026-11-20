@@ -29,7 +29,6 @@ import {
   languageChipClass,
   providerBadgeClass,
   providerLabel,
-  staggerRowClass,
 } from "./subtitleAdminStyles";
 import { formatRelativeTime } from "@/lib/date";
 import { useT } from "@/i18n";
@@ -130,8 +129,8 @@ export default function AdminSubtitlesTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {subtitles.map((subtitle, index) => (
-              <TableRow key={subtitle.id} className={cn("group", staggerRowClass(index))}>
+            {subtitles.map((subtitle) => (
+              <TableRow key={subtitle.id} className="group">
                 <TableCell className="max-w-[220px]">
                   <div className="space-y-1">
                     {subtitle.media_content_id ? (

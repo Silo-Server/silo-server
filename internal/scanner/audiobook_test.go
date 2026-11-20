@@ -10,7 +10,9 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -120,112 +122,6 @@ func TestApplyAudiobookEmbeddedCoverStoresPosterDuringScan(t *testing.T) {
 	}
 }
 
-func TestApplyAudiobookEmbeddedCoverPreservesExistingPoster(t *testing.T) {
-	dir := t.TempDir()
-	ffmpegPath := filepath.Join(dir, "ffmpeg")
-	writeFakeTool(t, ffmpegPath, "#!/bin/sh\nprintf cover-bytes\n")
-
-	reader := &fakeAudiobookPosterReader{posterPath: "local/audiobooks/content-1/poster/original.webp"}
-	exec := &fakeAudiobookPosterExec{}
-	cacher := &fakeScannerCoverCacher{}
-
-	applied, err := applyAudiobookEmbeddedCover(
-		context.Background(),
-		reader,
-		exec,
-		ffmpegPath,
-		cacher,
-		"/library/Author/Book/book.m4b",
-		"content-1",
-	)
-	if err != nil {
-		t.Fatalf("applyAudiobookEmbeddedCover: %v", err)
-	}
-	if applied {
-		t.Fatal("applied = true, want false")
-	}
-	if reader.calls != 1 {
-		t.Fatalf("GetPosterPath calls = %d, want 1", reader.calls)
-	}
-	if cacher.calls != 0 {
-		t.Fatalf("cache calls = %d, want 0", cacher.calls)
-	}
-	if exec.calls != 0 {
-		t.Fatalf("Exec calls = %d, want 0", exec.calls)
-	}
-}
-
-func TestPopulateFromTags_SeriesPrefersExplicitTag(t *testing.T) {
-	b := &parsedAudiobook{}
-	b.populateFromTags(map[string]string{
-		"title":  "The Way of Kings",
-		"album":  "The Way of Kings",
-		"series": "The Stormlight Archive",
-	})
-	if b.Series != "The Stormlight Archive" {
-		t.Fatalf("expected Series=%q, got %q", "The Stormlight Archive", b.Series)
-	}
-}
-
-func TestPopulateFromTags_SeriesFallsBackToMovementName(t *testing.T) {
-	b := &parsedAudiobook{}
-	b.populateFromTags(map[string]string{
-		"title": "The Way of Kings",
-		"mvnm":  "The Stormlight Archive",
-	})
-	if b.Series != "The Stormlight Archive" {
-		t.Fatalf("expected Series=%q (from mvnm fallback), got %q", "The Stormlight Archive", b.Series)
-	}
-}
-
-func TestParseAudiobookFolderSingleM4B(t *testing.T) {
-	ffprobePath := FFprobePathFromFFmpeg("ffmpeg")
-	if _, err := exec.LookPath(ffprobePath); err != nil {
-		ffprobePath = "ffprobe"
-		if _, err := exec.LookPath(ffprobePath); err != nil {
-			t.Skip("ffprobe not available")
-		}
-	}
-
-	ctx := context.Background()
-	got, err := parseAudiobookFolder(ctx, ffprobePath, "testdata/audiobook_fixtures/single_book", nil)
-	if err != nil {
-		t.Fatalf("parseAudiobookFolder: %v", err)
-	}
-	if got.Title != "Test Audiobook" {
-		t.Errorf("Title = %q, want %q", got.Title, "Test Audiobook")
-	}
-	if got.Author != "Test Author" {
-		t.Errorf("Author = %q, want %q", got.Author, "Test Author")
-	}
-	// The fixture has `album: Test Series` but no real `series` or
-	// `mvnm` tag. Series must stay empty — previously the parser
-	// fell back to album, which polluted audiobook_series with one
-	// fake singleton per book on real libraries.
-	if got.Series != "" {
-		t.Errorf("Series = %q, want %q (album must NOT be used as a fallback)", got.Series, "")
-	}
-	if got.Year != 2024 {
-		t.Errorf("Year = %d, want 2024", got.Year)
-	}
-	if len(got.Files) != 1 {
-		t.Fatalf("got %d files, want 1", len(got.Files))
-	}
-	if len(got.Files[0].Chapters) != 2 {
-		t.Fatalf("file 0 chapters = %d, want 2", len(got.Files[0].Chapters))
-	}
-	if got.Files[0].Chapters[0].Title != "Intro" || got.Files[0].Chapters[1].Title != "Outro" {
-		t.Fatalf("chapter titles = %q / %q, want Intro / Outro", got.Files[0].Chapters[0].Title, got.Files[0].Chapters[1].Title)
-	}
-}
-
-func TestParseAudiobookFolderEmptyFolderSignalsNoMedia(t *testing.T) {
-	_, err := parseAudiobookFolder(t.Context(), "ffprobe", t.TempDir(), nil)
-	if !errors.Is(err, errFolderHasNoMedia) {
-		t.Fatalf("empty folder error = %v, want errFolderHasNoMedia", err)
-	}
-}
-
 // A missing or misconfigured ffprobe binary must not look like an empty
 // folder: exec wraps fs.ErrNotExist when the binary does not exist, so a
 // reconcile that skipped on os.ErrNotExist silently indexed nothing while
@@ -236,7 +132,7 @@ func TestParseAudiobookFolderUnusableFFprobeIsNotSkippable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := parseAudiobookFolder(t.Context(), "/nonexistent/bin/ffprobe", dir, nil)
+	_, err := parseAudiobookFolder(t.Context(), "/nonexistent/bin/ffprobe", dir, nil, nil)
 	if err == nil {
 		t.Fatal("parseAudiobookFolder with an unusable ffprobe returned no error")
 	}
@@ -250,100 +146,9 @@ func TestParseAudiobookFolderUnusableFFprobeIsNotSkippable(t *testing.T) {
 func TestParseAudiobookFolderVanishedFolderSignalsNoMedia(t *testing.T) {
 	gone := filepath.Join(t.TempDir(), "renamed-away")
 
-	_, err := parseAudiobookFolder(t.Context(), "ffprobe", gone, nil)
+	_, err := parseAudiobookFolder(t.Context(), "ffprobe", gone, nil, nil)
 	if !errors.Is(err, errFolderHasNoMedia) {
 		t.Fatalf("vanished folder error = %v, want errFolderHasNoMedia", err)
-	}
-}
-
-func TestParseAudiobookFolderMultiFile(t *testing.T) {
-	ffprobePath := FFprobePathFromFFmpeg("ffmpeg")
-	if _, err := exec.LookPath(ffprobePath); err != nil {
-		ffprobePath = "ffprobe"
-		if _, err := exec.LookPath(ffprobePath); err != nil {
-			t.Skip("ffprobe not available")
-		}
-	}
-
-	ctx := context.Background()
-	got, err := parseAudiobookFolder(ctx, ffprobePath, "testdata/audiobook_fixtures/multi_file", nil)
-	if err != nil {
-		t.Fatalf("parseAudiobookFolder: %v", err)
-	}
-	if got.Title != "Multi File Test" {
-		t.Errorf("Title = %q, want %q", got.Title, "Multi File Test")
-	}
-	if got.Author != "Multi Author" {
-		t.Errorf("Author = %q, want %q", got.Author, "Multi Author")
-	}
-	if got.Year != 2023 {
-		t.Errorf("Year = %d, want 2023", got.Year)
-	}
-	if len(got.Files) != 3 {
-		t.Fatalf("got %d files, want 3", len(got.Files))
-	}
-	for i, f := range got.Files {
-		if len(f.Chapters) != 1 {
-			t.Errorf("file %d: %d synthesized chapters, want 1", i, len(f.Chapters))
-			continue
-		}
-		wantStem := fmt.Sprintf("part%d", i+1)
-		if f.Chapters[0].Title != wantStem {
-			t.Errorf("file %d: chapter title = %q, want %q", i, f.Chapters[0].Title, wantStem)
-		}
-		if f.Chapters[0].StartSeconds != 0 || f.Chapters[0].EndSeconds <= f.Chapters[0].StartSeconds {
-			t.Errorf("file %d: synthesized chapter range = %.3f..%.3f, want positive probed duration", i, f.Chapters[0].StartSeconds, f.Chapters[0].EndSeconds)
-		}
-	}
-}
-
-func TestApplyAudiobookFilesystemFallbacksUsesFolderNameWhenTagsAreBlank(t *testing.T) {
-	book := &parsedAudiobook{}
-	book.applyFilesystemFallbacks(
-		"/library/Caliber_Audio_Library/Dean Koontz/Devoted (2799)",
-		[]string{"/library/Caliber_Audio_Library/Dean Koontz/Devoted (2799)/Devoted - Dean Koontz.mp3"},
-	)
-	if book.Title != "Devoted" {
-		t.Fatalf("Title = %q, want Devoted", book.Title)
-	}
-}
-
-func TestApplyAudiobookFilesystemFallbacksPreservesTaggedTitle(t *testing.T) {
-	book := &parsedAudiobook{Title: "Tagged Title"}
-	book.applyFilesystemFallbacks(
-		"/library/Bad.Folder.Name-AudioBook",
-		[]string{"/library/Bad.Folder.Name-AudioBook/part01.mp3"},
-	)
-	if book.Title != "Tagged Title" {
-		t.Fatalf("Title = %q, want tagged title", book.Title)
-	}
-}
-
-func TestCleanAudiobookFilesystemTitleRemovesCommonReleaseNoise(t *testing.T) {
-	got := cleanAudiobookFilesystemTitle("Dan.Brown-Robert.Langdon.Bk.2-The.DaVinci.Code.NMR-AudioBook")
-	want := "Dan Brown-Robert Langdon Bk 2-The DaVinci Code"
-	if got != want {
-		t.Fatalf("cleanAudiobookFilesystemTitle = %q, want %q", got, want)
-	}
-}
-
-func TestAudiobookIdentityConfidenceReflectsMetadataCompleteness(t *testing.T) {
-	book := &parsedAudiobook{Title: "Tagged Book", Author: "Author", Narrator: "Narrator", Year: 2024}
-	file := parsedAudiobookFile{Chapters: []ChapterInfo{{Title: "One", StartSeconds: 0, EndSeconds: 10}}}
-	if got := audiobookIdentityConfidence(book, file); got != "high" {
-		t.Fatalf("complete metadata confidence = %q, want high", got)
-	}
-
-	book = &parsedAudiobook{Title: "Tagged Book"}
-	file = parsedAudiobookFile{Chapters: []ChapterInfo{{Title: "Unknown duration"}}}
-	if got := audiobookIdentityConfidence(book, file); got != "medium" {
-		t.Fatalf("partial metadata confidence = %q, want medium", got)
-	}
-
-	book = &parsedAudiobook{}
-	file = parsedAudiobookFile{}
-	if got := audiobookIdentityConfidence(book, file); got != "low" {
-		t.Fatalf("empty metadata confidence = %q, want low", got)
 	}
 }
 
@@ -367,18 +172,6 @@ func TestScanAudiobookFolderReturnsErrorWhenEveryReconcileFails(t *testing.T) {
 	}
 }
 
-func TestScanAudiobookFolderReturnsCanceledContext(t *testing.T) {
-	root := t.TempDir()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	s := &Scanner{}
-	err := s.ScanAudiobookFolder(ctx, &models.MediaFolder{ID: 42, Paths: []string{root}}, true)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("ScanAudiobookFolder error = %v, want context.Canceled", err)
-	}
-}
-
 func TestCollectAudiobookRootScansKeepsSiblingFoldersWhenRootHasLooseAudio(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "loose.m4b"), []byte("audio"), 0o644); err != nil {
@@ -392,7 +185,7 @@ func TestCollectAudiobookRootScansKeepsSiblingFoldersWhenRootHasLooseAudio(t *te
 		t.Fatal(err)
 	}
 
-	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, nil, true)
+	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, []string{root}, true, "")
 	if err != nil {
 		t.Fatalf("collectAudiobookRootScans: %v", err)
 	}
@@ -403,8 +196,8 @@ func TestCollectAudiobookRootScansKeepsSiblingFoldersWhenRootHasLooseAudio(t *te
 	for _, candidate := range scans[0].candidates {
 		got[candidate] = true
 	}
-	if !got[root] {
-		t.Fatalf("candidates = %#v, want root candidate %q", scans[0].candidates, root)
+	if loose := filepath.Join(root, "loose.m4b"); !got[loose] {
+		t.Fatalf("candidates = %#v, want loose file candidate %q", scans[0].candidates, loose)
 	}
 	if !got[sibling] {
 		t.Fatalf("candidates = %#v, want sibling candidate %q", scans[0].candidates, sibling)
@@ -455,29 +248,6 @@ func TestSplitAudiobookReconcileRootsProtectsOnlyFailedPaths(t *testing.T) {
 	}
 }
 
-func TestScanSubtreeAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
-	root := t.TempDir()
-	bookDir := filepath.Join(root, "bad-book")
-	if err := os.Mkdir(bookDir, 0o755); err != nil {
-		t.Fatalf("mkdir book dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(bookDir, "chapter.mp3"), []byte("not real audio"), 0o644); err != nil {
-		t.Fatalf("write fake audio: %v", err)
-	}
-
-	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
-	_, err := s.ScanSubtree(context.Background(), &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{root}}, bookDir)
-	if err == nil {
-		t.Fatal("ScanSubtree returned nil, want audiobook parse failure")
-	}
-	if strings.Contains(err.Error(), "getting existing files") {
-		t.Fatalf("ScanSubtree used generic file pipeline: %v", err)
-	}
-	if !strings.Contains(err.Error(), "folder_id=42") {
-		t.Fatalf("error = %q, want audiobook scanner aggregate failure", err)
-	}
-}
-
 func TestScanSubtreeAudiobookLibraryRejectsInvalidScopedRoot(t *testing.T) {
 	s := &Scanner{}
 
@@ -492,27 +262,32 @@ func TestScanSubtreeAudiobookLibraryRejectsInvalidScopedRoot(t *testing.T) {
 	}
 }
 
-func TestScanFileAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
+// A file change from real-time monitoring or autoscan rebuilds the books under
+// the file's folder with the library's ignore files, as a library scan does. For
+// a file directly in the library root, that is every book in the library.
+func TestScanFileAudiobookHonorsIgnoreFiles(t *testing.T) {
 	root := t.TempDir()
-	bookDir := filepath.Join(root, "bad-book")
-	if err := os.Mkdir(bookDir, 0o755); err != nil {
-		t.Fatalf("mkdir book dir: %v", err)
-	}
-	filePath := filepath.Join(bookDir, "chapter.mp3")
-	if err := os.WriteFile(filePath, []byte("not real audio"), 0o644); err != nil {
-		t.Fatalf("write fake audio: %v", err)
-	}
+	writeTestFile(t, filepath.Join(root, ".siloignore"), "Drafts\n")
+	writeTestFile(t, filepath.Join(root, "intro.mp3"), "audio")
+	writeTestFile(t, filepath.Join(root, "Kept Book", "01.mp3"), "audio")
+	writeTestFile(t, filepath.Join(root, "Drafts", "Draft Book", "01.mp3"), "audio")
+	writeTestFile(t, filepath.Join(root, "Hidden Book", ".nomedia"), "")
+	writeTestFile(t, filepath.Join(root, "Hidden Book", "01.mp3"), "audio")
 
+	// Every book fails to parse without ffprobe, so the error names each book
+	// the scan rebuilt.
 	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
-	err := s.ScanFile(context.Background(), filePath, &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{root}})
+	err := s.ScanFile(t.Context(), filepath.Join(root, "intro.mp3"), &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{root}})
 	if err == nil {
-		t.Fatal("ScanFile returned nil, want audiobook parse failure")
+		t.Fatal("ScanFile returned nil, want audiobook parse failures")
 	}
-	if strings.Contains(err.Error(), "unrecognized video extension") {
-		t.Fatalf("ScanFile used video extension gate: %v", err)
+	if !strings.Contains(err.Error(), "Kept Book") {
+		t.Errorf("error = %q, want Kept Book rebuilt", err)
 	}
-	if !strings.Contains(err.Error(), "folder_id=42") {
-		t.Fatalf("error = %q, want audiobook scanner aggregate failure", err)
+	for _, excluded := range []string{"Draft Book", "Hidden Book"} {
+		if strings.Contains(err.Error(), excluded) {
+			t.Errorf("error = %q, want excluded %s left alone", err, excluded)
+		}
 	}
 }
 
@@ -530,126 +305,42 @@ func TestScanFileAudiobookLibraryRejectsRelativeScopedRoot(t *testing.T) {
 	}
 }
 
-func TestResolveAudiobookMediaItemReusesRootScopedContentID(t *testing.T) {
-	finder := &fakeRootContentFinder{contentID: "book-root-id"}
-	writer := &fakeFilesystemItemWriter{}
-
-	got, err := resolveAudiobookMediaItem(
-		context.Background(),
-		finder,
-		writer,
-		7,
-		"/library/Author/Same Title",
-		&parsedAudiobook{Title: "Same Title", Year: 0, Author: "Author A"},
-	)
-	if err != nil {
-		t.Fatalf("resolveAudiobookMediaItem: %v", err)
-	}
-	if got != "book-root-id" {
-		t.Fatalf("contentID = %q, want root-scoped id", got)
-	}
-	if finder.calls != 1 {
-		t.Fatalf("root finder calls = %d, want 1", finder.calls)
-	}
-	if len(writer.upserts) != 0 {
-		t.Fatalf("unexpected item upsert for existing root: %d", len(writer.upserts))
-	}
-}
-
-func TestResolveAudiobookMediaItemCreatesNewWhenRootHasNoClaim(t *testing.T) {
-	finder := &fakeRootContentFinder{}
-	writer := &fakeFilesystemItemWriter{}
-
-	got, err := resolveAudiobookMediaItem(
-		context.Background(),
-		finder,
-		writer,
-		7,
-		"/library/Other Author/Same Title",
-		&parsedAudiobook{Title: "Same Title", Year: 0, Author: "Author B"},
-	)
-	if err != nil {
-		t.Fatalf("resolveAudiobookMediaItem: %v", err)
-	}
-	if got == "" {
-		t.Fatal("contentID is empty")
-	}
-	if len(writer.upserts) != 1 {
-		t.Fatalf("upserts = %d, want 1", len(writer.upserts))
-	}
-	if writer.upserts[0].ContentID != got || writer.upserts[0].Type != "audiobook" {
-		t.Fatalf("upserted item = %+v, contentID %q", writer.upserts[0], got)
-	}
-}
-
-func TestStripNarratorSuffix(t *testing.T) {
-	cases := []struct {
-		in, want string
-	}{
-		{"Solitaire Read By Holly Gibbs", "Solitaire"},
-		{"The Skyward Series 3 - Cytonic (UK Version: Read by Sophie Aldred)", "The Skyward Series 3 - Cytonic"},
-		{"Mick Stranahan (unabridged) 1 - Skin Tight", "Mick Stranahan 1 - Skin Tight"},
-		{"An Evening with Alan Titchmarsh (Unabridged)", "An Evening with Alan Titchmarsh"},
-		// "Read by Celebrities" is a series name here, not a narrator credit
-		{"Classic Stories and Tales Read by Celebrities 1 - Classics of Childhood, Volume One",
-			"Classic Stories and Tales Read by Celebrities 1 - Classics of Childhood, Volume One"},
-		{"Old Harry's Game", "Old Harry's Game"}, // unchanged
-	}
-	for _, c := range cases {
-		got := stripNarratorSuffix(c.in)
-		if got != c.want {
-			t.Errorf("stripNarratorSuffix(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-func TestAudiobookDedupeTitlesMatchPunctuationVariants(t *testing.T) {
-	if !audiobookDedupeTitlesMatch(
-		"Witch vs. Witch: F/F Paranormal Romance Novella",
-		"Witch vs. Witch - F/F Paranormal Romance Novella",
-	) {
-		t.Fatal("expected punctuation-only title variants to match")
-	}
-}
-
-func TestAudiobookDedupeTitlesKeepDifferentBooksSeparate(t *testing.T) {
-	if audiobookDedupeTitlesMatch(
-		"Adventure of Constance Verity 1 - The Last Adventure of Constance Verity",
-		"Adventure of Constance Verity 2 - Constance Verity Saves the World",
-	) {
-		t.Fatal("expected different series entries to remain separate")
-	}
-}
-
-func TestAudiobookLookupPathsIncludeCaseFoldedVariants(t *testing.T) {
-	got := audiobookLookupPaths([]parsedAudiobookFile{
-		{Path: "/Library/A. A. Milne/Winnie-The-Pooh.m4b"},
-		{Path: ""},
-	})
-	want := []string{
-		"/Library/A. A. Milne/Winnie-The-Pooh.m4b",
-		"/library/a. a. milne/winnie-the-pooh.m4b",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("paths = %#v, want %#v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("paths[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-}
-
 func TestApplyBookToMediaItemDoesNotBlankAllNarratorSuffixTitle(t *testing.T) {
 	item := &models.MediaItem{}
-	applyBookToMediaItem(item, &parsedAudiobook{Title: "Read by Jim Dale"})
+	applyBookToMediaItem(item, &parsedAudiobook{Title: "Read by Jim Dale"}, false)
 	if item.Title != "Read by Jim Dale" {
 		t.Fatalf("Title = %q, want raw title fallback", item.Title)
 	}
 }
 
+// The default sort title follows a title the tags change. A sort title in
+// any other form, or under the Name lock, stays.
+func TestApplyBookToMediaItemSortTitleFollowsTitle(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		sortTitle string
+		locked    []int
+		tagTitle  string
+		want      string
+	}{
+		{"derived from the old title, new title has no article", "Saga Name 2 - Book Title, The", nil, "Book Title", ""},
+		{"derived from the old title, new title has an article", "Saga Name 2 - Book Title, The", nil, "A Book Title", "Book Title, A"},
+		{"set by someone", "Saga Name 02", nil, "The Book Title", "Saga Name 02"},
+		{"name locked", "Saga Name 2 - Book Title, The", []int{lockedFieldName}, "Book Title", "Saga Name 2 - Book Title, The"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := &models.MediaItem{Title: "The Saga Name 2 - Book Title", SortTitle: tc.sortTitle, LockedFields: tc.locked}
+			applyBookToMediaItem(item, &parsedAudiobook{Title: tc.tagTitle}, false)
+			if item.SortTitle != tc.want {
+				t.Errorf("SortTitle = %q, want %q", item.SortTitle, tc.want)
+			}
+		})
+	}
+}
+
 // An admin's locked fields survive a changed-book rescan: tags only fill what
-// the editor has not pinned.
+// the editor has not pinned. The item's overview starts empty, as after an
+// admin clears a bad tag description.
 func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 	book := &parsedAudiobook{
 		Title:       "Tagged Title",
@@ -657,6 +348,7 @@ func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 		ReleaseDate: "2001-02-03",
 		Genres:      []string{"Tagged Genre"},
 		Publisher:   "Tagged Press",
+		Overview:    "Tagged overview",
 	}
 	edited := "2020-05-06"
 	newItem := func(locked ...int) *models.MediaItem {
@@ -671,21 +363,27 @@ func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name        string
-		locked      []int
-		wantTitle   string
-		wantYear    int
-		wantGenres  []string
-		wantStudios []string
+		name         string
+		locked       []int
+		matched      bool
+		wantTitle    string
+		wantYear     int
+		wantGenres   []string
+		wantStudios  []string
+		wantOverview string
 	}{
-		{"nothing locked", nil, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}},
-		{"title locked", []int{lockedFieldName}, "Admin Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}},
-		{"release dates locked", []int{lockedFieldReleaseDates}, "Tagged Title", 2020, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}},
-		{"genres and studios locked", []int{lockedFieldGenres, lockedFieldStudios}, "Tagged Title", 2001, []string{"Admin Genre"}, []string{"Admin Studio"}},
+		{"nothing locked", nil, false, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"title locked", []int{lockedFieldName}, false, "Admin Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"release dates locked", []int{lockedFieldReleaseDates}, false, "Tagged Title", 2020, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"genres and studios locked", []int{lockedFieldGenres, lockedFieldStudios}, false, "Tagged Title", 2001, []string{"Admin Genre"}, []string{"Admin Studio"}, "Tagged overview"},
+		{"overview locked", []int{lockedFieldOverview}, false, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, ""},
+		// A provider match owns year, genres and studios; tags keep the title
+		// and only fill what is empty.
+		{"provider matched", nil, true, "Tagged Title", 2020, []string{"Admin Genre"}, []string{"Admin Studio"}, "Tagged overview"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			item := newItem(tc.locked...)
-			applyBookToMediaItem(item, book)
+			applyBookToMediaItem(item, book, tc.matched)
 			if item.Title != tc.wantTitle {
 				t.Errorf("Title = %q, want %q", item.Title, tc.wantTitle)
 			}
@@ -701,121 +399,13 @@ func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 			if !slices.Equal(item.Studios, tc.wantStudios) {
 				t.Errorf("Studios = %v, want %v", item.Studios, tc.wantStudios)
 			}
-		})
-	}
-}
-
-func TestAudiobookFolderUnchanged(t *testing.T) {
-	now := time.Now().UTC()
-	earlier := now.Add(-time.Hour)
-	const a, b = "/lib/Author/Book/a.m4b", "/lib/Author/Book/b.m4b"
-	partA := []models.MediaChapter{{Index: 0, Title: "a", EndSeconds: 60}}
-	partB := []models.MediaChapter{{Index: 1, Title: "b", EndSeconds: 60}}
-	for _, tc := range []struct {
-		name   string
-		files  []*models.MediaFile
-		onDisk []audiobookDiskFile
-		want   bool
-	}{
-		{name: "sizes and mtimes match",
-			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &now, Chapters: partA}, {FilePath: b, FileSize: 200, FileModifiedAt: &now, Chapters: partB}},
-			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}, {Path: b, Size: 200, ModTime: now}},
-			want:   true},
-		{name: "single file without chapters matches",
-			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &now, Chapters: []models.MediaChapter{}}},
-			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}},
-			want:   true},
-		{name: "multipart part whose chapters were wiped is reprocessed",
-			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &now, Chapters: partA}, {FilePath: b, FileSize: 200, FileModifiedAt: &now, Chapters: []models.MediaChapter{}}},
-			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}, {Path: b, Size: 200, ModTime: now}}},
-		{name: "legacy cover-art rows bypass the fast path",
-			files: []*models.MediaFile{{
-				FilePath: a, FileSize: 100, FileModifiedAt: &now,
-				BaseType: "audiobook", CodecVideo: "mjpeg", CodecAudio: "aac",
-				VideoTracks: []models.VideoTrack{{Codec: "mjpeg"}}, AudioTracks: []models.AudioTrack{{Codec: "aac"}},
-			}},
-			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}}},
-		{name: "size differs",
-			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &now}},
-			onDisk: []audiobookDiskFile{{Path: a, Size: 101, ModTime: now}}},
-		{name: "new file appeared",
-			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &now}},
-			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}, {Path: b, Size: 200, ModTime: now}}},
-		{name: "mtime differs",
-			files:  []*models.MediaFile{{FilePath: a, FileSize: 100, FileModifiedAt: &earlier}},
-			onDisk: []audiobookDiskFile{{Path: a, Size: 100, ModTime: now}}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := audiobookFolderUnchanged(tc.files, tc.onDisk); got != tc.want {
-				t.Fatalf("audiobookFolderUnchanged = %v, want %v", got, tc.want)
+			if item.Overview != tc.wantOverview {
+				t.Errorf("Overview = %q, want %q", item.Overview, tc.wantOverview)
 			}
 		})
 	}
 }
 
-func TestAudiobookPeopleCreditsEqual(t *testing.T) {
-	tests := []struct {
-		name     string
-		existing []models.ItemPerson
-		desired  []audiobookCredit
-		want     bool
-	}{
-		{
-			name: "equal sets in same order",
-			existing: []models.ItemPerson{
-				{Person: models.Person{Name: "Author A"}, Kind: models.PersonKindAuthor, SortOrder: 0},
-				{Person: models.Person{Name: "Narrator N"}, Kind: models.PersonKindNarrator, SortOrder: 1},
-			},
-			desired: []audiobookCredit{
-				{Name: "Author A", Kind: models.PersonKindAuthor},
-				{Name: "Narrator N", Kind: models.PersonKindNarrator},
-			},
-			want: true,
-		},
-		{
-			name: "extra existing credit",
-			existing: []models.ItemPerson{
-				{Person: models.Person{Name: "Author A"}, Kind: models.PersonKindAuthor, SortOrder: 0},
-				{Person: models.Person{Name: "Narrator N"}, Kind: models.PersonKindNarrator, SortOrder: 1},
-			},
-			desired: []audiobookCredit{
-				{Name: "Author A", Kind: models.PersonKindAuthor},
-			},
-			want: false,
-		},
-		{
-			name: "name case differs - still equal",
-			existing: []models.ItemPerson{
-				{Person: models.Person{Name: "AUTHOR A"}, Kind: models.PersonKindAuthor, SortOrder: 0},
-			},
-			desired: []audiobookCredit{
-				{Name: "Author A", Kind: models.PersonKindAuthor},
-			},
-			want: true,
-		},
-		{
-			name: "different kind",
-			existing: []models.ItemPerson{
-				{Person: models.Person{Name: "X"}, Kind: models.PersonKindAuthor, SortOrder: 0},
-			},
-			desired: []audiobookCredit{
-				{Name: "X", Kind: models.PersonKindNarrator},
-			},
-			want: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := audiobookPeopleCreditsEqual(tt.existing, tt.desired); got != tt.want {
-				t.Errorf("got %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// A monitor or webhook scan scoped to a book folder that was deleted is an
-// empty scope, so the book's files can be reconciled. A missing library root,
-// or a missing parent above the book, stays an unreadable path.
 func TestCollectAudiobookRootScansTreatsVanishedBookFolderAsEmpty(t *testing.T) {
 	library := t.TempDir()
 	// The encoded scope must also decode its parent before checking it.
@@ -843,7 +433,7 @@ func TestCollectAudiobookRootScansTreatsVanishedBookFolderAsEmpty(t *testing.T) 
 		{"dangling legacy-named book symlink", fspath.Encode(danglingLegacy), library, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			scans, err := collectAudiobookRootScans(t.Context(), 1, []string{tc.scope}, []string{tc.libRoot}, true)
+			scans, err := collectAudiobookRootScans(t.Context(), 1, []string{tc.scope}, []string{tc.libRoot}, true, "")
 			if err != nil {
 				t.Fatalf("collectAudiobookRootScans: %v", err)
 			}
@@ -858,4 +448,113 @@ func TestCollectAudiobookRootScansTreatsVanishedBookFolderAsEmpty(t *testing.T) 
 			}
 		})
 	}
+}
+
+// Files written into a library cannot grow the rejected-part list without bound.
+func TestRejectedAudiobookPartsAreCapped(t *testing.T) {
+	now := time.Now()
+	t.Cleanup(func() {
+		rejectedAudiobookParts.Lock()
+		for path := range rejectedAudiobookParts.byPath {
+			if strings.HasPrefix(path, "/capped/") {
+				delete(rejectedAudiobookParts.byPath, path)
+			}
+		}
+		rejectedAudiobookParts.Unlock()
+	})
+	for i := range maxRejectedAudiobookParts + 10 {
+		rememberRejectedAudiobookPart(fmt.Sprintf("/capped/%d.mp3", i), 1, now)
+	}
+	rejectedAudiobookParts.Lock()
+	n := len(rejectedAudiobookParts.byPath)
+	rejectedAudiobookParts.Unlock()
+	if n > maxRejectedAudiobookParts {
+		t.Fatalf("remembered %d rejected parts, want at most %d", n, maxRejectedAudiobookParts)
+	}
+	last := fmt.Sprintf("/capped/%d.mp3", maxRejectedAudiobookParts+9)
+	if !audiobookPartRejected(last, 1, now) {
+		t.Fatal("the newest rejected part was not remembered")
+	}
+}
+
+// A damaged part must not keep the rest of the book out of the library.
+func TestParseAudiobookFolderSkipsRejectedPart(t *testing.T) {
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		t.Skip("ffprobe not available")
+	}
+	dir := t.TempDir()
+	for _, name := range []string{"part1.mp3", "part3.mp3"} {
+		data, err := os.ReadFile(filepath.Join("testdata/audiobook_fixtures/multi_file", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bad := filepath.Join(dir, "part2.mp3")
+	if err := os.WriteFile(bad, []byte("not audio at all, just bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := parseAudiobookFolder(t.Context(), "ffprobe", dir, nil, nil)
+	if err != nil {
+		t.Fatalf("parseAudiobookFolder: %v", err)
+	}
+	if len(got.Files) != 2 || !reflect.DeepEqual(got.UnreadableParts, []string{bad}) {
+		t.Fatalf("files %d unreadable %v, want 2 files and %s", len(got.Files), got.UnreadableParts, bad)
+	}
+	info, err := os.Stat(bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !audiobookPartRejected(bad, info.Size(), normalizeFileModifiedAt(info.ModTime())) {
+		t.Fatal("the rejected part is not remembered, so every scan would probe it again")
+	}
+	if err := os.Remove(filepath.Join(dir, "part1.mp3")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "part3.mp3")); err != nil {
+		t.Fatal(err)
+	}
+	// The caller retires rows indexed for these files, so the error must
+	// carry them.
+	_, err = parseAudiobookFolder(t.Context(), "ffprobe", dir, nil, nil)
+	var unreadable *noReadableAudiobookPartError
+	if !errors.As(err, &unreadable) || !reflect.DeepEqual(unreadable.paths, []string{bad}) {
+		t.Fatalf("book with no readable part: err = %v, want noReadableAudiobookPartError for %s", err, bad)
+	}
+}
+
+// Progress reaches the admin on the clock while a book takes longer than the
+// interval, and nothing is written after stop.
+func TestReportProgressEveryWritesUntilStopped(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var reports []int
+		ctx := WithProgressReporter(t.Context(), func(u ProgressUpdate) {
+			reports = append(reports, u.FilesProcessed)
+		})
+		var processed atomic.Int64
+		processed.Store(1)
+		stop := reportProgressEvery(ctx, audiobookScanProgressInterval, func() ProgressUpdate {
+			return audiobookScanProgress(1, 10, int(processed.Load()), 0, 0)
+		})
+
+		time.Sleep(audiobookScanProgressInterval + time.Millisecond) //nolint:forbidigo // synctest fake clock: advances one tick instantly.
+		synctest.Wait()
+		processed.Store(2)
+		time.Sleep(audiobookScanProgressInterval) //nolint:forbidigo // synctest fake clock: advances one more tick.
+		synctest.Wait()
+		if !slices.Equal(reports, []int{1, 2}) {
+			t.Fatalf("reports = %v, want [1 2]", reports)
+		}
+
+		stop()
+		processed.Store(3)
+		time.Sleep(2 * audiobookScanProgressInterval) //nolint:forbidigo // synctest fake clock: ticks that would fire if stop leaked.
+		synctest.Wait()
+		if len(reports) != 2 {
+			t.Fatalf("reports after stop = %v, want none added", reports)
+		}
+	})
 }

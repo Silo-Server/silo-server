@@ -149,9 +149,12 @@ type SourceMetadata struct {
 	DVBLPresent         bool
 	DVRPUPresent        bool
 	ColorRange          string
-	ColorPrimaries      string
-	ColorTransfer       string
-	ColorSpace          string
+	// FrameColorRange is the range on the first decoded frame, as the
+	// scanner recorded it: models.VideoTrack.FrameColorRange.
+	FrameColorRange string
+	ColorPrimaries  string
+	ColorTransfer   string
+	ColorSpace      string
 }
 
 // SourceResolution is the safe execution classification for one HDR source.
@@ -189,6 +192,7 @@ func MetadataForFile(file *models.MediaFile) SourceMetadata {
 		DVBLPresent:         track.DVBLPresent,
 		DVRPUPresent:        track.DVRPUPresent,
 		ColorRange:          track.ColorRange,
+		FrameColorRange:     track.FrameColorRange,
 		ColorPrimaries:      track.ColorPrimaries,
 		ColorTransfer:       track.ColorTransfer,
 		ColorSpace:          track.ColorSpace,

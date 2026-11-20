@@ -5,9 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"math"
 	"strings"
+	"sync"
+	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	publicmanifest "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/manifest"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
@@ -22,38 +28,82 @@ type scheduledTaskResolver interface {
 }
 
 type taskInstallationStore interface {
-	ListEnabled(ctx context.Context) ([]*Installation, error)
+	ListEnabled(context.Context) ([]*Installation, error)
+	ListCapabilities(context.Context, int) ([]*Capability, error)
+}
+
+type scheduledTaskStore interface {
+	ListEnabledWithCapabilityTypes(ctx context.Context, capabilityTypes []string) ([]*Installation, error)
 	ListCapabilities(ctx context.Context, installationID int) ([]*Capability, error)
 }
 
 type taskBindingStore interface {
-	GetTaskBinding(ctx context.Context, installationID int, capabilityID string) (*TaskBinding, error)
+	ListTaskBindings(ctx context.Context) ([]*TaskBinding, error)
 }
 
+// taskScheduler is the part of the task manager the registry drives.
+type taskScheduler interface {
+	RegisterLive(context.Context, taskmanager.Task) error
+	Unregister(key string)
+	ReloadSchedule(ctx context.Context, key string, presentationChanged bool) error
+}
+
+// TaskSyncInterval is how often an API server re-syncs plugin tasks without
+// an event, so a missed plugins_changed announcement costs at most one
+// interval. TaskSyncRetryWait is the wait before retrying a failed sync.
+const (
+	TaskSyncInterval  = DefaultLifecyclePollInterval
+	TaskSyncRetryWait = 10 * time.Second
+)
+
+// TaskRegistry keeps the task manager's plugin tasks in step with the
+// database: one task per scheduled_task.v1 capability of an enabled
+// installation whose binding is not disabled. Sync registers new tasks,
+// unregisters gone ones, updates names and default schedules in place and
+// installs schedules another server saved. It never writes a schedule. Every
+// API server runs its own registry, so a change made on one server reaches
+// the others through cache.EventPluginTasksChanged or
+// cache.EventPluginsChanged and the periodic resync (RunSyncs).
 type TaskRegistry struct {
-	installations taskInstallationStore
+	installations scheduledTaskStore
 	bindings      taskBindingStore
 	host          scheduledTaskResolver
+	scheduler     taskScheduler
+
+	syncGate   chan struct{}
+	registered map[string]*pluginTask
+	// wake asks RunSyncs for a sync; one pending request is enough.
+	wake chan struct{}
+	// retry tells RunSyncs a sync failed elsewhere, so it syncs again after
+	// its retry wait rather than at once.
+	retry chan struct{}
 }
 
 func NewTaskRegistry(
-	installations taskInstallationStore,
+	installations scheduledTaskStore,
 	bindings taskBindingStore,
 	host scheduledTaskResolver,
+	scheduler taskScheduler,
 ) *TaskRegistry {
 	return &TaskRegistry{
 		installations: installations,
 		bindings:      bindings,
 		host:          host,
+		scheduler:     scheduler,
+		syncGate:      make(chan struct{}, 1),
+		registered:    make(map[string]*pluginTask),
+		wake:          make(chan struct{}, 1),
+		retry:         make(chan struct{}, 1),
 	}
 }
 
 func NewTaskRegistryWithTypedResolver(
-	installations taskInstallationStore,
+	installations scheduledTaskStore,
 	bindings taskBindingStore,
 	resolver interface {
 		ScheduledTaskClient(ctx context.Context, installationID int, capabilityID string) (*pluginhost.ScheduledTaskClient, error)
 	},
+	scheduler taskScheduler,
 ) *TaskRegistry {
 	return NewTaskRegistry(installations, bindings, scheduledTaskResolverFunc(func(
 		ctx context.Context,
@@ -61,16 +111,144 @@ func NewTaskRegistryWithTypedResolver(
 		capabilityID string,
 	) (scheduledTaskClient, error) {
 		return resolver.ScheduledTaskClient(ctx, installationID, capabilityID)
-	}))
+	}), scheduler)
 }
 
-func (r *TaskRegistry) Tasks(ctx context.Context) ([]taskmanager.Task, error) {
-	installations, err := r.installations.ListEnabled(ctx)
+// Sync reconciles the task manager with the stored installations and
+// bindings. A read failure changes nothing, so a transient database error
+// never unregisters a task.
+func (r *TaskRegistry) Sync(ctx context.Context) error {
+	select {
+	case r.syncGate <- struct{}{}:
+		defer func() { <-r.syncGate }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	specs, err := r.scan(ctx)
+	if err != nil {
+		return err
+	}
+
+	var errs []error
+	wanted := make(map[string]struct{}, len(specs))
+	for _, spec := range specs {
+		wanted[spec.key] = struct{}{}
+		if task, ok := r.registered[spec.key]; ok {
+			presentationChanged := task.update(spec)
+			// A default changed by a binding write or plugin update, or a
+			// schedule saved on the task page of any server, applies here.
+			if err := r.scheduler.ReloadSchedule(ctx, spec.key, presentationChanged); err != nil {
+				errs = append(errs, fmt.Errorf("reload plugin task %s schedule: %w", spec.key, err))
+			}
+			continue
+		}
+		// Registering loads a saved schedule, else the defaults the scan
+		// just read. A task whose schedule cannot be read is left
+		// unregistered, so the retry after the failed sync registers it.
+		task := &pluginTask{installationID: spec.installationID, capabilityID: spec.capabilityID, resolver: r.host}
+		task.update(spec)
+		if err := r.scheduler.RegisterLive(ctx, task); err != nil {
+			errs = append(errs, fmt.Errorf("register plugin task %s: %w", spec.key, err))
+			continue
+		}
+		r.registered[spec.key] = task
+	}
+	for key := range r.registered {
+		if _, ok := wanted[key]; !ok {
+			r.scheduler.Unregister(key)
+			delete(r.registered, key)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// RequestSync asks RunSyncs for a sync without waiting for it. Requests made
+// while one is pending or running collapse into one more sync.
+func (r *TaskRegistry) RequestSync() {
+	select {
+	case r.wake <- struct{}{}:
+	default:
+	}
+}
+
+// SyncNow syncs before returning, for a change made on this server, and
+// leaves a failed sync to RunSyncs, which retries it after its retry wait.
+func (r *TaskRegistry) SyncNow(ctx context.Context) {
+	if err := r.Sync(ctx); err != nil {
+		slog.WarnContext(ctx, "sync plugin tasks failed; retrying", "component", "plugins", "error", err)
+		select {
+		case r.retry <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// RunSyncs syncs on every RequestSync and every interval until ctx ends, so
+// a server that missed a change announcement, or whose sync failed, catches
+// up without a restart. A failed sync is retried after retryWait.
+func (r *TaskRegistry) RunSyncs(ctx context.Context, interval, retryWait time.Duration) {
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	due := time.Now().Add(interval)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-r.retry:
+			// Another sync failed: try again after the retry wait, unless a
+			// sync is already due sooner.
+			if at := time.Now().Add(retryWait); at.Before(due) {
+				due = at
+				timer.Reset(retryWait)
+			}
+			continue
+		case <-r.wake:
+		case <-timer.C:
+		}
+		next := interval
+		if err := r.Sync(ctx); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			slog.WarnContext(ctx, "sync plugin tasks failed; retrying", "component", "plugins", "retry_in", retryWait, "error", err)
+			next = retryWait
+		}
+		due = time.Now().Add(next)
+		timer.Reset(next)
+	}
+}
+
+// pluginTaskSpec is one task the database says should be registered.
+type pluginTaskSpec struct {
+	key            string
+	installationID int
+	capabilityID   string
+	name           string
+	description    string
+	triggers       []taskmanager.TriggerConfig
+}
+
+// scan lists the scheduled task capabilities of enabled installations whose
+// binding is not disabled.
+func (r *TaskRegistry) scan(ctx context.Context) ([]pluginTaskSpec, error) {
+	installations, err := r.installations.ListEnabledWithCapabilityTypes(ctx, []string{"scheduled_task.v1"})
 	if err != nil {
 		return nil, fmt.Errorf("list enabled plugin installations: %w", err)
 	}
+	if len(installations) == 0 {
+		return nil, nil
+	}
+	bindingRows, err := r.bindings.ListTaskBindings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list plugin task bindings: %w", err)
+	}
+	bindings := make(map[string]*TaskBinding, len(bindingRows))
+	for _, binding := range bindingRows {
+		bindings[pluginTaskKey(binding.InstallationID, binding.CapabilityID)] = binding
+	}
 
-	var tasks []taskmanager.Task
+	var specs []pluginTaskSpec
 	for _, installation := range installations {
 		// Builtin installations expose no scheduled tasks and cannot be
 		// launched; defense-in-depth alongside the capability-type filter.
@@ -85,38 +263,44 @@ func (r *TaskRegistry) Tasks(ctx context.Context) ([]taskmanager.Task, error) {
 			if capability == nil || capability.Type != "scheduled_task.v1" {
 				continue
 			}
-
-			binding, err := r.bindings.GetTaskBinding(ctx, installation.ID, capability.ID)
-			if err != nil && !errors.Is(err, ErrTaskBindingNotFound) {
-				return nil, err
-			}
+			key := pluginTaskKey(installation.ID, capability.ID)
+			binding := bindings[key]
 			if binding != nil && !binding.Enabled {
 				continue
 			}
-
 			name, description := pluginTaskPresentation(installation.PluginID, capability)
-			task := &pluginTask{
+			specs = append(specs, pluginTaskSpec{
+				key:            key,
 				installationID: installation.ID,
 				capabilityID:   capability.ID,
 				name:           name,
 				description:    description,
-				resolver:       r.host,
-				triggers:       defaultPluginTaskTriggers(binding),
-			}
-			tasks = append(tasks, task)
+				triggers:       pluginTaskTriggers(binding, capability),
+			})
 		}
 	}
-
-	return tasks, nil
+	return specs, nil
 }
 
+// pluginTask is a registered plugin task. Sync updates its presentation and
+// default schedule in place, without canceling it during reconciliation.
 type pluginTask struct {
 	installationID int
 	capabilityID   string
-	name           string
-	description    string
 	resolver       scheduledTaskResolver
-	triggers       []taskmanager.TriggerConfig
+
+	mu          sync.RWMutex
+	name        string
+	description string
+	triggers    []taskmanager.TriggerConfig
+}
+
+func (t *pluginTask) update(spec pluginTaskSpec) (presentationChanged bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	presentationChanged = t.name != spec.name || t.description != spec.description
+	t.name, t.description, t.triggers = spec.name, spec.description, spec.triggers
+	return presentationChanged
 }
 
 type scheduledTaskResolverFunc func(ctx context.Context, installationID int, capabilityID string) (scheduledTaskClient, error)
@@ -129,14 +313,34 @@ func (f scheduledTaskResolverFunc) ScheduledTaskClient(
 	return f(ctx, installationID, capabilityID)
 }
 
-func (t *pluginTask) Key() string                        { return pluginTaskKey(t.installationID, t.capabilityID) }
-func (t *pluginTask) Name() string                       { return t.name }
-func (t *pluginTask) Description() string                { return t.description }
+func (t *pluginTask) Key() string { return pluginTaskKey(t.installationID, t.capabilityID) }
+func (t *pluginTask) Name() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.name
+}
+func (t *pluginTask) Description() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.description
+}
 func (t *pluginTask) Category() taskmanager.TaskCategory { return taskmanager.TaskCategorySystem }
 func (t *pluginTask) IsHidden() bool                     { return false }
 func (t *pluginTask) DefaultTriggers() []taskmanager.TriggerConfig {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	return append([]taskmanager.TriggerConfig(nil), t.triggers...)
 }
+
+// FollowsDefaultTriggers keeps a plugin task's default out of task_schedules,
+// so a saved schedule only ever means an administrator's edit and the task
+// otherwise follows its binding and manifest default.
+func (t *pluginTask) FollowsDefaultTriggers() bool { return true }
+
+// ClaimsFirings makes each scheduled firing run on one API server: every API
+// server registers the task, and a plugin's work is not safe to repeat per
+// server.
+func (t *pluginTask) ClaimsFirings() bool { return true }
 
 func (t *pluginTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
 	progress.Report(0, "Running plugin task")
@@ -184,15 +388,105 @@ func pluginTaskKey(installationID int, capabilityID string) string {
 	return fmt.Sprintf("plugin:%d:%s", installationID, capabilityID)
 }
 
-func defaultPluginTaskTriggers(binding *TaskBinding) []taskmanager.TriggerConfig {
-	if binding == nil || len(binding.Trigger) == 0 {
-		return []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeStartup}}
+// pluginTaskTriggers is a plugin task's default schedule: the binding's
+// trigger, else the manifest's scheduled_task.default_trigger, else one run
+// at startup. A trigger the task manager cannot run falls through to the
+// next source. A schedule saved on the task page outranks all three; the task
+// manager reads it first.
+func pluginTaskTriggers(binding *TaskBinding, capability *Capability) []taskmanager.TriggerConfig {
+	if trigger := bindingTrigger(binding); trigger != nil {
+		return []taskmanager.TriggerConfig{*trigger}
 	}
+	if trigger := manifestDefaultTrigger(capability); trigger != nil {
+		return []taskmanager.TriggerConfig{*trigger}
+	}
+	return []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeStartup}}
+}
 
-	var trigger taskmanager.TriggerConfig
-	raw, err := json.Marshal(binding.Trigger)
-	if err != nil || json.Unmarshal(raw, &trigger) != nil || trigger.Type == "" {
-		return []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeStartup}}
+// bindingTrigger is the runnable trigger stored on the binding, normalized,
+// or nil.
+func bindingTrigger(binding *TaskBinding) *taskmanager.TriggerConfig {
+	if binding == nil || len(binding.Trigger) == 0 {
+		return nil
 	}
-	return []taskmanager.TriggerConfig{trigger}
+	raw, err := json.Marshal(binding.Trigger)
+	if err != nil {
+		return nil
+	}
+	var trigger taskmanager.TriggerConfig
+	if json.Unmarshal(raw, &trigger) != nil || !runnableTrigger(trigger) {
+		return nil
+	}
+	trigger = trigger.Normalized()
+	return &trigger
+}
+
+// manifestDefaultTrigger is the runnable default_trigger the plugin manifest
+// declares for the capability, or nil. Capability metadata holds the
+// descriptor as protojson, so interval_ms arrives as a string.
+func manifestDefaultTrigger(capability *Capability) *taskmanager.TriggerConfig {
+	if capability == nil {
+		return nil
+	}
+	value, ok := capability.Metadata["scheduled_task"]
+	if !ok {
+		return nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var descriptor pluginv1.ScheduledTaskDescriptor
+	if (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(raw, &descriptor) != nil {
+		return nil
+	}
+	return ManifestDefaultTrigger(&descriptor)
+}
+
+// ManifestDefaultTrigger is the schedule a scheduled_task.v1 descriptor
+// declares, normalized, when the task manager can run it, or nil.
+func ManifestDefaultTrigger(descriptor *pluginv1.ScheduledTaskDescriptor) *taskmanager.TriggerConfig {
+	declared := descriptor.GetDefaultTrigger()
+	if declared == nil {
+		return nil
+	}
+	trigger := taskmanager.TriggerConfig{
+		Type:       taskmanager.TriggerType(declared.GetType()),
+		IntervalMs: declared.GetIntervalMs(),
+		TimeOfDay:  declared.GetTimeOfDay(),
+		DayOfWeek:  int(declared.GetDayOfWeek()),
+	}
+	if !runnableTrigger(trigger) ||
+		(trigger.Type == taskmanager.TriggerTypeInterval && trigger.IntervalMs < publicmanifest.MinTriggerIntervalMs) {
+		return nil
+	}
+	trigger = trigger.Normalized()
+	return &trigger
+}
+
+// maxTriggerIntervalMs is the longest interval a time.Duration holds; a
+// longer one overflows into a timer that fires at once.
+const maxTriggerIntervalMs = math.MaxInt64 / int64(time.Millisecond)
+
+// runnableTrigger reports whether the task manager can schedule trigger:
+// its type is one the manager knows and the fields that type reads are
+// valid.
+func runnableTrigger(trigger taskmanager.TriggerConfig) bool {
+	switch trigger.Type {
+	case taskmanager.TriggerTypeStartup:
+		return true
+	case taskmanager.TriggerTypeInterval:
+		return trigger.IntervalMs > 0 && trigger.IntervalMs <= maxTriggerIntervalMs
+	case taskmanager.TriggerTypeDaily:
+		return validTimeOfDay(trigger.TimeOfDay)
+	case taskmanager.TriggerTypeWeekly:
+		return validTimeOfDay(trigger.TimeOfDay) && trigger.DayOfWeek >= 0 && trigger.DayOfWeek <= 6
+	default:
+		return false
+	}
+}
+
+func validTimeOfDay(value string) bool {
+	_, err := time.Parse("15:04", value)
+	return err == nil
 }

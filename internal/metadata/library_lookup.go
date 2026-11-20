@@ -92,7 +92,7 @@ func (s *MetadataService) FetchLibraryMetadata(
 		return nil, err
 	}
 	language := s.resolveFolderLanguage(ctx, folderID)
-	providerIDs, err := s.resolveSeriesRefreshProviderIDs(ctx, item, folderID, language, true)
+	providerIDs, err := s.resolveSeriesRefreshProviderIDs(ctx, item, folderID, language, true, false)
 	if err != nil {
 		return nil, err
 	}

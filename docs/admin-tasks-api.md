@@ -22,6 +22,10 @@ but does not create a durable job or promise execution after a process failure.
 Concurrent local starts conflict. Another server has its own worker state.
 `POST /api/v2/admin/tasks/{key}/cancel` requests cancellation of the current local
 execution; completed effects remain. Neither operation automatically retries.
+While a task is `running` or `cancelling` on the responding process, its
+`started_at` reports when that run started; `last_execution` still describes
+the previous finished run. The realtime `task.updated` event and the events
+WebSocket's task snapshot do not carry it; refetch the task to read it.
 
 The `refresh_all_library_metadata` task runs a `full` library metadata refresh
 (see [libraries-api.md](libraries-api.md)) for each enabled library in turn,
@@ -75,10 +79,22 @@ and a strong caller-bound ETag. `PUT` on that resource requires `If-Match` and a
 compares the original revision under the schedule parent lock, and every
 schedule writer advances the revision. A mismatch returns 412 with the
 observed validator, without rereading or retrying the write. An empty schedule
-remains configured across restarts rather than restoring task defaults.
+remains configured across restarts rather than restoring task defaults. A plugin
+task without a persisted schedule reports the default it runs (binding trigger,
+else manifest default, else startup) at revision zero, under a validator that
+also changes when that default changes; the first `PUT` saves a schedule that
+then outranks the default. Only an administrator's edit saves one now, but a
+plugin task can still hold a schedule an earlier release saved from a binding
+trigger, which `GET` reports with its nonzero revision
+([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)).
 
-Successful edits apply to the responding process. Other running processes load
-the persisted configuration when they restart. Runtime state and persisted
+Successful edits apply to the responding process. If the task is running, its
+replacement timers arm after the current execution finishes. Other processes
+load the persisted configuration when they restart, except for plugin tasks: every
+API server installs a plugin task's saved schedule at its next successful plugin
+task sync. A task-page edit announces nothing, so other servers pick it up at
+the periodic sync, which runs every minute
+([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)). Runtime state and persisted
 schedule state are separate reads. The web editor captures the persisted schedule
 when editing begins, keeps the draft and original validator after conflicts, and
 requires explicit review and revision adoption before another submission. It

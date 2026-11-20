@@ -218,7 +218,7 @@ func (h *RatingsHandler) HandleGetRating(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusOK, ratingResponse{
-		Rating:  rating.Rating,
+		Rating:  rating.Score,
 		RatedAt: rating.RatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	})
 }
@@ -327,7 +327,7 @@ func (h *RatingsHandler) HandleListRatings(w http.ResponseWriter, r *http.Reques
 	for _, ur := range ratings {
 		items = append(items, ratingListItem{
 			MediaItemID: ur.MediaItemID,
-			Rating:      ur.Rating,
+			Rating:      ur.Score,
 			RatedAt:     ur.RatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}

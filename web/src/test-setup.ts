@@ -41,3 +41,18 @@ vi.mock("@testing-library/react", async (importOriginal) => {
 
   return { ...actual, render, renderHook };
 });
+
+// jsdom has no modal dialogs. Opening shows the dialog and focuses its first
+// control, as browsers do; closing fires close, which the player's dialogs
+// listen for.
+if (typeof HTMLDialogElement !== "undefined" && !HTMLDialogElement.prototype.showModal) {
+  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+    this.open = true;
+    this.querySelector<HTMLElement>("button, input, select, textarea, [href], [tabindex]")?.focus();
+  };
+  HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+    if (!this.open) return;
+    this.open = false;
+    this.dispatchEvent(new Event("close"));
+  };
+}

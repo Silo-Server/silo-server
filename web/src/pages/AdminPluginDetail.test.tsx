@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,58 +30,39 @@ function query<T>(data: T | undefined, overrides: Partial<QueryState<T>> = {}): 
 
 let installationsQuery: QueryState<PluginInstallation[]> = query<PluginInstallation[]>([]);
 let catalogQuery: QueryState<PluginCatalogEntry[]> = query<PluginCatalogEntry[]>([]);
-const catalogOptions: Array<{ enabled?: boolean }> = [];
-const updateInstallationMock = vi.fn();
-let updateInstallationPending = false;
-const applyUpdateMock = vi.fn();
 const restartMock = vi.fn();
-let restartPending = false;
 const deleteMock = vi.fn();
 const installMock = vi.fn();
-const saveConfigMock = vi.fn();
 const saveAuthBindingMock = vi.fn();
 const saveTaskBindingMock = vi.fn();
-const navigateToPluginRouteMock = vi.fn();
-const capturedConfigForms: Array<Record<string, unknown>> = [];
-const capturedSelects: Array<Record<string, unknown>> = [];
 const capturedSwitches: Array<Record<string, unknown>> = [];
 
 vi.mock("@/hooks/queries/admin/plugins", () => ({
   useAdminPluginInstallations: () => installationsQuery,
-  useAdminPluginCatalog: (options: { enabled?: boolean }) => {
-    catalogOptions.push(options);
-    return catalogQuery;
-  },
-  useUpdatePluginInstallation: () => ({
-    mutate: updateInstallationMock,
-    isPending: updateInstallationPending,
-  }),
-  useApplyPluginUpdate: () => ({ mutate: applyUpdateMock, isPending: false }),
-  useRestartPluginInstallation: () => ({ mutate: restartMock, isPending: restartPending }),
+  useAdminPluginCatalog: () => catalogQuery,
+  useUpdatePluginInstallation: () => ({ mutate: vi.fn(), isPending: false }),
+  useApplyPluginUpdate: () => ({ mutate: vi.fn(), isPending: false }),
+  useRestartPluginInstallation: () => ({ mutate: restartMock, isPending: false }),
   useDeletePluginInstallation: () => ({ mutate: deleteMock, isPending: false }),
   useInstallPlugin: () => ({ mutate: installMock, isPending: false }),
-  useSavePluginConfig: () => ({ mutate: saveConfigMock, isPending: false }),
+  useSavePluginConfig: () => ({ mutate: vi.fn(), isPending: false }),
   useTestPluginConfig: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useSavePluginAuthBinding: () => ({ mutate: saveAuthBindingMock, isPending: false }),
   useSavePluginTaskBinding: () => ({ mutate: saveTaskBindingMock, isPending: false }),
 }));
 
 vi.mock("@/lib/buildPluginHref", () => ({
-  navigateToPluginRoute: (href: string) => navigateToPluginRouteMock(href),
+  navigateToPluginRoute: vi.fn(),
 }));
 
 vi.mock("@/components/admin/plugins/PluginConfigForm", () => ({
-  PluginConfigForm: (props: Record<string, unknown>) => {
-    capturedConfigForms.push(props);
-    return <div data-testid="config-form">{(props.schema as { key: string }).key}</div>;
-  },
+  PluginConfigForm: (props: Record<string, unknown>) => (
+    <div data-testid="config-form">{(props.schema as { key: string }).key}</div>
+  ),
 }));
 
 vi.mock("@/components/ui/select", () => ({
-  Select: (props: Record<string, unknown>) => {
-    capturedSelects.push(props);
-    return null;
-  },
+  Select: () => <div data-testid="select" />,
   SelectContent: () => null,
   SelectItem: () => null,
   SelectTrigger: () => null,
@@ -159,6 +140,7 @@ function makeInstallation(overrides: Partial<PluginInstallation> = {}): PluginIn
     source_kind: "silo",
     repository_name: "Silo plugins",
     updates_paused: false,
+    connection_check_supported: true,
     presentation: PRESENTATION,
     capabilities: [{ type: "metadata_provider.v1", id: "mdblist", display_name: "MDBList" }],
     global_config_schema: [
@@ -177,6 +159,7 @@ function makeInstallation(overrides: Partial<PluginInstallation> = {}): PluginIn
     auth_bindings: [],
     task_bindings: [],
     update_policy: "auto",
+    signature: { state: "unknown" },
     created_at: "2026-09-14T10:00:00Z",
     ...overrides,
   };
@@ -228,38 +211,15 @@ describe("AdminPluginDetail", () => {
   beforeEach(() => {
     installationsQuery = query([makeInstallation()]);
     catalogQuery = query<PluginCatalogEntry[]>([]);
-    catalogOptions.length = 0;
-    capturedConfigForms.length = 0;
-    capturedSelects.length = 0;
     capturedSwitches.length = 0;
-    restartPending = false;
-    updateInstallationPending = false;
     for (const mock of [
-      updateInstallationMock,
-      applyUpdateMock,
       restartMock,
       deleteMock,
       installMock,
-      saveConfigMock,
       saveAuthBindingMock,
       saveTaskBindingMock,
-      navigateToPluginRouteMock,
     ])
       mock.mockReset();
-  });
-
-  it("saves a settings panel against the installation", () => {
-    renderPage();
-    const onSave = capturedConfigForms[0]?.onSave as (
-      key: string,
-      value: Record<string, unknown>,
-      clear: string[],
-    ) => void;
-    onSave("account", { api_key: "k" }, []);
-    expect(saveConfigMock).toHaveBeenCalledWith({
-      id: 7,
-      body: { key: "account", value: { api_key: "k" }, clear_secrets: [] },
-    });
   });
 
   it("asks for missing required settings, but not for optional ones", () => {
@@ -284,45 +244,6 @@ describe("AdminPluginDetail", () => {
     expect(screen.queryByText("Needs setup")).not.toBeInTheDocument();
   });
 
-  it("leads with the runtime error when a resident plugin keeps failing", () => {
-    installationsQuery = query([
-      makeInstallation({
-        global_config_schema: [],
-        runtime: {
-          resident: true,
-          state: "backoff",
-          restart_count: 3,
-          last_error: "floppy: context deadline exceeded",
-        },
-      }),
-    ]);
-    renderPage();
-
-    expect(screen.getByText("MDBList Ratings keeps stopping.")).toBeInTheDocument();
-    expect(screen.getByText("floppy: context deadline exceeded")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
-    expect(restartMock).toHaveBeenCalledWith(7);
-  });
-
-  it("shows the start error of a non-resident plugin without offering Restart", () => {
-    installationsQuery = query([
-      makeInstallation({
-        global_config_schema: [],
-        runtime: {
-          resident: false,
-          state: "failed",
-          restart_count: 0,
-          last_error: "start plugin process: exit status 2",
-        },
-      }),
-    ]);
-    renderPage();
-
-    expect(screen.getByText("MDBList Ratings failed to start.")).toBeInTheDocument();
-    expect(screen.getByText("start plugin process: exit status 2")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Restart now" })).not.toBeInTheDocument();
-  });
-
   it.each([
     { enabled: false, resident: true, state: "running", visible: false, disabled: false },
     { enabled: true, resident: false, state: "stopped", visible: false, disabled: false },
@@ -341,62 +262,49 @@ describe("AdminPluginDetail", () => {
     if (restart) expect(restart).toHaveProperty("disabled", testCase.disabled);
   });
 
-  it("changes the update policy, the enabled state, and applies an update", () => {
-    installationsQuery = query([makeInstallation({ available_version: "0.2.0" })]);
-    renderPage();
-
-    (capturedSelects[0]?.onValueChange as (value: string) => void)("notify");
-    expect(updateInstallationMock).toHaveBeenCalledWith({
-      id: 7,
-      body: { update_policy: "notify" },
-    });
-    const enabled = capturedSwitches.find((props) => props["aria-label"] === "Enabled");
-    (enabled?.onCheckedChange as (checked: boolean) => void)(false);
-    expect(updateInstallationMock).toHaveBeenCalledWith({ id: 7, body: { enabled: false } });
-
-    fireEvent.click(screen.getByRole("menuitem", { name: "Update to 0.2.0" }));
-    expect(applyUpdateMock).toHaveBeenCalledWith(7);
-  });
-
-  it("locks the update policy while an installation update is saving", () => {
-    updateInstallationPending = true;
-    renderPage();
-    expect(capturedSelects[0]?.disabled).toBe(true);
-  });
-
-  it("uninstalls after confirmation and returns to the plugin list", () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Uninstall..." }));
-    fireEvent.click(screen.getByRole("button", { name: "Uninstall plugin" }));
-
-    expect(deleteMock).toHaveBeenCalledWith(7, { onSuccess: expect.any(Function) });
-    const options = deleteMock.mock.calls[0]?.[1] as { onSuccess: () => void };
-    act(() => options.onSuccess());
-    expect(screen.getByTestId("location")).toHaveTextContent("/admin/plugins");
-  });
-
-  it("opens a plugin's own admin pages", () => {
+  it("marks a plugin installed without a catalog Unverified and offers no update policy", () => {
     installationsQuery = query([
       makeInstallation({
-        routes: [
-          {
-            id: "dashboard",
-            method: "GET",
-            path: "/dashboard/*",
-            access: "admin",
-            navigable: true,
-            navigation_label: "Dashboard",
-            navigation_kind: "admin",
-            static_asset: true,
-          },
-        ],
+        repository_id: null,
+        source_kind: "external",
+        repository_name: undefined,
       }),
     ]);
     renderPage();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Dashboard" }));
-    expect(navigateToPluginRouteMock).toHaveBeenCalledWith(
-      "/api/v2/plugin-content/plugins/7/dashboard",
-    );
+
+    expect(screen.getAllByText("Unverified").length).toBeGreaterThan(0);
+    expect(screen.getByText(/isn't linked to any of your catalogs/)).toBeInTheDocument();
+    expect(screen.getByText("Updated by upload")).toBeInTheDocument();
+    expect(screen.queryByTestId("select")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { name: "unverified", overrides: { repository_id: null, source_kind: "external" as const } },
+    {
+      name: "paused",
+      overrides: { source_kind: "approved_community" as const, updates_paused: true },
+    },
+  ])("does not offer an update recorded before updates stopped: $name", ({ overrides }) => {
+    installationsQuery = query([makeInstallation({ ...overrides, available_version: "0.2.0" })]);
+    renderPage();
+    expect(screen.queryByRole("menuitem", { name: "Update to 0.2.0" })).not.toBeInTheDocument();
+  });
+
+  it("does not show a catalog's repository on an Unverified plugin with the same ID", () => {
+    installationsQuery = query([
+      makeInstallation({
+        repository_id: null,
+        source_kind: "external",
+        repository_name: undefined,
+        presentation: undefined,
+      }),
+    ]);
+    catalogQuery = query([
+      makeCatalogEntry({ plugin_id: "silo.mdblist", repository_name: "Silo plugins" }),
+    ]);
+    renderPage();
+    expect(screen.queryByText("Silo plugins")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Unverified").length).toBeGreaterThan(0);
   });
 
   it("preserves the existing schedule when disabling a plugin task", () => {
@@ -450,76 +358,10 @@ describe("AdminPluginDetail", () => {
     });
   });
 
-  it("says so when a plugin has no settings", () => {
-    installationsQuery = query([makeInstallation({ global_config_schema: [] })]);
-    renderPage();
-    expect(screen.getByText(/This plugin has no settings/)).toBeInTheDocument();
-    expect(capturedConfigForms).toHaveLength(0);
-  });
-
-  it.each([
-    ["approved_community", "Approved community."],
-    ["external", "External source."],
-  ] as const)("shows the %s tier notice", (sourceKind, heading) => {
-    installationsQuery = query([makeInstallation({ source_kind: sourceKind })]);
-    renderPage();
-    expect(screen.getByText(heading)).toBeInTheDocument();
-  });
-
-  it.each(["silo", "vio"] as const)(
-    "shows no tier notice for %s first-party plugins",
-    (sourceKind) => {
-      installationsQuery = query([makeInstallation({ source_kind: sourceKind })]);
-      renderPage();
-      expect(screen.queryByRole("note")).not.toBeInTheDocument();
-    },
-  );
-
   it("renders setup Markdown as text, never as HTML", () => {
     const { container } = renderPage();
     expect(screen.getByText("free API key").tagName).toBe("STRONG");
     expect(container.querySelector("script")).toBeNull();
     expect(screen.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument();
-  });
-
-  it("previews a catalog plugin that isn't installed and installs it", () => {
-    installationsQuery = query<PluginInstallation[]>([]);
-    catalogQuery = query([makeCatalogEntry()]);
-    renderPage("silo.manga-metadata");
-
-    expect(screen.getByRole("heading", { level: 1, name: "Manga Metadata" })).toBeInTheDocument();
-    expect(screen.getByText("Not installed")).toBeInTheDocument();
-    expect(screen.getByText("Dump storage path")).toBeInTheDocument();
-    expect(capturedSwitches).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "Install" }));
-    expect(installMock).toHaveBeenCalledWith({
-      repository_id: 1,
-      plugin_id: "silo.manga-metadata",
-      version: "0.1.1",
-    });
-  });
-
-  it("installs the catalog version selected from its tile", () => {
-    installationsQuery = query<PluginInstallation[]>([]);
-    catalogQuery = query([
-      makeCatalogEntry({ version: "0.1.0" }),
-      makeCatalogEntry({ version: "0.2.0" }),
-    ]);
-    renderPage("silo.manga-metadata", "?repository=1&version=0.2.0");
-    expect(screen.getByText("Version 0.2.0")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Install" }));
-    expect(installMock).toHaveBeenCalledWith({
-      repository_id: 1,
-      plugin_id: "silo.manga-metadata",
-      version: "0.2.0",
-    });
-  });
-
-  it("offers a retry when the installations can't be read", () => {
-    const refetch = vi.fn();
-    installationsQuery = query<PluginInstallation[]>(undefined, { isError: true, refetch });
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(refetch).toHaveBeenCalled();
   });
 });

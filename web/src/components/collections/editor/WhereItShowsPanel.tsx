@@ -18,6 +18,7 @@ import {
   unshareWarning,
 } from "@/lib/collections/copy";
 import { SERVER_SCOPE, type CollectionDraft } from "@/lib/collections/scope";
+import { joinList } from "@/lib/appLocale";
 
 import { HideCollectionDialog } from "../HideCollectionDialog";
 import { focusLibrariesLine } from "../fields/librariesLineFocus";
@@ -115,7 +116,7 @@ function ServerFacts({
           label={t("web.collections.copy.fieldLibraries")}
           value={
             libraries.length > 0 ? (
-              <Value>{libraries.map((library) => library.name).join(", ")}</Value>
+              <Value>{joinList(libraries.map((library) => library.name))}</Value>
             ) : (
               librariesNotPicked()
             )
@@ -137,7 +138,7 @@ function ServerFacts({
         label={t("web.collections.whereItShows.shelf")}
         value={
           collectionId ? (
-            <Value>{shelves.join(", ")}</Value>
+            <Value>{joinList(shelves)}</Value>
           ) : (
             <>
               <Value>{noHeading()}</Value> {DOT} {shelfAfterCreate()}

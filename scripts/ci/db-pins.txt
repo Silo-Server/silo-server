@@ -35,6 +35,9 @@
 ./internal/blobgc TestSweeperDefersPrefixSpanningBoundedRunsDB
 ./internal/blobgc TestSweeperRestartsAfterStorageMoveDB
 
+# Deleting a media file seeks its queued chapter images instead of walking the queue.
+./internal/blobgc TestDeletedFileQueueLookupSeeksChapterFileIndexDB
+
 # Chapter width replacement has one extraction and upload across API replicas.
 ./internal/chapterthumbs TestWidthBackfillSerializesReplicasPostgres
 ./internal/chapterthumbs TestWidthChangeDuringFirstChapterExtractionDB
@@ -152,6 +155,11 @@
 # with one statement and never runs the collections' queries.
 ./internal/catalog TestPersonalCollectionCollageListReadsSkipSmartQueriesDB
 
+# Server smart collection collages: built from the first matches each viewer
+# can access, ready once the collection is saved, and served by list reads
+# with one statement.
+./internal/catalog TestServerSmartCollectionCollagesDB
+
 # Shared personal collections: a listing resolves each other owner's access
 # once, and a profile's own collections resolve nobody.
 ./internal/api/handlers TestPersonalCollectionOwnerLookupBudgetDB
@@ -210,6 +218,10 @@
 # Subtree file reads bound file_path on the folder path index under a generic
 # plan, and match the same literal paths as a prefix LIKE.
 ./internal/scanner TestFolderPathPrefixQueryUsesPathRangeUnderGenericPlanDB
+
+# The empty-root check probes each root on the folder path index under a
+# generic plan instead of reading every file of the folder.
+./internal/scanner TestListRootsWithCatalogedFilesUsesPathRangeUnderGenericPlanDB
 
 # Subtree theme passes read the scanned subtree and probe canonical roots above
 # it on their indexes instead of reading every file in the library.

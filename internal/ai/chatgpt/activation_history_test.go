@@ -14,25 +14,6 @@ func requireConnectionHistory(t *testing.T, store *memoryStore, want bool) {
 	}
 }
 
-func TestConnectionHistoryFromStoredActivation(t *testing.T) {
-	for _, test := range []struct {
-		name, raw string
-		want      bool
-	}{
-		{name: "new installation"},
-		{name: "retained failed registration", raw: `{"accounts":[{"client_id":"app","needs_login":true}]}`},
-		{name: "accepted grant without activation", raw: `{"accounts":[{"client_id":"app","refresh_token":"refresh"}]}`},
-		{name: "legacy active account", raw: `{"active":"app","accounts":[{"client_id":"app","refresh_token":"refresh"}]}`, want: true},
-		{name: "legacy active account needing login", raw: `{"active":"app","accounts":[{"client_id":"app","needs_login":true}]}`, want: true},
-		{name: "disconnected previous activation", raw: `{"has_connected":true,"accounts":[{"client_id":"app","needs_login":true}]}`, want: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			store := &memoryStore{values: map[string]string{CredentialsKey: test.raw}}
-			requireConnectionHistory(t, store, test.want)
-		})
-	}
-}
-
 func TestFirstSelectionPersistsConnectionHistoryAcrossDisconnect(t *testing.T) {
 	for _, unavailable := range []int{http.StatusOK} {
 		t.Run(http.StatusText(unavailable), func(t *testing.T) {

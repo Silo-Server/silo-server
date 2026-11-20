@@ -13,15 +13,12 @@ type NotificationWebhookUpdateInput struct {
 	IfMatch     string `header:"If-Match"`
 	IfNoneMatch string `header:"If-None-Match"`
 	Body        struct {
-		Name                   *string `json:"name,omitempty"`
-		URL                    *string `json:"url,omitempty" format:"uri"`
-		Enabled                *bool   `json:"enabled,omitempty"`
-		NotifyFavorites        *bool   `json:"notify_favorites,omitempty"`
-		NotifyWatchlist        *bool   `json:"notify_watchlist,omitempty"`
-		NotifyContinueWatching *bool   `json:"notify_continue_watching,omitempty"`
-		NotifyNextUp           *bool   `json:"notify_next_up,omitempty"`
-		NotifyRequests         *bool   `json:"notify_requests,omitempty"`
-		NotifyRatings          *bool   `json:"notify_ratings,omitempty"`
+		Name           *string `json:"name,omitempty"`
+		URL            *string `json:"url,omitempty" format:"uri"`
+		Enabled        *bool   `json:"enabled,omitempty"`
+		NotifyNextUp   *bool   `json:"notify_next_up,omitempty"`
+		NotifyRequests *bool   `json:"notify_requests,omitempty"`
+		NotifyRatings  *bool   `json:"notify_ratings,omitempty"`
 	}
 }
 
@@ -46,8 +43,7 @@ func registerNotificationWebhookUpdate(reg *Registry) {
 		}
 		row, err := reg.deps.NotificationDestinations.UpdateNotificationWebhook(ctx, user, profile, in.ID, notifications.WebhookInput{
 			Name: in.Body.Name, URL: in.Body.URL, Enabled: in.Body.Enabled,
-			NotifyFavorites: in.Body.NotifyFavorites, NotifyWatchlist: in.Body.NotifyWatchlist,
-			NotifyContinueWatching: in.Body.NotifyContinueWatching, NotifyNextUp: in.Body.NotifyNextUp, NotifyRequests: in.Body.NotifyRequests, NotifyRatings: in.Body.NotifyRatings,
+			NotifyNextUp: in.Body.NotifyNextUp, NotifyRequests: in.Body.NotifyRequests, NotifyRatings: in.Body.NotifyRatings,
 		}, func(revision int64) error {
 			if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, notificationWebhookTag(profile, in.ID, revision)); p != nil {
 				return p

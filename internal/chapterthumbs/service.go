@@ -16,8 +16,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -35,12 +38,6 @@ const (
 	hwExtractTimeoutHDR        = 20 * time.Second
 	cpuExtractTimeoutSDR       = 10 * time.Second
 	cpuExtractTimeoutHDR       = 25 * time.Second
-
-	// chapterThumbnailFolderStateTTL bounds how long an enqueue trusts a cached
-	// folder eligibility verdict. Library settings change rarely; a bounded
-	// cache keeps a queue sweep from reading the same folder row per file while
-	// still picking up a toggle within a minute.
-	chapterThumbnailFolderStateTTL = time.Minute
 
 	chapterThumbnailHDRPolicySetting    = "playback.chapter_thumbnail_hdr_policy"
 	chapterThumbnailHDRPolicyDefault    = "best_effort"
@@ -131,12 +128,6 @@ type ChapterThumbnailRequest struct {
 	priority bool
 }
 
-// chapterThumbnailFolderState is one cached folder eligibility verdict.
-type chapterThumbnailFolderState struct {
-	enabled   bool
-	checkedAt time.Time
-}
-
 type Service struct {
 	fileRepo     FileRepository
 	folderRepo   FolderRepository
@@ -177,13 +168,6 @@ type Service struct {
 	priorityBatchSize   int
 	normalBatchSize     int
 
-	// folderEnabledMu guards the folder eligibility memo the queue methods use
-	// to avoid enqueuing files whose library has chapter thumbnails disabled.
-	// The worker re-checks the folder under its lock, so this memo only saves
-	// the repeated skip work (and the skip log) for a disabled library.
-	folderEnabledMu sync.Mutex
-	folderEnabled   map[int]chapterThumbnailFolderState
-
 	mu              sync.Mutex
 	priorityQueue   []int
 	normalQueue     []int
@@ -196,6 +180,10 @@ type Service struct {
 	transcodePool      *nodepool.TranscodePool
 	remoteReservations *nodepool.Reservations
 	remoteExtractor    remoteFrameExtractor
+	// nodeKeys signs remote extraction requests; nil keeps extraction local.
+	nodeKeys nodeauth.Keyring
+	// sourceGrants grants a node each extraction's source; nil sends none.
+	sourceGrants nodesource.FileGranter
 
 	extractFrameFunc           func(ctx context.Context, file *models.MediaFile, seekSeconds float64, hdrPolicy string) ([]byte, string, error)
 	uploadChapterThumbnailFunc func(ctx context.Context, fileID, chapterIndex int, frame []byte) (string, string, error)
@@ -222,6 +210,25 @@ func (s *Service) SetNotifier(notifier ThumbnailNotifier) {
 		return
 	}
 	s.notifier = notifier
+}
+
+// SetNodeKeys wires the keyring that signs extraction requests to transcode
+// nodes. Without one every extraction runs on this server, or fails under
+// transcode_nodes_only.
+func (s *Service) SetNodeKeys(keys nodeauth.Keyring) {
+	if s == nil {
+		return
+	}
+	s.nodeKeys = keys
+}
+
+// SetSourceGrants wires the grants every remote extraction's source is sent
+// with.
+func (s *Service) SetSourceGrants(grants nodesource.FileGranter) {
+	if s == nil {
+		return
+	}
+	s.sourceGrants = grants
 }
 
 // SetBlobQueue lets the service retire the images a width change replaces.
@@ -313,28 +320,22 @@ func (s *Service) Start(ctx context.Context) {
 	go s.followPreviewWidth(ctx)
 }
 
-func (s *Service) QueueFileIDs(ctx context.Context, fileIDs []int) {
+func (s *Service) QueueFileIDs(_ context.Context, fileIDs []int) {
 	if s == nil {
 		return
 	}
 	for _, fileID := range fileIDs {
-		if !s.chapterThumbnailsEnabled(ctx, fileID) {
-			continue
-		}
 		if s.enqueue(ChapterThumbnailRequest{FileID: fileID}, false) {
 			s.notifyNormalWorker()
 		}
 	}
 }
 
-func (s *Service) QueuePriorityFileIDs(ctx context.Context, fileIDs []int) {
+func (s *Service) QueuePriorityFileIDs(_ context.Context, fileIDs []int) {
 	if s == nil {
 		return
 	}
 	for _, fileID := range fileIDs {
-		if !s.chapterThumbnailsEnabled(ctx, fileID) {
-			continue
-		}
 		if s.enqueue(ChapterThumbnailRequest{FileID: fileID}, true) {
 			s.notifyPriorityWorker()
 			s.notifyNormalWorker()
@@ -342,11 +343,8 @@ func (s *Service) QueuePriorityFileIDs(ctx context.Context, fileIDs []int) {
 	}
 }
 
-func (s *Service) QueuePriorityFileAtPosition(ctx context.Context, fileID int, targetSeconds float64) {
+func (s *Service) QueuePriorityFileAtPosition(_ context.Context, fileID int, targetSeconds float64) {
 	if s == nil {
-		return
-	}
-	if !s.chapterThumbnailsEnabled(ctx, fileID) {
 		return
 	}
 	target := targetSeconds
@@ -354,55 +352,6 @@ func (s *Service) QueuePriorityFileAtPosition(ctx context.Context, fileID int, t
 		s.notifyPriorityWorker()
 		s.notifyNormalWorker()
 	}
-}
-
-// chapterThumbnailsEnabled reports whether a file's library currently opts into
-// chapter thumbnails. Enqueuing a file from a disabled library only to have the
-// worker skip it is pure churn: the production log carried thousands of
-// folder_disabled skips for libraries that never had thumbnails enabled.
-//
-// A missing file or folder is a skip (the worker would skip it too). A lookup
-// error fails open: the worker still re-checks under its lock, so a transient
-// database problem must not silently drop a valid request.
-func (s *Service) chapterThumbnailsEnabled(ctx context.Context, fileID int) bool {
-	if s == nil || s.fileRepo == nil || s.folderRepo == nil {
-		return true
-	}
-	file, err := s.fileRepo.GetByID(ctx, fileID)
-	if err != nil {
-		return true
-	}
-	if file == nil {
-		return false
-	}
-	return s.folderAllowsChapterThumbnails(ctx, file.MediaFolderID)
-}
-
-func (s *Service) folderAllowsChapterThumbnails(ctx context.Context, folderID int) bool {
-	if folderID <= 0 {
-		return false
-	}
-	now := time.Now()
-	s.folderEnabledMu.Lock()
-	if state, ok := s.folderEnabled[folderID]; ok && now.Sub(state.checkedAt) < chapterThumbnailFolderStateTTL {
-		s.folderEnabledMu.Unlock()
-		return state.enabled
-	}
-	s.folderEnabledMu.Unlock()
-
-	folder, err := s.folderRepo.GetByID(ctx, folderID)
-	if err != nil {
-		return true
-	}
-	enabled := folder != nil && folder.Enabled && folder.ChapterThumbnailsEnabled
-
-	s.folderEnabledMu.Lock()
-	if s.folderEnabled == nil {
-		s.folderEnabled = make(map[int]chapterThumbnailFolderState)
-	}
-	s.folderEnabled[folderID] = chapterThumbnailFolderState{enabled: enabled, checkedAt: now}
-	s.folderEnabledMu.Unlock()
-	return enabled
 }
 
 func (s *Service) BackfillMissing(ctx context.Context, limit int) (int, error) {
@@ -778,8 +727,9 @@ var (
 	// ErrExtractionUnavailable: no transcode node could be reserved, so no
 	// file can be extracted until one can.
 	ErrExtractionUnavailable = errors.New("frame extraction unavailable")
-	// ErrUndecodableFile: ffmpeg could not decode the file's data; trying
-	// again only helps once the file changes.
+	// ErrUndecodableFile: ffmpeg could not decode the file's data, or its
+	// frame is over mediasample's size limits; trying again only helps once
+	// the file changes.
 	ErrUndecodableFile = errors.New("file cannot be decoded")
 )
 
@@ -812,8 +762,8 @@ func (s *Service) extractFrame(
 	seekSeconds float64,
 	hdrPolicy string,
 ) ([]byte, string, error) {
-	if file != nil && (strings.HasPrefix(strings.ToLower(file.FilePath), "virtual://") || strings.EqualFold(file.Container, "virtual")) {
-		return nil, "virtual_unsupported", wrapReason("virtual_unsupported", fmt.Errorf("chapter thumbnail extraction is not supported for virtual media"))
+	if err := checkFrameSize(file); err != nil {
+		return nil, reasonDecodeInvalidData, wrapReason(reasonDecodeInvalidData, err)
 	}
 	if s.extractFrameFunc != nil {
 		return s.extractFrameFunc(ctx, file, seekSeconds, hdrPolicy)
@@ -841,18 +791,12 @@ func (s *Service) extractFrame(
 	}
 	defer release()
 
-	jwtSecret := s.chapterThumbnailJWTSecret(ctx)
-	data, reason, err := s.remoteExtractor.ExtractFrame(ctx, node, jwtSecret, RemoteExtractRequest{
-		InputPath:            file.FilePath,
-		SeekSeconds:          seekSeconds,
-		ToneMap:              toneMap,
-		AllowSoftwareToneMap: allowSoftwareToneMap,
-	})
+	data, reason, err := s.extractFrameRemote(ctx, node, file, seekSeconds, toneMap, allowSoftwareToneMap)
 	if err == nil {
 		return data, "", nil
 	}
 
-	if mode == chapterThumbnailExecutionPreferTranscode && isInfrastructureRemoteFailure(reason) {
+	if mode == chapterThumbnailExecutionPreferTranscode && IsInfrastructureRemoteFailure(reason) {
 		slog.WarnContext(ctx,
 			"chapter thumbnail remote extraction failed; falling back to local", "component", "chapterthumbs",
 			"file_path",
@@ -868,6 +812,57 @@ func (s *Service) extractFrame(
 	}
 
 	return nil, reason, err
+}
+
+// checkFrameSize refuses a file whose every video track with known
+// dimensions is over mediasample.MaxImagePixels, before a node is reserved or
+// ffmpeg starts. A file with one track under the limit passes: ffmpeg's
+// -max_pixels skips the larger streams and extracts from it. Files without
+// known dimensions pass to that same ffmpeg bound.
+func checkFrameSize(file *models.MediaFile) error {
+	if file == nil {
+		return nil
+	}
+	var over *models.VideoTrack
+	for i, track := range file.VideoTracks {
+		if track.Width <= 0 || track.Height <= 0 {
+			continue
+		}
+		if int64(track.Width)*int64(track.Height) <= mediasample.MaxImagePixels {
+			return nil
+		}
+		if over == nil {
+			over = &file.VideoTracks[i]
+		}
+	}
+	if over == nil {
+		return nil
+	}
+	return fmt.Errorf("video frame %dx%d is over the %d-pixel extraction limit", over.Width, over.Height, mediasample.MaxImagePixels)
+}
+
+// extractFrameRemote grants node file's source and extracts the frame there.
+// A source that cannot be granted makes the node unavailable for this frame,
+// which prefer_transcode_nodes answers by extracting locally.
+func (s *Service) extractFrameRemote(
+	ctx context.Context,
+	node *nodepool.Node,
+	file *models.MediaFile,
+	seekSeconds float64,
+	toneMap bool,
+	allowSoftwareToneMap bool,
+) ([]byte, string, error) {
+	grant, err := nodesource.GrantFile(ctx, s.sourceGrants, node.ID, file)
+	if err != nil {
+		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: grant source: %w", err)
+	}
+	return s.remoteExtractor.ExtractFrame(ctx, node, s.nodeKeys, RemoteExtractRequest{
+		InputPath:            file.FilePath,
+		SourceGrant:          grant,
+		SeekSeconds:          seekSeconds,
+		ToneMap:              toneMap,
+		AllowSoftwareToneMap: allowSoftwareToneMap,
+	})
 }
 
 func (s *Service) extractFrameLocal(
@@ -984,26 +979,15 @@ func (s *Service) chapterThumbnailNodeCapacity(ctx context.Context) int {
 	return capacity
 }
 
-func (s *Service) chapterThumbnailJWTSecret(ctx context.Context) string {
-	if s == nil || s.settings == nil {
-		return ""
-	}
-	value, err := s.settings.Get(ctx, authJWTSecretSetting)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(value)
-}
-
 func (s *Service) reserveRemoteNode(ctx context.Context) (*nodepool.Node, func(), string) {
 	if s == nil || s.transcodePool == nil || s.remoteExtractor == nil {
 		return nil, func() {}, chapterThumbnailNodeUnavailableReason
 	}
-	if s.chapterThumbnailJWTSecret(ctx) == "" {
+	if s.nodeKeys == nil {
 		return nil, func() {}, chapterThumbnailNodeUnavailableReason
 	}
 
-	node, release, outcome := s.remoteReservations.Reserve(s.transcodePool.Nodes(), s.chapterThumbnailNodeCapacity(ctx))
+	node, release, outcome := s.remoteReservations.Reserve(s.transcodePool.KeyedNodes(), s.chapterThumbnailNodeCapacity(ctx))
 	switch outcome {
 	case nodepool.Reserved:
 		return node, release, ""

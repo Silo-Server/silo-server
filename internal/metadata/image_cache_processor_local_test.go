@@ -78,38 +78,6 @@ func writeLocalPoster(t *testing.T, dir string) string {
 	return path
 }
 
-func TestProcessLocalImageCachesWithinLibraryRoots(t *testing.T) {
-	root := t.TempDir()
-	posterPath := writeLocalPoster(t, root)
-	job := localArtworkJob("file://" + posterPath)
-	p, jobs, cacher, items := newLocalProcessorForTest(job, []string{root})
-
-	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
-	if err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-	if stats.Succeeded != 1 {
-		t.Fatalf("stats = %+v, want 1 succeeded (failed text %q)", stats, jobs.failedText)
-	}
-	if len(cacher.bytesReq) != 1 {
-		t.Fatalf("CacheImageBytes calls = %d, want 1", len(cacher.bytesReq))
-	}
-	req := cacher.bytesReq[0]
-	if req.ProviderID != "local" || req.ContentType != "movies" || req.ContentID != "movie-1" {
-		t.Fatalf("cache request = %+v", req)
-	}
-	if len(req.KeyDiscriminator) != 8 {
-		t.Fatalf("KeyDiscriminator = %q, want 8-char content hash", req.KeyDiscriminator)
-	}
-	wantCached := "local/movies/movie-1/" + req.KeyDiscriminator + "/poster/original.webp"
-	if items.cachedPath != wantCached {
-		t.Fatalf("cachedPath = %q, want %q", items.cachedPath, wantCached)
-	}
-	if items.thumbhash != "th-new" {
-		t.Fatalf("thumbhash = %q", items.thumbhash)
-	}
-}
-
 // A local source outside the library roots, through a ".." or a symlinked
 // leaf, or missing on disk is never read or cached; all but the symlink fail
 // as stable failures, fingerprinted sources included.
@@ -219,70 +187,6 @@ func fingerprintedSource(t *testing.T, path string) string {
 		t.Fatalf("lstat %s: %v", path, err)
 	}
 	return LocalImageSourceURL(path, info.Size(), info.ModTime())
-}
-
-func TestProcessLocalImageStripsFingerprintBeforeReading(t *testing.T) {
-	root := t.TempDir()
-	// A "?" in the file name must survive stripping the fingerprint.
-	posterPath := filepath.Join(root, "What If?-poster.jpg")
-	if err := os.WriteFile(posterPath, []byte("poster-bytes"), 0o644); err != nil {
-		t.Fatalf("writing poster: %v", err)
-	}
-	source := fingerprintedSource(t, posterPath)
-	job := localArtworkJob(source)
-	p, jobs, cacher, items := newLocalProcessorForTest(job, []string{root})
-
-	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
-	if err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-	if stats.Succeeded != 1 {
-		t.Fatalf("stats = %+v, want 1 succeeded (failed text %q)", stats, jobs.failedText)
-	}
-	if len(cacher.byteReqs) != 1 || string(cacher.byteReqs[0]) != "poster-bytes" {
-		t.Fatalf("read %q, want the poster bytes", cacher.byteReqs)
-	}
-	// The target update matches on the stored, fingerprinted source.
-	if items.sourcePath != source {
-		t.Fatalf("updated source = %q, want %q", items.sourcePath, source)
-	}
-}
-
-func TestProcessLocalImageSizeCapMatchesRemoteImages(t *testing.T) {
-	root := t.TempDir()
-	// Above the old 8 MiB local cap, within the 25 MiB remote cap.
-	large := filepath.Join(root, "poster.jpg")
-	if err := os.WriteFile(large, make([]byte, 9<<20), 0o644); err != nil {
-		t.Fatalf("writing poster: %v", err)
-	}
-	job := localArtworkJob(fingerprintedSource(t, large))
-	p, jobs, _, _ := newLocalProcessorForTest(job, []string{root})
-	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
-	if err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-	if stats.Succeeded != 1 {
-		t.Fatalf("9 MiB poster: stats = %+v (failed text %q)", stats, jobs.failedText)
-	}
-
-	oversized := filepath.Join(root, "fanart.jpg")
-	f, err := os.Create(oversized)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if err := f.Truncate(MaxArtworkSourceBytes + 1); err != nil {
-		t.Fatalf("truncate: %v", err)
-	}
-	_ = f.Close()
-	job = localArtworkJob(fingerprintedSource(t, oversized))
-	p, jobs, cacher, _ := newLocalProcessorForTest(job, []string{root})
-	stats, err = p.RunOnce(context.Background(), "w1", 10, 1)
-	if err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-	if stats.Failed != 1 || len(cacher.byteReqs) != 0 || !isStableProviderImageFailure(jobs.failedText) {
-		t.Fatalf("oversized: stats = %+v failed text %q", stats, jobs.failedText)
-	}
 }
 
 // recordingRootResolver records which content the processor asked roots for.

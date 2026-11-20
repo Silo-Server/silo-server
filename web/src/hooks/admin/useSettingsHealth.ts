@@ -65,7 +65,7 @@ export interface SettingsHealthItem {
  * off hooks inside the builder) so the derivation is testable without a query
  * client, and so a missing/failed query is just `undefined` here.
  */
-export interface SettingsHealthInput {
+interface SettingsHealthInput {
   settings?: Record<string, string>;
   sensitiveConfigured?: readonly string[];
   storageAvailable?: boolean;
@@ -159,7 +159,7 @@ function legacySettingsRestartPending(status: AdminServerStatus): boolean {
  * without the list falls back to the coarse last-reason heuristic, which warns
  * for any settings save rather than missing a real one.
  */
-function settingsRestartPending(
+export function settingsRestartPending(
   status: AdminServerStatus | undefined,
   prefixes: readonly string[],
 ): boolean {
@@ -191,7 +191,7 @@ function tileAction(
 }
 
 /** Every health item, healthy or not, derived from already-fetched data. */
-export function buildSettingsHealth(input: SettingsHealthInput): SettingsHealthItem[] {
+function buildSettingsHealth(input: SettingsHealthInput): SettingsHealthItem[] {
   const { settings } = input;
   const configured = new Set(input.sensitiveConfigured ?? []);
 
@@ -351,12 +351,12 @@ export function buildSettingsHealth(input: SettingsHealthInput): SettingsHealthI
 }
 
 /** The health items that ask the admin to do something, and the page that does it. */
-export function settingsAttentionItems(items: readonly SettingsHealthItem[]): SettingsHealthItem[] {
+function settingsAttentionItems(items: readonly SettingsHealthItem[]): SettingsHealthItem[] {
   return items.filter((item) => item.action != null);
 }
 
 /** The attention items, and whether every input they depend on has arrived. */
-export interface SettingsAttentionState {
+interface SettingsAttentionState {
   items: SettingsHealthItem[];
   /**
    * False while the settings map, branding, or server status is still

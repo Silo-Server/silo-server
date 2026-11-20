@@ -28,9 +28,12 @@ import (
 // password or PIN hash, no access fields, and no allowed libraries, and an
 // import refuses a document that carries any of them. The target account
 // and profile always come from the session, never from the document.
+//
+// Version 2 carries a rating's score (1 to 10) in place of its whole stars,
+// so an older server refuses it as too new instead of failing on the field.
 const (
 	ProfileExportFormat  = "silo-profile-export"
-	ProfileExportVersion = 1
+	ProfileExportVersion = 2
 	// MaxProfileImportBytes bounds an import's document.
 	MaxProfileImportBytes = 64 << 20
 	// maxProfileItems bounds the items an export names, its items list and
@@ -81,7 +84,7 @@ var accessFieldNames = func() map[string]bool {
 	out := map[string]bool{}
 	for _, name := range strings.Fields(`account accounts profiles profile username email password_hash pin_hash role
 		permissions policy group effective_policy library_ids allowed_library_ids library_restrictions_enabled
-		max_content_rating max_advisory_age require_advisory_age max_playback_quality is_child is_primary is_owner`) {
+		max_content_rating max_advisory_age require_advisory_age requests_blocked max_playback_quality is_child is_primary is_owner`) {
 		out[name] = true
 	}
 	return out

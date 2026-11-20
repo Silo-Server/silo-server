@@ -3,7 +3,6 @@ package transcodenode
 import (
 	"testing"
 
-	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/routeinventory"
 )
@@ -25,8 +24,8 @@ func TestRouteInventoryMatchesRuntimeRouter(t *testing.T) {
 			"equality with one wiring no longer holds — switch to Reconcile and say why here", count)
 	}
 	router := NewServer(
-		nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{}),
-		nodesessions.NewTracker(nil, "", "", ""),
+		newTestRuntime(nil),
+		nodesessions.NewLocalTracker(),
 	).router()
 
 	observed, err := routeinventory.Observed(router)

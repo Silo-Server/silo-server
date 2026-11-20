@@ -21,7 +21,18 @@ import {
 import type { SectionItem } from "@/api/types";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
-import { numberText, useAppLanguage, useT } from "@/i18n";
+import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
+
+/**
+ * A "next in series" card's book number. The server sends it as the English
+ * badge "Book 3"; the number is read back out and shown in the app language.
+ */
+function bookBadgeLabel(t: Translate, badges: string[] | undefined): string | undefined {
+  const badge = badges?.find((value) => value.startsWith("Book "));
+  if (!badge) return undefined;
+  const number = /^Book (\d+)$/.exec(badge)?.[1];
+  return number ? t("web.detail.books.bookNumber", { number: Number(number) }) : badge;
+}
 
 interface SectionItemCardProps {
   item: SectionItem;
@@ -60,6 +71,7 @@ export default memo(function SectionItemCard({
       <div className="group/media relative">
         <ViewTransitionLink
           to={itemHref}
+          prefetchOn="intent"
           aria-label={displayTitle}
           className="block overflow-hidden rounded-xl"
         >
@@ -151,9 +163,7 @@ export default memo(function SectionItemCard({
           </ViewTransitionLink>
         ) : item.item_source === "next_in_series" && item.series_title ? (
           <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
-            {[item.badges?.find((badge) => badge.startsWith("Book ")), item.series_title]
-              .filter(Boolean)
-              .join(" · ")}
+            {[bookBadgeLabel(t, item.badges), item.series_title].filter(Boolean).join(" · ")}
           </ViewTransitionLink>
         ) : (
           <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>

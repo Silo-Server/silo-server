@@ -186,6 +186,17 @@ func (r *Repository) RecordSubmission(ctx context.Context, id string, leaseUntil
 		}
 		return nil, fmt.Errorf("release request submission claim: %w", err)
 	}
+	// A resent quality's earlier failure is replaced only now that the
+	// attempt has a result for it, so a resend that errored keeps it.
+	qualities := make([]string, 0, len(targets))
+	for _, t := range targets {
+		qualities = append(qualities, string(t.Quality))
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM media_request_targets
+		WHERE request_id = $1 AND status = 'failed' AND quality = ANY($2)`, id, qualities); err != nil {
+		return nil, fmt.Errorf("replace failed targets: %w", err)
+	}
 	for _, t := range targets {
 		t.RequestID = id
 		if _, err := insertTarget(ctx, tx, t); err != nil {
@@ -202,20 +213,48 @@ func (r *Repository) RecordSubmission(ctx context.Context, id string, leaseUntil
 	return req, nil
 }
 
-func (r *Repository) DeleteTarget(ctx context.Context, id int64) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM media_request_targets WHERE id = $1`, id)
+func (r *Repository) DeleteTarget(ctx context.Context, requestID string, id int64, leaseUntil time.Time) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin target delete transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Lock the request before checking the lease, as RecomputeStatus does: a
+	// reclaim that commits while the delete runs must be seen, not read past
+	// from an older snapshot.
+	var status Status
+	var outcome Outcome
+	var lease *time.Time
+	if err := tx.QueryRow(ctx, `SELECT status, outcome, submit_lease_until FROM media_requests WHERE id = $1 FOR UPDATE`, requestID).
+		Scan(&status, &outcome, &lease); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvalidState
+		}
+		return fmt.Errorf("lock request for target delete: %w", err)
+	}
+	if status != StatusApproved || outcome != OutcomeActive || lease == nil || !lease.Equal(leaseUntil) {
+		return ErrInvalidState
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM media_request_targets WHERE id = $1 AND request_id = $2`, id, requestID)
 	if err != nil {
 		return fmt.Errorf("delete target: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit target delete transaction: %w", err)
+	}
 	return nil
 }
 
-// UpdateTargetStatus updates one target and recomputes the parent request's
-// aggregate status/outcome, all in one transaction. A target that completes
-// or fails loses its download progress.
+// UpdateTargetStatus updates one queued or downloading target and recomputes
+// the parent request's aggregate status/outcome, all in one transaction. A
+// target that completes or fails loses its download progress. A target that
+// has already completed or failed is left alone and answers ErrInvalidState:
+// the caller read it while it was live, and a late report must not fail a
+// failed target again while a retry is resending it.
 func (r *Repository) UpdateTargetStatus(ctx context.Context, targetID int64, status Status,
 	externalID, externalStatus, lastErr string, actor Viewer) (*Request, error) {
 	tx, err := r.pool.Begin(ctx)
@@ -231,9 +270,16 @@ func (r *Repository) UpdateTargetStatus(ctx context.Context, targetID int64, sta
 		    external_id = CASE WHEN $3 = '' THEN external_id ELSE $3 END,
 		    external_status = CASE WHEN $4 = '' THEN external_status ELSE $4 END,
 		    last_error=$5, updated_at=now()
-		WHERE id=$1 RETURNING request_id`,
+		WHERE id=$1 AND status IN ('queued', 'downloading') RETURNING request_id`,
 		targetID, status, externalID, externalStatus, lastErr).Scan(&requestID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			var exists bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_request_targets WHERE id = $1)`, targetID).Scan(&exists); err != nil {
+				return nil, fmt.Errorf("check target existence: %w", err)
+			}
+			if exists {
+				return nil, ErrInvalidState
+			}
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("update target: %w", err)
