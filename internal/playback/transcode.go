@@ -431,6 +431,9 @@ type SegmentProgress struct {
 	StartSegmentNumber   int
 	SegmentDuration      int
 	LastRequestedSegment int
+	// LastCompletedSegment is the highest segment the client finished
+	// downloading in the current generation, read with the rest.
+	LastCompletedSegment int
 }
 
 // SegmentRecoveryDecision tells the segment handler whether to briefly wait
@@ -3154,6 +3157,7 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 		StartSegmentNumber:   opts.StartSegmentNumber,
 		SegmentDuration:      opts.SegmentDuration,
 		LastRequestedSegment: s.lastRequestedSegment,
+		LastCompletedSegment: s.lastCompletedSegment,
 		GenerationStartedAt:  s.generationStartedAt,
 	}
 	s.mu.Unlock()
@@ -3207,19 +3211,19 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 // throttle window; one that is slower than real time, such as a heavy
 // subtitle burn-in, never gets ahead. Output left by an earlier FFmpeg
 // generation is not this encoder's lead: until the running one writes its
-// own, the client is waiting on it.
+// own, and while a restart replaces it, the client is waiting on it.
 func (s *TranscodeSession) OutputBoundsClient() bool {
 	progress := s.SegmentProgress(time.Now())
+	if progress.Restarting {
+		return true
+	}
 	if !progress.Running {
 		return false
 	}
 	if progressPredatesGeneration(progress) {
 		return true
 	}
-	s.mu.Lock()
-	completed := s.lastCompletedSegment
-	s.mu.Unlock()
-	return progress.ProducedHead-completed <= 1
+	return progress.ProducedHead-progress.LastCompletedSegment <= 1
 }
 
 // SegmentRecoveryDecision determines whether a missing segment should briefly

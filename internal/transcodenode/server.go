@@ -3080,8 +3080,9 @@ type outputBoundResponse struct {
 }
 
 // handleOutputBound tells the core whether the client of a transport this node
-// runs has fetched all its produced segments but at most the newest
-// (playback.TranscodeSession.OutputBoundsClient): a stall the client reports
+// runs is waiting on its encoder: a restart is replacing FFmpeg, or the client
+// has fetched all produced segments but at most the newest
+// (playback.TranscodeSession.OutputBoundsClient). A stall the client reports
 // then was paced by this node's encoder, not the link, and the core learns no
 // bandwidth limit from it. A progressive remux has no segment lead to compare
 // and answers false. A transport the node does not run is 404, and the read

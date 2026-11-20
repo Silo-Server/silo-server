@@ -2701,8 +2701,9 @@ node is judged by that node, which the replica asks with the signed
 fetched when the relay that delivered it acknowledges it, so the answer is the
 same whichever API replica or proxy relays the stream.
 
-A segment counts as fetched once its download completed, and output an
-earlier FFmpeg generation left behind is no lead. A progressive remux has no
+A segment counts as fetched once its download completed, output an earlier
+FFmpeg generation left behind is no lead, and a client whose transcode is
+restarting is waiting on the server. A progressive remux has no
 segment lead and is never judged bound.
 
 When the remote answer is unknown, the stall counts as the server's and

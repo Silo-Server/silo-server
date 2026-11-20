@@ -538,6 +538,7 @@ func (s *TranscodeSession) plannedSegmentProgress() SegmentProgress {
 		Restarting:           s.restarting != nil,
 		SegmentDuration:      s.opts.SegmentDuration,
 		LastRequestedSegment: s.lastRequestedSegment,
+		LastCompletedSegment: s.lastCompletedSegment,
 		GenerationStartedAt:  s.generationStartedAt,
 		HasManifest:          true,
 	}

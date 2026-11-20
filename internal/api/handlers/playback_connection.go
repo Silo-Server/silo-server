@@ -118,7 +118,7 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 	}
 	if clientSent && req.BandwidthEstimateSource == playback.BandwidthEstimateObservedRebufferV3 && req.BandwidthEstimateKbps != nil && req.QualityPreference == playback.QualityAutoV3 {
 		if outputBound != nil && outputBound() {
-			slog.InfoContext(r.Context(), "learned limit not recorded: the stall is the server's transcode, which paced playback or could not say", "component", "playback",
+			slog.InfoContext(r.Context(), "learned limit not recorded: the transcode paced playback, or whether it did is unknown", "component", "playback",
 				"estimate_kbps", *req.BandwidthEstimateKbps)
 		} else if err := h.Connections.Observe(r.Context(), user, device, key, *req.BandwidthEstimateKbps); err != nil {
 			return nil, err

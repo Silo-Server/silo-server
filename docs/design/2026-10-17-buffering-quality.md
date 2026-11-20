@@ -1060,10 +1060,6 @@ The tables above are the test oracle, and
 [`schemas/buffering-quality/v1/vectors.json`](schemas/buffering-quality/v1/vectors.json)
 encodes them. Each case is a list of timed events on one clock, with the
 complete list of outputs it must produce. Timeouts come from the clock. The
-cases carry no throughput: a harness reports every plan's media as measured
-below its delivered bitrate, so each lowering has slow-link evidence (see
-*Slow-link evidence*) and carries `observed_rebuffer`. Each client tests a
-lowering without that evidence in its own tests. The
 events are:
 
 - `plan_adopted`, carrying the plan's delivered bitrate, quality, menu and
@@ -1087,9 +1083,11 @@ events are:
   The vectors have no case with a replacement adopted before the attempt has
   played, and no event for a missed start deadline. They carry no
   throughput either: a client's harness reports a measurement below every
-  plan's delivered bitrate, so a case that lowers before the attempt has
-  played (`slow_start`) has the evidence *Trigger* requires. Each client
-  covers those rules, a start without that evidence, and the deadline's
+  plan's delivered bitrate. Every Auto lowering therefore has slow-link
+  evidence (see *Slow-link evidence*) and carries `observed_rebuffer`, and a
+  case that lowers before the attempt has played (`slow_start`) has the
+  evidence *Trigger* requires. Each client covers those rules, a start
+  without that evidence, an Auto lowering without it, and the deadline's
   fallback in its own tests.
 - The pill answers `select_lower`, `select_keep`, `select_restore` and `back`.
 - `pick_sent` and `pick_refused`: the viewer's quality pick is sent, or the
