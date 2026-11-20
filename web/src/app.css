@@ -805,9 +805,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   /* `hover:text-primary` can't be seen here: the rule above holds muted text
      at its colour, and foreground text sits within a shade of the default
      --primary (a brand accent may differ). Underline it instead, behind the
-     pointer gate the `hover` variant uses at the top of this file. */
+     pointer gate the `hover` variant uses at the top of this file. The line
+     takes the foreground colour: in the link's own colour, a dark accent
+     would hide it under a title that keeps its own colour. */
   html[data-high-contrast="true"]:where([data-fine-pointer="true"]) .hover\:text-primary:hover {
     text-decoration-line: underline;
+    text-decoration-color: var(--foreground);
   }
   html[data-high-contrast="true"] .border-border,
   html[data-high-contrast="true"] .border-border\/50,
