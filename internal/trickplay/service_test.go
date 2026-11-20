@@ -3,8 +3,10 @@ package trickplay
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -439,5 +441,14 @@ func TestSheetsToneMapNamesTheSourceSignal(t *testing.T) {
 		if (got == nil) != (tt.want == nil) || (got != nil && *got != *tt.want) {
 			t.Errorf("%s: tone map %+v, want %+v", name, got, tt.want)
 		}
+	}
+}
+
+// A full artwork store is not the file's fault: the file waits an hour and
+// keeps its failure count, so previews resume soon after space is freed.
+func TestClassifyReleasesFileWhenStorageIsFull(t *testing.T) {
+	err := fmt.Errorf("store trickplay/1/1/0.jpg: %w", syscall.ENOSPC)
+	if outcome, delay := (&Service{}).classify(t.Context(), err); outcome != Released || delay != releaseDelay {
+		t.Fatalf("a full store classifies as %v after %v, want Released after %v", outcome, delay, releaseDelay)
 	}
 }
