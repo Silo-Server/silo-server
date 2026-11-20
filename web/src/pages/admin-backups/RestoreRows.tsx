@@ -92,11 +92,13 @@ function settingValues(t: Translate, setting: RestoreSetting): { now: string; ba
 }
 
 /**
- * A setting key that may break after its dots and underscores, so a narrow
- * column wraps "playback.watched_threshold" between words, not inside one.
+ * A setting key or dotted name that may break after its dots and underscores,
+ * so a narrow column wraps "playback.watched_threshold" or "silo.tmdb 1.2.3"
+ * between words, not inside one. A dot before a digit stays, keeping a version
+ * number whole.
  */
-function BreakableKey({ value }: { value: string }) {
-  const parts = value.replace(/([._])/g, "$1\u0000").split("\u0000");
+export function BreakableKey({ value }: { value: string }) {
+  const parts = value.replace(/([._])(?=\D)/g, "$1\u0000").split("\u0000");
   return (
     <>
       {parts.map((part, position) => (
@@ -265,9 +267,9 @@ export const ItemRow = memo(function ItemRow({
   const details = open ? itemDetails(t, item) : null;
   const hasDetails = hasItemDetails(item);
   const label = displayLabel(item);
-  // The row is its own container: in a narrow row (a phone, or the list beside the
-  // admin sidebar and restore summary) the name wraps above the status instead of
-  // sharing one line with it, so names that differ only at the end stay apart.
+  // The row is its own container, since its width depends on the admin sidebar and
+  // restore summary as much as on the viewport. A narrow row wraps the whole name
+  // above the muted detail, so names that differ only at the end stay apart.
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
@@ -277,17 +279,17 @@ export const ItemRow = memo(function ItemRow({
           disabled={!item.selectable}
           onCheckedChange={(value) => onToggle(toggleKeys(sectionId, item), value === true)}
         />
-        <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @md:flex-row @md:items-baseline">
+        <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
           {/* block: Label is a flex box, which would clip the name without an ellipsis. */}
           <Label
             htmlFor={controlId}
             title={label}
             className={cn(
-              "block shrink-0 text-sm font-medium @max-md:wrap-anywhere @md:max-w-[60%] @md:truncate",
+              "block shrink-0 text-sm font-medium @max-2xl:wrap-anywhere @2xl:max-w-[60%] @2xl:truncate",
               !item.selectable && "text-muted-foreground",
             )}
           >
-            {label}
+            <BreakableKey value={label} />
           </Label>
           {secondary ? (
             <span title={secondary} className="text-muted-foreground min-w-0 truncate text-xs">
@@ -296,7 +298,7 @@ export const ItemRow = memo(function ItemRow({
           ) : null}
         </div>
         {item.kind === "template_collection" ? (
-          <span className="text-muted-foreground hidden shrink-0 text-[11px] sm:inline">
+          <span className="text-muted-foreground hidden shrink-0 text-[11px] @2xl:inline">
             {t("web.admin.backups.restore.rows.starterPack")}
           </span>
         ) : null}

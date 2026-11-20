@@ -11,7 +11,7 @@ import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 
 import { RowDisclosure } from "./Disclosure";
 import { itemState } from "./restoreGroups";
-import { StateTag, type ToggleKeys } from "./RestoreRows";
+import { BreakableKey, StateTag, type ToggleKeys } from "./RestoreRows";
 import {
   REASON_SENTENCES,
   policyDifferenceSentence,
@@ -175,7 +175,8 @@ export const AccountRow = memo(function AccountRow({
         })
       : t("web.admin.backups.restore.users.newAccount");
   // Laid out like ItemRow (RestoreRows.tsx): a narrow row wraps the name above the
-  // contact line.
+  // contact line, and the admin badge, profile count and merge status move into
+  // the details, so they never squeeze the name.
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
@@ -185,16 +186,16 @@ export const AccountRow = memo(function AccountRow({
           disabled={!item.selectable}
           onCheckedChange={(value) => onToggle(toggleKeys("users", item), value === true)}
         />
-        <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @md:flex-row @md:items-baseline">
+        <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
           <Label
             htmlFor={controlId}
             title={item.label}
             className={cn(
-              "block shrink-0 text-sm font-medium @max-md:wrap-anywhere @md:max-w-[45%] @md:truncate",
+              "block shrink-0 text-sm font-medium @max-2xl:wrap-anywhere @2xl:max-w-[45%] @2xl:truncate",
               !item.selectable && "text-muted-foreground",
             )}
           >
-            {item.label}
+            <BreakableKey value={item.label} />
           </Label>
           {contact ? (
             <span title={contact} className="text-muted-foreground min-w-0 truncate text-xs">
@@ -203,13 +204,13 @@ export const AccountRow = memo(function AccountRow({
           ) : null}
         </div>
         {account.admin ? (
-          <span className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[11px] sm:inline-flex">
+          <span className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[11px] @2xl:inline-flex">
             <ShieldCheck aria-hidden="true" className="size-3.5" />
             {t("web.admin.backups.restore.users.administrator")}
           </span>
         ) : null}
         {account.profiles.length > 0 ? (
-          <span className="text-muted-foreground hidden shrink-0 text-[11px] whitespace-nowrap md:inline">
+          <span className="text-muted-foreground hidden shrink-0 text-[11px] whitespace-nowrap @2xl:inline">
             {t("web.admin.backups.restore.users.profileCount", {
               count: account.profiles.length,
               count_text: account.profiles.length,
@@ -217,7 +218,7 @@ export const AccountRow = memo(function AccountRow({
           </span>
         ) : null}
         {status ? (
-          <span title={status} className="hidden max-w-40 shrink-0 truncate text-xs md:inline">
+          <span title={status} className="hidden max-w-40 shrink-0 truncate text-xs @2xl:inline">
             {status}
           </span>
         ) : null}
@@ -236,9 +237,9 @@ export const AccountRow = memo(function AccountRow({
       </div>
       {open ? (
         <div id={detailsId} className="space-y-1 ps-7 pb-3">
-          {status ? <p className="text-[13px] md:hidden">{status}</p> : null}
+          {status ? <p className="text-[13px] @2xl:hidden">{status}</p> : null}
           {account.admin ? (
-            <p className="text-muted-foreground text-xs sm:hidden">
+            <p className="text-muted-foreground text-xs @2xl:hidden">
               {t("web.admin.backups.restore.users.administrator")}
             </p>
           ) : null}
