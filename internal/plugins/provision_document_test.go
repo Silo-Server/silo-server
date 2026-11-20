@@ -89,9 +89,12 @@ func TestProvisionDocumentAIProviders(t *testing.T) {
 		t.Error("a plugins-only document declares AI providers, or no plugins")
 	}
 
+	t.Setenv("TEST_SILO_BLANK_KEY", "  ")
 	for name, input := range map[string]string{
-		"literal key":     `{"apiVersion":1,"ai_providers":{"openai-main":{"type":"openai","api_key":"sk-private-literal"}}}`,
-		"key it requires": `{"apiVersion":1,"ai_providers":{"openai-main":{"type":"openai"}}}`,
+		"literal key":        `{"apiVersion":1,"ai_providers":{"openai-main":{"type":"openai","api_key":"sk-private-literal"}}}`,
+		"key it requires":    `{"apiVersion":1,"ai_providers":{"openai-main":{"type":"openai"}}}`,
+		"blank key":          `{"apiVersion":1,"ai_providers":{"local":{"type":"ollama","api_key":{"fromEnv":"TEST_SILO_BLANK_KEY"}}}}`,
+		"empty capabilities": `{"apiVersion":1,"ai_providers":{"local":{"type":"ollama","capabilities":[]}}}`,
 	} {
 		doc, err := parseProvisionDocument([]byte(input), false)
 		if err == nil {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -132,5 +133,31 @@ func TestCheckDeploymentSettingsBindsDeclaredProvider(t *testing.T) {
 	// Without the document the provider isn't connected, and startup stops.
 	if _, err := CheckEnvironmentSettings(nil, env, false); err == nil || !strings.Contains(err.Error(), "SILO_RECOMMENDATIONS_PROVIDER") {
 		t.Errorf("provider not declared: error = %v, want one naming SILO_RECOMMENDATIONS_PROVIDER", err)
+	}
+}
+
+// A provider the deployment declares is listed with its variable, and the
+// admin API refuses to edit or remove it until a document releases it.
+func TestAdminAIProvidersRefuseDeclaredProvider(t *testing.T) {
+	embed, err := config.NewDeclaredAIProvider("local-embed", config.AIProviderCustom, "Local embeddings", "http://embed:8080/v1", "", []config.AICapability{config.AICapabilityEmbeddings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := config.ApplyDeclaredAIProviders("", []config.AIProvider{embed}, "SILO_CONFIG_FILE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := &AdminHandler{SettingsRepo: newSerializedSettingsStore(map[string]string{config.AIProvidersSettingKey: registry})}
+
+	views, err := handler.ListAIProviders(t.Context())
+	if err != nil || len(views) != 1 || views[0].ManagedByEnvVar != "SILO_CONFIG_FILE" {
+		t.Fatalf("views = %+v, error = %v; want the declared provider with its variable", views, err)
+	}
+	name := "Renamed"
+	if _, err := handler.UpdateAIProvider(t.Context(), "local-embed", AdminAIProviderInput{Name: &name}); !errors.Is(err, ErrAIProviderManaged) {
+		t.Errorf("update: error = %v, want ErrAIProviderManaged", err)
+	}
+	if err := handler.DeleteAIProvider(t.Context(), "local-embed"); !errors.Is(err, ErrAIProviderManaged) {
+		t.Errorf("delete: error = %v, want ErrAIProviderManaged", err)
 	}
 }

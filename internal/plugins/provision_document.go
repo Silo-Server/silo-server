@@ -184,6 +184,11 @@ func (d *ProvisionDocument) resolveAIProviderKey(value map[string]any) (string, 
 	if err := d.captureSecret(ref, &d.secretBytes); err != nil {
 		return "", err
 	}
+	// A key that is only whitespace would be stored as no key at all, which a
+	// provider that takes an optional key would accept without a word.
+	if strings.TrimSpace(d.secrets[ref]) == "" {
+		return "", errors.New("the referenced secret holds only whitespace")
+	}
 	return d.secrets[ref], nil
 }
 
