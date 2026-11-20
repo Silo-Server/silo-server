@@ -422,7 +422,7 @@ func (c *SubtitleCache) serveProgressiveSUPPage(w http.ResponseWriter, r *http.R
 	// is priced beyond the budget. The second half matters because a refusal
 	// starts the fill, and the pages it publishes must then be served from it
 	// even when the row never declared a size.
-	if !bounded || (!progressiveSUPEligible(opts) && !c.pagePrefixBeyondBudget(opts)) {
+	if !bounded || (!progressiveSUPEligible(opts) && !c.pageWindowBeyondBudget(opts)) {
 		return false, nil
 	}
 	fill, covered := c.progressiveSUPArtifact(opts)

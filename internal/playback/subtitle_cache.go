@@ -124,10 +124,10 @@ type SubtitleCache struct {
 	pageCostMu    sync.Mutex
 	pageReadRates map[string]float64
 
-	// pageWaitMu guards pageWaits, one bounded wait per refused bitmap page
-	// while its track's progressive artifact parses toward it (see
-	// subtitle_page_recovery.go). pageWaitBudget and pageWaitNow are test seams;
-	// zero keeps the production budget and wall clock.
+	// pageWaitMu guards pageWaits, one bounded wait per playback session and
+	// bitmap track while the track's progressive artifact parses toward the
+	// page (see subtitle_page_recovery.go). pageWaitBudget and pageWaitNow are
+	// test seams; zero keeps the production budget and wall clock.
 	pageWaitMu     sync.Mutex
 	pageWaits      map[string]subtitlePageRecovery
 	pageWaitBudget time.Duration
@@ -2104,18 +2104,20 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 	//   - a page the track's progressive artifact already covers is copied out
 	//     of it, and a page beyond its watermark answers retryable with that
 	//     coverage (see subtitle_progressive_sup.go);
-	//   - a page whose discarded container prefix is priced beyond the page
-	//     budget is refused before the read, because refusing after it is the
-	//     wall clock this gate exists to remove (see subtitle_page_cost.go).
+	//   - a page whose own window cannot be read inside one page extract is
+	//     refused before the read, because refusing after it is the wall clock
+	//     this gate exists to remove (see subtitle_page_cost.go). The window,
+	//     not the container prefix: the extract seeks to the page.
 	//
-	// Both must precede the packet-source path: indexing the container for one
-	// page reads the same prefix the raw demux would.
+	// Both must precede the packet-source path: indexing the container to cut one
+	// page is a second read of the same source, and the page's window is what it
+	// costs.
 	cachedPath, _, hasArtifact := c.cachedEntryPath(opts.InputPath, opts.CacheIdentity, opts.TrackIndex)
 	if !hasArtifact {
 		if served, progressiveErr := c.serveProgressiveSUPPage(w, r, sourceOpts, extract); served || progressiveErr != nil {
 			return progressiveErr
 		}
-		if refusal := c.pagePrefixRefusal(sourceOpts); refusal != nil {
+		if refusal := c.pageWindowRefusal(sourceOpts); refusal != nil {
 			return refusal
 		}
 	}
@@ -2897,15 +2899,6 @@ func (c *SubtitleCache) settleWarmAttempt(
 	budget time.Duration,
 	deadlineCtx context.Context,
 ) (outcome, reason string, again bool) {
-	if errors.Is(context.Cause(ctx), errSubtitleFillPageAnswered) || errors.Is(err, errSubtitleFillPageAnswered) {
-		// The page this fill was serving already has its final answer and no
-		// other page of the track is waiting. Nothing can consume the rest of
-		// this read, so it ends here instead of running to its own budget.
-		st.fill.Discard()
-		slog.DebugContext(ctx, "subtitle cache warm ended: its page was answered finally",
-			"input", st.opts.InputPath, "track", st.opts.TrackIndex, "format", st.format)
-		return subtitleFillOutcomeAbandoned, subtitleFillEndPageAnswered, false
-	}
 	if preempted && err != nil {
 		// An admitted page took the pipe. This is a deliberate yield, never a
 		// source failure: discard the partial fill, rebuild it under the same

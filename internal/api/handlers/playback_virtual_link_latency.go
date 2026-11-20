@@ -74,6 +74,28 @@ func copySeekAnchorResolveBudgetFor(file *models.MediaFile) time.Duration {
 	)
 }
 
+// copySeekAnchorProbeBudgetHint reports the budget this source's own anchor
+// probes imply. It is a var so a test can pin the sizing rule without paying for
+// a real provider probe.
+var copySeekAnchorProbeBudgetHint = playback.CopySeekAnchorProbeBudgetHint
+
+// copySeekAnchorAdaptiveBudgetFor sizes one anchor attempt for this file. Two
+// measurements feed it: the provider link's slowest recent round trip (what the
+// resolve leg pays) and, when it is larger, the cost this source's own anchor
+// probes recently paid. The second one exists because a probe is not a listing: it
+// byte-seeks into the release and reads a frame on top of the provider open, so a
+// link that lists in 3.6s can need 11.6s to anchor a deep position. Sizing only
+// from the listing handed that probe the same too-small budget on every seek and
+// forced the retry to discover the real cost again, which is the 5-19s start this
+// fixes. A source with no probe history keeps exactly the budget it had.
+func copySeekAnchorAdaptiveBudgetFor(file *models.MediaFile, ffmpegPath, sourceIdentity string) time.Duration {
+	budget := copySeekAnchorResolveBudgetFor(file)
+	if hint := copySeekAnchorProbeBudgetHint(ffmpegPath, sourceIdentity, playback.DefaultSegmentDuration); hint > budget {
+		budget = hint
+	}
+	return budget
+}
+
 // copySeekProbeContext returns the context one copy-video seek-anchor probe runs
 // under. The probe is the second leg of an attempt whose resolve already spent
 // part of the attempt budget, so a probe bounded by the attempt context alone is
@@ -212,4 +234,75 @@ func recentVirtualProviderLinkLatency(key string) time.Duration {
 		return 0
 	}
 	return mark.slowest
+}
+
+const (
+	// copySeekAnchorNoticeWindow bounds how long "this session is playing without
+	// its anchor" is remembered. It only decides the level of a repeat notice, so
+	// it may outlive the start that recorded it by as long as a session plausibly
+	// seeks.
+	copySeekAnchorNoticeWindow = time.Hour
+	// copySeekAnchorNoticeLimit bounds the notice tracker. Entries expire on
+	// record and read, so a busy server cannot accumulate one per session forever.
+	copySeekAnchorNoticeLimit = 1024
+)
+
+// copySeekAnchorNotices remembers which session+source pairs have already been
+// told that a start began without its copy seek anchor. A degraded start is
+// deliberately not an error (the copied stream can begin at the requested
+// position), which left it silent apart from a WARN per seek: an operator could
+// not tell an anchor-less session from a resolved one, and the following seek had
+// no record explaining why it paid another probe. The first notice per session is
+// a WARN; repeats stay visible at INFO without repeating the warning.
+var copySeekAnchorNotices = &copySeekAnchorNoticeTracker{seen: make(map[string]time.Time)}
+
+type copySeekAnchorNoticeTracker struct {
+	mu   sync.Mutex
+	seen map[string]time.Time
+	now  func() time.Time
+}
+
+func (t *copySeekAnchorNoticeTracker) clock() time.Time {
+	if t != nil && t.now != nil {
+		return t.now()
+	}
+	return time.Now()
+}
+
+// first reports whether key has not been noticed inside the window and records
+// it. The caller logs at WARN when it returns true and at INFO otherwise.
+func (t *copySeekAnchorNoticeTracker) first(key string) bool {
+	if t == nil || key == "" {
+		return true
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.seen == nil {
+		t.seen = make(map[string]time.Time)
+	}
+	now := t.clock()
+	for seenKey, observedAt := range t.seen {
+		if now.Sub(observedAt) >= copySeekAnchorNoticeWindow {
+			delete(t.seen, seenKey)
+		}
+	}
+	if observedAt, ok := t.seen[key]; ok && now.Sub(observedAt) < copySeekAnchorNoticeWindow {
+		t.seen[key] = now
+		return false
+	}
+	if len(t.seen) >= copySeekAnchorNoticeLimit {
+		t.seen = make(map[string]time.Time)
+	}
+	t.seen[key] = now
+	return true
+}
+
+// copySeekAnchorNoticeKey names one session's anchor-less state for one source.
+// The source is part of the key so a session that switches release is told about
+// the new one, and a profile change inside the same session does not repeat it.
+func copySeekAnchorNoticeKey(sessionID, sourceIdentity string) string {
+	if sessionID == "" {
+		return ""
+	}
+	return sessionID + "\x00" + sourceIdentity
 }

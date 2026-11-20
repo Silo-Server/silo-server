@@ -25,6 +25,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -2214,12 +2215,6 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		remuxErr := serveRemux()
-		if errors.Is(remuxErr, playback.ErrRemuxRangeUnsatisfiable) {
-			// The transport already answered 416: a generated stream has no byte
-			// offset to restart at, and the range says nothing about the source.
-			// No candidate verdict, no rotation, and no second status write.
-			return
-		}
 		if remuxErr != nil {
 			// The remux only commits 200 after FFmpeg produces media bytes, so
 			// a failure here means the provider release served no output
@@ -2231,7 +2226,7 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 			// refuses the mapped stream) is not evidence about the release. Do
 			// not mark the candidate failed or rotate: that indicts healthy bytes
 			// and hands the client a verdict about a file it never faulted.
-			if !isClientCancellation(r.Context(), remuxErr) && !errors.Is(remuxErr, playback.ErrRemuxRecipeFault) && !errors.Is(remuxErr, playback.ErrRemuxRangeUnsatisfiable) && !stoppedServerSide() && isVirtualPlaybackFile(file) && hasVirtualMediaResolver(h) {
+			if !isClientCancellation(r.Context(), remuxErr) && !errors.Is(remuxErr, playback.ErrRemuxRecipeFault) && !stoppedServerSide() && isVirtualPlaybackFile(file) && hasVirtualMediaResolver(h) {
 				if releaseInput != nil {
 					releaseInput()
 					releaseInput = nil
@@ -4142,21 +4137,31 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 	}
 
 	// A detached warm probes its own relay registration. When that probe
-	// completed and found no live track for this plan ordinal, it recorded the
-	// verdict; without this answer every later page is refused again, starts the
-	// same warm, and abandons the same way — a loop with no failure and no
+	// completed and found no carryable track for this plan ordinal, it recorded
+	// the verdict; without this answer every later page is refused again, starts
+	// the same warm, and abandons the same way — a loop with no failure and no
 	// progress. A committed artifact still pins the release it was extracted
 	// from, so it is served rather than reported as rotated.
+	//
+	// The answer is retryable, not the 409 the serve's own probe produces. A 409
+	// `subtitle_source_changed` tells the client its plan is stale and must be
+	// rebuilt; that verdict belongs to the request that probed this release while
+	// serving it. A background fill's opinion is ours, not the client's — and
+	// production showed the cost of confusing them: one successful page at 2160,
+	// then seven 409s, subtitles off, and no way back, because the replan kept
+	// re-deriving the same plan. A retry re-reads the cached window or the
+	// committed artifact, and the miss expires (virtualSubtitleLayoutMissTTL), so
+	// the next serve probes the release again.
 	if virtualActive &&
 		h.virtualSubtitleLayoutUnmatchable(&opts, time.Now()) &&
 		!h.SubtitleCache.HasCommittedEntry(opts.InputPath, opts.CacheIdentity, opts.TrackIndex, opts.SourceCodec, opts.TargetFormat) {
-		slog.WarnContext(r.Context(), "virtual subtitle request answered from the warm's rotation verdict",
+		slog.WarnContext(r.Context(), "virtual subtitle page answered retryably from the warm's layout verdict",
 			"component", "api",
 			"file_id", file.ID,
 			"track", opts.TrackIndex,
 			"codec", opts.SourceCodec,
 			"language", track.Language)
-		writeSubtitleSourceChanged(w)
+		writeSubtitleSourceUnavailableRetry(w, subtitleSourceRetryAfterSeconds*time.Second)
 		return
 	}
 
@@ -4426,14 +4431,6 @@ const (
 	virtualSubtitleWarmSeekAheadSlack = 30.0
 	virtualSubtitleWarmSeekRate       = 2.0
 )
-
-// virtualSubtitlePageWarmSlack is how much longer than a page's own wait a
-// page-driven fill may run. The fill starts a moment after the first refusal
-// that opened the wait, so without the slack its deadline could land just
-// before the page's last allowed request and the page would spend its budget
-// waiting on a fill that has already ended. With it, the fill outlives the
-// wait and its end is what the page's final answer is derived from.
-const virtualSubtitlePageWarmSlack = 5 * time.Second
 
 // virtualSubtitleWarmRekeyAttempts bounds how many times a detached warm
 // re-keys itself when its own drift probe settles on an identity other than the
@@ -4975,18 +4972,26 @@ func (h *StreamHandler) warmVirtualSubtitle(file *models.MediaFile, track models
 		for attempt := 0; attempt < virtualSubtitleWarmRekeyAttempts; attempt++ {
 			attemptOpts := warmOpts
 			extract, rekeyed, release := h.virtualSubtitleWarmExtractor(file, track, session, planTracks, seed, attemptOpts, live)
-			warmBudget := time.Duration(0)
 			if pageWaiting {
 				// A page refused for its read cost must be served by this fill, and
 				// it is the page's own ledger that allows exactly one. A previous
-				// failed warm's cooldown must not suppress it. The fill is bounded
-				// by the wait it serves: a fill that outlives the page can never
-				// answer it, and its end is what the page's next refusal acts on
-				// instead of looping on `page_not_ready`.
+				// failed warm's cooldown must not suppress it.
+				//
+				// The fill is deliberately *not* bounded by the page's wait (the
+				// budget stays 0, i.e. the cache's warm timeout). A page wait is
+				// ~90 s; a fill for a page deep into a large container parses from
+				// byte zero and needs minutes. Bounding it by the wait made it end
+				// exactly when the page gave up, so the retry restarted the same
+				// read from zero and no page ever arrived — production logged
+				// `page_wait_budget_spent` at 1m35s with 2 MB of artifact to show
+				// for it. The fill's extent is now the session that is waiting on
+				// it: the abort ticker above stops it on a seek or when that session
+				// ends, and subtitleCacheWarmTimeout is the outer bound. A page
+				// answered without the fill does not stop it either (see
+				// pageRecoveryRefusal): its progress is what the next request needs.
 				h.SubtitleCache.AllowWarmAfterPageRefusal(attemptOpts)
-				warmBudget = playback.SubtitlePageRecoveryBudget() + virtualSubtitlePageWarmSlack
 			}
-			<-h.SubtitleCache.WarmTrackInBackgroundWithin(attemptOpts, extract, requestID, warmBudget)
+			<-h.SubtitleCache.WarmTrackInBackgroundWithin(attemptOpts, extract, requestID, 0)
 			next := rekeyed()
 			release()
 			if next == nil {
@@ -5508,6 +5513,26 @@ func (h *StreamHandler) verifyVirtualSubtitleLayout(ctx context.Context, file *m
 	}
 	liveOrdinal, liveTrack, matched := playback.MatchEmbeddedSubtitleTrack(requestedTrack, liveTracks)
 	if !matched {
+		// A requested language that no live track declares is not by itself a
+		// rotation: the plan's language came from the provider's metadata, and a
+		// container tag can say `und`, or the plan inventory can carry a
+		// downloaded sidecar the live probe cannot see. Extraction addresses the
+		// ordinal, so if the plan ordinal still names a live track of the same
+		// extraction class, the bytes this track produces are the bytes it
+		// produced before. Refusing here discarded a successful extract: the page
+		// at position=2160 answered 200, the next page's warm probe found "no
+		// match for the planned track", and every later page was answered
+		// `subtitle_source_changed` — the viewer's only recovery was to replan,
+		// and the replan kept producing the same metadata.
+		if liveTrack, ok := planOrdinalStillCarries(requestedTrack, liveTracks, opts.TrackIndex, opts.TargetFormat); ok {
+			slog.InfoContext(ctx, "virtual subtitle layout differs only in metadata; keeping the plan ordinal", "component", "api",
+				"plan_ordinal", opts.TrackIndex,
+				"plan_codec", requestedTrack.Codec,
+				"plan_language", requestedTrack.Language,
+				"live_codec", liveTrack.Codec,
+				"live_language", liveTrack.Language)
+			return true, nil
+		}
 		// "No track in this class" and "the class is there in other languages"
 		// are different problems — one is a rotated layout, the other is a
 		// selection that no longer exists — and they used to log identically.
@@ -5539,6 +5564,50 @@ func (h *StreamHandler) verifyVirtualSubtitleLayout(ctx context.Context, file *m
 		"codec", liveTrack.Codec,
 		"language", liveTrack.Language)
 	return true, nil
+}
+
+// planOrdinalStillCarries reports whether the plan ordinal still names a live
+// track whose extraction produces the same output class as the requested plan
+// track, with no language that contradicts the plan. It is the fallback for a
+// live layout that differs from the plan only in metadata: the provider listing
+// says `fre` while the container tag says `und` or nothing, or the plan
+// inventory carries a sidecar the embedded probe cannot see. `MatchEmbeddedSubtitleTrack`
+// applies language as a hard constraint, so it finds no candidate there and the
+// rotation verdict called a metadata gap a release rotation.
+//
+// The ordinal is what ffmpeg is told to map (`0:s:N`), so a same-class track at
+// that ordinal yields the subtitles the plan promised. A live track that
+// *contradicts* the plan's language is a rotation, not drift, and is not
+// carried: serving English where French was selected is a real mis-serve. Nor
+// is a class or muxer difference, which would change the response's format
+// under a URL minted at plan time.
+func planOrdinalStillCarries(requested models.SubtitleTrack, live []models.SubtitleTrack, ordinal int, targetFormat string) (models.SubtitleTrack, bool) {
+	class := playback.SubtitleLayoutClass(requested.Codec)
+	if class == "" || ordinal < 0 || ordinal >= len(live) {
+		return models.SubtitleTrack{}, false
+	}
+	liveTrack := live[ordinal]
+	if playback.SubtitleLayoutClass(liveTrack.Codec) != class {
+		return models.SubtitleTrack{}, false
+	}
+	if playback.SubtitleExtractMuxer(requested.Codec, targetFormat) != playback.SubtitleExtractMuxer(liveTrack.Codec, targetFormat) {
+		return models.SubtitleTrack{}, false
+	}
+	requestedLanguage := lang.Canonical(requested.Language)
+	liveLanguage := lang.Canonical(liveTrack.Language)
+	// `und` is the container saying "no language tagged", not a language that
+	// contradicts the plan. Only a *named* language that differs is a rotation.
+	if subtitleLanguageDiffers(requestedLanguage, liveLanguage) {
+		return models.SubtitleTrack{}, false
+	}
+	return liveTrack, true
+}
+
+// subtitleLanguageDiffers reports whether two canonical language tags name
+// different languages. An absent or `und`-tagged side is unknown, not different.
+func subtitleLanguageDiffers(a, b string) bool {
+	known := func(tag string) bool { return tag != "" && tag != audioLanguageUndetermined }
+	return known(a) && known(b) && a != b
 }
 
 // isRelayTokenNotFoundError reports whether an ffmpeg extraction failure is

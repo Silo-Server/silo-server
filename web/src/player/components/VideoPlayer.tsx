@@ -457,6 +457,9 @@ interface VideoPlayerProps {
 const EXIT_PROGRESS_FLUSH_TIMEOUT_MS = 1_000;
 // MediaError.MEDIA_ERR_NETWORK: the media was usable, then fetching it failed.
 const MEDIA_ERR_NETWORK = 2;
+// MediaError.MEDIA_ERR_DECODE: the bytes arrived but this device could not
+// decode them, which is a verdict on the file rather than on the transport.
+const MEDIA_ERR_DECODE = 3;
 const FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS = 8_000;
 /**
  * Firefox's copy-remux stall is media that arrived and still made no frame.
@@ -1444,6 +1447,16 @@ export function VideoPlayer({
   const canSeekAnywhere = plan.timeline.can_seek_anywhere;
   const canSeekAnywhereRef = useRef(canSeekAnywhere);
   canSeekAnywhereRef.current = canSeekAnywhere;
+  // A progressive remux is one forward-only generation anchored at the plan's
+  // start, not a byte-addressable file: the element cannot seek it, and asking
+  // it to makes Chromium re-request the stream at a byte offset the transport
+  // cannot resume. Its targets go back through the server (reanchorAt) unless
+  // the element already reports them as seekable, and the element's own error
+  // recovery reopens the stream at the playhead rather than treating a refused
+  // offset as a verdict on the file.
+  const isProgressiveRemux = plan.delivery === "server_remux_progressive";
+  const isProgressiveRemuxRef = useRef(isProgressiveRemux);
+  isProgressiveRemuxRef.current = isProgressiveRemux;
   const replanningRef = useRef(replanning);
   replanningRef.current = replanning;
   // The viewer's newest seek while a replan of this session was in flight, and
@@ -2145,7 +2158,17 @@ export function VideoPlayer({
         video.currentTime = nativeSeconds;
         return true;
       }
-      if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
+      // A progressive remux is not byte-seekable, whatever the plan's
+      // `can_seek_anywhere` claims: it is one forward-only generation anchored
+      // where the plan started, so a native seek makes Chromium re-request the
+      // stream at a byte offset the transport has no media position for. The
+      // element's own seekable range is the honest signal that the target needs
+      // no request at all; everything else goes back through the server as a
+      // reanchor, which is the seek this transport can actually serve.
+      const canNativeSeek = isProgressiveRemux
+        ? isNativePositionInRanges(video.seekable, nativeSeconds)
+        : canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds);
+      if (canNativeSeek) {
         rememberPendingSeek(seconds);
         // The replan now in flight may already be building the stream this
         // seek will play on, from a position the seek has moved past. Hand the
@@ -2167,6 +2190,7 @@ export function VideoPlayer({
       canSeekAnywhere,
       handleSeek,
       isHlsStream,
+      isProgressiveRemux,
       reanchorAt,
       rememberPendingSeek,
       resetRoomCatchupRate,
@@ -2177,7 +2201,6 @@ export function VideoPlayer({
   // until the reopened stream replaces it. A room keeps its own transport. A
   // replan or fresh start already in flight replaces this stream when it lands
   // a plan; the reopen waits for it and runs only if it does not.
-  const isProgressiveRemux = plan.delivery === "server_remux_progressive";
   const planChangeInFlight = replanning || replacing;
   const planChangeInFlightRef = useRef(planChangeInFlight);
   planChangeInFlightRef.current = planChangeInFlight;
@@ -4286,6 +4309,20 @@ export function VideoPlayer({
           outageBufferedEndRef.current = bufferedEndSeconds(video);
         }
         if (video.error.code === MEDIA_ERR_NETWORK && reportConnectionLost()) return;
+        // A progressive remux is a forward-only body: when the element asks it
+        // to resume at a byte offset the transport cannot map — a seek it took
+        // natively, or a read it resumed on its own — the refusal reaches the
+        // element as an unsupported source, not as a network error. Once the
+        // stream has played, that is a transport loss, not this device's
+        // verdict on the file: reopen the stream at the playhead. Failing the
+        // route instead sends the player back to the media page on every seek.
+        if (
+          isProgressiveRemuxRef.current &&
+          video.error.code !== MEDIA_ERR_DECODE &&
+          reportConnectionLost()
+        ) {
+          return;
+        }
         const message = video.error.message || "Unknown media element error";
         if (!reportCurrentPlanFailure({ classification: "decoder_error", message })) {
           // A network error on a transport that never played is the transport

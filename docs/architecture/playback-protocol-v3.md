@@ -2519,21 +2519,37 @@ fill. Every other bitmap request keeps its existing admission rules: the
 full-track warm is paused-only, and a request whose window names a playhead uses
 the bounded prefetch.
 
-Before any bitmap page reads its source, the server prices the container prefix
-that read would discard: `start × rate`, from the row's declared size and runtime
-or bitrate, and in wall-clock terms from the read rate the identity's own extracts
-have measured. A page beyond 256 MB of prefix, or whose prefix would take longer
-than 45 s at the measured rate, is refused before the extract with
+A bounded bitmap page is extracted with an input seek to its own start (`-ss
+<start>` before `-i`, `-copyts` after it), so against a source that honors Range
+and a container with a usable index it reads its window and not the container
+prefix before it. Measured with the production argument shape on a 3600 s,
+101 MB Matroska: a 120 s page at 3000 s read 13.0 MB, where the same page read
+without Range (or from an MKV with its cues stripped) read 94-114 MB and the
+whole file 102 MB.
+
+Before a page reads its source, the server therefore prices that window, not the
+prefix: its span times the container's byte rate (the row's declared size and
+runtime, or its bitrate), and in wall-clock terms the read rate the identity's
+own extracts have measured. Only a window that cannot be read inside one page
+extract (120 s at the measured rate) is refused before the extract, with
 `503 subtitle_page_too_costly`, `Retry-After`, and `X-Subtitle-Coverage`
 describing the progressive artifact's watermark; that refusal is what starts the
-fill when the handler does not already own one. An opening page has no prefix and
-always extracts normally. The same page answered after the read started is capped
-at 256 MB of process reads; a page killed that way, or one that runs out the
-two-minute window extract deadline without emitting a byte, answers the same
-retryable shape instead of a 500. A windowed text extract is held until it
-completes, so a slice cut short by that deadline or by a canceled request is never
-committed as a 200 carrying a header and half a cue: nothing is written and the
-client receives the retryable answer.
+fill when the handler does not already own one. An opening page always extracts
+normally. A page nothing can price (no size, runtime or bitrate) is not priced
+from the link's throughput, which says nothing about how many bytes a window
+holds.
+
+The extract itself is capped at 48 MB of fixed opening cost plus twice its
+window, floored at 64 MB and capped at 3 GB; an unpriceable window keeps the
+256 MB cap. A page killed that way, or one that runs out the two-minute window
+extract deadline without emitting a byte, answers the same retryable shape
+instead of a 500. The cap stops the case the seek cannot help — a container
+without an index, or a provider that answers every range request with 200.
+
+A windowed text extract is held until it completes, so a slice cut short by that
+deadline or by a canceled request is never committed as a 200 carrying a header
+and half a cue: nothing is written and the client receives the retryable
+answer.
 
 A page whose start the artifact has parsed is served from it even while the page's
 own end is still ahead of the watermark: the display sets that show in the parsed

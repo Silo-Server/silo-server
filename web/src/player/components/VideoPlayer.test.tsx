@@ -317,10 +317,10 @@ function fireFrameTimeUpdate(video: HTMLVideoElement) {
   else Reflect.deleteProperty(video, "readyState");
 }
 
-function setMediaError(video: HTMLVideoElement, message: string) {
+function setMediaError(video: HTMLVideoElement, message: string, code = 3) {
   Object.defineProperty(video, "error", {
     configurable: true,
-    value: { code: 3, message },
+    value: { code, message },
   });
 }
 
@@ -1861,6 +1861,12 @@ describe("VideoPlayer room catch-up", () => {
 
   it("paces corrections that must load unbuffered media on a seekable stream", async () => {
     const { video, correct } = setup(90, 0, true);
+    // A stream the element reports as seekable: its own range, not the plan's
+    // can_seek_anywhere claim, is what makes the target local.
+    Object.defineProperty(video, "seekable", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => 10_000 } as unknown as TimeRanges,
+    });
     await correct("correction-1", 100);
     expect(playerSeek).toHaveBeenCalledTimes(1);
 
@@ -6054,6 +6060,73 @@ describe("VideoPlayer lost connection", () => {
     if (!video) throw new Error("expected video element");
 
     setNetworkError(video);
+    fireEvent.error(video);
+
+    expect(onConnectionLost).not.toHaveBeenCalled();
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+  });
+
+  // The progressive remux plan claims can_seek_anywhere, but the transport is
+  // one forward-only generation: the element can only ask for a byte offset
+  // its origin does not have.
+  const progressiveRemuxPlan = fixturePlanV3({
+    ...directPlan,
+    delivery: "server_remux_progressive",
+    timeline: { ...directPlan.timeline, can_seek_anywhere: true },
+  });
+
+  it("reanchors a progressive remux seek instead of byte-seeking the element", () => {
+    const onReanchorSeek = vi.fn(() => true);
+    const { container } = renderPlayer({ plan: progressiveRemuxPlan, onReanchorSeek });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    video.currentTime = 40;
+    fireFrameTimeUpdate(video);
+
+    act(() => controls.current?.onSeek(1_200));
+
+    expect(onReanchorSeek).toHaveBeenCalledExactlyOnceWith(1_200);
+    // The element was never moved: a native seek is what makes Chromium
+    // re-request this stream at a byte offset the server cannot resume.
+    expect(video.currentTime).toBe(40);
+  });
+
+  it("hands an unsupported-source error on a played progressive remux to the reconnect", () => {
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container } = renderPlayer({
+      plan: progressiveRemuxPlan,
+      onConnectionLost,
+      onPlanFailure,
+    });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    video.currentTime = 40;
+    fireFrameTimeUpdate(video);
+
+    // A refused range reaches the element as an unsupported source, not as a
+    // network error.
+    setMediaError(video, "Failed to load because no supported source was found", 4);
+    fireEvent.error(video);
+
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(40, false);
+    expect(onPlanFailure).not.toHaveBeenCalled();
+    expect(screen.queryByText("Go Back")).not.toBeInTheDocument();
+  });
+
+  it("keeps a decode error on a played progressive remux on route recovery", () => {
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container } = renderPlayer({
+      plan: progressiveRemuxPlan,
+      onConnectionLost,
+      onPlanFailure,
+    });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    fireFrameTimeUpdate(video);
+
+    setMediaError(video, "decode failed", 3);
     fireEvent.error(video);
 
     expect(onConnectionLost).not.toHaveBeenCalled();

@@ -75,7 +75,12 @@ start is not blamed on it.
   retry, the player refreshes the subtitle inventory, and the refreshed
   generation rebuilds the parser and window. If the refresh re-mints the same
   URL, the refresh revision still forces one retry; a repeated conflict ends in
-  the visible error state rather than an endless "loading" overlay.
+  the visible error state rather than an endless "loading" overlay. This verdict
+  is the serve path's own probe of the release it is about to read. A layout
+  verdict from a background fill instead answers the retryable
+  `503 subtitle_source_unavailable`, because a retry may still be served from the
+  cached window or the committed artifact and the client's plan is not what was
+  proven stale.
 - A `503 subtitle_source_unavailable` carries `Retry-After`. The client waits at
   least that long, then uses its normal capped backoff. Four consecutive
   non-retryable failures or twelve retryable failures end the fetch for that
@@ -127,16 +132,20 @@ follow.
   complete-track bitmap warm for any other request (a whole-track fetch, or an
   open-ended window) stays paused-only. The fill is single-flighted, so a burst
   of page requests starts exactly one.
-- Before a page reads its source, the server prices the prefix that read would
-  discard — `start × rate`, from the row's size and runtime or bitrate, and in
-  seconds from the rate this identity's extracts have measured. A page beyond
-  256 MB of prefix, or one whose prefix would take more than 45 s at the measured
-  rate, is refused before the extract with `503 subtitle_page_too_costly`,
-  `Retry-After` and `X-Subtitle-Coverage`, and that refusal starts the fill. An
-  opening page has no prefix and always extracts. A page extract that does run is
-  still capped at 256 MB of process reads; one killed that way, or one that runs
-  out the two-minute window extract deadline before emitting a byte, answers the
-  same retryable shape instead of a 500.
+- A page extract seeks to its own start, so it reads its window plus a fixed
+  opening cost rather than the container prefix. Before a page reads its source,
+  the server prices that window — its span times the row's byte rate (size and
+  runtime, or bitrate), and in seconds the rate this identity's extracts have
+  measured. Only a window that cannot be read inside one page extract (120 s at
+  the measured rate) is refused before the extract with
+  `503 subtitle_page_too_costly`, `Retry-After` and `X-Subtitle-Coverage`, and
+  that refusal starts the fill. An opening page always extracts. The extract
+  itself is capped at 48 MB of opening cost plus twice its window (floor 64 MB,
+  ceiling 3 GB); an unpriceable window keeps the 256 MB cap. One killed that way,
+  or one that runs out the two-minute window extract deadline before emitting a
+  byte, answers the same retryable shape instead of a 500. A container without an
+  index, or a provider that ignores Range, is what the cap and the deadline stop;
+  the seek cannot help there.
 
   A retry that arrives while the identity is inside the extraction cooldown a
   refusal armed is answered with the same page shape, not a generic
@@ -148,10 +157,10 @@ follow.
 
 All of it applies only to a remote identity, and pricing only to one whose size
 and runtime (or bitrate) are known: an unpriceable page keeps its source extract
-rather than being refused for an assumption. A text (WebVTT/SRT/ASS) window and a
-local file keep their existing paths; a windowed text extract is held until it
-completes, so a slice cut short by the deadline or a canceled request is never
-served as a 200 with half a cue.
+under the 256 MB cap rather than being refused, or priced from the link, for an
+assumption. A text (WebVTT/SRT/ASS) window and a local file keep their existing
+paths; a windowed text extract is held until it completes, so a slice cut short
+by the deadline or a canceled request is never served as a 200 with half a cue.
 
 ## Jellyfin compatibility
 

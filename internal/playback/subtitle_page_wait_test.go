@@ -2,6 +2,7 @@ package playback
 
 import (
 	"errors"
+	"io"
 	"testing"
 	"time"
 )
@@ -192,34 +193,69 @@ func TestBitmapPageNearTheFillStaysRetryable(t *testing.T) {
 	}
 }
 
-// A page's final answer stops the fill it was waiting on: the remaining read
-// cannot serve the answered page, and production's answered page left it
-// reading to 95 s and 3.1 MB for nobody.
-func TestFinalPageAnswerCancelsTheFill(t *testing.T) {
-	cache, opts, advance, canceled, release := newPageAnswerFixture(t, "answered-page-track")
+// A cost refusal must not stop the fill that is the page's only route. The
+// page's own bytes were never delivered, so the fill's artifact and watermark
+// are the only copy of the progress made toward it: canceling it restarted the
+// same read from byte zero, and production restarted it 27 times over six
+// minutes without ever reaching the page.
+func TestCostRefusalKeepsTheFillAndItsProgress(t *testing.T) {
+	cache, opts, advance, canceled, release := newPageAnswerFixture(t, "cost-refused-track")
 	defer release()
 
 	page := opts
-	page.SeekSeconds = 1080
+	page.SeekSeconds = 2280
 	page.DurationSeconds = 120
-	if err := cache.pageRecoveryRefusal(page, 1080, 300, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
+	if err := cache.pageRecoveryRefusal(page, 2280, 300, subtitleFillBusyRetryAfter, SubtitlePageTooCostlyReason); err == nil {
 		t.Fatal("first refusal returned no answer")
 	}
-	// The fill advanced ten media seconds in ten wall seconds: reaching the
-	// page needs far more than the client still waits, so this refusal is final.
+	// The fill parsed twenty media seconds in ten wall seconds: it cannot reach
+	// the page inside the client's wait, so this refusal is final for the page.
+	if covered := appendProgressiveArtifact(t, cache, page, pgsDisplaySetAt(10), pgsDisplaySetAt(320)); covered != 320 {
+		t.Fatalf("artifact coverage = %v, want 320", covered)
+	}
 	advance(10 * time.Second)
-	if err := cache.pageRecoveryRefusal(page, 1080, 310, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); !IsSubtitlePageUnavailable(err) {
+	if err := cache.pageRecoveryRefusal(page, 2280, 320, subtitleFillBusyRetryAfter, SubtitlePageTooCostlyReason); !IsSubtitlePageUnavailable(err) {
 		t.Fatalf("page answer = %v, want the final page-unavailable reason", err)
 	}
-	if !*canceled {
-		t.Fatal("the final page answer did not cancel the fill it was waiting on")
+	if *canceled {
+		t.Fatal("the cost refusal canceled the fill that is the page's only route")
+	}
+	// A second refused request for the same track finds the same fill, still
+	// holding every display set it had parsed: the read continues from where it
+	// was instead of starting over.
+	if covered := appendProgressiveArtifact(t, cache, page, pgsDisplaySetAt(340)); covered != 340 {
+		t.Fatalf("artifact coverage after the second refusal = %v, want 340", covered)
 	}
 }
 
-// A second client waiting on the same track keeps the fill: another playback
-// session still needs the artifact, so answering one page must not stop the read
-// it is waiting on.
-func TestFinalPageAnswerKeepsAFillAnotherPageNeeds(t *testing.T) {
+// appendProgressiveArtifact writes parts to the track's running fill and returns
+// the coverage the artifact now reports.
+func appendProgressiveArtifact(t *testing.T, c *SubtitleCache, opts StreamExtractOpts, parts ...[]byte) float64 {
+	t.Helper()
+	key, ok := c.formatEntryKey(opts.InputPath, opts.CacheIdentity, opts.TrackIndex, subtitleFormatSUP)
+	if !ok {
+		t.Fatal("the track has no cache key")
+	}
+	c.mu.Lock()
+	fill := c.inflight[key]
+	c.mu.Unlock()
+	if fill == nil {
+		t.Fatal("the track has no running fill")
+	}
+	tee := fill.Tee(io.Discard)
+	for _, part := range parts {
+		if _, err := tee.Write(part); err != nil {
+			t.Fatalf("artifact write: %v", err)
+		}
+	}
+	_, covered := c.progressiveSUPArtifact(opts)
+	return covered
+}
+
+// A second client waiting on the same track keeps its own wait: answering one
+// session's page finally must not carry that verdict to another session's page
+// of the same artifact.
+func TestFinalPageAnswerDoesNotReachAnotherSessionsPage(t *testing.T) {
 	cache, opts, advance, canceled, release := newPageAnswerFixture(t, "two-page-track")
 	defer release()
 
@@ -229,13 +265,13 @@ func TestFinalPageAnswerKeepsAFillAnotherPageNeeds(t *testing.T) {
 	deep.DurationSeconds = 120
 	other := opts
 	other.PageWaitScope = "session-other"
-	other.SeekSeconds = 1320
+	other.SeekSeconds = 400
 	other.DurationSeconds = 120
 	if err := cache.pageRecoveryRefusal(deep, 1080, 300, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
 		t.Fatal("first refusal returned no answer")
 	}
 	// A second session's page of the same track is waiting on the same fill.
-	if err := cache.pageRecoveryRefusal(other, 1320, 300, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
+	if err := cache.pageRecoveryRefusal(other, 400, 300, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); err == nil {
 		t.Fatal("the second page's refusal returned no answer")
 	}
 	advance(10 * time.Second)
@@ -243,13 +279,18 @@ func TestFinalPageAnswerKeepsAFillAnotherPageNeeds(t *testing.T) {
 		t.Fatalf("page answer = %v, want the final page-unavailable reason", err)
 	}
 	if *canceled {
-		t.Fatal("the fill was canceled while another session's page was still waiting")
+		t.Fatal("the final answer canceled the fill another session's page still waits on")
+	}
+	// The other session's wait is its own: it keeps its budget and its page.
+	var retry *SubtitleExtractionRetryError
+	if err := cache.pageRecoveryRefusal(other, 400, 310, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); !errors.As(err, &retry) {
+		t.Fatalf("second session's page = %v, want the retryable shape", err)
 	}
 }
 
 // newPageAnswerFixture builds a cache whose page-wait clock the test drives,
-// plus the bitmap options of one track's in-flight fill and the flag its cancel
-// cause sets. release unregisters the fill and discards it.
+// plus the bitmap options of one track's in-flight fill and a flag set if that
+// fill is canceled at all. release unregisters the fill and discards it.
 func newPageAnswerFixture(t *testing.T, identity string) (cache *SubtitleCache, opts StreamExtractOpts, advance func(time.Duration), canceled *bool, release func()) {
 	t.Helper()
 	dir := t.TempDir()
@@ -278,8 +319,8 @@ func newPageAnswerFixture(t *testing.T, identity string) (cache *SubtitleCache, 
 	fill.background = true
 	cache.mu.Unlock()
 	canceled = new(bool)
-	run := cache.registerWarmRun(key, func(cause error) {
-		*canceled = errors.Is(cause, errSubtitleFillPageAnswered)
+	run := cache.registerWarmRun(key, func(error) {
+		*canceled = true
 	})
 	if run == nil {
 		t.Fatal("register the fill handle the page cancels")
@@ -433,11 +474,13 @@ func TestPageTheFillIsAboutToCrossStaysRetryable(t *testing.T) {
 	}
 }
 
-// Answering a page finally removes it from the waiting set immediately, along
-// with the earlier positions the same session asked for before it. Otherwise an
-// abandoned position keeps the fill alive for a page nobody will ask for again
-// (production ran a 1080 page's fill to 00:52:29 for a stale 1200 entry).
-func TestAnsweredPageLeavesTheWaitingSetAndStopsTheFill(t *testing.T) {
+// A page answered finally keeps the fill and stays final. Canceling the fill
+// threw away the only progress toward the page: the next request restarted the
+// read from byte zero, and the page got the same final answer again (production:
+// 27 refusals in six minutes, each abandoning the file's fill). Keeping the
+// session's ledger entry is what makes the repeat final instead of a fresh
+// budget.
+func TestAnsweredPageKeepsTheFillAndStaysFinal(t *testing.T) {
 	cache, opts, advance, canceled, release := newPageAnswerFixture(t, "answered-waiting-track")
 	defer release()
 
@@ -460,17 +503,13 @@ func TestAnsweredPageLeavesTheWaitingSetAndStopsTheFill(t *testing.T) {
 	if err := cache.pageRecoveryRefusal(reanchored, 1085, 310, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); !IsSubtitlePageUnavailable(err) {
 		t.Fatalf("page answer = %v, want the final reason", err)
 	}
-	if !*canceled {
-		t.Fatal("the final answer did not cancel the fill")
+	if *canceled {
+		t.Fatal("the final answer canceled the fill that holds the page's only progress")
 	}
-	key, ok := cache.pageRecoveryKey(reanchored, 1085)
-	if !ok {
-		t.Fatal("page recovery key unavailable")
-	}
-	cache.pageWaitMu.Lock()
-	defer cache.pageWaitMu.Unlock()
-	if entry, seen := cache.pageWaits[key]; seen && len(entry.waiting) != 0 {
-		t.Fatalf("waiting set = %v, want every answered/superseded position removed", entry.waiting)
+	// The same page asked again inside its wait is still final: the answer is
+	// the artifact's reach, not a one-shot verdict.
+	if err := cache.pageRecoveryRefusal(reanchored, 1085, 310, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason); !IsSubtitlePageUnavailable(err) {
+		t.Fatalf("repeat of the answered page = %v, want the final shape again", err)
 	}
 }
 
