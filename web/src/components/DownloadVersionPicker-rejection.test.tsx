@@ -19,7 +19,11 @@ const LINK_URL = "/api/v2/direct-download?file_id=42&dl=link-token";
 /** The profile-bound link the server mints for the preflight. */
 function mintResponse(): Response {
   return new Response(
-    JSON.stringify({ url: LINK_URL, proxy_url: `${LINK_URL}-proxy`, expires_at: "2026-01-01T00:30:00Z" }),
+    JSON.stringify({
+      url: LINK_URL,
+      proxy_url: `${LINK_URL}-proxy`,
+      expires_at: "2026-01-01T00:30:00Z",
+    }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
 }
