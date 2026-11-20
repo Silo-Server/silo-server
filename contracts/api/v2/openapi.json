@@ -19397,9 +19397,17 @@
             ],
             "format": "int64",
             "type": "integer"
+          },
+          "requests_enabled": {
+            "description": "Whether the server-wide requests switch is on; the queue still answers while it is off",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
+          "requests_enabled",
           "needs_approval",
           "in_progress",
           "failed",

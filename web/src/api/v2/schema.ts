@@ -21296,6 +21296,11 @@ export interface components {
        * @example 3
        */
       needs_approval: number;
+      /**
+       * @description Whether the server-wide requests switch is on; the queue still answers while it is off
+       * @example true
+       */
+      requests_enabled: boolean;
     };
     AdminRequestEvent: {
       /**
