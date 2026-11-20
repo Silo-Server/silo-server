@@ -413,9 +413,10 @@ the deletion of a complete upload, and the restore job.
   same daily trigger; one backs up and the others record the skip. A
   scheduled run that takes the lock after another server already backed up
   its slot skips too ("skipped: tonight's backup already ran on another
-  server"): a successful nightly records its slot, the latest `backup.time`
-  at or before it started in its server's local time zone, in
-  `backup_status.last_nightly_slot`, and a scheduled run skips when the
+  server"): a successful nightly records the slot it took the lock for, the
+  latest `backup.time` at or before that moment in its server's local time
+  zone, in `backup_status.last_nightly_slot`; a `backup.time` change while
+  it runs does not move it. A scheduled run skips when the
   recorded slot is later than its own previous slot (the same wall-clock
   time a calendar day earlier, so each night across a daylight saving
   change backs up once). Servers in different time zones, or a
