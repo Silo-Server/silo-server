@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -9,19 +8,18 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path"
-	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-// packageShards splits the slowest packages across isolated database copies
-// so no single serial test binary holds up the run while other CPU slots sit
-// idle. Tests are distributed round-robin so expensive tests in adjacent
-// manifest sections spread across shards.
+// packageShards splits the slowest packages across parallel `go test -exec`
+// invocations (each receiving its own cloned database) so no single serial
+// package binary dominates the CI tail. Tests are distributed round-robin so
+// expensive tests in adjacent manifest sections spread across shards.
 var packageShards = map[string]int{
 	"./internal/backup":  4,
 	"./internal/catalog": 2,
@@ -41,40 +39,28 @@ var packagePriority = map[string]int{
 	"./internal/api/handlers":    50,
 }
 
-type testShard struct {
-	dir   string
+type testInvocation struct {
+	label string
+	dir   string // non-empty for single-package shard invocations
 	tests []string
-	index int // 1-based shard index when split; 0 when unsplit
+	index int // 1-based shard index when split
 	total int
+	args  []string
 }
 
-func (s testShard) label() string {
-	if s.total <= 1 {
-		return s.dir
-	}
-	return fmt.Sprintf("%s [%d/%d]", s.dir, s.index, s.total)
+func goTestExecArgs(execPath string, names, dirs []string) []string {
+	args := make([]string, 0, 7+len(dirs))
+	args = append(args, "test", "-count=1", "-json", "-exec", execPath, "-run", "^("+strings.Join(names, "|")+")$")
+	return append(args, dirs...)
 }
 
-func (s testShard) cloneTag() string {
-	if s.total <= 1 {
-		return s.dir
-	}
-	return fmt.Sprintf("%s_s%d", s.dir, s.index)
-}
-
-func (s testShard) runPattern() string {
-	return "^(" + strings.Join(s.tests, "|") + ")$"
-}
-
-type compiledPackage struct {
-	dir        string
-	importPath string
-	binary     string
-}
-
-// planShards groups pins by package, splits configured heavy packages
-// round-robin, and orders the resulting shards longest-first.
-func planShards(pins []pin) []testShard {
+// planInvocations partitions pins into:
+//   - shardInvs: one `go test -json -exec` invocation per shard of each
+//     configured heavy package, ordered longest-first; and
+//   - mainInv: one `go test -json -exec` invocation for every unsplit package,
+//     ordered by packagePriority then pin count (empty args if all pins were
+//     in split packages).
+func planInvocations(pins []pin, execPath string) (mainInv testInvocation, shardInvs []testInvocation) {
 	var dirs []string
 	byDir := make(map[string][]string)
 	for _, p := range pins {
@@ -84,12 +70,17 @@ func planShards(pins []pin) []testShard {
 		byDir[p.dir] = append(byDir[p.dir], p.test)
 	}
 
-	var shards []testShard
+	var unsplitDirs, unsplitNames []string
 	for _, dir := range dirs {
 		tests := byDir[dir]
 		n := min(max(packageShards[dir], 1), len(tests))
 		if n == 1 {
-			shards = append(shards, testShard{dir: dir, tests: tests, total: 1})
+			unsplitDirs = append(unsplitDirs, dir)
+			for _, name := range tests {
+				if !slices.Contains(unsplitNames, name) {
+					unsplitNames = append(unsplitNames, name)
+				}
+			}
 			continue
 		}
 		buckets := make([][]string, n)
@@ -97,16 +88,18 @@ func planShards(pins []pin) []testShard {
 			buckets[i%n] = append(buckets[i%n], name)
 		}
 		for i, bucket := range buckets {
-			shards = append(shards, testShard{
+			shardInvs = append(shardInvs, testInvocation{
+				label: fmt.Sprintf("%s [%d/%d]", dir, i+1, n),
 				dir:   dir,
 				tests: bucket,
 				index: i + 1,
 				total: n,
+				args:  goTestExecArgs(execPath, bucket, []string{dir}),
 			})
 		}
 	}
 
-	slices.SortStableFunc(shards, func(a, b testShard) int {
+	slices.SortStableFunc(shardInvs, func(a, b testInvocation) int {
 		if c := cmp.Compare(packagePriority[b.dir], packagePriority[a.dir]); c != 0 {
 			return c
 		}
@@ -115,334 +108,203 @@ func planShards(pins []pin) []testShard {
 		}
 		return cmp.Compare(a.index, b.index)
 	})
-	return shards
-}
 
-// batchPackagesByBasename partitions directories into collision-free batches
-// for `go test -c -o <dir>/`, which names each output binary after the last
-// segment of its import path.
-func batchPackagesByBasename(pkgs []compiledPackage) [][]compiledPackage {
-	var batches [][]compiledPackage
-	var seen []map[string]bool
-	for _, pkg := range pkgs {
-		base := path.Base(pkg.importPath)
-		placed := false
-		for i := range batches {
-			if !seen[i][base] {
-				seen[i][base] = true
-				batches[i] = append(batches[i], pkg)
-				placed = true
-				break
+	if len(unsplitDirs) > 0 {
+		slices.SortStableFunc(unsplitDirs, func(a, b string) int {
+			if c := cmp.Compare(packagePriority[b], packagePriority[a]); c != 0 {
+				return c
 			}
-		}
-		if !placed {
-			seen = append(seen, map[string]bool{base: true})
-			batches = append(batches, []compiledPackage{pkg})
+			return cmp.Compare(len(byDir[b]), len(byDir[a]))
+		})
+		mainInv = testInvocation{
+			label: "unsplit packages",
+			args:  goTestExecArgs(execPath, unsplitNames, unsplitDirs),
 		}
 	}
-	return batches
+	return mainInv, shardInvs
 }
 
-func testBinaryExt() string {
-	if runtime.GOOS == "windows" {
-		return ".test.exe"
-	}
-	return ".test"
-}
-
-func compileTestBinaries(ctx context.Context, shards []testShard, binRoot string) (map[string]compiledPackage, error) {
-	var dirs []string
-	seenDir := make(map[string]bool)
-	for _, s := range shards {
-		if !seenDir[s.dir] {
-			seenDir[s.dir] = true
-			dirs = append(dirs, s.dir)
-		}
-	}
-
-	listArgs := append([]string{"list", "-f", "{{.Dir}}\t{{.ImportPath}}"}, dirs...)
-	listCmd := exec.CommandContext(ctx, "go", listArgs...) //nolint:gosec // fixed go binary with validated repo-relative package dirs
-	var listStderr bytes.Buffer
-	listCmd.Stderr = &listStderr
-	listOut, err := listCmd.Output()
-	if err != nil {
-		if msg := strings.TrimSpace(listStderr.String()); msg != "" {
-			return nil, fmt.Errorf("go list: %w: %s", err, msg)
-		}
-		return nil, fmt.Errorf("go list: %w", err)
-	}
-	importByAbsDir := make(map[string]string, len(dirs))
-	for _, line := range strings.Split(strings.TrimSpace(string(listOut)), "\n") {
-		if line == "" {
+// goflagsParallelism reads any -p flag from GOFLAGS so callers setting
+// GOFLAGS=-p=1 cap concurrent go test invocations too.
+func goflagsParallelism(goflags string, defaultP int) int {
+	p := max(defaultP, 1)
+	fields := strings.Fields(goflags)
+	for i := 0; i < len(fields); i++ {
+		f := fields[i]
+		var val string
+		switch {
+		case strings.HasPrefix(f, "-p="):
+			val = strings.TrimPrefix(f, "-p=")
+		case strings.HasPrefix(f, "--p="):
+			val = strings.TrimPrefix(f, "--p=")
+		case (f == "-p" || f == "--p") && i+1 < len(fields):
+			i++
+			val = fields[i]
+		default:
 			continue
 		}
-		absDir, importPath, ok := strings.Cut(line, "\t")
-		if !ok {
-			return nil, fmt.Errorf("unexpected go list line %q", line)
-		}
-		importByAbsDir[filepath.Clean(absDir)] = strings.TrimSpace(importPath)
-	}
-
-	pkgs := make([]compiledPackage, len(dirs))
-	for i, dir := range dirs {
-		absDir, err := filepath.Abs(dir)
-		if err != nil {
-			return nil, fmt.Errorf("resolve %s: %w", dir, err)
-		}
-		importPath, ok := importByAbsDir[filepath.Clean(absDir)]
-		if !ok {
-			return nil, fmt.Errorf("go list did not return package for %s", dir)
-		}
-		pkgs[i] = compiledPackage{dir: dir, importPath: importPath}
-	}
-
-	ext := testBinaryExt()
-	compiled := make(map[string]compiledPackage, len(pkgs))
-	for batchIdx, batch := range batchPackagesByBasename(pkgs) {
-		batchDir := filepath.Join(binRoot, fmt.Sprintf("b%d", batchIdx))
-		if err := os.MkdirAll(batchDir, 0o700); err != nil {
-			return nil, err
-		}
-		args := make([]string, 0, len(batch)+4)
-		args = append(args, "test", "-c", "-o", batchDir+string(os.PathSeparator))
-		for _, pkg := range batch {
-			args = append(args, pkg.dir)
-		}
-		cmd := exec.CommandContext(ctx, "go", args...) //nolint:gosec // fixed go binary compiling repository packages
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return nil, fmt.Errorf("compile test binaries: %w", err)
-		}
-		for _, pkg := range batch {
-			pkg.binary = filepath.Join(batchDir, path.Base(pkg.importPath)+ext)
-			compiled[pkg.dir] = pkg
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			p = n
 		}
 	}
-	return compiled, nil
+	return p
 }
 
-func runSharded(ctx context.Context, pins []pin, template string) (*results, string, error) {
-	run, err := preflightClones(ctx, template)
-	if err != nil {
-		return nil, run, err
-	}
+// runSharded fans out `go test -json -exec` across the split shards and the
+// unsplit packages, merging every JSON event stream into one results table.
+// Non-test infrastructure failures (start/pipe/scanner errors, cancellation,
+// or a failing invocation that produced no test events) are returned in
+// infraErr so callers report them alongside any MISSING pins.
+func runSharded(ctx context.Context, pins []pin, execPath, template, run string) (*results, error, error) {
+	mainInv, shardInvs := planInvocations(pins, execPath)
+	env := append(os.Environ(), cloneTemplateEnv+"="+template, cloneRunEnv+"="+run)
+	maxP := goflagsParallelism(os.Getenv("GOFLAGS"), max(runtime.GOMAXPROCS(0), 1))
 
-	shards := planShards(pins)
-	binRoot, err := os.MkdirTemp("", "dbpins-bins-*")
-	if err != nil {
-		return nil, run, err
-	}
-	defer func() { _ = os.RemoveAll(binRoot) }()
-
-	compiled, err := compileTestBinaries(ctx, shards, binRoot)
-	if err != nil {
-		return nil, run, err
-	}
-
-	res := &results{tests: make(map[testKey]*testResult, len(pins))}
+	merged := &results{tests: make(map[testKey]*testResult, len(pins))}
 	var (
-		cloneMu sync.Mutex
-		resMu   sync.Mutex
-		outMu   sync.Mutex
-		errMu   sync.Mutex
-		runErrs []error
+		mu        sync.Mutex
+		outMu     sync.Mutex
+		exitErrs  []error
+		infraErrs []error
 	)
 
-	work := make(chan testShard, len(shards))
-	for _, s := range shards {
-		work <- s
+	record := func(inv testInvocation) {
+		if ctx.Err() != nil {
+			return
+		}
+		invRes, exitErr, infraErr := runGoTestInvocation(ctx, inv, env, &outMu)
+		mu.Lock()
+		merged.merge(invRes)
+		if exitErr != nil {
+			exitErrs = append(exitErrs, exitErr)
+		}
+		if infraErr != nil {
+			infraErrs = append(infraErrs, infraErr)
+		}
+		mu.Unlock()
 	}
-	close(work)
 
-	workers := min(max(runtime.GOMAXPROCS(0), 1), len(shards))
+	if maxP <= 1 {
+		for _, inv := range shardInvs {
+			record(inv)
+		}
+		if len(mainInv.args) > 0 {
+			record(mainInv)
+		}
+	} else {
+		runInvocationsParallel(ctx, mainInv, shardInvs, maxP, record)
+	}
+
+	if err := ctx.Err(); err != nil {
+		infraErrs = append(infraErrs, err)
+	}
+	return merged, errors.Join(exitErrs...), errors.Join(infraErrs...)
+}
+
+func runInvocationsParallel(ctx context.Context, mainInv testInvocation, shardInvs []testInvocation, maxP int, record func(testInvocation)) {
 	var wg sync.WaitGroup
-	for range workers {
+	if len(mainInv.args) > 0 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
-				if ctx.Err() != nil {
-					return
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case s, ok := <-work:
-					if !ok {
-						return
-					}
+			record(mainInv)
+		}()
+	}
+	if len(shardInvs) > 0 {
+		work := make(chan testInvocation, len(shardInvs))
+		for _, inv := range shardInvs {
+			work <- inv
+		}
+		close(work)
+		workers := min(maxP, len(shardInvs))
+		for range workers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for inv := range work {
 					if ctx.Err() != nil {
 						return
 					}
-					pkg := compiled[s.dir]
-					if err := runOneShard(ctx, template, run, s, pkg, &cloneMu, &resMu, &outMu, res); err != nil {
-						errMu.Lock()
-						runErrs = append(runErrs, err)
-						errMu.Unlock()
-					}
+					record(inv)
 				}
-			}
-		}()
+			}()
+		}
 	}
 	wg.Wait()
-	if err := ctx.Err(); err != nil {
-		runErrs = append(runErrs, err)
-	}
-	return res, run, errors.Join(runErrs...)
 }
 
-func preflightClones(ctx context.Context, template string) (string, error) {
-	run, err := newRunToken()
-	if err != nil {
-		return "", err
-	}
-	name, _, err := cloneDatabase(ctx, template, run, "preflight")
-	if err != nil {
-		return run, err
-	}
-	if err := dropDatabase(ctx, template, name); err != nil {
-		return run, err
-	}
-	return run, nil
-}
-
-func runOneShard(
-	ctx context.Context,
-	template, run string,
-	s testShard,
-	pkg compiledPackage,
-	cloneMu, resMu, outMu *sync.Mutex,
-	merged *results,
-) error {
-	if _, err := os.Stat(pkg.binary); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("%s: stat test binary: %w", s.label(), err)
-	}
-
-	cloneMu.Lock()
-	clone, cloneURL, err := cloneDatabase(ctx, template, run, s.cloneTag())
-	cloneMu.Unlock()
-	if err != nil {
-		return fmt.Errorf("%s: %w", s.label(), err)
-	}
-	defer func() {
-		if dropErr := dropDatabase(context.Background(), template, clone); dropErr != nil {
-			outMu.Lock()
-			fmt.Fprintf(os.Stderr, "dbpins: %v\n", dropErr)
-			outMu.Unlock()
-		}
-	}()
-
-	start := time.Now()
-	shardRes, passthrough, convStderr, runErr := execShardBinary(ctx, s, pkg, cloneEnv(os.Environ(), template, cloneURL))
-	elapsed := time.Since(start)
-
-	resMu.Lock()
-	merged.merge(shardRes)
-	resMu.Unlock()
-
-	outMu.Lock()
-	if passthrough != "" {
-		fmt.Print(passthrough)
-	}
-	if convStderr != "" {
-		_, _ = io.WriteString(os.Stderr, convStderr)
-	}
-	status := "ok  "
-	if runErr != nil {
-		status = "FAIL"
-	}
-	fmt.Printf("%s\t%s\t%.3fs\n", status, shardSummaryName(pkg.importPath, s), elapsed.Seconds())
-	outMu.Unlock()
-
-	return runErr
-}
-
-// execShardBinary runs the compiled test binary directly and pipes its output
-// through `go tool test2json`. Running the test binary as a direct child
-// ensures cancellation signals and reaps the test binary before the caller
-// drops its cloned database.
-func execShardBinary(ctx context.Context, s testShard, pkg compiledPackage, env []string) (*results, string, string, error) {
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		return nil, "", "", fmt.Errorf("%s: pipe: %w", s.label(), err)
-	}
-
-	testCmd := exec.CommandContext( //nolint:gosec // freshly compiled repository test binary
-		ctx,
-		pkg.binary,
-		"-test.v=test2json",
-		"-test.count=1",
-		"-test.timeout=10m",
-		"-test.run="+s.runPattern(),
-	)
-	testCmd.Dir = s.dir
-	testCmd.Env = env
-	testCmd.Stdout = pw
-	testCmd.Stderr = pw
-	testCmd.Cancel = func() error {
-		if sigErr := testCmd.Process.Signal(os.Interrupt); sigErr != nil && !errors.Is(sigErr, os.ErrProcessDone) {
-			return testCmd.Process.Kill()
+func runGoTestInvocation(ctx context.Context, inv testInvocation, env []string, outMu *sync.Mutex) (*results, error, error) {
+	cmd := exec.CommandContext(ctx, "go", inv.args...) //nolint:gosec // fixed go binary with validated repo-relative package dirs and self -exec wrapper
+	cmd.Env = env
+	cmd.Stderr = &lockedWriter{mu: outMu, w: os.Stderr}
+	cmd.Cancel = func() error {
+		if sigErr := cmd.Process.Signal(os.Interrupt); sigErr != nil {
+			if errors.Is(sigErr, os.ErrProcessDone) {
+				return sigErr
+			}
+			return cmd.Process.Kill()
 		}
 		return nil
 	}
-	testCmd.WaitDelay = 10 * time.Second
+	// Fit forced kill + database clone cleanup inside CI cancel grace windows.
+	cmd.WaitDelay = 5 * time.Second
 
-	convCmd := exec.CommandContext( //nolint:gosec // fixed go tool test2json reading piped test output
-		context.Background(),
-		"go", "tool", "test2json", "-p", pkg.importPath, "-t",
-	)
-	var convStderr bytes.Buffer
-	convCmd.Stdin = pr
-	convCmd.Stderr = &convStderr
-	convStdout, err := convCmd.StdoutPipe()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		_ = pr.Close()
-		_ = pw.Close()
-		return nil, "", "", fmt.Errorf("%s: %w", s.label(), err)
+		err = fmt.Errorf("%s: stdout pipe: %w", inv.label, err)
+		writeStderr(outMu, err)
+		return nil, nil, err
 	}
-	if err := convCmd.Start(); err != nil {
-		_ = pr.Close()
-		_ = pw.Close()
-		return nil, "", "", fmt.Errorf("%s: %w", s.label(), err)
+	if err := cmd.Start(); err != nil {
+		err = fmt.Errorf("%s: start go test: %w", inv.label, err)
+		writeStderr(outMu, err)
+		return nil, nil, err
 	}
-	_ = pr.Close()
 
-	if err := testCmd.Start(); err != nil {
-		_ = pw.Close()
-		_ = convCmd.Wait()
-		return nil, "", convStderr.String(), fmt.Errorf("%s: %w", s.label(), err)
-	}
-	_ = pw.Close()
-
-	var passthrough strings.Builder
-	shardRes, readErr := readEvents(convStdout, func(line string) { passthrough.WriteString(line) })
+	invRes, readErr := readEvents(stdout, func(line string) {
+		outMu.Lock()
+		fmt.Print(line)
+		outMu.Unlock()
+	})
 	if readErr != nil {
-		_, _ = io.Copy(io.Discard, convStdout)
+		_, _ = io.Copy(io.Discard, stdout)
 	}
-	testWaitErr := testCmd.Wait()
-	convWaitErr := convCmd.Wait()
+	waitErr := cmd.Wait()
 
-	switch {
-	case readErr != nil:
-		return shardRes, passthrough.String(), convStderr.String(), fmt.Errorf("%s: %w", s.label(), readErr)
-	case testWaitErr != nil:
-		return shardRes, passthrough.String(), convStderr.String(), fmt.Errorf("%s: %w", s.label(), testWaitErr)
-	case convWaitErr != nil:
-		return shardRes, passthrough.String(), convStderr.String(), fmt.Errorf("%s: test2json: %w", s.label(), convWaitErr)
-	default:
-		return shardRes, passthrough.String(), convStderr.String(), nil
+	if readErr != nil {
+		err := fmt.Errorf("%s: read test events: %w", inv.label, readErr)
+		writeStderr(outMu, err)
+		return invRes, nil, err
 	}
+	if waitErr == nil {
+		return invRes, nil, nil
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(waitErr, &exitErr) || invRes == nil || len(invRes.tests) == 0 {
+		// Either go test failed to exit normally, or it failed before running
+		// any tests (e.g. build error or cloneDatabase failure in -exec).
+		err := fmt.Errorf("%s: %w", inv.label, waitErr)
+		writeStderr(outMu, err)
+		return invRes, nil, err
+	}
+	return invRes, fmt.Errorf("%s: %w", inv.label, waitErr), nil
 }
 
-func shardSummaryName(importPath string, s testShard) string {
-	if s.total <= 1 {
-		return importPath
-	}
-	return fmt.Sprintf("%s [shard %d/%d]", importPath, s.index, s.total)
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (lw *lockedWriter) Write(p []byte) (int, error) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	return lw.w.Write(p)
+}
+
+func writeStderr(mu *sync.Mutex, err error) {
+	mu.Lock()
+	fmt.Fprintf(os.Stderr, "dbpins: %v\n", err)
+	mu.Unlock()
 }
 
 func (res *results) merge(other *results) {

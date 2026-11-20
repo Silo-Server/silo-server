@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -37,13 +38,10 @@ func TestParseList(t *testing.T) {
 
 func TestGoTestArgsAnchorsEveryName(t *testing.T) {
 	pins := []pin{{"./internal/b", "TestOne"}, {"./internal/a", "TestOne"}, {"./internal/a", "TestTwo"}}
-	got := goTestArgs(pins, false)
-	want := []string{"test", "-count=1", "-json", "-run", "^(TestOne|TestTwo)$", "./internal/a", "./internal/b"}
+	got := goTestArgs(pins)
+	want := []string{"test", "-count=1", "-json", "-run", "^(TestOne|TestTwo)$", "./internal/b", "./internal/a"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args = %q, want %q", got, want)
-	}
-	if got := goTestArgs(pins, true); !reflect.DeepEqual(got[len(got)-2:], []string{"./internal/b", "./internal/a"}) {
-		t.Fatalf("shared database package order changed: %q", got)
 	}
 }
 
@@ -157,12 +155,15 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-// cloneEnv repoints a database variable only when it names the template,
-// however its host, port and options are spelled.
+// cloneEnv drops the wrapper's own variables and repoints a database variable
+// only when it names the template, however its host, port and options are
+// spelled.
 func TestCloneEnv(t *testing.T) {
 	const template = "postgres://u:p@localhost:5432/silo_test?sslmode=disable"
 	const clone = "postgres://u:p@localhost:5432/dbpins_x?sslmode=disable"
 	got := cloneEnv([]string{
+		cloneTemplateEnv + "=" + template,
+		cloneRunEnv + "=0123abcd",
 		"SILO_TEST_DATABASE_URL=" + template,
 		"SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL=postgresql://u:p@127.0.0.1/other?dbname=silo_test",
 		"OTHER=" + template,
@@ -216,11 +217,28 @@ func TestCloneNameFitsPostgres(t *testing.T) {
 	}
 }
 
-func TestPlanShardsSplitsHeavyPackagesAndPrioritizesSlowestFirst(t *testing.T) {
+func TestExecArg(t *testing.T) {
+	for input, want := range map[string]string{
+		"/tmp/dbpins":       "/tmp/dbpins",
+		"/tmp/my dir/bin":   "'/tmp/my dir/bin'",
+		"/tmp/o'brien/bin":  `"/tmp/o'brien/bin"`,
+		`/tmp/a "b"/dbpins`: `'/tmp/a "b"/dbpins'`,
+	} {
+		got, err := execArg(input)
+		if err != nil || got != want {
+			t.Fatalf("execArg(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	if _, err := execArg(`/tmp/a'b"c/dbpins`); err == nil {
+		t.Fatal("execArg accepted path with both quote kinds")
+	}
+}
+
+func TestPlanInvocationsSplitsHeavyPackagesAndPrioritizesUnsplit(t *testing.T) {
 	pins := []pin{
+		{"./internal/small", "TestS1"},
 		{"./internal/api/handlers", "TestH1"},
 		{"./internal/api/handlers", "TestH2"},
-		{"./internal/api/handlers", "TestH3"},
 		{"./internal/backup", "TestB1"},
 		{"./internal/backup", "TestB2"},
 		{"./internal/backup", "TestB3"},
@@ -230,49 +248,73 @@ func TestPlanShardsSplitsHeavyPackagesAndPrioritizesSlowestFirst(t *testing.T) {
 		{"./internal/catalog", "TestC2"},
 		{"./internal/catalog", "TestC3"},
 	}
-	shards := planShards(pins)
-	// Backup (4 shards) comes before catalog (2 shards), then handlers (1 shard).
-	if len(shards) != 7 {
-		t.Fatalf("len(shards) = %d, want 7: %+v", len(shards), shards)
+	mainInv, shardInvs := planInvocations(pins, "/tmp/dbpins")
+	// Backup (4 shards) comes before catalog (2 shards).
+	if len(shardInvs) != 6 {
+		t.Fatalf("len(shardInvs) = %d, want 6: %+v", len(shardInvs), shardInvs)
 	}
 	for i := range 4 {
-		if shards[i].dir != "./internal/backup" || shards[i].total != 4 {
-			t.Fatalf("shards[%d] = %+v, want backup shard", i, shards[i])
+		if shardInvs[i].dir != "./internal/backup" || shardInvs[i].total != 4 {
+			t.Fatalf("shardInvs[%d] = %+v, want backup shard", i, shardInvs[i])
 		}
 	}
-	if shards[4].dir != "./internal/catalog" || shards[5].dir != "./internal/catalog" {
-		t.Fatalf("shards[4..5] = %+v, want catalog shards", shards[4:6])
+	if shardInvs[4].dir != "./internal/catalog" || shardInvs[5].dir != "./internal/catalog" {
+		t.Fatalf("shardInvs[4..5] = %+v, want catalog shards", shardInvs[4:6])
 	}
-	if shards[6].dir != "./internal/api/handlers" || shards[6].total != 1 {
-		t.Fatalf("shards[6] = %+v, want unsplit handlers shard", shards[6])
+	// Unsplit invocation prioritizes handlers above small and excludes split packages.
+	wantMain := []string{
+		"test", "-count=1", "-json", "-exec", "/tmp/dbpins",
+		"-run", "^(TestS1|TestH1|TestH2)$",
+		"./internal/api/handlers", "./internal/small",
+	}
+	if !reflect.DeepEqual(mainInv.args, wantMain) {
+		t.Fatalf("mainInv.args = %q, want %q", mainInv.args, wantMain)
 	}
 
-	// Every listed pin appears in exactly one shard.
-	seen := make(map[pin]int, len(pins))
-	for _, s := range shards {
-		for _, test := range s.tests {
-			seen[pin{dir: s.dir, test: test}]++
+	// Every split pin appears in exactly one shard invocation.
+	seen := make(map[pin]int)
+	for _, inv := range shardInvs {
+		for _, test := range inv.tests {
+			seen[pin{dir: inv.dir, test: test}]++
 		}
 	}
 	for _, p := range pins {
-		if seen[p] != 1 {
-			t.Fatalf("pin %+v appeared %d times across shards", p, seen[p])
+		if packageShards[p.dir] > 1 && seen[p] != 1 {
+			t.Fatalf("split pin %+v appeared %d times across shards", p, seen[p])
 		}
 	}
 }
 
-func TestBatchPackagesByBasenameAvoidsBinaryCollisions(t *testing.T) {
-	pkgs := []compiledPackage{
-		{dir: "./internal/a/store", importPath: "example.com/silo/internal/a/store"},
-		{dir: "./internal/b/store", importPath: "example.com/silo/internal/b/store"},
-		{dir: "./internal/c/other", importPath: "example.com/silo/internal/c/other"},
+func TestGoflagsParallelism(t *testing.T) {
+	for _, tc := range []struct {
+		goflags  string
+		defaultP int
+		want     int
+	}{
+		{"", 4, 4},
+		{"-race -v", 4, 4},
+		{"-p=1", 4, 1},
+		{"-v -p 2 -count=1", 4, 2},
+		{"--p=3", 4, 3},
+		{"-p=2 -p=1", 4, 1},
+		{"-p=bad", 4, 4},
+	} {
+		if got := goflagsParallelism(tc.goflags, tc.defaultP); got != tc.want {
+			t.Errorf("goflagsParallelism(%q, %d) = %d, want %d", tc.goflags, tc.defaultP, got, tc.want)
+		}
 	}
-	batches := batchPackagesByBasename(pkgs)
-	if len(batches) != 2 {
-		t.Fatalf("len(batches) = %d, want 2: %+v", len(batches), batches)
+}
+
+func TestSummarizeRunReportsInfraErrorsAlongsideMissingPins(t *testing.T) {
+	res := &results{tests: map[testKey]*testResult{}}
+	pins := []pin{{"./internal/backup", "TestA"}}
+	_, problems := summarizeRun(res, pins, testModule, nil, errors.New("./internal/backup [1/4]: exit status 1"))
+	want := []string{
+		"MISSING ./internal/backup TestA",
+		"runner: ./internal/backup [1/4]: exit status 1",
 	}
-	if len(batches[0]) != 2 || len(batches[1]) != 1 {
-		t.Fatalf("batch sizes = [%d %d], want [2 1]", len(batches[0]), len(batches[1]))
+	if !reflect.DeepEqual(problems, want) {
+		t.Fatalf("problems = %q, want %q", problems, want)
 	}
 }
 

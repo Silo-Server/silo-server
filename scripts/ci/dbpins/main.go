@@ -7,9 +7,9 @@
 // skips guards nothing, so this command fails on a listed test that is
 // missing, skipped or failing, and on any skipped subtest.
 //
-// Each package runs against its own copy of the database (see clone.go), so
-// the database must have no other sessions; -shared runs every package
-// against it directly instead.
+// Each package or shard runs against its own copy of the database (see
+// clone.go), so the database must have no other sessions; -shared runs every
+// package against it directly instead.
 //
 // Usage (the repository root is the cwd; SILO_TEST_DATABASE_URL names a
 // migrated, disposable database):
@@ -19,7 +19,6 @@ package main
 
 import (
 	"bufio"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,6 +31,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 )
 
 // listFlag collects every -list.
@@ -53,6 +53,13 @@ type pin struct {
 var testName = regexp.MustCompile(`^Test[A-Za-z0-9_]*$`)
 
 func main() {
+	if template := os.Getenv(cloneTemplateEnv); template != "" {
+		os.Exit(runCloned(template, os.Args[1:]))
+	}
+	os.Exit(runMain())
+}
+
+func runMain() int {
 	var lists listFlag
 	flag.Var(&lists, "list", "file naming the pinned tests; repeat to run several lists in one pass")
 	shared := flag.Bool("shared", false, "run every package against SILO_TEST_DATABASE_URL instead of a copy of it")
@@ -63,70 +70,95 @@ func main() {
 
 	pins, err := readLists(lists)
 	if err != nil {
-		fail(err)
+		fmt.Fprintf(os.Stderr, "dbpins: %v\n", err)
+		return 1
 	}
 	// GOWORK=off: in a workspace, go list -m prints every module.
 	listModule := exec.CommandContext(context.Background(), "go", "list", "-m")
 	listModule.Env = append(os.Environ(), "GOWORK=off")
 	module, err := listModule.Output()
 	if err != nil {
-		fail(fmt.Errorf("go list -m: %w", err))
+		fmt.Fprintf(os.Stderr, "dbpins: go list -m: %v\n", err)
+		return 1
 	}
 
 	template := os.Getenv("SILO_TEST_DATABASE_URL")
 	var (
-		res     *results
-		run     string
-		waitErr error
+		res      *results
+		exitErr  error
+		infraErr error
 	)
 	switch {
 	case template == "":
 		fmt.Println("dbpins: SILO_TEST_DATABASE_URL is not set, so every pin will skip")
-		res, waitErr = runDirect(pins, *shared)
+		res, exitErr, infraErr = runDirect(pins)
 	case *shared:
-		res, waitErr = runDirect(pins, true)
+		res, exitErr, infraErr = runDirect(pins)
 	default:
-		// Cancel queued shard starts on Ctrl-C while staying alive to drop
-		// this run's database copies once active test binaries exit.
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		res, run, waitErr = runSharded(ctx, pins, template)
-		stop()
+		// Keep SIGINT/SIGTERM trapped through dropRunClones so an interrupt
+		// cancels queued shard starts and lets active wrappers finish before
+		// sweeping any leftover database copies.
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+
+		execPath, run, setupErr := setUpClones(ctx, template)
 		if run != "" {
-			if dropErr := dropRunClones(template, run); dropErr != nil {
-				fmt.Fprintf(os.Stderr, "dbpins: %v\n", dropErr)
-			}
+			defer func() {
+				if dropErr := dropRunClones(template, run); dropErr != nil {
+					fmt.Fprintf(os.Stderr, "dbpins: %v\n", dropErr)
+				}
+			}()
 		}
-		if res == nil {
-			fail(waitErr)
+		if setupErr != nil {
+			fmt.Fprintf(os.Stderr, "dbpins: %v\n", setupErr)
+			return 1
 		}
+		res, exitErr, infraErr = runSharded(ctx, pins, execPath, template, run)
 	}
 
-	report, problems := res.check(pins, strings.TrimSpace(string(module)))
-	fmt.Print(report)
-	if waitErr != nil && len(problems) == 0 {
-		// A test binary or go test failed without a failing test to show for it.
-		problems = append(problems, "go test: "+waitErr.Error())
+	if res == nil {
+		if infraErr != nil {
+			fmt.Fprintf(os.Stderr, "dbpins: %v\n", infraErr)
+		} else if exitErr != nil {
+			fmt.Fprintf(os.Stderr, "dbpins: %v\n", exitErr)
+		}
+		return 1
 	}
+
+	report, problems := summarizeRun(res, pins, strings.TrimSpace(string(module)), exitErr, infraErr)
+	fmt.Print(report)
 	if len(problems) > 0 {
 		fmt.Printf("\n::error::%d problem(s) running the pins in %s; a missing or skipped test fails like a failing one\n", len(problems), strings.Join(lists, " and "))
 		for _, problem := range problems {
 			fmt.Println("  " + problem)
 		}
-		os.Exit(1)
+		return 1
 	}
 	fmt.Printf("\ndbpins: all %d pins passed\n", len(pins))
+	return 0
 }
 
-func runDirect(pins []pin, shared bool) (*results, error) {
-	args := goTestArgs(pins, shared)
+func summarizeRun(res *results, pins []pin, module string, exitErr, infraErr error) (string, []string) {
+	report, problems := res.check(pins, module)
+	if infraErr != nil {
+		problems = append(problems, "runner: "+infraErr.Error())
+	} else if exitErr != nil && len(problems) == 0 {
+		// A test binary or go test failed without a failing test to show for it.
+		problems = append(problems, "go test: "+exitErr.Error())
+	}
+	return report, problems
+}
+
+func runDirect(pins []pin) (*results, error, error) {
+	args := goTestArgs(pins)
 	cmd := exec.CommandContext(context.Background(), "go", args...) //nolint:gosec // fixed go executable with separate arguments, no shell
 	cmd.Stderr = os.Stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		fail(err)
+		return nil, nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		fail(err)
+		return nil, nil, err
 	}
 	res, readErr := readEvents(stdout, func(line string) { fmt.Print(line) })
 	if readErr != nil {
@@ -136,14 +168,9 @@ func runDirect(pins []pin, shared bool) (*results, error) {
 	}
 	waitErr := cmd.Wait()
 	if readErr != nil {
-		fail(readErr)
+		return nil, nil, readErr
 	}
-	return res, waitErr
-}
-
-func fail(err error) {
-	fmt.Fprintf(os.Stderr, "dbpins: %v\n", err)
-	os.Exit(1)
+	return res, waitErr, nil
 }
 
 // readLists parses each list and merges them; a test may be listed once
@@ -196,29 +223,17 @@ func parseList(data string) ([]pin, error) {
 	return pins, nil
 }
 
-// goTestArgs runs exactly the pinned tests, uncached: the test cache cannot
-// see the database the results depend on.
-func goTestArgs(pins []pin, shared bool) []string {
+// goTestArgs runs exactly the pinned tests in manifest order, uncached: the
+// test cache cannot see the database the results depend on.
+func goTestArgs(pins []pin) []string {
 	var names, dirs []string
-	pinCounts := make(map[string]int)
 	for _, p := range pins {
 		if !slices.Contains(names, p.test) {
 			names = append(names, p.test)
 		}
-		if pinCounts[p.dir] == 0 {
+		if !slices.Contains(dirs, p.dir) {
 			dirs = append(dirs, p.dir)
 		}
-		pinCounts[p.dir]++
-	}
-	// Give slower packages and packages with many pins an early slot on their
-	// isolated databases. A caller using a shared database keeps manifest order.
-	if !shared {
-		slices.SortStableFunc(dirs, func(a, b string) int {
-			if c := cmp.Compare(packagePriority[b], packagePriority[a]); c != 0 {
-				return c
-			}
-			return cmp.Compare(pinCounts[b], pinCounts[a])
-		})
 	}
 	return append([]string{"test", "-count=1", "-json", "-run", "^(" + strings.Join(names, "|") + ")$"}, dirs...)
 }
