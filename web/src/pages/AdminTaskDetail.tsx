@@ -24,6 +24,7 @@ import {
 import type { ExecutionResult, TriggerConfig } from "@/api/types";
 
 import { describeTrigger } from "@/lib/taskTrigger";
+import { itemTypeLabel } from "@/lib/itemTypeLabels";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
 import { useServerText, useT, type MessageKey, type Translate } from "@/i18n";
@@ -45,6 +46,10 @@ const REFRESH_REASON_LABELS: Record<string, MessageKey> = {
 function refreshReasonLabel(t: Translate, reason: string): string {
   const key = REFRESH_REASON_LABELS[reason] as MessageKey | undefined;
   return key ? t(key) : reason;
+}
+
+function refreshItemTypeLabel(t: Translate, type: string): string {
+  return type ? itemTypeLabel(t, type) : t("web.admin.tasks.detail.itemFallback");
 }
 
 function formatDuration(t: Translate, ms: number): string {
@@ -162,7 +167,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
                     </div>
                     <div className="text-muted-foreground text-xs">
                       {t("web.admin.tasks.detail.recentErrorAttempts", {
-                        type: entry.type || t("web.admin.tasks.detail.itemFallback"),
+                        type: refreshItemTypeLabel(t, entry.type),
                         count: entry.attempt_count,
                         count_text: entry.attempt_count,
                       })}
@@ -215,7 +220,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
                 <td className="px-4 py-2">
                   <div className="font-medium">{entry.title || entry.content_id}</div>
                   <div className="text-muted-foreground text-xs">
-                    {entry.type || t("web.admin.tasks.detail.itemFallback")}
+                    {refreshItemTypeLabel(t, entry.type)}
                   </div>
                 </td>
                 <td className="px-4 py-2">{formatDateTime(entry.next_refresh_at)}</td>
