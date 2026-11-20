@@ -35,6 +35,19 @@ def stamp(root, paths):
             raise ValueError('filesystem lost timestamp precision: ' + str(path))
 
 
+def tracked_worktree_files(root):
+    raw = subprocess.check_output(['git', 'ls-files', '-t', '-z'], cwd=root).decode()
+    paths = []
+    for entry in raw.split('\0'):
+        if not entry:
+            continue
+        status, _, name = entry.partition(' ')
+        # Sparse checkouts mark excluded tracked files as skip-worktree ('S').
+        if status != 'S':
+            paths.append(name)
+    return paths
+
+
 if __name__ == '__main__':
-    names = subprocess.check_output(['git', 'ls-files', '-z']).decode().rstrip('\0').split('\0')
-    stamp(Path.cwd(), names)
+    root = Path.cwd()
+    stamp(root, tracked_worktree_files(root))

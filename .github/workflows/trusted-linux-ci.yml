@@ -118,14 +118,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        # Every job except Go skips web/assets-source (230 MB of PNG files that
-        # only the internal/collections/templates tests read).
+        # Skip raw PNG plates (220 MB) and collection-template JPGs (43 MB);
+        # verify-bidi ignores binary files and casecollisions reads the git index.
         with:
           fetch-depth: 0
           filter: blob:none
           sparse-checkout: |
             /*
             !/web/assets-source/
+            !/web/public/images/collection-templates/
           sparse-checkout-cone-mode: false
           persist-credentials: false
       # GitHub release downloads sometimes return 504s for a stretch while the
@@ -158,6 +159,9 @@ jobs:
           fi
           if [ -f scripts/test_lint_changed.py ]; then
             python3 scripts/test_lint_changed.py
+          fi
+          if [ -f scripts/ci/test_content_mtimes.py ]; then
+            python3 scripts/ci/test_content_mtimes.py
           fi
       - name: Check workflows and shell
         run: make verify-actionlint verify-shellcheck
@@ -362,10 +366,18 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # golangci-lint needs the merge base to tell this branch's lines
-          # from the ones it inherited.
+        with: &go-history-checkout
+          # golangci-lint and the contract diff need the merge base, but not
+          # frontend image or locale blobs (~390 MB). blob:none keeps full
+          # commit and tree history while downloading only checked-out files.
           fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: |
+            /*
+            !/web/assets-source/
+            !/web/src/locales/
+            !/web/public/images/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       # After the PR checkout, which would otherwise clean it away, and
@@ -486,10 +498,7 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # The contract diff needs the merge base with the target branch.
-          fetch-depth: 0
-          persist-credentials: false
+        with: *go-history-checkout
 
       # After the PR checkout, which would otherwise clean it away, and
       # before any PR code runs.
@@ -551,6 +560,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Go tests need collection-template image paths, not the ~130 MB of
+          # web translation catalogs.
+          filter: blob:limit=1m
+          sparse-checkout: |
+            /*
+            !/web/src/locales/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       # After the PR checkout, which would otherwise clean it away, and
@@ -637,13 +653,16 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: &no-assets
+        with: &go-db-checkout
           # Fetch small files in the first pack. Checkout then requests only
-          # the remaining large files it needs, excluding the source artwork.
+          # the remaining large files it needs, excluding frontend assets and
+          # translation catalogs (~390 MB) that no DB job reads.
           filter: blob:limit=1m
           sparse-checkout: |
             /*
             !/web/assets-source/
+            !/web/src/locales/
+            !/web/public/images/
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Set up Go
@@ -668,7 +687,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/race"
-          go test -p 2 -race -c -o "$RUNNER_TEMP/race/" \
+          go test -race -c -o "$RUNNER_TEMP/race/" \
             ./internal/watchtogether/ ./migrations/ ./internal/historyimport/ ./internal/api/handlers/ ./internal/adminjob/ ./internal/auth/ ./internal/recommendations/ ./cmd/silo/
 
       - name: Test Watch Party coordination against Postgres
@@ -744,7 +763,7 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: *no-assets
+        with: *go-db-checkout
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -868,7 +887,7 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: *no-assets
+        with: *go-db-checkout
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -890,7 +909,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/race"
-          go test -p 2 -race -c -o "$RUNNER_TEMP/race/" \
+          go test -race -c -o "$RUNNER_TEMP/race/" \
             ./internal/api/handlers/ ./internal/auth/ ./internal/jellycompat/ ./internal/plugins/
 
       # Account resolution and linking, the local-password policy, the OAuth
@@ -926,7 +945,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: *no-assets
+        with: &no-assets
+          # Fetch small files in the first pack. Checkout then requests only
+          # the remaining large files it needs, excluding the source artwork.
+          filter: blob:limit=1m
+          sparse-checkout: |
+            /*
+            !/web/assets-source/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       # The pnpm version comes from web/package.json's packageManager field —
       # there is no package.json at the repo root, and `defaults.run` does not
