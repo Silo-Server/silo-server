@@ -593,9 +593,12 @@ func (h *PluginHandler) TestAdminPluginAuthConnection(ctx context.Context, id in
 	}
 	binding, err := h.configs.GetAuthBinding(ctx, id, result.CapabilityID)
 	if err != nil && !errors.Is(err, plugins.ErrAuthBindingNotFound) {
-		return plugins.AuthConnectionTestResult{}, err
+		// The probe already ran. Return its verdict without guessing a callback URL.
+		slog.WarnContext(ctx, "could not read callback mode after plugin connection test", "installation_id", id)
+		return result, nil
 	}
-	if binding != nil {
+	result.CallbackMode = plugins.AuthCallbackInstallation
+	if binding != nil && binding.CallbackMode != "" {
 		result.CallbackMode = binding.CallbackMode
 	}
 	return result, nil

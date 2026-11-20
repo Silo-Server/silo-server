@@ -177,6 +177,10 @@ func checkPlacementBlockedByRestore(t *testing.T, w *ProvisionWriter) {
 		t.Fatal(err)
 	}
 	w.applyOnline(ctx)
+	statuses, err = ListProvisionStatus(ctx, w.pool)
+	if err != nil || len(statuses) != 1 || statuses[0].State != "held" {
+		t.Fatalf("old writer after acknowledgment: statuses = %v, error = %v", statuses, err)
+	}
 	if w.retry || w.placementPending {
 		t.Fatal("acknowledgment resumed the old writer")
 	}

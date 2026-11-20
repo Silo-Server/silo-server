@@ -2276,7 +2276,7 @@ func fixtureDeps() Dependencies {
 	deps.CatalogAccess, deps.CatalogBrowse, deps.CatalogItems = catalog, catalog, catalog
 	actions := &fakeCatalogActions{enabled: true, trailerView: handlers.TrailerRefreshView{Status: "queued"}}
 	deps.CatalogTrailers, deps.MetadataAI, deps.People, deps.LiteraryWorks = actions, actions, actions, actions
-	deps.ExternalSignIn = &fakeExternalSignIn{}
+	deps.ExternalSignIn = &fakeExternalSignIn{callbackMode: plugins.AuthCallbackInstallation}
 	deps.CursorSecret = []byte("fixture-cursor-key")
 	deps.SettingValues.(*fakeSettingValuesSeam).contendedLabel = "Contended"
 	prefs := preferenceDeps(nil, nil)

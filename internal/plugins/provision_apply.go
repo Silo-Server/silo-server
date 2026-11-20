@@ -391,7 +391,7 @@ func validateProvisionBindingSet(ctx context.Context, tx pgx.Tx, bindingIDs map[
 		err := validateInstallationAuthBindings(ctx, tx, bindingIDs[pluginID])
 		switch {
 		case errors.Is(err, ErrAuthProviderAlreadyEnabled):
-			return &provisionRefusalError{pluginID: pluginID, detail: "The sign-in binding conflicts with another active binding. Disable the other binding before applying this declaration."}
+			return &provisionRefusalError{pluginID: pluginID, detail: "The sign-in binding conflicts with another active binding. Disable the other binding, then restart the provisioning instance to apply this declaration."}
 		case errors.Is(err, ErrAuthBindingIneligible):
 			return &provisionRefusalError{pluginID: pluginID, detail: "An enabled sign-in binding is incompatible with the plugin release. Disable that binding or choose a compatible release."}
 		case err != nil:

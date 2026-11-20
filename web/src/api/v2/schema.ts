@@ -23992,7 +23992,7 @@ export interface components {
     AuthConnectionTestResult: {
       /**
        * Format: uri-reference
-       * @description Redirect URI to register at an OAuth (OIDC) provider for this installation, on the public URL; empty when no public URL is configured. Password (LDAP) providers do not use it
+       * @description Redirect URI to register at the OAuth provider. Empty for password providers, when the public URL is unset, or when the binding mode is unavailable.
        * @example https://silo.example.test/api/v2/auth/oauth/3/callback
        */
       callback_url: string;

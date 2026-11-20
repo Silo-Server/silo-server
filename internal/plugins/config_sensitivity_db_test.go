@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,5 +149,23 @@ func TestProvisionedReplacementProtectsNestedCredentialDB(t *testing.T) {
 				t.Fatalf("compatible replacement refused: %v", err)
 			}
 		})
+	}
+}
+
+func TestMovedCredentialComparesExactJSONNumbers(t *testing.T) {
+	const saved = json.Number("9007199254740992")
+	before := map[string]any{"token": saved}
+	removed := [][]string{{"token"}}
+	for _, tc := range []struct {
+		public json.Number
+		refuse bool
+	}{
+		{"9007199254740992.0", true},
+		{"9007199254740993", false},
+	} {
+		err := protectRetainedCredentials("app", removed, nil, before, map[string]any{"value": tc.public})
+		if (err != nil) != tc.refuse {
+			t.Errorf("replacement with %s: got %v, want refusal %v", tc.public, err, tc.refuse)
+		}
 	}
 }

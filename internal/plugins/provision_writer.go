@@ -32,8 +32,8 @@ type ProvisionStatus struct {
 	Detail   string
 }
 
-func ListProvisionStatus(ctx context.Context, pool *pgxpool.Pool) ([]ProvisionStatus, error) {
-	rows, err := pool.Query(ctx, `SELECT plugin_id, version, state, detail FROM plugin_provision_status ORDER BY plugin_id`)
+func ListProvisionStatus(ctx context.Context, db provisionConfigQuery) ([]ProvisionStatus, error) {
+	rows, err := db.Query(ctx, `SELECT plugin_id, version, state, detail FROM plugin_provision_status ORDER BY plugin_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -405,18 +405,22 @@ func (s *RuntimeConfigStore) SetProvisionWriter(writer *ProvisionWriter) {
 // ListProvisionStatus combines the committed status with a local failure to
 // obtain writer authority, if this process submitted a declaration.
 func (s *RuntimeConfigStore) ListProvisionStatus(ctx context.Context) ([]ProvisionStatus, error) {
-	committed, err := ListProvisionStatus(ctx, s.pool)
 	if s.provisionWriter == nil {
-		return committed, err
+		return ListProvisionStatus(ctx, s.pool)
 	}
 	state, detail := s.provisionWriter.localStatusReason()
 	if state == "" {
-		return committed, err
+		return ListProvisionStatus(ctx, s.pool)
 	}
-	if err != nil && len(s.provisionWriter.document.Plugins) == 0 {
-		return nil, err
-	}
-	statuses, err := s.provisionWriter.unappliedStatuses(ctx, s.pool, committed, state, detail)
+	var statuses []ProvisionStatus
+	err := pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+		committed, err := ListProvisionStatus(ctx, tx)
+		if err != nil {
+			return err
+		}
+		statuses, err = s.provisionWriter.unappliedStatuses(ctx, tx, committed, state, detail)
+		return err
+	})
 	if err != nil && len(s.provisionWriter.document.Plugins) != 0 {
 		// The declaring process can still explain its own refusal during a database outage.
 		return s.provisionWriter.statuses(state, detail), nil

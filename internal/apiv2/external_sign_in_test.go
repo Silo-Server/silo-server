@@ -282,7 +282,7 @@ func TestAdminUserIdentities(t *testing.T) {
 }
 
 func TestAdminPluginAuthBindingTest(t *testing.T) {
-	f := &fakeExternalSignIn{}
+	f := &fakeExternalSignIn{callbackMode: plugins.AuthCallbackInstallation}
 	h := newTestHandler(t, externalSignInDeps(f))
 	path := Prefix + "/admin/plugins/installations/3/auth-binding/test"
 	rec := do(t, h, http.MethodPost, path, `{"capability_id":"oidc","config":[{"key":"oidc","value":{"issuer":"https://id.example.test","client_secret":""}}]}`, actingRequestAdmin)
@@ -302,6 +302,13 @@ func TestAdminPluginAuthBindingTest(t *testing.T) {
 	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &body) != nil ||
 		body.CallbackURL != "https://silo.example.test/api/v2/auth/oauth/callback" {
 		t.Fatalf("stable callback: %d %s", rec.Code, rec.Body.String())
+	}
+	// The completed probe remains available when the binding lookup fails.
+	f.callbackMode = ""
+	rec = do(t, h, http.MethodPost, path, `{"capability_id":"oidc"}`, actingRequestAdmin)
+	body = AuthConnectionTestResult{}
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.OK || len(body.Steps) != 2 || body.CallbackURL != "" {
+		t.Fatalf("probe without callback metadata: %d %s", rec.Code, rec.Body.String())
 	}
 	// A password (LDAP) provider has no redirect URI to register.
 	rec = do(t, h, http.MethodPost, path, `{"capability_id":"ldap","config":[]}`, actingRequestAdmin)

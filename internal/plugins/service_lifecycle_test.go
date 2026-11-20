@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -74,6 +75,37 @@ func TestLifecyclePollRetriesOnlyFailedRefresh(t *testing.T) {
 	if refreshes != afterRetry || otherCalls != 2 {
 		t.Fatal("unchanged poll refreshed the registry again")
 	}
+}
+
+func TestLifecyclePollSkipsBusyRuntimeAndRetriesItsStop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := newFakeServiceInstallationStore(&Installation{ID: 7, Enabled: true, RuntimeGeneration: 1})
+		service := &Service{installations: store, host: newSeqFakeHost()}
+		service.running.store(7, installationRuntime{enabled: true})
+		lock := service.runtimeLock(7)
+		lock.Lock()
+		done := make(chan struct{})
+		go func() {
+			service.reconcileInstallations(t.Context())
+			close(done)
+		}()
+		synctest.Wait()
+		select {
+		case <-done:
+			lock.Unlock()
+		default:
+			lock.Unlock()
+			<-done
+			t.Fatal("busy installation blocked reconciliation")
+		}
+		if _, ok := service.running.load(7); !ok {
+			t.Fatal("poll stopped the busy installation")
+		}
+		service.reconcileInstallations(t.Context())
+		if _, ok := service.running.load(7); ok {
+			t.Fatal("later poll retained the stale runtime")
+		}
+	})
 }
 
 func TestLifecycleFollowerRebindsLazyAuthAfterMissedEvent(t *testing.T) {

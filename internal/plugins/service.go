@@ -777,6 +777,15 @@ type runtimeMutex chan struct{}
 func (l runtimeMutex) Lock()   { l <- struct{}{} }
 func (l runtimeMutex) Unlock() { <-l }
 
+func (l runtimeMutex) tryLock() bool {
+	select {
+	case l <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
 func (l runtimeMutex) lockContext(ctx context.Context) error {
 	select {
 	case l <- struct{}{}:
@@ -1146,6 +1155,12 @@ func (s *Service) residentClient(ctx context.Context, installationID int) (plugi
 	}
 	defer lock.Unlock()
 	installation, err := s.loadInstallation(ctx, installationID, true)
+	if errors.Is(err, ErrInstallationDisabled) || (err == nil && !s.runtimeMatches(installation)) {
+		// The supervisor can start a newer generation before the lifecycle poll
+		// refreshes the cached installation. Confirm the row before refusing an RPC.
+		s.InvalidateInstallationCache()
+		installation, err = s.loadInstallation(ctx, installationID, true)
+	}
 	if err != nil {
 		return nil, err
 	}

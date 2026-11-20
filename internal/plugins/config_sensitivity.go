@@ -26,17 +26,17 @@ func removedCredentialPaths(before *pluginv1.PluginManifest, key string, protect
 }
 
 func protectRetainedCredentials(key string, removed, protected [][]string, before, after map[string]any) error {
-	var exposed map[any]bool
+	var exposed credentialValues
 	for _, path := range removed {
 		saved, _ := configPathValue(before, path)
 		if !populatedCredential(saved) {
 			continue
 		}
 		if exposed == nil {
-			exposed = make(map[any]bool)
+			exposed = make(credentialValues)
 			collectCredentialValues(exposed, after, protected)
 		}
-		values := make(map[any]bool)
+		values := make(credentialValues)
 		collectCredentialValues(values, saved, nil)
 		retained := false
 		switch saved.(type) {
@@ -45,13 +45,7 @@ func protectRetainedCredentials(key string, removed, protected [][]string, befor
 			// container sensitive. Keep requiring it to be cleared as a unit.
 			retained = populatedCredential(after[path[0]])
 		}
-		for value := range values {
-			if exposed[value] {
-				retained = true
-				break
-			}
-		}
-		if retained {
+		if retained || values.overlaps(exposed) {
 			return fmt.Errorf("config entry %q has a saved credential at %q that this release no longer protects",
 				key, strings.Join(path, "."))
 		}
@@ -59,10 +53,33 @@ func protectRetainedCredentials(key string, removed, protected [][]string, befor
 	return nil
 }
 
+// String and boolean keys match directly. Numbers in the same floating-point
+// bucket still need exact comparison: large, distinct JSON integers can round
+// to the same double.
+type credentialValues map[any][]json.Number
+
+func (v credentialValues) overlaps(other credentialValues) bool {
+	for key, numbers := range v {
+		matches, ok := other[key]
+		if !ok {
+			continue
+		}
+		if numbers == nil {
+			return true
+		}
+		for _, number := range numbers {
+			if slices.ContainsFunc(matches, func(match json.Number) bool { return sameConfigValue(number, match) }) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Index scalar values wherever they occur in the config, skipping paths that
 // the replacement still protects. Include undeclared fields because a later
 // release could make them public without another change to the config.
-func collectCredentialValues(values map[any]bool, value any, protected [][]string) {
+func collectCredentialValues(values credentialValues, value any, protected [][]string) {
 	switch v := value.(type) {
 	case map[string]any:
 		for key, child := range v {
@@ -76,13 +93,11 @@ func collectCredentialValues(values map[any]bool, value any, protected [][]strin
 			collectCredentialValues(values, child, nil)
 		}
 	case json.Number:
-		// Equivalent numeric spellings must match. If double precision
-		// cannot distinguish two values, conservatively keep them protected.
-		number, _ := v.Float64()
-		values[number] = true
+		bucket, _ := v.Float64()
+		values[bucket] = append(values[bucket], v)
 	default:
 		if populatedCredential(v) {
-			values[v] = true
+			values[v] = nil
 		}
 	}
 }

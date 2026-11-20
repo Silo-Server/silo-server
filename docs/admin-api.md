@@ -3825,8 +3825,8 @@ A server with a task manager applies the task binding live and answers 200 with
 progress. Enabling one registers the task if its installation is enabled. A changed
 trigger becomes the task's default schedule. The server handling the request attempts
 a sync before answering and retries a failed sync. Other API servers apply the change
-at their next successful sync. A server without a task manager returns
-`restart_required` true and applies the binding at the next start.
+at their next successful sync. A server without a task manager stores the binding and returns
+`restart_required` true. A task manager on any API server can apply it at its next sync.
 
 An omitted task trigger stores an empty object. A runnable binding trigger outranks the
 manifest's `scheduled_task.default_trigger`. A schedule saved on the task page outranks

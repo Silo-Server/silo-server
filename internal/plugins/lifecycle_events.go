@@ -232,7 +232,9 @@ func (s *Service) stopStaleLazyRuntime(ctx context.Context, id int) error {
 		return nil
 	}
 	lock := s.runtimeLock(id)
-	lock.Lock()
+	if !lock.tryLock() {
+		return nil // The next poll checks every tracked runtime again.
+	}
 	defer lock.Unlock()
 	running, ok := s.running.load(id)
 	if !ok {
