@@ -217,13 +217,14 @@ func (h *AdminPlaybackControlHandler) commandLocal(ctx context.Context, in Admin
 	// dispatcher only performs one bounded lane write, so holding the lock
 	// through dispatch costs nothing and means a concurrent duplicate or stale
 	// command can never be dispatched alongside the winner, nor observe a
-	// receipt whose delivery is still unknown: it either waits and replays the
-	// completed receipt, or the dispatch failed, the slot was released, and
+	// receipt before its dispatch finished: it either waits and replays the
+	// recorded receipt, or the dispatch failed, the slot was released, and
 	// the duplicate is admitted on its own. Failures are never recorded. The
 	// lookup is under the lock too, so a session that ends between lookup and
 	// admission cannot be given a fresh ledger after its own was dropped.
 	// A message then waits for the player's result after the lock is
-	// released, so one unresponsive player never delays other commands.
+	// released, so one unresponsive player never delays other commands; its
+	// receipt reads "dispatched" until an answer upgrades it.
 	h.commandMu.Lock()
 	locked := true
 	defer func() {
@@ -294,7 +295,12 @@ func (h *AdminPlaybackControlHandler) awaitMessageResult(in AdminPlaybackCommand
 	select {
 	case <-answered:
 	case <-timer.C:
-		return AdminPlaybackDeliveryDispatched
+		// select picks at random when the answer lands with the deadline.
+		select {
+		case <-answered:
+		default:
+			return AdminPlaybackDeliveryDispatched
+		}
 	}
 	h.commandMu.Lock()
 	defer h.commandMu.Unlock()
