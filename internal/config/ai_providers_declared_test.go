@@ -55,6 +55,16 @@ func TestApplyDeclaredAIProviders(t *testing.T) {
 		t.Errorf("name collision: error = %v, want one naming groq-admin, the provider to take over or rename around", err)
 	}
 
+	// A provider keeps its type, as an admin's edit does: its bound models
+	// are that type's.
+	retyped, err := NewDeclaredAIProvider("groq-admin", AIProviderOpenAI, "Retyped", "", "sk-3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApplyDeclaredAIProviders(raw, []AIProvider{retyped}, "SILO_CONFIG_FILE"); err == nil || !strings.Contains(err.Error(), "type cannot change") {
+		t.Errorf("retyped provider: error = %v, want a refusal of the type change", err)
+	}
+
 	// Two declarations may not share a name; the error names both.
 	other, err := NewDeclaredAIProvider("openai-batch", AIProviderOpenAI, "", "", "sk-2", nil)
 	if err != nil {

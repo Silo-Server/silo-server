@@ -69,6 +69,12 @@ func ApplyDeclaredAIProviders(raw string, declared []AIProvider, managedBy strin
 		}
 		provider.ManagedBy = managedBy
 		if i := slices.IndexFunc(registry.Providers, func(p AIProvider) bool { return p.ID == provider.ID }); i >= 0 {
+			// As for an admin's edit: the models bound to a provider are its
+			// type's, so a new type takes a new id.
+			if stored := registry.Providers[i]; stored.Type != provider.Type {
+				return "", fmt.Errorf("%s: a provider's type cannot change (it is %s, declared as %s); declare the %s provider under a new id",
+					provider.ID, stored.Type, provider.Type, provider.Type)
+			}
 			registry.Providers[i] = provider
 		} else {
 			registry.Providers = append(registry.Providers, provider)

@@ -448,7 +448,7 @@ function ProviderPanel({
   onCreated?: (provider: AIProvider) => void;
 }) {
   const t = useT();
-  const [draft, setDraft] = useState<AIProviderDraft>(initial);
+  const [editDraft, setDraft] = useState<AIProviderDraft>(initial);
   const [test, setTest] = useState<ProviderTestState | undefined>();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const create = useCreateAIProvider();
@@ -459,13 +459,16 @@ function ProviderPanel({
   // The deployment declares this provider; the server refuses edits to it.
   const managedByEnv = provider?.managed_by_env_var;
   const locked = managedByEnv != null;
+  // A locked panel shows and tests the stored provider, including one the
+  // deployment took over while an admin had edits open here.
+  const draft = locked && provider ? draftOf(provider) : editDraft;
   const keyCleared = draft.api_key === "" && provider?.has_api_key === true;
-  const dirty =
-    !provider ||
+  const edited =
     draft.name !== initial.name ||
     draft.base_url !== initial.base_url ||
     draft.api_key !== undefined ||
     draft.capabilities.join() !== initial.capabilities.join();
+  const dirty = !provider || (!locked && edited);
   const busy = create.isPending || update.isPending || remove.isPending;
   // The server refuses to carry a saved key to another host unasked.
   const keyMustBeRetyped =
