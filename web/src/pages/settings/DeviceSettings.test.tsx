@@ -139,7 +139,7 @@ describe("DeviceSettings capability discovery", () => {
       }),
     );
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Device controls stay unavailable until Vio confirms which settings this server supports.",
+      "Device controls stay unavailable until Silo confirms which settings this server supports.",
     );
     expect(screen.queryByText("Editable device defaults")).not.toBeInTheDocument();
 
