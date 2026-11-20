@@ -5396,6 +5396,13 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 			var retryRemaining time.Duration
 			lastProbedInput := ""
 			anchorBudgetElapsed := false
+			// indexBudgetElapsed marks the specific case where the keyframe
+			// index itself could not be read inside this start's budget. That
+			// is not a verdict on the release and not a reason to fail the
+			// start: the copied stream can begin from the requested position
+			// exactly as it did before the anchor existed, so the start
+			// degrades instead of answering a retryable seek error.
+			indexBudgetElapsed := false
 			var err error
 			var cancelAttempt context.CancelFunc = func() {}
 			defer func() { cancelAttempt() }()
@@ -5407,6 +5414,7 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 				// context whose budget is the reason for retrying.
 				cancelAttempt()
 				resolveFailure = nil
+				indexBudgetElapsed = false
 				attemptStarted := time.Now()
 				attemptBudget, reserved, remaining := copySeekAnchorAttemptBudget(ctx, copySeekAnchorResolveBudgetFor(file), attempt == 1)
 				if attempt == 1 {
@@ -5534,6 +5542,7 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 				// context still has time left.
 				anchorBudgetElapsed = err != nil && ctx.Err() == nil &&
 					(probeCtx.Err() != nil || errors.Is(err, context.DeadlineExceeded))
+				indexBudgetElapsed = anchorBudgetElapsed
 				probeCancel()
 				recordVirtualProviderLinkLatency(linkKey, time.Since(attemptStarted), time.Now())
 				if err == nil || ctx.Err() != nil || attempt == 2 {
@@ -5608,6 +5617,23 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 					// lookup classified, exactly as it did before the anchor
 					// could retry.
 					return preparedTimelineV3{}, resolveFailure
+				}
+				if indexBudgetElapsed && ctx.Err() == nil {
+					// The keyframe index could not be read inside the start
+					// budget (a slow provider, not a verdict on the release).
+					// Fail the start no longer: begin the copied stream from the
+					// requested position with the non-anchored timeline it had
+					// before the anchor existed. The plan reports the requested
+					// origin and copy_seek_anchor_resolved=false, so the client
+					// and the transport see exactly the unanchored shape.
+					slog.WarnContext(ctx, "copy-video seek anchor unavailable inside the start budget; starting from the requested position without it",
+						"component", "api",
+						"playback_session_id", session.ID,
+						"requested_seek_seconds", requested,
+						"error", err,
+					)
+					configureCopyRemuxTimelineV3(result.Plan, requested)
+					return preparedTimelineV3{seekSeconds: requested, streamOriginSeconds: requested}, nil
 				}
 				// A transient relay failure or our own anchor budget expiring is
 				// not evidence against the release: the enclosing start may

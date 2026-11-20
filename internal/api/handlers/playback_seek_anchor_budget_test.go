@@ -549,13 +549,13 @@ func TestCopySeekAnchorAttemptBudgetReservesTheRetry(t *testing.T) {
 	}
 }
 
-// TestPrepareTransportTimelineRetryEndingOnADeadlineStaysRetryable proves a
-// retry that ends with a deadline error while its own probe context is still
-// live — the shape of a probe that inherited a spent flight — is classified as
-// our budget expiring, not as a verdict against the release. The player gets a
-// retryable seek error it can retry instead of a terminal that leaves it
-// reconnecting.
-func TestPrepareTransportTimelineRetryEndingOnADeadlineStaysRetryable(t *testing.T) {
+// TestPrepareTransportTimelineRetryEndingOnADeadlineStartsWithoutTheAnchor
+// proves a retry that ends with a deadline error while its own probe context is
+// still live — the shape of a probe that inherited a spent flight — is treated
+// as the keyframe index timing out, not as a verdict against the release. The
+// start degrades to the requested position instead of leaving the player
+// reconnecting on a retryable seek error.
+func TestPrepareTransportTimelineRetryEndingOnADeadlineStartsWithoutTheAnchor(t *testing.T) {
 	previousFloor, previousMargin := copySeekAnchorSeekResolveTimeout, copySeekProbeRetryMargin
 	copySeekAnchorSeekResolveTimeout, copySeekProbeRetryMargin = 100*time.Millisecond, 100*time.Millisecond
 	defer func() {
@@ -584,15 +584,15 @@ func TestPrepareTransportTimelineRetryEndingOnADeadlineStaysRetryable(t *testing
 		return 0, 0, fmt.Errorf("resolve copy seek anchor: ffmpeg failed: resolve copy seek anchor: probe interrupted: %w", context.DeadlineExceeded)
 	}
 
-	_, transportErr := handler.prepareTransportTimelineV3(callerCtx, session, file, playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux})
-	if transportErr == nil {
-		t.Fatal("a retry that ended on a deadline produced a timeline, want the retryable seek error")
+	timeline, transportErr := handler.prepareTransportTimelineV3(callerCtx, session, file, playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux})
+	if transportErr != nil {
+		t.Fatalf("transport error = %#v, want a start from the requested position without the anchor", transportErr)
 	}
-	if !transportErr.retryable || !transportErr.seekFailure {
-		t.Fatalf("transport error = %#v, want the retryable seek error instead of a terminal", transportErr)
+	if timeline.copySeekAnchorResolved {
+		t.Fatalf("timeline = %#v, want the unanchored shape", timeline)
 	}
-	if transportErr.reason != transcodeStartFailedReasonV3 {
-		t.Fatalf("transport reason = %q, want %q", transportErr.reason, transcodeStartFailedReasonV3)
+	if timeline.seekSeconds != plan.Timeline.SourceStartSeconds || timeline.streamOriginSeconds != plan.Timeline.SourceStartSeconds {
+		t.Fatalf("timeline = %#v, want seek and origin at the requested %v s", timeline, plan.Timeline.SourceStartSeconds)
 	}
 	if got := probes.Load(); got != 2 {
 		t.Fatalf("anchor probes = %d, want the timed-out attempt and its retry", got)

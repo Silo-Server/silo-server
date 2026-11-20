@@ -3950,6 +3950,12 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		SourceDurationSeconds: float64(file.Duration),
 		SourceBitrateKbps:     file.Bitrate,
 	}
+	// The page wait ledger is per track so a re-anchoring retry cannot restart
+	// it, but it belongs to the playback session that opened it: a new session
+	// must pay its own measured wait instead of inheriting a spent one.
+	if session != nil {
+		opts.PageWaitScope = session.ID
+	}
 	// Virtual sources are provider-neutral URIs, not FFmpeg inputs. Resolve
 	// through the relay so ffmpeg reads the real stream. Subtitle extraction
 	// spawns its own ffmpeg independent of the video pipeline, so it must
