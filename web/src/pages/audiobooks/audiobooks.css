@@ -23,9 +23,9 @@
       ),
       linear-gradient(
         180deg,
-        color-mix(in srgb, var(--ambient, var(--background)) 34%, var(--background)) 0%,
-        color-mix(in srgb, var(--ambient, var(--background)) 12%, var(--background)) 55%,
-        var(--background) 100%
+        color-mix(in srgb, var(--ambient, var(--background)) 34%, transparent) 0%,
+        color-mix(in srgb, var(--ambient, var(--background)) 12%, transparent) 55%,
+        transparent 100%
       );
   }
 
@@ -94,14 +94,14 @@
     }
   }
 
-  @media (min-width: 64rem) {
+  @media (min-width: 48rem) {
     .audiobook-detail-grid {
-      grid-template-columns: 16.25rem minmax(0, 1fr);
+      grid-template-columns: 13.5rem minmax(0, 1fr);
       grid-template-rows: auto 1fr;
       grid-template-areas:
         "side head"
         "side body";
-      gap: 2rem 3.5rem;
+      gap: 1.75rem 2.5rem;
       align-items: start;
     }
 
@@ -118,6 +118,13 @@
     .audiobook-detail-cover,
     .audiobook-detail-actions {
       grid-area: auto;
+    }
+  }
+
+  @media (min-width: 64rem) {
+    .audiobook-detail-grid {
+      grid-template-columns: 16.25rem minmax(0, 1fr);
+      gap: 2rem 3.5rem;
     }
   }
 }
