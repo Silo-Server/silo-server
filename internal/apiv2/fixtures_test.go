@@ -1782,6 +1782,10 @@ func fixtureCases() []fixtureCase {
 			scenario: "The declaration is pending before the plugin is installed.",
 			method:   http.MethodGet, path: Prefix + "/admin/plugins/provisioning-status", headers: actingRequestAdmin,
 			status: http.StatusOK, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/CollectionAdminPluginProvisionStatus"},
+		fixtureCase{name: "get_profile_section_baseline_ok", operationID: "getProfileSectionBaseline",
+			scenario: "The home page's pre-override server section baseline: opaque tokens for the server rows in libraries the profile is allowed, plus the pre-override visible server rows.",
+			method:   http.MethodGet, path: "/api/v2/profile/sections/baseline", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileSectionBaseline"},
 	)
 }
 

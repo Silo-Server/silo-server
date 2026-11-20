@@ -11114,6 +11114,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/profile/sections/baseline": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one page's pre-override server section baseline for home layout export and import. */
+    get: operations["getProfileSectionBaseline"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/profile/sections/flags": {
     parameters: {
       query?: never;
@@ -33312,6 +33329,45 @@ export interface components {
        */
       pin: string;
     };
+    ProfileSectionBaseline: {
+      /** @description Opaque server-keyed tokens, bound to the acting profile, for every server section on this page in a library the profile is allowed (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically. Rows tied to libraries the profile isn't allowed are left out. */
+      section_tokens: string[];
+      /** @description Pre-override active server sections the acting profile's access policy permits, in display order */
+      visible_sections: components["schemas"]["ProfileSectionBaselineRow"][];
+    };
+    ProfileSectionBaselineRow: {
+      /** @example s-continue-watching */
+      id: string;
+      /**
+       * @description The recipe; the set is extensible
+       * @example continue_watching
+       */
+      section_type: string;
+      /**
+       * @description The server's title for this row before any profile overrides
+       * @example Continue Watching
+       */
+      title: string;
+      /**
+       * @description Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none
+       * @example {
+       *       "library": "Movies"
+       *     }
+       */
+      title_args?: {
+        [key: string]: string;
+      };
+      /**
+       * @description Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present
+       * @example home.section.recentlyAddedIn
+       */
+      title_key?: string;
+      /**
+       * @description Opaque server-keyed token identifying this server section on this page for the acting profile, for layout export and import comparisons
+       * @example m3s9R1pQv8fK2nL7wX4yZA
+       */
+      token: string;
+    };
     ProfileSectionFlags: {
       /**
        * @deprecated
@@ -33319,6 +33375,11 @@ export interface components {
        * @example true
        */
       allow_profile_custom_sections: boolean;
+      /**
+       * @description True when this server serves getProfileSectionBaseline, so a home layout export can record the server's rows and an import on this server can offer to hide rows added since.
+       * @example true
+       */
+      home_layout_baseline: boolean;
     };
     ProfileSectionSetting: {
       /** @description The recipe's effective config; absent when none, {} when explicitly empty */
@@ -136002,6 +136063,117 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getProfileSectionBaseline: {
+    parameters: {
+      query?: {
+        /** @description The library; required when scope is library and refused otherwise */
+        library_id?: string;
+        /** @description The page the overrides apply to */
+        scope?: "home" | "library";
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProfileSectionBaseline"];
+        };
       };
       /** @description Bad Request */
       400: {
