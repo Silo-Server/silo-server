@@ -250,6 +250,7 @@ export default function SearchSettings() {
                   description={t("web.admin.settings.search.meili.index.description")}
                   disabled={!meiliEnabled}
                   restartRequired={restartKeys.has("catalog.search.meilisearch.index")}
+                  managedByEnv={form.envVar("catalog.search.meilisearch.index")}
                 />
                 <SettingField
                   label={t("web.admin.settings.search.meili.timeout.label")}

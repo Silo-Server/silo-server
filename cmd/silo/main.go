@@ -978,7 +978,7 @@ func main() {
 	migrationWait := database.MigrationWait()
 	startupMigrations := database.StartupOptions{
 		Wait:          migrationWait,
-		BeforeMigrate: beforeMigrateBackup(bc, pool, dataCipher, migrationWait),
+		BeforeMigrate: beforeMigrateBackup(bc, pool, dataCipher, migrationWait, envSettings),
 	}
 
 	if *migrateOnly {

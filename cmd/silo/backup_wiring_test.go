@@ -154,7 +154,7 @@ func TestBeforeMigrateBackupOnAnOldSchemaDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hook := beforeMigrateBackup(bc, db.pool, cipher, time.Minute)
+	hook := beforeMigrateBackup(bc, db.pool, cipher, time.Minute, nil)
 	otherServer := backup.New(backup.Options{Pool: db.pool, Locker: backup.PostgresLocker{Pool: db.pool}})
 	var checked bool
 	err = database.MigrateAtStartup(ctx, db.pool, migrations.FS, "sql", database.StartupOptions{
@@ -259,4 +259,24 @@ func passwordless(t *testing.T, raw string) string {
 		u.User = url.User(u.User.Username())
 	}
 	return u.String()
+}
+
+type storedBackupSettings map[string]string
+
+func (s storedBackupSettings) Get(_ context.Context, key string) (string, error) { return s[key], nil }
+
+// A SILO_BACKUP_* variable set in the deploy that also upgrades applies to the
+// backup taken before the migrations, which runs before startup stores it.
+func TestEnvBackupSettingsOverlayStored(t *testing.T) {
+	values := map[string]string{"SILO_BACKUP_ENABLED": "false", "SILO_SMTP_HOST": "smtp.example.com"}
+	env, err := config.ReadEnvSettings(func(name string) string { return values[name] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := withEnvBackupSettings(storedBackupSettings{"backup.enabled": "true", "backup.keep": "9", "email.smtp_host": "stored"}, env)
+	for key, want := range map[string]string{"backup.enabled": "false", "backup.keep": "9", "email.smtp_host": "stored"} {
+		if got, _ := settings.Get(t.Context(), key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
 }

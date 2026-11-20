@@ -63,7 +63,7 @@ func newBackupService(pool *pgxpool.Pool, bc *config.BootstrapConfig, settings *
 // through the migrations. It runs before this release's schema exists, so
 // it reads only the server_settings rows the previous release left, with
 // defaults for the rest, and publishes no status.
-func beforeMigrateBackup(bc *config.BootstrapConfig, pool *pgxpool.Pool, cipher *secret.Cipher, wait time.Duration) func(context.Context) (database.Guard, error) {
+func beforeMigrateBackup(bc *config.BootstrapConfig, pool *pgxpool.Pool, cipher *secret.Cipher, wait time.Duration, env config.EnvSettings) func(context.Context) (database.Guard, error) {
 	return func(ctx context.Context) (database.Guard, error) {
 		skip := backup.SkipBeforeUpgradeFromEnv()
 		opts, err := upgradeBackupOptions(ctx, pool, bc, cipher)
@@ -74,6 +74,9 @@ func beforeMigrateBackup(bc *config.BootstrapConfig, pool *pgxpool.Pool, cipher 
 			}
 			// Skipping needs only the lock the migrations run under.
 			opts = backup.Options{Pool: pool, Locker: backup.PostgresLocker{Pool: pool}}
+		}
+		if opts.Settings != nil {
+			opts.Settings = withEnvBackupSettings(opts.Settings, env)
 		}
 		// Rotation after the backup keeps a queued restore's source, read
 		// from the admin jobs (Options.ActiveRestore). On a schema the job
@@ -90,6 +93,37 @@ func beforeMigrateBackup(bc *config.BootstrapConfig, pool *pgxpool.Pool, cipher 
 		}
 		return held, nil
 	}
+}
+
+// envBackupSettings lays the backup settings the environment sets
+// (SILO_BACKUP_*) over the stored ones. The backup before migrations runs
+// before startup stores the environment's values, so without it a variable
+// set in the same deploy, such as SILO_BACKUP_ENABLED=false, would not apply
+// to that backup. A --migrate-only run reads no environment settings, as no
+// maintenance command does, so it backs up by the stored ones.
+type envBackupSettings struct {
+	backup.SettingsReader
+	values map[string]string
+}
+
+func withEnvBackupSettings(stored backup.SettingsReader, env config.EnvSettings) backup.SettingsReader {
+	values := map[string]string{}
+	for key, value := range env.Values(config.EnvScopeStored) {
+		if strings.HasPrefix(key, "backup.") {
+			values[key] = value
+		}
+	}
+	if len(values) == 0 {
+		return stored
+	}
+	return envBackupSettings{SettingsReader: stored, values: values}
+}
+
+func (s envBackupSettings) Get(ctx context.Context, key string) (string, error) {
+	if value, ok := s.values[key]; ok {
+		return value, nil
+	}
+	return s.SettingsReader.Get(ctx, key)
 }
 
 // upgradeBackupOptions builds the backup service's options from the

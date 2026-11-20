@@ -39,6 +39,8 @@ export function BackupScheduleSettings({ form }: { form: SettingsForm }) {
   const timeId = useId();
   const keepId = useId();
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
+  const timeEnv = form.envVar(BACKUP_TIME_KEY);
+  const keepEnv = form.envVar(BACKUP_KEEP_KEY);
   return (
     <>
       <FieldGroup
@@ -53,18 +55,21 @@ export function BackupScheduleSettings({ form }: { form: SettingsForm }) {
           description={t("web.admin.backups.schedule.enabledDescription")}
           value={form.getValue(BACKUP_ENABLED_KEY)}
           onChange={(value) => form.setValue(BACKUP_ENABLED_KEY, value)}
+          managedByEnv={form.envVar(BACKUP_ENABLED_KEY)}
         />
         <SettingFieldRow
           label={t("web.admin.backups.schedule.time")}
           htmlFor={timeId}
           dirty={form.isDirty(BACKUP_TIME_KEY)}
           description={t("web.admin.backups.schedule.timeDescription")}
+          managedByEnv={timeEnv}
         >
           <Input
             id={timeId}
             type="time"
             step={60}
             required
+            disabled={timeEnv != null}
             value={form.getValue(BACKUP_TIME_KEY)}
             onChange={(event) => form.setValue(BACKUP_TIME_KEY, event.target.value)}
             className={cn("border-muted-foreground/25", SETTINGS_NUMBER_WIDTH, "sm:w-32")}
@@ -76,6 +81,7 @@ export function BackupScheduleSettings({ form }: { form: SettingsForm }) {
           dirty={form.isDirty(BACKUP_KEEP_KEY)}
           description={t("web.admin.backups.schedule.keepDescription")}
           unit={t("web.admin.backups.schedule.keepUnit")}
+          managedByEnv={keepEnv}
         >
           <Input
             id={keepId}
@@ -83,6 +89,7 @@ export function BackupScheduleSettings({ form }: { form: SettingsForm }) {
             min={1}
             max={60}
             step={1}
+            disabled={keepEnv != null}
             value={form.getValue(BACKUP_KEEP_KEY)}
             onChange={(event) => form.setValue(BACKUP_KEEP_KEY, event.target.value)}
             className={cn("border-muted-foreground/25", SETTINGS_NUMBER_WIDTH)}
@@ -102,6 +109,7 @@ export function BackupScheduleSettings({ form }: { form: SettingsForm }) {
           description={t("web.admin.backups.content.introDescription")}
           value={form.getValue(BACKUP_INTRO_KEY)}
           onChange={(value) => form.setValue(BACKUP_INTRO_KEY, value)}
+          managedByEnv={form.envVar(BACKUP_INTRO_KEY)}
         />
         <SettingField
           label={t("web.admin.backups.content.subtitles")}
@@ -110,6 +118,7 @@ export function BackupScheduleSettings({ form }: { form: SettingsForm }) {
           description={t("web.admin.backups.content.subtitlesDescription")}
           value={form.getValue(BACKUP_SUBTITLES_KEY)}
           onChange={(value) => form.setValue(BACKUP_SUBTITLES_KEY, value)}
+          managedByEnv={form.envVar(BACKUP_SUBTITLES_KEY)}
         />
       </FieldGroup>
     </>

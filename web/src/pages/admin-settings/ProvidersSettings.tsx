@@ -452,6 +452,7 @@ function SubtitleProviderTile({
 
 function MDBListTile({
   sensitiveConfigured,
+  managedByEnv,
   restartKeys,
   expanded,
   onExpand,
@@ -460,6 +461,8 @@ function MDBListTile({
   onTested,
 }: {
   sensitiveConfigured: string[];
+  /** The variable that sets the key from the server's environment, if any. */
+  managedByEnv?: string;
   restartKeys: RestartKeyMatcher;
   expanded: boolean;
   onExpand: () => void;
@@ -474,6 +477,7 @@ function MDBListTile({
   const [testing, setTesting] = useState(false);
 
   const configured = sensitiveConfigured.includes("mdblist.api_key");
+  const managed = managedByEnv != null;
   const hasDraft = apiKey.trim() !== "";
   useReportUnsavedChanges(hasDraft);
 
@@ -580,18 +584,21 @@ function MDBListTile({
           setApiKey(next);
         }}
         restartRequired={restartKeys.has("mdblist.api_key")}
+        managedByEnv={managedByEnv}
       />
       <ProviderPanelActions test={test}>
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => void save()}
-          disabled={updateSettings.isPending}
-        >
-          {updateSettings.isPending
-            ? t("web.admin.settings.providers.mdblist.saving")
-            : t("common.save")}
-        </Button>
+        {managed ? null : (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => void save()}
+            disabled={updateSettings.isPending}
+          >
+            {updateSettings.isPending
+              ? t("web.admin.settings.providers.mdblist.saving")
+              : t("common.save")}
+          </Button>
+        )}
         <Button
           type="button"
           size="sm"
@@ -603,7 +610,7 @@ function MDBListTile({
             ? t("web.admin.settings.providers.mdblist.testing")
             : t("web.admin.settings.providers.mdblist.testConnection")}
         </Button>
-        {configured ? (
+        {configured && !managed ? (
           <DisconnectButton
             title={t("web.admin.settings.providers.mdblist.clearTitle")}
             description={t("web.admin.settings.providers.mdblist.clearDescription")}
@@ -683,6 +690,7 @@ export default function ProvidersSettings() {
           <ProviderTileGrid>
             <MDBListTile
               sensitiveConfigured={form.sensitiveConfigured}
+              managedByEnv={form.envVar("mdblist.api_key")}
               restartKeys={restartKeys}
               expanded={expandedTile === "mdblist"}
               onExpand={() => setExpandedTile("mdblist")}
