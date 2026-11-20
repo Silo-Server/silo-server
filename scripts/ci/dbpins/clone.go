@@ -7,129 +7,36 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
-	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Every package's tests run against their own copy of the migrated database.
-// go test runs the listed packages in parallel, and on one shared database
-// they saw each other's rows, advisory locks and planner statistics: a
-// MAX(id)+1 seed collided with another package's insert, and a plan test
-// flipped when another package changed the table it read.
-//
-// dbpins passes itself to go test as -exec. go test then starts each test
-// binary through it, with the template's URL in cloneTemplateEnv; the wrapper
-// copies the template into a new database, points the binary at the copy, and
-// drops the copy when the binary exits. Every copy a run makes is named with
-// the run's token in cloneRunEnv, so the run drops any copy a killed wrapper
-// left behind, and runs from other checkouts on the same server are untouched.
-const (
-	cloneTemplateEnv = "DBPINS_CLONE_TEMPLATE"
-	cloneRunEnv      = "DBPINS_CLONE_RUN"
-	clonePrefix      = "dbpins_"
-)
+// Every shard runs against its own copy of the migrated database. Packages and
+// shards run in parallel, and on one shared database they saw each other's
+// rows, advisory locks and planner statistics: a MAX(id)+1 seed collided with
+// another package's insert, and a plan test flipped when another package
+// changed the table it read. Every copy a run makes is named with the run's
+// token so cleanup drops any copy a killed worker left behind, and runs from
+// other checkouts on the same server are untouched.
+const clonePrefix = "dbpins_"
 
-// databaseURLEnvs name the variables a test reads its database from. The
-// wrapper repoints each one that names the template.
+// databaseURLEnvs name the variables a test reads its database from.
+// cloneEnv repoints each one that names the template.
 var databaseURLEnvs = []string{"SILO_TEST_DATABASE_URL", "SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL"}
 
-// setUpClones returns the -exec value that runs each test binary through
-// this command and the run's token. It copies the template once first, so a
-// database that cannot be copied fails here rather than once per package.
-func setUpClones(template string) (execPath, run string, err error) {
-	self, err := os.Executable()
-	if err != nil {
-		return "", "", err
-	}
-	if execPath, err = execArg(self); err != nil {
-		return "", "", err
-	}
-	if run, err = newRunToken(); err != nil {
-		return "", "", err
-	}
-	ctx := context.Background()
-	name, _, err := cloneDatabase(ctx, template, run, "preflight")
-	if err != nil {
-		return "", "", err
-	}
-	if err := dropDatabase(ctx, template, name); err != nil {
-		return "", "", err
-	}
-	return execPath, run, nil
-}
-
-// runCloned is the -exec wrapper: argv is the test binary and its flags.
-func runCloned(template string, argv []string) int {
-	if len(argv) == 0 {
-		fmt.Fprintln(os.Stderr, "dbpins: no test binary to run")
-		return 2
-	}
-	ctx := context.Background()
-	dir, _ := os.Getwd()
-	clone, cloneURL, err := cloneDatabase(ctx, template, os.Getenv(cloneRunEnv), dir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "dbpins: %v\n", err)
-		return 1
-	}
-	defer func() {
-		if err := dropDatabase(context.Background(), template, clone); err != nil {
-			fmt.Fprintf(os.Stderr, "dbpins: %v\n", err)
-		}
-	}()
-
-	// go test signals only the process it started, which is this wrapper: a
-	// timeout sends SIGQUIT for the test binary's goroutine dump. Handled
-	// signals reset to their default in the child, so the binary still dies on
-	// each one it is sent.
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
-	defer signal.Stop(signals)
-
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // go test hands -exec the test binary it built and its flags; no shell is invoked
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	cmd.Env = cloneEnv(os.Environ(), template, cloneURL)
-	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "dbpins: %v\n", err)
-		return 1
-	}
-	go func() {
-		for sig := range signals {
-			_ = cmd.Process.Signal(sig)
-		}
-	}()
-	err = cmd.Wait()
-	var exitErr *exec.ExitError
-	switch {
-	case err == nil:
-		return 0
-	case errors.As(err, &exitErr) && exitErr.ExitCode() >= 0:
-		return exitErr.ExitCode()
-	default:
-		fmt.Fprintf(os.Stderr, "dbpins: %v\n", err)
-		return 1
-	}
-}
-
-// cloneEnv drops the wrapper's own variables and repoints every database
-// variable that names the template at the clone.
+// cloneEnv repoints every database variable that names the template at the
+// clone.
 func cloneEnv(environ []string, template, cloneURL string) []string {
 	env := make([]string, 0, len(environ))
 	for _, kv := range environ {
 		key, value, _ := strings.Cut(kv, "=")
-		switch {
-		case key == cloneTemplateEnv || key == cloneRunEnv:
-			continue
-		case slices.Contains(databaseURLEnvs, key) && sameDatabase(value, template):
+		if slices.Contains(databaseURLEnvs, key) && sameDatabase(value, template) {
 			kv = key + "=" + cloneURL
 		}
 		env = append(env, kv)
@@ -310,19 +217,4 @@ func parseDatabaseURL(dsn string) (*url.URL, error) {
 		return nil, errors.New("SILO_TEST_DATABASE_URL must be a postgres:// URL; pass -shared for another form")
 	}
 	return u, nil
-}
-
-// execArg quotes path for go test's -exec, which splits its value on spaces
-// and honors quotes.
-func execArg(path string) (string, error) {
-	if !strings.ContainsAny(path, " \t\n'\"") {
-		return path, nil
-	}
-	if !strings.Contains(path, "'") {
-		return "'" + path + "'", nil
-	}
-	if !strings.Contains(path, `"`) {
-		return `"` + path + `"`, nil
-	}
-	return "", fmt.Errorf("cannot pass %q to go test -exec; build dbpins to a path without quotes", path)
 }

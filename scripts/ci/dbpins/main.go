@@ -53,10 +53,6 @@ type pin struct {
 var testName = regexp.MustCompile(`^Test[A-Za-z0-9_]*$`)
 
 func main() {
-	if template := os.Getenv(cloneTemplateEnv); template != "" {
-		os.Exit(runCloned(template, os.Args[1:]))
-	}
-
 	var lists listFlag
 	flag.Var(&lists, "list", "file naming the pinned tests; repeat to run several lists in one pass")
 	shared := flag.Bool("shared", false, "run every package against SILO_TEST_DATABASE_URL instead of a copy of it")
@@ -70,35 +66,59 @@ func main() {
 		fail(err)
 	}
 	// GOWORK=off: in a workspace, go list -m prints every module.
-	listModule := exec.Command("go", "list", "-m")
+	listModule := exec.CommandContext(context.Background(), "go", "list", "-m")
 	listModule.Env = append(os.Environ(), "GOWORK=off")
 	module, err := listModule.Output()
 	if err != nil {
 		fail(fmt.Errorf("go list -m: %w", err))
 	}
 
-	args := goTestArgs(pins, *shared)
-	env := os.Environ()
 	template := os.Getenv("SILO_TEST_DATABASE_URL")
-	run := ""
+	var (
+		res     *results
+		run     string
+		waitErr error
+	)
 	switch {
 	case template == "":
 		fmt.Println("dbpins: SILO_TEST_DATABASE_URL is not set, so every pin will skip")
-	case !*shared:
-		var execPath string
-		if execPath, run, err = setUpClones(template); err != nil {
-			fail(err)
+		res, waitErr = runDirect(pins, *shared)
+	case *shared:
+		res, waitErr = runDirect(pins, true)
+	default:
+		// Ctrl-C reaches test binaries through the process group; stay up to
+		// drop this run's database copies once they exit.
+		signal.Notify(make(chan os.Signal, 1), os.Interrupt)
+		res, run, waitErr = runSharded(context.Background(), pins, template)
+		if run != "" {
+			if dropErr := dropRunClones(template, run); dropErr != nil {
+				fmt.Fprintf(os.Stderr, "dbpins: %v\n", dropErr)
+			}
 		}
-		args = slices.Insert(args, 1, "-exec", execPath)
-		env = append(env, cloneTemplateEnv+"="+template, cloneRunEnv+"="+run)
+		if res == nil {
+			fail(waitErr)
+		}
 	}
 
-	// Ctrl-C reaches go test and the test binaries through the process
-	// group; stay up to drop this run's database copies once they exit.
-	signal.Notify(make(chan os.Signal, 1), os.Interrupt)
+	report, problems := res.check(pins, strings.TrimSpace(string(module)))
+	fmt.Print(report)
+	if waitErr != nil && len(problems) == 0 {
+		// A test binary or go test failed without a failing test to show for it.
+		problems = append(problems, "go test: "+waitErr.Error())
+	}
+	if len(problems) > 0 {
+		fmt.Printf("\n::error::%d problem(s) running the pins in %s; a missing or skipped test fails like a failing one\n", len(problems), strings.Join(lists, " and "))
+		for _, problem := range problems {
+			fmt.Println("  " + problem)
+		}
+		os.Exit(1)
+	}
+	fmt.Printf("\ndbpins: all %d pins passed\n", len(pins))
+}
 
+func runDirect(pins []pin, shared bool) (*results, error) {
+	args := goTestArgs(pins, shared)
 	cmd := exec.CommandContext(context.Background(), "go", args...) //nolint:gosec // fixed go executable with separate arguments, no shell
-	cmd.Env = env
 	cmd.Stderr = os.Stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -114,30 +134,10 @@ func main() {
 		_, _ = io.Copy(io.Discard, stdout)
 	}
 	waitErr := cmd.Wait()
-	if run != "" {
-		// A wrapper killed by go test cannot drop its own copy.
-		if err := dropRunClones(template, run); err != nil {
-			fmt.Fprintf(os.Stderr, "dbpins: %v\n", err)
-		}
-	}
 	if readErr != nil {
 		fail(readErr)
 	}
-
-	report, problems := res.check(pins, strings.TrimSpace(string(module)))
-	fmt.Print(report)
-	if waitErr != nil && len(problems) == 0 {
-		// go test failed without a failing test to show for it.
-		problems = append(problems, "go test: "+waitErr.Error())
-	}
-	if len(problems) > 0 {
-		fmt.Printf("\n::error::%d problem(s) running the pins in %s; a missing or skipped test fails like a failing one\n", len(problems), strings.Join(lists, " and "))
-		for _, problem := range problems {
-			fmt.Println("  " + problem)
-		}
-		os.Exit(1)
-	}
-	fmt.Printf("\ndbpins: all %d pins passed\n", len(pins))
+	return res, waitErr
 }
 
 func fail(err error) {
@@ -209,10 +209,13 @@ func goTestArgs(pins []pin, shared bool) []string {
 		}
 		pinCounts[p.dir]++
 	}
-	// Give packages with many pins an early slot on their isolated databases.
-	// A caller using a shared database can still specify package order.
+	// Give slower packages and packages with many pins an early slot on their
+	// isolated databases. A caller using a shared database keeps manifest order.
 	if !shared {
 		slices.SortStableFunc(dirs, func(a, b string) int {
+			if c := cmp.Compare(packagePriority[b], packagePriority[a]); c != 0 {
+				return c
+			}
 			return cmp.Compare(pinCounts[b], pinCounts[a])
 		})
 	}

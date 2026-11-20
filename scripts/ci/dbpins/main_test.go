@@ -157,9 +157,8 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-// The wrapper repoints a database variable only when it names the template,
-// however its host, port and options are spelled, and never passes its own
-// variables on.
+// cloneEnv repoints a database variable only when it names the template,
+// however its host, port and options are spelled.
 func TestCloneEnv(t *testing.T) {
 	const template = "postgres://u:p@localhost:5432/silo_test?sslmode=disable"
 	const clone = "postgres://u:p@localhost:5432/dbpins_x?sslmode=disable"
@@ -167,8 +166,6 @@ func TestCloneEnv(t *testing.T) {
 		"SILO_TEST_DATABASE_URL=" + template,
 		"SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL=postgresql://u:p@127.0.0.1/other?dbname=silo_test",
 		"OTHER=" + template,
-		cloneTemplateEnv + "=" + template,
-		cloneRunEnv + "=abcd",
 	}, template, clone)
 	want := []string{
 		"SILO_TEST_DATABASE_URL=" + clone,
@@ -216,5 +213,84 @@ func TestCloneNameFitsPostgres(t *testing.T) {
 	}
 	if len(name) > 63 || !strings.HasPrefix(name, clonePrefix+"0123abcd_") || !strings.Contains(name, "another_long_package_name_") {
 		t.Fatalf("clone name %q (%d bytes)", name, len(name))
+	}
+}
+
+func TestPlanShardsSplitsHeavyPackagesAndPrioritizesSlowestFirst(t *testing.T) {
+	pins := []pin{
+		{"./internal/api/handlers", "TestH1"},
+		{"./internal/api/handlers", "TestH2"},
+		{"./internal/api/handlers", "TestH3"},
+		{"./internal/backup", "TestB1"},
+		{"./internal/backup", "TestB2"},
+		{"./internal/backup", "TestB3"},
+		{"./internal/backup", "TestB4"},
+		{"./internal/backup", "TestB5"},
+		{"./internal/catalog", "TestC1"},
+		{"./internal/catalog", "TestC2"},
+		{"./internal/catalog", "TestC3"},
+	}
+	shards := planShards(pins)
+	// Backup (4 shards) comes before catalog (2 shards), then handlers (1 shard).
+	if len(shards) != 7 {
+		t.Fatalf("len(shards) = %d, want 7: %+v", len(shards), shards)
+	}
+	for i := range 4 {
+		if shards[i].dir != "./internal/backup" || shards[i].total != 4 {
+			t.Fatalf("shards[%d] = %+v, want backup shard", i, shards[i])
+		}
+	}
+	if shards[4].dir != "./internal/catalog" || shards[5].dir != "./internal/catalog" {
+		t.Fatalf("shards[4..5] = %+v, want catalog shards", shards[4:6])
+	}
+	if shards[6].dir != "./internal/api/handlers" || shards[6].total != 1 {
+		t.Fatalf("shards[6] = %+v, want unsplit handlers shard", shards[6])
+	}
+
+	// Every listed pin appears in exactly one shard.
+	seen := make(map[pin]int, len(pins))
+	for _, s := range shards {
+		for _, test := range s.tests {
+			seen[pin{dir: s.dir, test: test}]++
+		}
+	}
+	for _, p := range pins {
+		if seen[p] != 1 {
+			t.Fatalf("pin %+v appeared %d times across shards", p, seen[p])
+		}
+	}
+}
+
+func TestBatchPackagesByBasenameAvoidsBinaryCollisions(t *testing.T) {
+	pkgs := []compiledPackage{
+		{dir: "./internal/a/store", importPath: "example.com/silo/internal/a/store"},
+		{dir: "./internal/b/store", importPath: "example.com/silo/internal/b/store"},
+		{dir: "./internal/c/other", importPath: "example.com/silo/internal/c/other"},
+	}
+	batches := batchPackagesByBasename(pkgs)
+	if len(batches) != 2 {
+		t.Fatalf("len(batches) = %d, want 2: %+v", len(batches), batches)
+	}
+	if len(batches[0]) != 2 || len(batches[1]) != 1 {
+		t.Fatalf("batch sizes = [%d %d], want [2 1]", len(batches[0]), len(batches[1]))
+	}
+}
+
+func TestResultsMergeCombinesShardOutputs(t *testing.T) {
+	merged := &results{tests: map[testKey]*testResult{}}
+	s1, err := readEvents(strings.NewReader(event("run", "internal/backup", "TestA", "")+event("pass", "internal/backup", "TestA", "")), func(string) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := readEvents(strings.NewReader(event("run", "internal/backup", "TestB", "")+event("fail", "internal/backup", "TestB", "")), func(string) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged.merge(s1)
+	merged.merge(s2)
+	_, problems := merged.check([]pin{{"./internal/backup", "TestA"}, {"./internal/backup", "TestB"}}, testModule)
+	want := []string{"FAIL ./internal/backup TestB"}
+	if !reflect.DeepEqual(problems, want) {
+		t.Fatalf("problems = %q, want %q", problems, want)
 	}
 }
