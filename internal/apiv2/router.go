@@ -557,16 +557,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	r.NotFound(notFound)
 
-	api := humachi.New(r, humaConfig())
+	api := humachi.New(r, runtimeHumaConfig())
 	var routeSnapshot []streamtelemetry.WalkedRoute
 	if deps.ObserveRoutes != nil {
-		api = huma.NewAPI(humaConfig(), &routeSnapshotAdapter{Adapter: api.Adapter(), routes: &routeSnapshot})
+		api = huma.NewAPI(runtimeHumaConfig(), &routeSnapshotAdapter{Adapter: api.Adapter(), routes: &routeSnapshot})
 	}
 	api.UseMiddleware(bufferStructuredResponse, observeOperation, defaultHeaders, deprecationHeaders, classGate(deps), observeIdentity, normalizeAccept, encodingGuard, mediaTypeGuard, queryGuard)
 
-	reg := &Registry{api: api, deps: deps}
+	reg := &Registry{api: api, deps: deps, skipBaseChecks: true}
 	registerAll(reg)
 	if deps.testRegister != nil {
+		reg.skipBaseChecks = false
 		deps.testRegister(reg)
 	}
 	// After registration: the 405 answer names the methods the registry
@@ -656,6 +657,12 @@ func nameMultipartForm(oapi *huma.OpenAPI, op *huma.Operation, media *huma.Media
 	name, _ := op.Metadata[metaFormSchema].(string)
 	if name == "" || media.Schema == nil || media.Schema.Ref != "" {
 		return
+	}
+	if reg, ok := oapi.Components.Schemas.(*runtimeSchemaRegistry); ok {
+		if reg.claimBaseFormSchema(name) {
+			media.Schema = &huma.Schema{Ref: schemaRefPrefix + name}
+			return
+		}
 	}
 	schemas := oapi.Components.Schemas.Map()
 	if prev, taken := schemas[name]; taken && prev != media.Schema {
