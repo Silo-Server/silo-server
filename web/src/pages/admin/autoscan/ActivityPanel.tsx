@@ -1,4 +1,4 @@
-import { useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import {
   ChevronRight,
   Clock,
@@ -484,7 +484,7 @@ function PollEventCard({
   event: AutoscanEvent;
   lookups: SourceLabelLookups;
   selected: boolean;
-  onInspect: (event: AutoscanEvent) => void;
+  onInspect: (event: AutoscanEvent, trigger?: HTMLElement | null) => void;
 }) {
   const t = useT();
   const hasActivity = event.changes_returned > 0 || event.scan_runs.length > 0;
@@ -516,7 +516,7 @@ function PollEventCard({
       ) : null}
       <button
         type="button"
-        onClick={() => onInspect(event)}
+        onClick={(mouseEvent) => onInspect(event, mouseEvent.currentTarget)}
         aria-haspopup="dialog"
         className={cn(
           "border-border/70 bg-muted/25 hover:bg-surface-hover focus-visible:ring-ring mt-3 flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs transition-colors focus-visible:ring-2 focus-visible:outline-none",
@@ -544,22 +544,30 @@ export function PollEventTable({
 }) {
   const t = useT();
   const [inspected, setInspected] = useState<{ id: number; snapshot: AutoscanEvent } | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
 
-  // Prefer the live event from the current page so scan statuses and results
-  // refresh while the inspector is open, falling back to the opened snapshot
-  // if pagination or a refresh moves that poll off-page.
-  const selectedEvent = inspected
-    ? (events.find((event) => event.id === inspected.id) ?? inspected.snapshot)
-    : null;
+  // Prefer the live event from the current page and keep the fallback snapshot
+  // up to date so scan statuses and results do not revert if pagination or a
+  // later refresh moves the inspected poll off-page.
+  const liveEvent = inspected ? events.find((event) => event.id === inspected.id) : undefined;
+  if (inspected && liveEvent && liveEvent !== inspected.snapshot) {
+    setInspected({ id: inspected.id, snapshot: liveEvent });
+  }
+  const selectedEvent = inspected ? (liveEvent ?? inspected.snapshot) : null;
 
-  function openInspector(event: AutoscanEvent) {
+  function openInspector(event: AutoscanEvent, trigger?: HTMLElement | null) {
+    returnFocusRef.current =
+      trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     setInspected({ id: event.id, snapshot: event });
   }
 
   function handleRowClick(mouseEvent: MouseEvent<HTMLTableRowElement>, event: AutoscanEvent) {
     if (window.getSelection()?.toString()) return;
     if ((mouseEvent.target as HTMLElement).closest("button, a, input, select, textarea")) return;
-    openInspector(event);
+    const trigger = mouseEvent.currentTarget.querySelector<HTMLElement>(
+      "[data-poll-details-trigger]",
+    );
+    openInspector(event, trigger);
   }
 
   return (
@@ -617,7 +625,8 @@ export function PollEventTable({
               <TableCell>
                 <button
                   type="button"
-                  onClick={() => openInspector(event)}
+                  data-poll-details-trigger
+                  onClick={(mouseEvent) => openInspector(event, mouseEvent.currentTarget)}
                   aria-haspopup="dialog"
                   className={cn(
                     "focus-visible:ring-ring -ms-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs whitespace-nowrap tabular-nums transition-colors focus-visible:ring-2 focus-visible:outline-none",
@@ -649,6 +658,14 @@ export function PollEventTable({
         lookups={lookups}
         librariesByID={librariesByID}
         onClose={() => setInspected(null)}
+        onCloseAutoFocus={(closeEvent) => {
+          const target = returnFocusRef.current;
+          returnFocusRef.current = null;
+          if (target?.isConnected) {
+            closeEvent.preventDefault();
+            target.focus();
+          }
+        }}
       />
     </>
   );

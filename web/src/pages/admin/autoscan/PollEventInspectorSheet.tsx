@@ -275,7 +275,10 @@ function PollEventInspectorBody({
         </div>
         <SheetDescription className="text-xs tabular-nums">{headerMeta}</SheetDescription>
         {event.error_message ? (
-          <div className="border-destructive/30 bg-destructive/10 text-destructive mt-1 rounded-md border px-3 py-2 text-xs [overflow-wrap:anywhere]">
+          <div
+            tabIndex={0}
+            className="border-destructive/30 bg-destructive/10 text-destructive focus-visible:ring-ring mt-1 max-h-32 overflow-y-auto overscroll-contain rounded-md border px-3 py-2 text-xs [overflow-wrap:anywhere] focus-visible:ring-2 focus-visible:outline-none"
+          >
             {event.error_message}
           </div>
         ) : null}
@@ -615,11 +618,13 @@ export function PollEventInspectorSheet({
   lookups,
   librariesByID,
   onClose,
+  onCloseAutoFocus,
 }: {
   event: AutoscanEvent | null;
   lookups: SourceLabelLookups;
   librariesByID: Map<number, Library>;
   onClose: () => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   return (
     <Sheet
@@ -630,6 +635,7 @@ export function PollEventInspectorSheet({
     >
       <SheetContent
         side="right"
+        onCloseAutoFocus={onCloseAutoFocus}
         className="flex h-full w-full flex-col gap-0 overflow-hidden overscroll-contain p-0 sm:max-w-2xl lg:max-w-4xl"
       >
         {event ? (

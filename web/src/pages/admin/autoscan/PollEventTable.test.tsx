@@ -233,4 +233,50 @@ describe("PollEventTable", () => {
     expect(within(dialog).getByText("01RUN002")).toBeInTheDocument();
     expect(within(dialog).queryByText("01RUN001")).not.toBeInTheDocument();
   });
+
+  it("restores focus to the opening Details button when closed", async () => {
+    const user = userEvent.setup();
+    const event = makeEvent();
+
+    render(<PollEventTable events={[event]} lookups={LOOKUPS} librariesByID={LIBRARIES} />);
+
+    const table = screen.getByRole("table");
+    const detailsButton = within(table).getByRole("button", { name: /2 paths/i });
+    await user.click(detailsButton);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(detailsButton).toHaveFocus();
+  });
+
+  it("preserves the latest observed scan update after the poll leaves the current page", async () => {
+    const user = userEvent.setup();
+    const initial = makeEvent({
+      changes: [],
+      scan_runs: [makeScanRun(0, { status: "running", result: undefined })],
+    });
+    const completed = makeEvent({
+      changes: [],
+      scan_runs: [makeScanRun(0, { status: "completed" })],
+    });
+
+    const { rerender } = render(
+      <PollEventTable events={[initial]} lookups={LOOKUPS} librariesByID={LIBRARIES} />,
+    );
+
+    const table = screen.getByRole("table");
+    await user.click(within(table).getByRole("button", { name: /2 paths/i }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("running")).toBeInTheDocument();
+
+    rerender(<PollEventTable events={[completed]} lookups={LOOKUPS} librariesByID={LIBRARIES} />);
+    expect(within(dialog).getByText("completed")).toBeInTheDocument();
+    expect(within(dialog).getByText("1 new")).toBeInTheDocument();
+
+    rerender(<PollEventTable events={[]} lookups={LOOKUPS} librariesByID={LIBRARIES} />);
+    expect(within(dialog).getByText("completed")).toBeInTheDocument();
+    expect(within(dialog).getByText("1 new")).toBeInTheDocument();
+  });
 });
