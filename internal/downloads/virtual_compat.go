@@ -3,6 +3,7 @@ package downloads
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"net/url"
 	"strings"
@@ -67,4 +68,20 @@ func (m *ArtifactManager) SetVirtualInputResolver(resolver VirtualInputResolver)
 	if resolver != nil {
 		m.triggerDrain()
 	}
+}
+
+// CancelAbandonedPrepare releases an artifact job whose last download row was
+// just deleted. RetireAbandonedPreparations re-checks the links inside the
+// deleting statement, so a request that attached since the caller looked keeps
+// the job, and a genuinely abandoned job stops this replica's attempt at once.
+func (m *ArtifactManager) CancelAbandonedPrepare(ctx context.Context, artifactID string) {
+	if m == nil || artifactID == "" || m.repo == nil {
+		return
+	}
+	retired, err := m.repo.RetireAbandonedPreparations(ctx, []string{artifactID})
+	if err != nil {
+		slog.WarnContext(ctx, "releasing an abandoned download preparation failed", "component", "downloads", "artifact_id", artifactID, "error", err)
+		return
+	}
+	m.announceRetired(ctx, retired)
 }

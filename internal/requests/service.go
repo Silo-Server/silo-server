@@ -186,6 +186,10 @@ func (s *Service) SetEntitlementResolver(r EntitlementResolver) { s.entitlements
 
 func (s *Service) SetGroupPolicyProvider(p access.GroupPolicyProvider) { s.groupProvider = p }
 
+// SetProfileStores wires the profile loader so a profile's own requests block
+// applies on top of the account's switch. Without it no profile is blocked.
+func (s *Service) SetProfileStores(stores userstore.UserStoreProvider) { s.profiles = stores }
+
 // SetUserRepository wires the account loader so the per-user requests_allowed
 // override is honored on top of the access group's gate.
 func (s *Service) SetUserRepository(users access.UserRepository) { s.users = users }
@@ -640,7 +644,7 @@ func (s *Service) Search(ctx context.Context, viewer Viewer, query string, media
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	mediaType, err := normalizeSearchMediaType(mediaType)
@@ -675,7 +679,7 @@ func (s *Service) getDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 		return nil, fmt.Errorf("request service is not configured")
 	}
 	ctx = withPolicyCache(ctx)
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	mediaType, err := normalizeMediaType(mediaType)
@@ -1009,7 +1013,19 @@ func (s *Service) ListMine(ctx context.Context, viewer Viewer, filter ListFilter
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
 		return nil, err
 	}
-	reqs, err := s.store.ListMine(ctx, viewer.UserID, normalizeListFilter(filter))
+	filter = normalizeListFilter(filter)
+	// The account's list holds every profile's requests. A profile blocked
+	// from requests sees only its own: the others' titles come from TMDB,
+	// which the block keeps it out of.
+	blocked, err := s.profileRequestsBlocked(ctx, viewer)
+	if err != nil {
+		return nil, err
+	}
+	filter.RequestedByProfileID = ""
+	if blocked {
+		filter.RequestedByProfileID = viewer.ProfileID
+	}
+	reqs, err := s.store.ListMine(ctx, viewer.UserID, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -1185,8 +1201,8 @@ func (s *Service) GetRequest(ctx context.Context, viewer Viewer, id string) (*Re
 	if err != nil {
 		return nil, err
 	}
-	if !viewer.IsAdmin && req.RequestedByUserID != viewer.UserID {
-		return nil, ErrForbidden
+	if err := s.ensureViewerMayManage(ctx, viewer, req); err != nil {
+		return nil, err
 	}
 	if err := s.attachTargets(ctx, req); err != nil {
 		return nil, err
@@ -1244,6 +1260,30 @@ func (s *Service) AdminCancel(ctx context.Context, viewer Viewer, id, reason str
 	return s.cancel(ctx, viewer, id, reason, true)
 }
 
+// ensureViewerMayManage refuses a request the viewer may not read or change:
+// another account's, or another profile's while this profile is blocked from
+// requests. A blocked profile keeps its own requests, since the account's list
+// is otherwise shared.
+func (s *Service) ensureViewerMayManage(ctx context.Context, viewer Viewer, req *Request) error {
+	if viewer.IsAdmin {
+		return nil
+	}
+	if req.RequestedByUserID != viewer.UserID {
+		return ErrForbidden
+	}
+	if req.RequestedByProfileID == viewer.ProfileID {
+		return nil
+	}
+	blocked, err := s.profileRequestsBlocked(ctx, viewer)
+	if err != nil {
+		return err
+	}
+	if blocked {
+		return ErrForbidden
+	}
+	return nil
+}
+
 // ownedRequest loads a request the viewer may withdraw or remove: its own
 // account's, or any for an admin. Requesters are refused while requests are
 // turned off; admins are not.
@@ -1260,8 +1300,8 @@ func (s *Service) ownedRequest(ctx context.Context, viewer Viewer, id string) (*
 	if err != nil {
 		return nil, err
 	}
-	if !viewer.IsAdmin && req.RequestedByUserID != viewer.UserID {
-		return nil, ErrForbidden
+	if err := s.ensureViewerMayManage(ctx, viewer, req); err != nil {
+		return nil, err
 	}
 	return req, nil
 }
@@ -1409,6 +1449,9 @@ func (s *Service) GetFeatureStatus(ctx context.Context, viewer Viewer) (FeatureS
 		// The account's own permission is left to the caller, which reads
 		// it for the request capability anyway.
 		status.WatchlistRequests = settings.WatchlistRequests && viewer.UserID != 0 && s.watchlistAutoRequest(ctx, viewer)
+		if status.ProfileRequestsBlocked, err = s.profileRequestsBlocked(ctx, viewer); err != nil {
+			return FeatureStatus{}, err
+		}
 	}
 	return status, nil
 }

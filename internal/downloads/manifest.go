@@ -182,6 +182,9 @@ type ManifestBuilder struct {
 	// artifact resolves a download's linked prepared artifact so artifact-backed
 	// manifests can describe the delivered file instead of the catalog source.
 	artifact func(ctx context.Context, id string) (*Artifact, error)
+	// originalSize resolves a provider-backed original's real size; nil leaves
+	// it unknown.
+	originalSize func(context.Context, *models.MediaFile) (int64, error)
 }
 
 type MarkerPopulationService interface {
@@ -212,6 +215,30 @@ func episodeSeriesID(dl *Download, detail *catalog.ItemDetail) string {
 	return detail.SeriesID
 }
 
+// applyVirtualOriginalManifestSize replaces a virtual original's catalog size
+// hint with the length its relay reports. The row has no local file to stat,
+// and the catalog hint is a rounded estimate that must not become an offline
+// expected byte count. A zero size means unknown.
+func (b *ManifestBuilder) applyVirtualOriginalManifestSize(ctx context.Context, dl *Download, file *models.MediaFile, filter catalog.AccessFilter) (*Download, error) {
+	if dl.Format != FormatOriginal || !isVirtualMediaFile(file) {
+		return dl, nil
+	}
+	if !catalog.FileAllowedByAccess(file, filter) {
+		return nil, catalog.ErrItemNotFound
+	}
+	resolved := *dl
+	resolved.FileSize = 0
+	if b.originalSize == nil {
+		return &resolved, nil
+	}
+	size, err := b.originalSize(ctx, file)
+	if err != nil {
+		return nil, err
+	}
+	resolved.FileSize = size
+	return &resolved, nil
+}
+
 // build is Build with an optional per-batch series-detail cache: a season
 // batch shares one series, so the batch endpoint resolves its detail once
 // instead of once per episode.
@@ -221,6 +248,10 @@ func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalo
 		return nil, err
 	}
 	file := b.lookupFile(ctx, dl.MediaFileID)
+	dl, err = b.applyVirtualOriginalManifestSize(ctx, dl, file, filter)
+	if err != nil {
+		return nil, err
+	}
 	var seriesDetail *catalog.ItemDetail
 	if seriesID := episodeSeriesID(dl, detail); seriesID != "" {
 		if cached, ok := seriesCache[seriesID]; ok {

@@ -157,6 +157,29 @@ func (r *fakeItemRepo) UpdateProvisionalArtwork(_ context.Context, read *models.
 	return true, nil
 }
 
+func (r *fakeItemRepo) UpdateStatus(_ context.Context, contentID, status string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.items[contentID]
+	if !ok {
+		return catalog.ErrItemNotFound
+	}
+	item.Status = status
+	return nil
+}
+
+func (r *fakeItemRepo) UpdateEpisodeMetadataState(_ context.Context, seriesID string, incomplete bool, lastCheckedAt *time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.items[seriesID]
+	if !ok {
+		return catalog.ErrItemNotFound
+	}
+	item.EpisodeMetadataIncomplete = incomplete
+	item.EpisodeMetadataLastCheckedAt = lastCheckedAt
+	return nil
+}
+
 func (r *fakeItemRepo) SetStatusUnlessMatched(_ context.Context, contentID, status string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

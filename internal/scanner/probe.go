@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,20 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
+)
+
+const (
+	maxFFprobeStreams  = 256
+	maxFFprobeChapters = 10000
+
+	// ffprobe's default analysis window (5 s / 5 MB) can finish against a
+	// relayed provider stream before any audio or video stream is visible:
+	// ffprobe exits 0 with an empty stream table, which callers then persist as
+	// a successful probe. These limits exceed the playback pipelines' caps
+	// (3 s / 5 MB — see playback/transcode.go and playback/remux.go) so the
+	// metadata probe sees the same stream table playback does.
+	probeAnalyzeDuration = "10M" // 10 s (10,000,000 us)
+	probeSizeLimit       = "32M" // 32 MiB
 )
 
 // ErrPrimaryVideoNotFound reports that FFprobe completed successfully but did
@@ -136,29 +151,20 @@ func probeMediaFile(ctx context.Context, ffprobePath string, filePath string, li
 	defer cancel()
 	// Errors go to stderr (kept on the *exec.ExitError) so IsProbeRejection
 	// can tell an unreadable source from damaged content; stdout stays JSON.
-	args := slices.Concat(limits.inputOptions, []string{
-		"-v", "error",
-		"-print_format", "json",
-		"-show_format",
-		"-show_streams",
-		"-show_chapters",
-		filePath,
-	})
-	cmd := fspath.CommandContext(probeCtx, ffprobePath, args...)
-	cmd.WaitDelay = limits.waitDelay
-
-	output, err := cmd.Output()
-	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, probeCtx.Err())
+	output, err := runFFprobeBounded(probeCtx, ctx, ffprobePath, filePath, buildProbeArgs(filePath, limits.inputOptions...), limits)
 	if err != nil {
-		if probeTimedOut(ctx, probeCtx) {
-			return nil, fmt.Errorf("%w: no result for %s within %s", errProbeTimeout, filePath, limits.probe)
-		}
-		return nil, fmt.Errorf("ffprobe failed for %s: %w", filePath, err)
+		return nil, err
 	}
 
 	var raw ffprobeOutput
 	if err := json.Unmarshal(output, &raw); err != nil {
 		return nil, fmt.Errorf("ffprobe JSON parse failed for %s: %w", filePath, err)
+	}
+	if len(raw.Streams) > maxFFprobeStreams {
+		return nil, fmt.Errorf("ffprobe returned %d streams (maximum %d)", len(raw.Streams), maxFFprobeStreams)
+	}
+	if len(raw.Chapters) > maxFFprobeChapters {
+		return nil, fmt.Errorf("ffprobe returned %d chapters (maximum %d)", len(raw.Chapters), maxFFprobeChapters)
 	}
 	if demuxer := guessedContainerDemuxer(raw.Format, filePath); demuxer != "" {
 		if err := confirmContainer(ctx, ffprobePath, filePath, demuxer, raw.Format, limits); err != nil {
@@ -270,20 +276,70 @@ func confirmContainer(ctx context.Context, ffprobePath, filePath, demuxer string
 // of 1 MiB.
 const probeWideFormatBytes = "5242880"
 
+// buildProbeArgs returns the bounded metadata-probe argv for ffprobe. It is
+// split out so tests can assert the remote-stream analysis limits without
+// executing a process. inputOptions come after the defaults so a caller's
+// deeper window wins, as ffprobe keeps the last value of a repeated option.
+func buildProbeArgs(filePath string, inputOptions ...string) []string {
+	args := []string{
+		"-v", "error",
+		"-print_format", "json",
+		"-show_format",
+		"-show_streams",
+		"-show_chapters",
+		"-probesize", probeSizeLimit,
+		"-analyzeduration", probeAnalyzeDuration,
+	}
+	args = append(args, inputOptions...)
+	return append(args, filePath)
+}
+
+// runFFprobeBounded runs one ffprobe argv and returns its stdout. Output is
+// capped at maxFFprobeOutputBytes: a provider-controlled source must not be
+// able to grow this process's memory with a stream table nobody will publish.
+// Errors go to stderr, kept on the *exec.ExitError, so IsProbeRejection can
+// tell an unreadable source from damaged content.
+func runFFprobeBounded(ctx context.Context, parent context.Context, ffprobePath, filePath string, args []string, limits probeLimits) ([]byte, error) {
+	cmd := toolCommandContext(ctx, ffprobePath, args...)
+	cmd.WaitDelay = limits.waitDelay
+
+	output := &boundedProbeBuffer{limit: maxFFprobeOutputBytes}
+	cmd.Stdout = output
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, ctx.Err())
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(exitErr.Stderr) == 0 {
+			exitErr.Stderr = stderr.Bytes()
+		}
+		// A producer may receive SIGPIPE after the bounded writer rejects its
+		// output, so the process error can mask the writer's sentinel.
+		if output.overflow || errors.Is(err, errFFprobeOutputTooLarge) {
+			return nil, errFFprobeOutputTooLarge
+		}
+		if probeTimedOut(parent, ctx) {
+			return nil, fmt.Errorf("%w: no result for %s within %s", errProbeTimeout, filePath, limits.probe)
+		}
+		return nil, fmt.Errorf("ffprobe failed for %s: %w", filePath, err)
+	}
+	// os/exec may report a successful process exit after its stdout copy
+	// goroutine consumed the Writer error. Keep an explicit overflow bit so a
+	// provider-controlled response can never fall through to JSON parsing.
+	if output.overflow {
+		return nil, errFFprobeOutputTooLarge
+	}
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, nil, ctx.Err())
+	return output.Bytes(), nil
+}
+
 // runFormatProbe runs ffprobe on filePath with inputOptions and returns its
 // JSON output, which holds the format without the streams.
 func runFormatProbe(ctx context.Context, ffprobePath, filePath string, limits probeLimits, inputOptions ...string) ([]byte, error) {
 	runCtx, cancel := context.WithTimeout(ctx, limits.probe)
 	defer cancel()
 	args := append(slices.Clone(inputOptions), "-v", "error", "-print_format", "json", "-show_entries", "format=format_name,probe_score", filePath)
-	cmd := fspath.CommandContext(runCtx, ffprobePath, args...)
-	cmd.WaitDelay = limits.waitDelay
-	output, err := cmd.Output()
-	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, runCtx.Err())
-	if err != nil && probeTimedOut(ctx, runCtx) {
-		return nil, fmt.Errorf("%w: no result for %s within %s", errProbeTimeout, filePath, limits.probe)
-	}
-	return output, err
+	return runFFprobeBounded(runCtx, ctx, ffprobePath, filePath, args, limits)
 }
 
 // IsProbeRejection reports whether err, returned by ProbeFile for filePath
@@ -488,6 +544,15 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 	if raw.Format.BitRate != "" {
 		if br, err := strconv.Atoi(raw.Format.BitRate); err == nil {
 			pd.Bitrate = br / 1000
+		}
+	}
+
+	// ffprobe's byte count for the container it read; virtual playback compares
+	// it with the row's declared size to catch a provider serving another
+	// release under the row's URL.
+	if raw.Format.Size != "" {
+		if size, err := strconv.ParseInt(raw.Format.Size, 10, 64); err == nil && size > 0 {
+			pd.FormatSize = size
 		}
 	}
 

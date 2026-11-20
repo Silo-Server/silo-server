@@ -3,6 +3,7 @@ package scanner
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 
@@ -45,11 +46,59 @@ func (b *boundedProbeBuffer) Write(p []byte) (int, error) {
 
 func (b *boundedProbeBuffer) Bytes() []byte { return b.buffer.Bytes() }
 
+// The fast preprobe trades the analysis window for speed: the identity fields
+// and a complete stream table are usually already in the file's header, and a
+// result without them escalates to the full probe (see virtualFastProbeUsable),
+// so the reduction never changes a verdict.
+const (
+	fastProbeSizeLimit       = "32"
+	fastProbeAnalyzeDuration = "0"
+	fastProbeFlags           = "+discardcorrupt+fastseek+nobuffer"
+	// fastProbeFFlagsOption names the fflags input option so the flag
+	// stays a single literal across the builder and its tests.
+	fastProbeFFlagsOption = "-fflags"
+)
+
+// buildFastProbeArgs returns the version-candidate preprobe argv. It is split
+// out so tests can assert the fast flags without executing a process.
+func buildFastProbeArgs(filePath string) []string {
+	return []string{
+		"-v", "error",
+		"-print_format", "json",
+		"-show_format",
+		"-show_streams",
+		"-show_chapters",
+		"-probesize", fastProbeSizeLimit,
+		"-analyzeduration", fastProbeAnalyzeDuration,
+		fastProbeFFlagsOption, fastProbeFlags,
+		filePath,
+	}
+}
+
 // probeFileFast runs the version-candidate preprobe. It stops before a packet
 // scan and before the first-frame read; a result that would need either is the
 // caller's signal to escalate to the full probe.
 func probeFileFast(ctx context.Context, ffprobePath string, filePath string) (*ProbeData, error) {
-	return probeFileStreamsOnly(ctx, ffprobePath, filePath)
+	return probeFileFastWithin(ctx, ffprobePath, filePath, defaultProbeLimits)
+}
+
+func probeFileFastWithin(ctx context.Context, ffprobePath string, filePath string, limits probeLimits) (*ProbeData, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, limits.probe)
+	defer cancel()
+	output, err := runFFprobeBounded(probeCtx, ctx, ffprobePath, filePath, buildFastProbeArgs(filePath), limits)
+	if err != nil {
+		return nil, err
+	}
+	var raw ffprobeOutput
+	if err := json.Unmarshal(output, &raw); err != nil {
+		return nil, fmt.Errorf("ffprobe JSON parse failed for %s: %w", filePath, err)
+	}
+	if len(raw.Streams) > maxFFprobeStreams {
+		return nil, fmt.Errorf("ffprobe returned %d streams (maximum %d)", len(raw.Streams), maxFFprobeStreams)
+	}
+	probe := convertProbeData(&raw)
+	applyMatroskaSubtitleTracks(ctx, filePath, probe)
+	return probe, nil
 }
 
 // impliedBitrateBps is the bitrate a file's size and duration imply. Callers

@@ -314,6 +314,15 @@ func ResolveSource(source SourceMetadata) SourceResolution {
 	if candidate == "" {
 		return SourceResolution{}
 	}
+	// The decoder takes the range from the bitstream before the container's
+	// tag, and the graphs see the decoder's value, so an explicit range on the
+	// first decoded frame overrides a stream tag that contradicts it. A track
+	// whose frame was not read yet keeps its tag until the scanner or the
+	// HDR10+ backfill reads it.
+	frameRange := normalizeColorValue(source.FrameColorRange)
+	if rangeIsFull(frameRange) || rangeIsLimited(frameRange) {
+		source.ColorRange = frameRange
+	}
 	// Full-range PQ graphs preserve the decoded range and therefore require
 	// explicit frame validation before execution.
 	if candidate == SourcePQ && rangeIsFull(normalizeColorValue(source.ColorRange)) {

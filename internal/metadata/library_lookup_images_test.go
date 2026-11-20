@@ -20,6 +20,21 @@ func seedImageChain(t *testing.T, service *MetadataService, folderID int, conten
 	}
 }
 
+// itemImageProvider is an image-capable provider stub: it answers every image
+// request with its fixed gallery.
+type itemImageProvider struct {
+	slug   string
+	images []RemoteImage
+}
+
+func (p *itemImageProvider) Slug() string       { return p.slug }
+func (p *itemImageProvider) Name() string       { return p.slug }
+func (p *itemImageProvider) ForTypes() []string { return []string{"series"} }
+
+func (p *itemImageProvider) GetImages(context.Context, ImageRequest) ([]RemoteImage, error) {
+	return p.images, nil
+}
+
 func TestDiscoverLibraryItemImagesUsesConfiguredImageProviders(t *testing.T) {
 	provider := &itemImageProvider{slug: "tmdb", images: []RemoteImage{
 		{ProviderID: "tmdb", URL: "tmdb://poster.jpg", Type: ImagePoster, Rating: 5},

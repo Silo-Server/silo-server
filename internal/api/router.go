@@ -1204,6 +1204,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			return itemRepo.CleanupRequestVirtualMedia(ctx, string(req.MediaType), req.TMDBID, tvdbID, req.IMDbID)
 		})
 		requestSvc.SetGroupPolicyProvider(accessGroupStore)
+		requestSvc.SetProfileStores(deps.UserStoreProvider)
 		if userRepo != nil {
 			requestSvc.SetUserRepository(userRepo)
 		}

@@ -98,6 +98,9 @@ type Capability struct {
 // from the request-scoped resolver methods below; a path alone is never an
 // authorization grant.
 type FileTarget struct {
+	// virtualFile is the provider-backed row a direct download serves through
+	// serveVirtualOriginal. Path is not readable for it.
+	virtualFile                  *models.MediaFile
 	Path                         string
 	DownloadID                   string
 	MediaFileID                  int
@@ -191,6 +194,7 @@ func (s *Service) SetOfflineDeps(detail ManifestSource, subs SubtitleSource, cli
 	})
 	s.manifest.MarkerPopulation = s.markerPopulation
 	s.manifest.externalTimings = s.externalTimings
+	s.manifest.originalSize = s.virtualOriginalSize
 	// A nil client leaves artwork fetches on artworkClient and its timeout.
 	s.httpClient = client
 }
@@ -452,6 +456,10 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 		return nil, catalog.ErrItemNotFound
 	}
 	if err := s.itemAccess.EnsureAccessible(ctx, file.ContentID, filter); err != nil {
+		return nil, err
+	}
+	file, err = s.resolveDownloadMetadata(ctx, file)
+	if err != nil {
 		return nil, err
 	}
 
@@ -1764,7 +1772,22 @@ func (s *Service) resolveDownloadBytesTarget(ctx context.Context, dl *Download, 
 	if !catalog.FileAllowedByAccess(file, filter) {
 		return nil, catalog.ErrItemNotFound
 	}
-	return &FileTarget{Path: file.FilePath, DownloadID: dl.ID, MediaFileID: file.ID, ProxyEligible: sourceProxyEligible}, nil
+	target := &FileTarget{Path: file.FilePath, DownloadID: dl.ID, MediaFileID: file.ID, ProxyEligible: sourceProxyEligible}
+	if isVirtualMediaFile(file) {
+		if s.virtualInput == nil {
+			return nil, ErrFormatUnavailable
+		}
+		// A row registered before probing committed has no container yet, so the
+		// delivery filename would fall back to .bin. Probe here, best effort: the
+		// download is servable either way and a metadata failure must not turn it
+		// into an error.
+		if probed, probeErr := s.resolveDownloadMetadata(ctx, file); probeErr == nil && probed != nil {
+			file = probed
+		}
+		target.virtualFile = file
+		target.ProxyEligible = false
+	}
+	return target, nil
 }
 
 // Capped transfers remain on the API egress path until proxy capability
@@ -1908,6 +1931,9 @@ func attachmentDisposition(path string) string {
 func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r *http.Request, target *FileTarget, userID int) error {
 	if target == nil {
 		return catalog.ErrItemNotFound
+	}
+	if target.virtualFile != nil {
+		return s.serveVirtualOriginal(ctx, w, r, target.virtualFile, userID)
 	}
 	if target.OriginArtifactID == "" {
 		return s.serveLocalFile(ctx, w, r, target.Path, s.AttachmentName(ctx, target), userID)

@@ -965,6 +965,25 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 		m.failJob(ctx, a, "frozen execution recipe no longer matches source metadata")
 		return
 	}
+	virtualCleanup, err := m.applyVirtualInput(ctx, file, &opts)
+	if err != nil {
+		if errors.Is(err, errVirtualInputResolverPending) {
+			// The resolver is wired with the API router, which may start after
+			// the startup recovery sweep. Retry under the same bounded backoff
+			// as any other attempt: a wired resolver drains at once, and a
+			// resolver that never becomes usable fails the job with an
+			// actionable message once attempts are exhausted instead of
+			// leaving the download "preparing" forever.
+			slog.InfoContext(ctx, "virtual prepare input resolver not yet available; retrying artifact", "component", "downloads", "artifact_id", a.ID)
+			m.failJob(ctx, a, virtualResolverPendingMessage)
+			return
+		}
+		m.failJob(ctx, a, err.Error())
+		return
+	}
+	if virtualCleanup != nil {
+		defer virtualCleanup()
+	}
 	// Each lease attempt owns a distinct node-local object. A worker that loses
 	// the readiness fence can therefore queue its object for deletion without
 	// racing the replacement worker's output on the same node.
@@ -1064,6 +1083,12 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 func artifactExecutionFingerprintMatches(a *Artifact, opts playback.TranscodeOpts) bool {
 	if !artifactUsesExecutionFingerprint(a) {
 		return true
+	}
+	// A provider-backed source's transport path rotates per attempt; the frozen
+	// recipe names the durable `virtual://` identity instead, so a relay
+	// rotation never invalidates a healthy artifact.
+	if opts.CanonicalInputPath != "" {
+		opts.InputPath = opts.CanonicalInputPath
 	}
 	fingerprint := downloadprepare.NewRequest(a.ID, opts).ExecutionFingerprint()
 	return fingerprint != "" && fingerprint == a.ParamsHash
@@ -1203,6 +1228,49 @@ func (m *ArtifactManager) heartbeatLoop(ctx context.Context, cancel context.Canc
 }
 
 // buildOpts reconstructs the frozen encode options for an artifact job.
+var errVirtualInputResolverPending = errors.New("virtual input resolver is not available yet")
+
+// virtualResolverPendingMessage is the download-facing reason while a virtual
+// job waits for the resolver to be wired. It must stay actionable: the job
+// retries automatically, and after artifactMaxAttempts the linked downloads
+// fail with this message rather than sitting in "preparing" forever.
+const virtualResolverPendingMessage = "The provider connection is still starting; the download will retry automatically."
+
+// applyVirtualInput resolves a provider-backed source to a concrete prepare
+// input and rewrites opts accordingly. It returns the relay cleanup the caller
+// must run once the executor is finished; for a non-virtual file it is a no-op.
+// The canonical `virtual://` path is preserved on CanonicalInputPath, and the
+// execution fingerprint is derived from that durable identity rather than the
+// per-attempt relay URL, so a relay rotation never invalidates a healthy
+// artifact.
+func (m *ArtifactManager) applyVirtualInput(ctx context.Context, file *models.MediaFile, opts *playback.TranscodeOpts) (func(), error) {
+	if file == nil || opts == nil || !isVirtualMediaFile(file) {
+		return nil, nil
+	}
+	m.mu.Lock()
+	resolver := m.virtualInput
+	m.mu.Unlock()
+	if resolver == nil {
+		return nil, errVirtualInputResolverPending
+	}
+	inputPath, cleanup, err := resolver.ResolveVirtualDownloadInput(ctx, file)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return nil, fmt.Errorf("resolve virtual prepare input: %w", err)
+	}
+	if strings.TrimSpace(inputPath) == "" {
+		if cleanup != nil {
+			cleanup()
+		}
+		return nil, errors.New("virtual media resolved to an empty prepare input")
+	}
+	opts.CanonicalInputPath = file.FilePath
+	opts.InputPath = inputPath
+	return cleanup, nil
+}
+
 func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playback.TranscodeOpts {
 	cfg := config.Config{}
 	if m.liveCfg != nil {

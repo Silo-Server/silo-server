@@ -129,8 +129,7 @@ func TestPluginEpisodeSessionPayload(t *testing.T) {
 	at := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	pause := episodePause{row: handlers.AdminPlaybackSessionView{
 		SessionID: "88451ef8-0f5c-4235-8ee4-26cbd0b51326", StartedAt: at, UpdatedAt: at,
-		EpisodeFileItem: &evt.PlaybackFileItem{Title: "Example Show", Type: "series"},
-		MediaItemID:     "episode-3", MediaType: "episode", MediaTitle: "Pilot", SeriesTitle: "Example Show",
+		ContentID: "episode-3", MediaType: "episode", MediaTitle: "Pilot", SeriesName: "Example Show",
 	}}
 	hub := evt.NewHub("api", nil)
 	events, unsubscribe := hub.Subscribe()
@@ -155,8 +154,8 @@ func TestPluginEpisodeSessionPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 	for key, want := range map[string]string{
-		"content_id": "episode-3", "media_title": "Example Show", "media_type": "series",
-		"series_name": "Example Show", "episode_name": "Pilot",
+		"content_id": "episode-3", "media_title": "Pilot", "media_type": "episode",
+		"series_name": "Example Show",
 	} {
 		if got := string(event.Session[key]); got != string(mustJSON(t, want)) {
 			t.Errorf("session.%s = %s, want %q", key, got, want)

@@ -140,9 +140,14 @@ func ReloadAfterRefusal(keys Keyring) {
 // Sign authenticates req with a caller-supplied shared secret. Vio's
 // transcode nodes still share auth.jwt_secret rather than holding a per-node
 // key, so the fork's remote control calls sign this way.
+//
+// An empty secret means node auth is not configured on this deployment, which
+// is how the fork's worker links have always run: the request goes out
+// unsigned instead of failing. A receiver that does hold a key still refuses
+// it, so this cannot stand in for a configured secret.
 func Sign(req *http.Request, nodeURL, secret string) error {
 	if secret == "" {
-		return ErrNoSecret
+		return nil
 	}
 	return sign(req, nodeURL, secret, time.Now())
 }
@@ -160,9 +165,11 @@ func SignProxy(req *http.Request, nodeURL string, keys Keyring) error {
 }
 
 // SignWith authenticates req for the worker of kind target registered at
-// nodeURL with the key keys returns for it (see sign). A nil keyring or an
-// empty key is ErrNoSecret, so a sender that was never given its keys fails
-// where it is.
+// nodeURL with the key keys returns for it (see sign). A nil keyring is
+// ErrNoSecret, so a sender that was never given its keys fails where it is.
+// An empty key means node auth is not configured on this deployment, the
+// fork's shared-secret mode: the request goes out unsigned rather than
+// failing, exactly as Sign does.
 func SignWith(req *http.Request, target Target, nodeURL string, keys Keyring) error {
 	if keys == nil {
 		return ErrNoSecret
@@ -172,7 +179,7 @@ func SignWith(req *http.Request, target Target, nodeURL string, keys Keyring) er
 		return err
 	}
 	if key == "" {
-		return ErrNoSecret
+		return nil
 	}
 	return sign(req, nodeURL, key, time.Now())
 }

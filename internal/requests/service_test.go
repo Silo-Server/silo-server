@@ -1495,6 +1495,18 @@ func (f *fakeStore) ListActiveByTMDB(_ context.Context, mediaType MediaType, ids
 	return out, nil
 }
 
+func (f *fakeStore) ListRequestedTMDB(_ context.Context, _ Viewer, mediaType MediaType, tmdbIDs []int) (map[int]bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[int]bool{}
+	for _, id := range tmdbIDs {
+		if f.active[mediaType][id] != nil {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeStore) ListProfileWatchlistRequests(_ context.Context, userID int, profileID string) ([]*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1706,10 +1718,16 @@ func (f *fakeStore) MarkFulfilledNotified(_ context.Context, id string) (bool, e
 	return true, nil
 }
 
-func (f *fakeStore) ListMine(context.Context, int, ListFilter) ([]*Request, error) {
+func (f *fakeStore) ListMine(_ context.Context, _ int, filter ListFilter) ([]*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]*Request(nil), f.mine...), nil
+	var out []*Request
+	for _, req := range f.mine {
+		if filter.RequestedByProfileID == "" || req.RequestedByProfileID == filter.RequestedByProfileID {
+			out = append(out, req)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeStore) ListAdmin(_ context.Context, filter ListFilter) ([]*Request, error) {
@@ -1962,7 +1980,7 @@ func (f *fakeStore) MarkReconciled(_ context.Context, id string) error {
 	return nil
 }
 
-func (f *fakeStore) RecomputeStatus(_ context.Context, id string, _ Viewer) (*Request, error) {
+func (f *fakeStore) RecomputeStatus(_ context.Context, id string, _ time.Time, _ Viewer) (*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	req := f.lookupLocked(id)
@@ -2275,15 +2293,17 @@ func (f *fakeStore) CreateTarget(_ context.Context, t Target) (Target, error) {
 	return t, nil
 }
 
-func (f *fakeStore) DeleteTarget(_ context.Context, id int64) error {
+func (f *fakeStore) DeleteTarget(_ context.Context, requestID string, id int64, _ time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for rid, ts := range f.targets {
-		for i := range ts {
-			if ts[i].ID == id {
-				f.targets[rid] = append(ts[:i], ts[i+1:]...)
-				return nil
-			}
+	ts, ok := f.targets[requestID]
+	if !ok {
+		return ErrNotFound
+	}
+	for i := range ts {
+		if ts[i].ID == id {
+			f.targets[requestID] = append(ts[:i], ts[i+1:]...)
+			return nil
 		}
 	}
 	return ErrNotFound

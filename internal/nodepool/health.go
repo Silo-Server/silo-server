@@ -186,10 +186,10 @@ func CheckNodeReport(ctx context.Context, n *Node) HealthReport {
 		DrainState:       drainStateOfHealthStatus(hr.Status),
 	}
 	if n.Type == NodeTypeTranscode {
-		switch {
-		case hr.NodeControlVersion < NodeControlVersion:
-			report.Healthy, report.Reason = false, UnhealthyNodeControlMissing
-		case hr.KeyRejected:
+		// Vio's nodes share auth.jwt_secret and predate the per-node key
+		// handshake, so a missing node_control_version is not a fault here.
+		// A node that reports a rejected key is still worth flagging.
+		if hr.KeyRejected {
 			report.Healthy, report.Reason = false, UnhealthyKeyRejected
 		}
 	}

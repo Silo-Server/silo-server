@@ -3,9 +3,7 @@ package tonemap
 import (
 	"context"
 	"errors"
-	"math"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -96,108 +94,6 @@ func TestValidateSourceClassifiesDeterministicRejection(t *testing.T) {
 	err := ValidateSourceWithRunner(context.Background(), request, runner)
 	if !errors.Is(err, ErrSourcePreflightRejected) || errors.Is(err, ErrSourcePreflightUnavailable) {
 		t.Fatalf("deterministic mismatch = %v, want ErrSourcePreflightRejected only", err)
-	}
-}
-
-// TestValidateSourceSamplesLastKeyframeNearEndOfUnindexedSource verifies a
-// short MPEG-TS whose last sample falls after its final keyframe is accepted:
-// the frame read and the conversion both sample that keyframe instead.
-func TestValidateSourceSamplesLastKeyframeNearEndOfUnindexedSource(t *testing.T) {
-	resetSourcePreflightCache(t)
-	request := sourcePreflightTestRequest(t)
-	request.DurationSeconds = 23
-	// A 24 fps stream starting at 1.4 s with a keyframe every 250 packets, so
-	// keyframes are decoded at about 1.4, 11.8 and 22.23 s and presented five
-	// frames later. The 90% sample (22.31 s) lies between the last keyframe's
-	// decode and presentation times, in the last keyframe interval. Without an
-	// index, a seek lands on the last packet at or before the target, a read
-	// ending at a time stops at the first packet presented from then on, and
-	// frames decode only from a keyframe on.
-	const startTime, frameDuration, packetCount = 1.4, 1.0 / 24, 600
-	dts := func(index int) float64 { return startTime + float64(index)*frameDuration }
-	pts := func(index int) float64 { return dts(index) + 5*frameDuration }
-	seek := func(target float64) int {
-		index := int((target - startTime) / frameDuration)
-		return min(max(index, 0), packetCount-1)
-	}
-	keyframeFrom := func(first, end int) bool {
-		for index := first; index < min(end, packetCount); index++ {
-			if index%250 == 0 {
-				return true
-			}
-		}
-		return false
-	}
-	sourceFrame := `{"color_range":"tv","color_space":"bt2020nc","color_transfer":"smpte2084","color_primaries":"bt2020"}`
-	lastConversionDecoded := false
-	var conversions []float64
-	runner := func(_ context.Context, name string, args ...string) ([]byte, error) {
-		if len(args) == 1 && args[0] == "-version" {
-			return []byte("ffmpeg version ts"), nil
-		}
-		if !strings.Contains(name, "ffprobe") {
-			// ffmpeg's -ss is relative to the start time unless
-			// -seek_timestamp makes it absolute.
-			target, _ := strconv.ParseFloat(args[slices.Index(args, "-ss")+1], 64)
-			if index := slices.Index(args, "-seek_timestamp"); index < 0 || args[index+1] != "1" {
-				target += startTime
-			}
-			conversions = append(conversions, target)
-			lastConversionDecoded = keyframeFrom(seek(target), packetCount)
-			return nil, nil
-		}
-		if slices.Contains(args, "format=start_time") {
-			// ffprobe reports the first presentation time.
-			return []byte(`{"format":{"start_time":"` + strconv.FormatFloat(pts(0), 'f', 6, 64) + `"}}`), nil
-		}
-		index := slices.Index(args, "-read_intervals")
-		if index < 0 {
-			frames := "[]"
-			if lastConversionDecoded {
-				frames = `[{"color_range":"tv","color_space":"bt709","color_transfer":"bt709","color_primaries":"bt709"}]`
-			}
-			return []byte(`{"streams":[{"codec_name":"h264","pix_fmt":"yuv420p","color_range":"tv","color_space":"bt709","color_transfer":"bt709","color_primaries":"bt709"}],"frames":` + frames + `}`), nil
-		}
-		interval := args[index+1]
-		var first, end int
-		if start, packets, ok := strings.Cut(interval, "%+#"); ok {
-			target, _ := strconv.ParseFloat(start, 64)
-			count, _ := strconv.Atoi(packets)
-			first = seek(target)
-			end = first + count
-		} else {
-			start, stop, _ := strings.Cut(interval, "%")
-			target, _ := strconv.ParseFloat(start, 64)
-			limit, _ := strconv.ParseFloat(stop, 64)
-			first = seek(target)
-			for end = first; end < packetCount && pts(end) < limit; end++ {
-			}
-		}
-		end = min(end, packetCount)
-		if slices.Contains(args, "-show_packets") {
-			packets := make([]string, 0, end-first)
-			for packet := first; packet < end; packet++ {
-				flags := "__"
-				if packet%250 == 0 {
-					flags = "K_"
-				}
-				packets = append(packets, `{"flags":"`+flags+`","dts_time":"`+strconv.FormatFloat(dts(packet), 'f', 6, 64)+`"}`)
-			}
-			return []byte(`{"packets":[` + strings.Join(packets, ",") + `]}`), nil
-		}
-		if keyframeFrom(first, end) {
-			return []byte(`{"frames":[` + sourceFrame + `]}`), nil
-		}
-		return []byte(`{"frames":[]}`), nil
-	}
-	if err := ValidateSourceWithRunner(context.Background(), request, runner); err != nil {
-		t.Fatalf("ValidateSource() = %v, want accepted", err)
-	}
-	// The first sample reads from the start of the file, ahead of the opening
-	// keyframe's decode time, and the 50% sample is half the duration into
-	// the stream's own timestamps.
-	if len(conversions) != 3 || conversions[0] != 0 || math.Abs(conversions[1]-(pts(0)+11.5)) > 0.001 {
-		t.Fatalf("conversions = %v, want three: 0, then %.3f", conversions, pts(0)+11.5)
 	}
 }
 

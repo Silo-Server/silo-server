@@ -105,6 +105,50 @@ func (s *Service) listAccountPage(ctx context.Context, userID int, after *Regist
 	return page, nil
 }
 
+// Get returns one registry entry in the same mode listRegistryPage uses: the
+// device-managed row when deviceID is set (scoped on profile and device), else
+// the account's ephemeral row. A managed row is never reachable through the
+// device-less mode, so a caller cannot read another scope's entry by dropping
+// the device header. Preparation progress is attached exactly as it is for a
+// listed page, so a polling client sees the same shape either way.
+func (s *Service) Get(ctx context.Context, userID int, profileID, deviceID, downloadID string) (*Download, error) {
+	if downloadID == "" {
+		return nil, ErrNotFound
+	}
+	if deviceID != "" {
+		if profileID == "" {
+			return nil, ErrProfileRequired
+		}
+		dl, err := s.repo.GetManagedByID(ctx, downloadID, userID, profileID, deviceID)
+		if err != nil {
+			return nil, err
+		}
+		s.attachPreparation(ctx, dl)
+		return dl, nil
+	}
+	dl, err := s.repo.GetByID(ctx, downloadID)
+	if err != nil {
+		return nil, err
+	}
+	if dl.UserID != userID || dl.IsManaged() {
+		return nil, ErrNotFound
+	}
+	s.attachPreparation(ctx, dl)
+	return dl, nil
+}
+
+// attachPreparation decorates one entry with its preparation progress. Progress
+// is decoration; a failure to read it must not fail the entry read.
+func (s *Service) attachPreparation(ctx context.Context, dl *Download) {
+	if dl == nil {
+		return
+	}
+	rows := []*Download{dl}
+	if err := s.repo.attachPreparations(ctx, rows); err != nil {
+		slog.WarnContext(ctx, "download preparation progress unavailable", "component", "downloads", "download_id", dl.ID, "error", err)
+	}
+}
+
 // ListPage preserves the separate account-ephemeral and profile/device modes.
 // ID breaks timestamp ties; creation time remains stable through status reports.
 func (s *Service) ListPage(ctx context.Context, userID int, profileID, deviceID string, after *RegistryPosition, limit int, filter catalog.AccessFilter) (RegistryPage, error) {

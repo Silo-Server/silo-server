@@ -165,14 +165,18 @@ func TestInstallerReplaceArchiveRequestsVirtualMediaCleanup(t *testing.T) {
 
 	store := newRecordingInstallationStore()
 	installer := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()})
-	if _, err := installer.replaceArchive(ctx, &Installation{
+	prepared, err := installer.prepareArchive(&Installation{
 		ID:          16,
 		PluginID:    "silo.metadb",
 		Version:     "0.0.19",
 		InstallPath: oldPath,
 		Enabled:     true,
-	}, archiveData, InstallArchiveRequest{}); err != nil {
-		t.Fatalf("replaceArchive() returned error: %v", err)
+	}, archiveData, InstallArchiveRequest{})
+	if err != nil {
+		t.Fatalf("prepareArchive() returned error: %v", err)
+	}
+	if _, err := prepared.Apply(ctx); err != nil {
+		t.Fatalf("apply() returned error: %v", err)
 	}
 
 	if len(store.updateInputs) != 1 || store.updateInputs[0].RemoveVirtualMedia {
