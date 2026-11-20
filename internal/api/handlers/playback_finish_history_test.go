@@ -476,8 +476,7 @@ func TestAdminPlaybackHistoryFactsDB(t *testing.T) {
 	// A row recorded before the subtitle had its own order keeps its
 	// subtitle against an earlier finalization and takes a later one's.
 	recordedEarlier, recordedLater := "before-order-"+suffix, "before-order-later-"+suffix
-	recordedAdvanced := "before-order-advanced-" + suffix
-	for _, id := range []string{recordedEarlier, recordedLater, recordedAdvanced} {
+	for _, id := range []string{recordedEarlier, recordedLater} {
 		if _, err = pool.Exec(ctx, `INSERT INTO admin_playback_history(session_id,user_id,profile_id,media_file_id,play_method,started_at,ended_at,watched_seconds,subtitle)
 			VALUES($1,$2,'p-1',0,'direct_play',$3,$4,300,$5)`, id, account, started, started.Add(10*time.Minute), subB); err != nil {
 			t.Fatal(err)
@@ -485,16 +484,6 @@ func TestAdminPlaybackHistoryFactsDB(t *testing.T) {
 	}
 	finalize(300, 9*time.Minute, AdminPlaybackHistoryEntry{SessionID: recordedEarlier, Subtitle: subA})
 	finalize(300, 11*time.Minute, AdminPlaybackHistoryEntry{SessionID: recordedLater, Subtitle: subA})
-	// A sweep that gets further, with a subtitle its row synced after the
-	// recorded one, replaces it even though its own end is later still.
-	finalize(400, 3*time.Hour, AdminPlaybackHistoryEntry{SessionID: recordedAdvanced, Subtitle: subA, SubtitleAt: started.Add(11 * time.Minute)})
-	var advancedSubtitle *playback.SessionSubtitle
-	if err = pool.QueryRow(ctx, `SELECT subtitle FROM admin_playback_history WHERE session_id=$1`, recordedAdvanced).Scan(&advancedSubtitle); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(advancedSubtitle, subA) {
-		t.Errorf("%s: subtitle %+v, want %+v synced after the recorded one", recordedAdvanced, advancedSubtitle, subA)
-	}
 	for id, want := range map[string]*playback.SessionSubtitle{switched: subA, turnedOff: nil, recordedEarlier: subB, recordedLater: subA} {
 		var got *playback.SessionSubtitle
 		var ended time.Time
@@ -1056,6 +1045,23 @@ func TestLifecycleSweepKeepsARecordedSubtitleDB(t *testing.T) {
 	h.endLifecycleWith(ctx, pool, bare, PlaybackEndExpired, time.Now(), nil)
 	if got, endedAt := read(bare); !reflect.DeepEqual(got, ended) || !endedAt.Equal(teardownEnd) {
 		t.Errorf("swept play without start facts = subtitle %+v ended %v; want the recorded %+v ended %v", got, endedAt, ended, teardownEnd)
+	}
+
+	// A row recorded before the subtitle had its own order, whose play then
+	// synced a later subtitle and got further: the sweep moves the end, and
+	// the subtitle synced after the recorded one still replaces it.
+	beforeOrder := start()
+	if _, err = pool.Exec(ctx, `INSERT INTO admin_playback_history(session_id,user_id,profile_id,media_file_id,play_method,started_at,ended_at,watched_seconds,subtitle)
+		VALUES($1,$2,'p-1',42,'direct_play',$3,$4,300,$5)`, beforeOrder, account, started, teardownEnd, ended); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO playback_sessions_sync (session_id, user_id, profile_id, media_file_id, started_at, last_sync_at, position_seconds, subtitle)
+		VALUES ($1, $2, 'p-1', 42, $3, $4, 400, $5)`, beforeOrder, account, started, started.Add(40*time.Minute), later); err != nil {
+		t.Fatal(err)
+	}
+	h.endLifecycleWith(ctx, pool, beforeOrder, PlaybackEndExpired, time.Now(), nil)
+	if got, _ := read(beforeOrder); !reflect.DeepEqual(got, later) {
+		t.Errorf("swept play recorded before subtitle ordering = subtitle %+v, want the live row's %+v", got, later)
 	}
 
 	fresh := start()
