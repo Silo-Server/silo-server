@@ -102,3 +102,35 @@ func TestCheckEnvironmentSettingsDeploymentSettings(t *testing.T) {
 	}
 
 }
+
+// SILO_RECOMMENDATIONS_PROVIDER can name a provider the deployment document
+// declares in the same start, and only a connected one that serves
+// embeddings.
+func TestCheckDeploymentSettingsBindsDeclaredProvider(t *testing.T) {
+	embed, err := config.NewDeclaredAIProvider("local-embed", config.AIProviderCustom, "Local embeddings", "http://embed:8080/v1", "", []config.AICapability{config.AICapabilityEmbeddings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := config.ApplyDeclaredAIProviders("", []config.AIProvider{embed}, "SILO_CONFIG_FILE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := map[string]string{config.AIProvidersSettingKey: registry}
+	env := readEnv(t, map[string]string{
+		"SILO_RECOMMENDATIONS_ENABLED":  "true",
+		"SILO_RECOMMENDATIONS_PROVIDER": "local-embed",
+		"SILO_RECOMMENDATIONS_MODEL":    "nomic-embed-text",
+	})
+	checked, err := CheckDeploymentSettings(nil, env, declared, "SILO_CONFIG_FILE", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := checked.Values(config.EnvScopeStored)[config.EmbeddingProviderSettingKey]; got != "local-embed" {
+		t.Errorf("embedding provider = %q, want local-embed", got)
+	}
+
+	// Without the document the provider isn't connected, and startup stops.
+	if _, err := CheckEnvironmentSettings(nil, env, false); err == nil || !strings.Contains(err.Error(), "SILO_RECOMMENDATIONS_PROVIDER") {
+		t.Errorf("provider not declared: error = %v, want one naming SILO_RECOMMENDATIONS_PROVIDER", err)
+	}
+}

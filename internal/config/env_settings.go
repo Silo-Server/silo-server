@@ -111,6 +111,10 @@ var envSettingVars = []EnvSettingVar{
 	{"SILO_BACKUP_INCLUDE_SUBTITLES", BackupIncludeSubtitlesSettingKey, EnvScopeStored},
 	{"SILO_BACKUP_INCLUDE_INTRO_FINGERPRINTS", BackupIncludeIntroFingerprintsSettingKey, EnvScopeStored},
 
+	{"SILO_RECOMMENDATIONS_ENABLED", "recommendations.enabled", EnvScopeStored},
+	{"SILO_RECOMMENDATIONS_PROVIDER", EmbeddingProviderSettingKey, EnvScopeStored},
+	{"SILO_RECOMMENDATIONS_MODEL", "recommendations.embedding_model", EnvScopeStored},
+
 	{"SILO_TMDB_API_KEY", "tmdb.api_key", EnvScopeStored},
 	{"SILO_MDBLIST_API_KEY", "mdblist.api_key", EnvScopeStored},
 

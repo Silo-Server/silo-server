@@ -930,11 +930,24 @@ func main() {
 	// SILO_DB_MAX_CONNECTIONS sizes it.
 	isPrimaryNode := bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == ""
 	var envSettings config.EnvSettings
+	// The deployment document (SILO_CONFIG or SILO_CONFIG_FILE) is read with
+	// them: its AI providers are stored with the environment's settings, and
+	// its plugins section goes to the provisioning writer once plugins load.
+	var deploymentDocument *plugins.ProvisionDocument
+	var declaredAIProviders deploymentAIProviders
 	if isPrimaryNode && !*migrateOnly && !*migrateStatus && *migrateDownTo < 0 {
 		envSettings, err = config.ReadEnvSettings(os.Getenv)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
+		if deploymentDocument, err = plugins.ReadProvisionDocument(); err != nil {
+			log.Fatalf("read deployment configuration: %v", err)
+		}
+		providers, declared, err := deploymentDocument.DeclaredAIProviders()
+		if err != nil {
+			log.Fatalf("%s: %v", deploymentDocument.Variable(), err)
+		}
+		declaredAIProviders = deploymentAIProviders{declared: declared, providers: providers, variable: deploymentDocument.Variable()}
 	}
 
 	// Step 2: Connect to PostgreSQL (bootstrap pool sized by
@@ -1061,7 +1074,7 @@ func main() {
 	// The settings the environment sets win over the stored ones. Cluster-wide
 	// ones are stored so the admin UI and the other servers see the values in
 	// effect; per-process ones only overlay this process's settings.
-	envSettings, envChangedKeys, err := applyEnvSettings(ctx, settingsRepo, settings, envSettings, bc.RedisURL)
+	envSettings, envChangedKeys, err := applyEnvSettings(ctx, settingsRepo, settings, envSettings, declaredAIProviders, bc.RedisURL)
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -2067,12 +2080,17 @@ func main() {
 			installer,
 			plugins.NewHostAdapter(pluginHost),
 		)
-		provisionDocument, err := plugins.ReadProvisionDocument()
-		if err != nil {
-			log.Fatalf("read plugin provisioning: %v", err)
+		// A frontend server provisions plugins but stores no settings from
+		// its environment, so it reads the document here.
+		if bc.Mode == "frontend" && !*migrateOnly {
+			if deploymentDocument, err = plugins.ReadProvisionDocument(); err != nil {
+				log.Fatalf("read deployment configuration: %v", err)
+			}
 		}
-		if provisionDocument != nil {
-			pluginProvisionWriter = plugins.NewProvisionWriter(deps.DB, repositoryStore, installationStore, installer, catalogService, runtimeConfigStore, pluginService, provisionDocument,
+		// A deployment document without a plugins section leaves plugin
+		// installations as they are, as no document does.
+		if deploymentDocument.DeclaresPlugins() {
+			pluginProvisionWriter = plugins.NewProvisionWriter(deps.DB, repositoryStore, installationStore, installer, catalogService, runtimeConfigStore, pluginService, deploymentDocument,
 				metadata.ApplyProvisionedMetadataPlacement)
 			runtimeConfigStore.SetProvisionWriter(pluginProvisionWriter)
 			deps.PluginProvisionStatus = runtimeConfigStore.ListProvisionStatus

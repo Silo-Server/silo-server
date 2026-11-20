@@ -161,6 +161,10 @@ type AIProvider struct {
 	BaseURL      string         `json:"base_url"`
 	APIKey       string         `json:"api_key,omitempty"`
 	Capabilities []AICapability `json:"capabilities"`
+	// ManagedBy names the deployment variable that declares the provider,
+	// such as SILO_CONFIG_FILE (ApplyDeclaredAIProviders). Admins cannot edit
+	// or delete a declared provider. Empty for one an admin connected.
+	ManagedBy string `json:"managed_by,omitempty"`
 }
 
 // Supports reports whether the provider serves capability.

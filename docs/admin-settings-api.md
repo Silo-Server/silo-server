@@ -125,6 +125,15 @@ clients never handled a query; that job stays unconfigured and startup logs a
 warning naming the legacy setting. HTTP Basic authentication through the URL
 is not supported; such a proxy needs to accept the provider's API key.
 
+The deployment can also declare providers, in the `ai_providers` section of
+its deployment document (`SILO_CONFIG` or `SILO_CONFIG_FILE`). Each API server
+that reads the document stores them when it starts, in the same transaction as
+the settings its environment sets, so the last server to start wins, as for
+those settings: give every API server that reads the document the same one. A
+declared provider carries `managed_by_env_var`, the document's variable, and
+the update and delete operations below refuse it with `422` and code
+`managed_by_environment`. The user manual covers writing the document.
+
 The following operations require an acting administrator:
 
 - `GET /api/v2/admin/ai/providers` lists providers without keys (`has_api_key`

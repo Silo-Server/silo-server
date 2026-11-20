@@ -54,6 +54,8 @@ interface RecSettingFieldProps {
   localValues: RecLocalValues;
   sensitiveConfigured: string[];
   isPending: boolean;
+  /** The variable that sets this field on the server; locks the control. */
+  managedByEnv?: string;
   onLocalChange: (key: string, value: string) => void;
   onCommit: (key: string, value: string) => void;
   onToggle: (key: string, checked: boolean) => void;
@@ -77,7 +79,8 @@ function RecSettingField({
   serverValue,
   localValues,
   sensitiveConfigured,
-  isPending,
+  isPending: isPendingProp,
+  managedByEnv,
   onLocalChange,
   onCommit,
   onToggle,
@@ -86,6 +89,13 @@ function RecSettingField({
   const { key, label, type, hint, defaultValue } = field;
   const effectiveServerValue = serverValue || defaultValue || "";
   const [confirmClear, setConfirmClear] = useState(false);
+  // The server refuses a save of an env-set key, so its control stays disabled.
+  const isPending = isPendingProp || managedByEnv != null;
+  const envNote = managedByEnv ? (
+    <p className="text-muted-foreground text-xs">
+      {t("web.admin.settings.fields.managedByEnv", { env: managedByEnv })}
+    </p>
+  ) : null;
 
   if (type === "toggle") {
     const checked = serverValue === "true";
@@ -96,6 +106,7 @@ function RecSettingField({
             {label}
           </Label>
           {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
+          {envNote}
         </div>
         <Switch
           id={key}
@@ -173,6 +184,7 @@ function RecSettingField({
           </div>
         )}
         {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
+        {envNote}
       </div>
     );
   }
@@ -198,6 +210,7 @@ function RecSettingField({
           className="w-40"
         />
         {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
+        {envNote}
       </div>
     );
   }
@@ -223,6 +236,7 @@ function RecSettingField({
         placeholder={hint}
       />
       {hint && type === "duration" && <p className="text-muted-foreground text-xs">{hint}</p>}
+      {envNote}
     </div>
   );
 }
@@ -347,7 +361,7 @@ function RecJobStatusCard({
 export default function AdminRecommendations() {
   const t = useT();
   const { data: settings, isLoading } = useAdminServerSettings();
-  const { data: sensitiveData } = useAdminSensitiveStatus();
+  const { data: sensitiveData, isLoading: sensitiveLoading } = useAdminSensitiveStatus();
   const updateSettings = useUpdateServerSettings();
   const checkConnection = useCheckAdminSettingsConnection();
   const { data: status } = useRecommendationsStatus();
@@ -485,7 +499,9 @@ export default function AdminRecommendations() {
     }
   }
 
-  if (isLoading)
+  // Until the server says which settings its environment sets, a field could
+  // offer an edit the server would refuse.
+  if (isLoading || sensitiveLoading)
     return (
       <div className="space-y-6 pb-4 sm:pb-6">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -500,6 +516,7 @@ export default function AdminRecommendations() {
     );
 
   const sensitiveConfigured = sensitiveData?.configured ?? [];
+  const envVars = sensitiveData?.managed_by_env_vars ?? {};
   const serverSettings: Record<string, string> = settings ?? {};
   const embeddingLock = parseRecommendationEmbeddingLock(
     serverSettings["recommendations.embedding_lock"],
@@ -635,6 +652,7 @@ export default function AdminRecommendations() {
                       <EmbeddingProviderField
                         value={embeddingProviderID}
                         disabled={updateSettings.isPending}
+                        managedByEnv={envVars[EMBEDDING_PROVIDER_KEY]}
                         onChange={(id) => {
                           setConnectionResult(null);
                           void handleCommit(EMBEDDING_PROVIDER_KEY, id).then((saved) => {
@@ -658,9 +676,13 @@ export default function AdminRecommendations() {
                         kind="embeddings"
                         value={embeddingModel}
                         placeholder={EMBEDDING_MODEL_EXAMPLES}
+                        managedByEnv={envVars[EMBEDDING_MODEL_KEY]}
                         onChange={(next) => handleLocalChange(EMBEDDING_MODEL_KEY, next)}
                         onCommit={(next) => {
-                          if (next !== (serverSettings[EMBEDDING_MODEL_KEY] ?? "")) {
+                          if (
+                            !envVars[EMBEDDING_MODEL_KEY] &&
+                            next !== (serverSettings[EMBEDDING_MODEL_KEY] ?? "")
+                          ) {
                             void handleCommit(EMBEDDING_MODEL_KEY, next);
                           }
                         }}
@@ -677,6 +699,7 @@ export default function AdminRecommendations() {
                         localValues={localValues}
                         sensitiveConfigured={sensitiveConfigured}
                         isPending={updateSettings.isPending}
+                        managedByEnv={envVars[field.key]}
                         onLocalChange={handleLocalChange}
                         onCommit={(key, value) => void handleCommit(key, value)}
                         onToggle={handleToggle}

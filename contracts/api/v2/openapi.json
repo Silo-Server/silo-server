@@ -594,6 +594,10 @@
           "id": {
             "type": "string"
           },
+          "managed_by_env_var": {
+            "description": "The variable in the server's environment that declares this provider, such as SILO_CONFIG_FILE, when the deployment declares it. Updating or deleting such a provider is 422 validation_failed with code managed_by_environment.",
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -65415,7 +65419,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Disconnect a provider and discard its key. A provider a job uses cannot be deleted.",
+        "summary": "Disconnect a provider and discard its key. A provider a job uses cannot be deleted, and one the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment.",
         "tags": [
           "admin-ai"
         ],
@@ -65607,7 +65611,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request.",
+        "summary": "Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request. A provider the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment.",
         "tags": [
           "admin-ai"
         ],
