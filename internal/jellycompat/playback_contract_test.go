@@ -192,7 +192,7 @@ func TestMonoTranscodingProfileMatchesActualContainer(t *testing.T) {
 			}
 			source := h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{MaxAudioChannels: 1}, true)
 			source.HLSRemuxMPEGTS = source.hlsRemuxInTS
-			dto := h.mediaSourceDTO("item", "play", source)
+			dto := h.mediaSourceDTO("item", "play", "", source)
 			if source.SupportsDirectPlay || !source.SupportsTranscoding || source.TargetAudioChannels != 1 || !source.HLSRemux || dto.TranscodingContainer != container || dto.TranscodingURL == "" {
 				t.Fatalf("wrong negotiated container: source=%+v dto=%+v", source, dto)
 			}
@@ -206,7 +206,7 @@ func TestMonoTranscodingProfileMatchesActualContainer(t *testing.T) {
 
 func TestRemuxOnlyPublishedURLIsNotStatic(t *testing.T) {
 	h := &PlaybackHandler{codec: NewResourceIDCodec()}
-	dto := h.mediaSourceDTO("item", "play", PlaybackMediaSource{ID: "source", SupportsDirectStream: true})
+	dto := h.mediaSourceDTO("item", "play", "", PlaybackMediaSource{ID: "source", SupportsDirectStream: true})
 	u, err := url.Parse(dto.DirectStreamURL)
 	if err != nil {
 		t.Fatal(err)
@@ -214,7 +214,7 @@ func TestRemuxOnlyPublishedURLIsNotStatic(t *testing.T) {
 	if u.Query().Get("static") != "false" {
 		t.Fatalf("URL=%s", dto.DirectStreamURL)
 	}
-	dto = h.mediaSourceDTO("item", "play", PlaybackMediaSource{ID: "source", SupportsDirectPlay: true})
+	dto = h.mediaSourceDTO("item", "play", "", PlaybackMediaSource{ID: "source", SupportsDirectPlay: true})
 	u, _ = url.Parse(dto.DirectStreamURL)
 	if u.Query().Get("static") != "true" {
 		t.Fatalf("URL=%s", dto.DirectStreamURL)
@@ -285,7 +285,7 @@ func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
 				t.Fatalf("transcoding=%v copies video=%v audio encode=%v, want copies video=%v audio encode=%v",
 					source.SupportsTranscoding, compatHLSCopiesVideo(source), source.TranscodeAudio, tc.wantVideoCopy, tc.wantAudioEncode)
 			}
-			dto := h.mediaSourceDTO("item", "play", source)
+			dto := h.mediaSourceDTO("item", "play", "", source)
 			if dto.DirectStreamURL != "" || dto.TranscodingURL == "" || len(tc.version.AudioTracks) > 0 && dto.DefaultAudioStreamIndex == nil {
 				t.Fatalf("DirectStreamUrl=%q TranscodingUrl=%q DefaultAudioStreamIndex=%v", dto.DirectStreamURL, dto.TranscodingURL, dto.DefaultAudioStreamIndex)
 			}
@@ -310,7 +310,7 @@ func TestTranscodingSubProtocolFollowsPlayedURL(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.source.ID = "source"
-			dto := h.mediaSourceDTO("item", "play", tc.source)
+			dto := h.mediaSourceDTO("item", "play", "", tc.source)
 			if dto.TranscodingSubProtocol != tc.want {
 				t.Fatalf("TranscodingSubProtocol = %q, want %q", dto.TranscodingSubProtocol, tc.want)
 			}

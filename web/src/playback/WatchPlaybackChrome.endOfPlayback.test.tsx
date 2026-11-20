@@ -179,7 +179,7 @@ describe("WatchPlaybackHost end of an episode", () => {
     const episode = await renderEpisode({ contentId: "episode-1", libraryId: 1 });
     // The version switch is committed before the early post-roll opens; the
     // viewer then leaves through its Close action and `onEnded` never fires.
-    act(() => episode.player().onRequestedVersionChange?.(2));
+    act(() => episode.player().onRequestedVersionChange?.(2, true));
     episode.nearEnd();
     expect(episode.controller().state.mode).toBe("post-roll");
 
@@ -190,7 +190,7 @@ describe("WatchPlaybackHost end of an episode", () => {
 
   it("remembers a version switched during the episode when post-roll advances without ending", async () => {
     const episode = await renderEpisode({ contentId: "episode-1", libraryId: 1 });
-    act(() => episode.player().onRequestedVersionChange?.(2));
+    act(() => episode.player().onRequestedVersionChange?.(2, true));
     episode.nearEnd();
     expect(episode.controller().state.mode).toBe("post-roll");
 

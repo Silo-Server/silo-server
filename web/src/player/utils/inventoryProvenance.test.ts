@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  PROVISIONAL_INVENTORY_POLL_MS,
+  PROVISIONAL_INVENTORY_SLOW_MS,
   PROVISIONAL_INVENTORY_TIMEOUT_MS,
   isInventoryProvisional,
   isOverlayInventoryProvisional,
   isPlanSubtitleInventoryProvisional,
   isProvisionalInventoryExpired,
+  isProvisionalInventorySlow,
 } from "./inventoryProvenance";
 
 describe("isInventoryProvisional", () => {
@@ -81,22 +84,20 @@ describe("isPlanSubtitleInventoryProvisional", () => {
 });
 
 describe("isOverlayInventoryProvisional", () => {
-  it("stays provisional while the plan reports declared or pending inventory", () => {
-    expect(isOverlayInventoryProvisional(true, true, 2)).toBe(true);
-    expect(isOverlayInventoryProvisional(true, false, 0)).toBe(true);
+  it("shows declared rows immediately instead of waiting for the probe", () => {
+    expect(isOverlayInventoryProvisional(true, 2)).toBe(false);
   });
 
-  it("stays provisional while the rows are catalog fallback, not plan evidence", () => {
-    expect(isOverlayInventoryProvisional(false, false, 2)).toBe(true);
-  });
-
-  it("treats plan-published rows with no provisional marker as final", () => {
-    expect(isOverlayInventoryProvisional(false, true, 2)).toBe(false);
+  it("stays provisional only while the plan reports no rows at all", () => {
+    expect(isOverlayInventoryProvisional(true, 0)).toBe(true);
   });
 
   it("keeps an empty verified inventory final so the menu can show its empty state", () => {
-    expect(isOverlayInventoryProvisional(false, false, 0)).toBe(false);
-    expect(isOverlayInventoryProvisional(false, true, 0)).toBe(false);
+    expect(isOverlayInventoryProvisional(false, 0)).toBe(false);
+  });
+
+  it("treats probed rows as final", () => {
+    expect(isOverlayInventoryProvisional(false, 2)).toBe(false);
   });
 });
 
@@ -127,5 +128,44 @@ describe("isProvisionalInventoryExpired", () => {
   it("honors a caller's shorter bound", () => {
     expect(isProvisionalInventoryExpired(true, since, since + 2_000, 2_000)).toBe(true);
     expect(isProvisionalInventoryExpired(true, since, since + 1_999, 2_000)).toBe(false);
+  });
+});
+
+// The client's wait must follow the server's answer, not cut it short. The
+// server bounds a selection probe chain at 20 s (virtualSelectionProbeBudget),
+// so a slow-but-successful selection that answers at 16-18 s has to still be
+// spinning when it does: the previous 15 s window declared "Not verified" while
+// the server was still working, which is what the production measurement caught.
+describe("the provisional window follows the server's selection bound", () => {
+  const since = 1_000_000;
+
+  it("is still waiting at 15 s, past the old client-only deadline", () => {
+    expect(isProvisionalInventoryExpired(true, since, since + 15_000)).toBe(false);
+    expect(isProvisionalInventoryExpired(true, since, since + 16_000)).toBe(false);
+    expect(isProvisionalInventoryExpired(true, since, since + 18_000)).toBe(false);
+  });
+
+  it("outlasts the server's own chain bound", () => {
+    // Mirrors virtualSelectionProbeBudget in
+    // internal/api/handlers/playback_virtual_probe_chain.go.
+    const serverSelectionProbeBudgetMs = 20_000;
+    expect(PROVISIONAL_INVENTORY_TIMEOUT_MS).toBeGreaterThan(serverSelectionProbeBudgetMs);
+    expect(isProvisionalInventoryExpired(true, since, since + serverSelectionProbeBudgetMs)).toBe(
+      false,
+    );
+  });
+
+  it("is slow, but not expired, between the two thresholds", () => {
+    expect(isProvisionalInventorySlow(true, since, since + 1_000)).toBe(false);
+    expect(isProvisionalInventorySlow(true, since, since + PROVISIONAL_INVENTORY_SLOW_MS)).toBe(
+      true,
+    );
+    expect(isProvisionalInventoryExpired(true, since, since + PROVISIONAL_INVENTORY_SLOW_MS)).toBe(
+      false,
+    );
+  });
+
+  it("polls often enough that the answer lands promptly", () => {
+    expect(PROVISIONAL_INVENTORY_POLL_MS).toBeLessThanOrEqual(PROVISIONAL_INVENTORY_TIMEOUT_MS / 4);
   });
 });

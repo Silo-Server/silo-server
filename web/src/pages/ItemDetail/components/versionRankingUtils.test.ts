@@ -6,6 +6,7 @@ import {
   pickBestAttributes,
   selectDefaultPlaybackVariantVersion,
   selectDefaultVersion,
+  selectItemVersion,
 } from "./versionRankingUtils";
 
 function makeVersion(overrides: Partial<FileVersion> = {}): FileVersion {
@@ -22,6 +23,8 @@ function makeVersion(overrides: Partial<FileVersion> = {}): FileVersion {
     audio_tracks: overrides.audio_tracks,
     video_tracks: overrides.video_tracks,
     subtitle_tracks: overrides.subtitle_tracks,
+    available: overrides.available,
+    failed: overrides.failed,
   };
 }
 
@@ -248,5 +251,46 @@ describe("persisted version selection", () => {
         999,
       )?.file_id,
     ).toBe(22);
+  });
+});
+
+describe("selectItemVersion", () => {
+  const listed = makeVersion({ file_id: 1 });
+  const other = makeVersion({ file_id: 2, resolution: "720p" });
+
+  it("keeps an explicit pick the viewer made here even when it is failed", () => {
+    const failed = makeVersion({ file_id: 3, failed: true, available: false });
+    const selection = selectItemVersion([listed, failed], listed, failed.file_id, failed.file_id);
+    expect(selection.version?.file_id).toBe(failed.file_id);
+    expect(selection.fallback).toBeNull();
+  });
+
+  it("skips a failed server hint and reports why", () => {
+    const failed = makeVersion({ file_id: 3, failed: true, available: false });
+    const selection = selectItemVersion([other, failed], failed, failed.file_id);
+    expect(selection.version?.file_id).toBe(other.file_id);
+    expect(selection.fallback).toMatchObject({
+      reason: "failed",
+      skipped: expect.objectContaining({ file_id: failed.file_id }),
+      selected: expect.objectContaining({ file_id: other.file_id }),
+    });
+  });
+
+  it("plays the best listed row when the remembered row left the list", () => {
+    const selection = selectItemVersion([listed, other], listed, 999);
+    expect(selection.version?.file_id).toBe(listed.file_id);
+    expect(selection.fallback).toMatchObject({ reason: "unlisted", skipped: null });
+  });
+
+  it("keeps the preferred row when every row is unplayable", () => {
+    const failedA = makeVersion({ file_id: 4, failed: true });
+    const failedB = makeVersion({ file_id: 5, available: false });
+    const selection = selectItemVersion([failedA, failedB], failedA, failedA.file_id);
+    expect(selection.version?.file_id).toBe(failedA.file_id);
+    expect(selection.fallback).toMatchObject({
+      reason: "failed",
+      skipped: expect.objectContaining({ file_id: failedA.file_id }),
+      selected: expect.objectContaining({ file_id: failedA.file_id }),
+    });
   });
 });

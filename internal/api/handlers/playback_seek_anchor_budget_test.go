@@ -549,13 +549,119 @@ func TestCopySeekAnchorAttemptBudgetReservesTheRetry(t *testing.T) {
 	}
 }
 
-// TestPrepareTransportTimelineRetryEndingOnADeadlineStaysRetryable proves a
-// retry that ends with a deadline error while its own probe context is still
-// live — the shape of a probe that inherited a spent flight — is classified as
-// our budget expiring, not as a verdict against the release. The player gets a
-// retryable seek error it can retry instead of a terminal that leaves it
-// reconnecting.
-func TestPrepareTransportTimelineRetryEndingOnADeadlineStaysRetryable(t *testing.T) {
+// TestPrepareTransportTimelineSizesAnchorProbeFromObservedProbeCost proves the
+// first attempt is sized from what this source's anchor probe recently cost, not
+// from the provider link's listing latency. A probe byte-seeks into the release
+// and reads a frame on top of the open, so a link that lists in 3.6s can need
+// 11.6s to anchor a deep position; before this the first attempt always got the
+// floor, expired, and the retry re-discovered the real cost — the 5-19s start. A
+// probe that still cannot finish inside the measured budget stays a slow link:
+// the start degrades to the requested position instead of answering a retryable
+// provider verdict.
+func TestPrepareTransportTimelineSizesAnchorProbeFromObservedProbeCost(t *testing.T) {
+	previousFloor, previousCap, previousMargin := copySeekAnchorSeekResolveTimeout, copySeekAnchorSeekResolveTimeoutCap, copySeekProbeRetryMargin
+	copySeekAnchorSeekResolveTimeout, copySeekAnchorSeekResolveTimeoutCap, copySeekProbeRetryMargin = 100*time.Millisecond, 2*time.Second, 100*time.Millisecond
+	previousHint := copySeekAnchorProbeBudgetHint
+	// A source whose own probe needed 150ms: twice that is the attempt size.
+	copySeekAnchorProbeBudgetHint = func(string, string, int) time.Duration { return 300 * time.Millisecond }
+	defer func() {
+		copySeekAnchorSeekResolveTimeout, copySeekAnchorSeekResolveTimeoutCap, copySeekProbeRetryMargin = previousFloor, previousCap, previousMargin
+		copySeekAnchorProbeBudgetHint = previousHint
+	}()
+
+	const ownerInstallationID = 43
+	clearVirtualProviderLinkLatency(t, "43")
+	handler, file, session, plan := slowLinkAnchorFixture(t, ownerInstallationID)
+
+	callerCtx, callerCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer callerCancel()
+
+	var mu sync.Mutex
+	var budgets []time.Duration
+	handler.copySeekAnchor = func(ctx context.Context, _ string, _ string, _ float64, _ int) (float64, int, error) {
+		mu.Lock()
+		if deadline, ok := ctx.Deadline(); ok {
+			budgets = append(budgets, time.Until(deadline))
+		}
+		mu.Unlock()
+		// A link that is slow rather than broken: the probe cannot finish inside
+		// the budget it was given.
+		<-ctx.Done()
+		return 0, 0, ctx.Err()
+	}
+
+	started := time.Now()
+	timeline, transportErr := handler.prepareTransportTimelineV3(callerCtx, session, file, playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux})
+	if transportErr != nil {
+		t.Fatalf("transport error = %#v, want the anchor-less start, not a retryable failure", transportErr)
+	}
+	if timeline.copySeekAnchorResolved {
+		t.Fatalf("timeline = %#v, want the unanchored shape", timeline)
+	}
+	if timeline.seekSeconds != plan.Timeline.SourceStartSeconds || timeline.streamOriginSeconds != plan.Timeline.SourceStartSeconds {
+		t.Fatalf("timeline = %#v, want seek and origin at the requested %v s", timeline, plan.Timeline.SourceStartSeconds)
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("anchor phase took %v, want it bounded by the caller's 2s budget", elapsed)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(budgets) == 0 {
+		t.Fatal("the anchor probe never ran")
+	}
+	// The first attempt is the measurement's, not the 100ms floor: at least twice
+	// the floor and never below it.
+	if budgets[0] < 250*time.Millisecond {
+		t.Fatalf("first probe budget = %v, want the ~300ms the measured probe cost implies, not the %v floor", budgets[0], copySeekAnchorSeekResolveTimeout)
+	}
+	for _, budget := range budgets {
+		if budget > copySeekAnchorSeekResolveTimeoutCap {
+			t.Fatalf("probe budgets = %v, want every attempt inside the %v cap", budgets, copySeekAnchorSeekResolveTimeoutCap)
+		}
+	}
+}
+
+// TestCopySeekAnchorNoticesSpeakOncePerSession proves the anchor-less notice is
+// recorded once per session and source: the first degraded start can WARN, a
+// repeat inside the window is a plain notice, another source or session is new
+// again, and a lapsed record is new again. Without it a degraded session left one
+// WARN per seek and no way to tell an anchor-less session from a resolved one.
+func TestCopySeekAnchorNoticesSpeakOncePerSession(t *testing.T) {
+	now := time.Now()
+	previous := copySeekAnchorNotices
+	copySeekAnchorNotices = &copySeekAnchorNoticeTracker{seen: make(map[string]time.Time), now: func() time.Time { return now }}
+	defer func() { copySeekAnchorNotices = previous }()
+
+	key := copySeekAnchorNoticeKey("session-1", "virtual://movie/tt")
+	if !copySeekAnchorNotices.first(key) {
+		t.Fatal("the first degraded start for a session was not a warning-worthy notice")
+	}
+	if copySeekAnchorNotices.first(key) {
+		t.Fatal("the second degraded start for the same session repeated the warning")
+	}
+	if !copySeekAnchorNotices.first(copySeekAnchorNoticeKey("session-1", "virtual://movie/other")) {
+		t.Fatal("a different source in the same session was not noticed")
+	}
+	if !copySeekAnchorNotices.first(copySeekAnchorNoticeKey("session-2", "virtual://movie/tt")) {
+		t.Fatal("a different session was not noticed")
+	}
+	if copySeekAnchorNoticeKey("", "virtual://movie/tt") != "" {
+		t.Fatal("a session-less start must not be keyed")
+	}
+
+	now = now.Add(copySeekAnchorNoticeWindow + time.Second)
+	if !copySeekAnchorNotices.first(key) {
+		t.Fatal("a lapsed notice was not repeated")
+	}
+}
+
+// TestPrepareTransportTimelineRetryEndingOnADeadlineStartsWithoutTheAnchor
+// proves a retry that ends with a deadline error while its own probe context is
+// still live — the shape of a probe that inherited a spent flight — is treated
+// as the keyframe index timing out, not as a verdict against the release. The
+// start degrades to the requested position instead of leaving the player
+// reconnecting on a retryable seek error.
+func TestPrepareTransportTimelineRetryEndingOnADeadlineStartsWithoutTheAnchor(t *testing.T) {
 	previousFloor, previousMargin := copySeekAnchorSeekResolveTimeout, copySeekProbeRetryMargin
 	copySeekAnchorSeekResolveTimeout, copySeekProbeRetryMargin = 100*time.Millisecond, 100*time.Millisecond
 	defer func() {
@@ -565,6 +671,9 @@ func TestPrepareTransportTimelineRetryEndingOnADeadlineStaysRetryable(t *testing
 	const ownerInstallationID = 42
 	clearVirtualProviderLinkLatency(t, "42")
 	handler, file, session, plan := slowLinkAnchorFixture(t, ownerInstallationID)
+	previousNotices := copySeekAnchorNotices
+	copySeekAnchorNotices = &copySeekAnchorNoticeTracker{seen: make(map[string]time.Time)}
+	defer func() { copySeekAnchorNotices = previousNotices }()
 
 	callerCtx, callerCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer callerCancel()
@@ -584,18 +693,27 @@ func TestPrepareTransportTimelineRetryEndingOnADeadlineStaysRetryable(t *testing
 		return 0, 0, fmt.Errorf("resolve copy seek anchor: ffmpeg failed: resolve copy seek anchor: probe interrupted: %w", context.DeadlineExceeded)
 	}
 
-	_, transportErr := handler.prepareTransportTimelineV3(callerCtx, session, file, playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux})
-	if transportErr == nil {
-		t.Fatal("a retry that ended on a deadline produced a timeline, want the retryable seek error")
+	timeline, transportErr := handler.prepareTransportTimelineV3(callerCtx, session, file, playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux})
+	if transportErr != nil {
+		t.Fatalf("transport error = %#v, want a start from the requested position without the anchor", transportErr)
 	}
-	if !transportErr.retryable || !transportErr.seekFailure {
-		t.Fatalf("transport error = %#v, want the retryable seek error instead of a terminal", transportErr)
+	if timeline.copySeekAnchorResolved {
+		t.Fatalf("timeline = %#v, want the unanchored shape", timeline)
 	}
-	if transportErr.reason != transcodeStartFailedReasonV3 {
-		t.Fatalf("transport reason = %q, want %q", transportErr.reason, transcodeStartFailedReasonV3)
+	if timeline.seekSeconds != plan.Timeline.SourceStartSeconds || timeline.streamOriginSeconds != plan.Timeline.SourceStartSeconds {
+		t.Fatalf("timeline = %#v, want seek and origin at the requested %v s", timeline, plan.Timeline.SourceStartSeconds)
 	}
 	if got := probes.Load(); got != 2 {
 		t.Fatalf("anchor probes = %d, want the timed-out attempt and its retry", got)
+	}
+	// The degrade is recorded for the session, so the next seek is explained
+	// rather than rediscovered.
+	noticeKey := copySeekAnchorNoticeKey(session.ID, file.FilePath)
+	copySeekAnchorNotices.mu.Lock()
+	_, noticed := copySeekAnchorNotices.seen[noticeKey]
+	copySeekAnchorNotices.mu.Unlock()
+	if !noticed {
+		t.Fatalf("anchor-less start for %q left no session record", session.ID)
 	}
 }
 

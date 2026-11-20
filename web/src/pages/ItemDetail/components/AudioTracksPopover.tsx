@@ -4,9 +4,13 @@ import { memo, useCallback, type ReactNode } from "react";
 import type { FileVersion } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { getLanguageName } from "@/player/utils/languageNames";
-import { audioTrackLabel, formatChannels } from "@/lib/mediaFormat";
-import { audioTitle, compactAudioMeta } from "./versionFormatUtils";
+import {
+  audioTrackIdentity,
+  audioTrackLabel,
+  formatChannels,
+  undeclaredLanguageHint,
+} from "@/lib/mediaFormat";
+import { compactAudioMeta } from "./versionFormatUtils";
 import { formatAudioTrackSummary, resolveAudioTrackSelection } from "./prePlaySelection";
 import { useProvisionalInventoryExpiry } from "@/player/hooks/useProvisionalInventoryExpiry";
 import DetailPopover from "./DetailPopover";
@@ -18,11 +22,16 @@ interface AudioTracksPopoverProps {
   onSelectTrack?: (trackIndex: number) => void;
   onResetSelection?: () => void;
   /**
-   * True while the version's audio rows are the catalog fallback rather than
-   * probe evidence for the file. The menu withholds those rows and says it is
-   * still discovering instead of offering a pick that may not exist.
+   * True while the selected row has no audio rows at all and no probe evidence
+   * has landed. The menu says it is still discovering instead of inventing a
+   * list; a row that carries declared tracks never reaches this state.
    */
   inventoryProvisional?: boolean;
+  /**
+   * True while the rows are the selected row's release listing rather than
+   * probe evidence. They are shown immediately and labelled as unverified.
+   */
+  inventoryDeclared?: boolean;
   /** Re-runs inventory discovery; shown once the provisional window lapses. */
   onRetryInventory?: () => void;
 }
@@ -32,12 +41,15 @@ function AudioOptionRow({
   title,
   description,
   badges,
+  hint,
   onSelect,
 }: {
   active: boolean;
   title: string;
   description?: string;
   badges?: ReactNode;
+  /** Spoken and hovered note for a row whose identity is incomplete. */
+  hint?: string;
   onSelect?: () => void;
 }) {
   const content = (
@@ -45,6 +57,7 @@ function AudioOptionRow({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <span className="text-sm font-medium">{title}</span>
+          {hint && <span className="sr-only">{hint}</span>}
           {badges}
         </div>
         {description && <div className="text-muted-foreground mt-0.5 text-xs">{description}</div>}
@@ -58,6 +71,7 @@ function AudioOptionRow({
   if (!onSelect) {
     return (
       <div
+        title={hint}
         className={`flex items-start gap-3 rounded-lg px-3 py-2.5 ${active ? "bg-accent/50" : ""}`}
       >
         {content}
@@ -69,6 +83,7 @@ function AudioOptionRow({
     <button
       type="button"
       onClick={onSelect}
+      title={hint}
       className={`flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
         active ? "bg-accent/50" : "hover:bg-accent/30"
       }`}
@@ -85,19 +100,30 @@ function AudioTracksPopover({
   onSelectTrack,
   onResetSelection,
   inventoryProvisional = false,
+  inventoryDeclared = false,
   onRetryInventory,
 }: AudioTracksPopoverProps) {
-  const tracks = version?.audio_tracks;
-  const { expired: discoveryExpired, retry: restartDiscovery } =
-    useProvisionalInventoryExpiry(inventoryProvisional);
+  const tracks = version?.audio_tracks ?? [];
+  const {
+    expired: discoveryExpired,
+    slow: discoverySlow,
+    retry: restartDiscovery,
+  } = useProvisionalInventoryExpiry(inventoryProvisional);
   const handleRetryInventory = useCallback(() => {
     restartDiscovery();
     onRetryInventory?.();
   }, [onRetryInventory, restartDiscovery]);
 
-  if (!tracks || tracks.length === 0) return null;
+  if (tracks.length === 0 && !inventoryProvisional) return null;
 
   const isInteractive = Boolean(onSelectTrack || onResetSelection);
+  const declared = inventoryDeclared && !inventoryProvisional;
+  // A declaration with no language or codec names no track. Group it as the
+  // release listing instead of presenting a fabricated row as a probe result.
+  const declaredHasDetail = tracks.some((track) =>
+    Boolean(track.language || track.codec || track.title || track.embedded_title),
+  );
+  const declaredGroupOnly = declared && tracks.length > 0 && !declaredHasDetail;
 
   const { autoTrack, activeTrack } = resolveAudioTrackSelection(
     version,
@@ -108,7 +134,7 @@ function AudioTracksPopover({
 
   return (
     <DetailPopover
-      positionKey={`${inventoryProvisional}:${discoveryExpired}:${tracks.length}`}
+      positionKey={`${inventoryProvisional}:${discoveryExpired}:${discoverySlow}:${tracks.length}`}
       contentClassName="w-80 p-1.5"
       trigger={
         <Button
@@ -120,13 +146,17 @@ function AudioTracksPopover({
           <span className="text-muted-foreground max-w-44 truncate text-[0.6875rem] font-normal sm:max-w-64">
             {inventoryProvisional
               ? discoveryExpired
-                ? "Unavailable"
-                : "Discovering…"
-              : isInteractive
-                ? selectionMode === "auto"
-                  ? `Auto: ${autoSummary}`
-                  : activeSummary
-                : tracks.length}
+                ? "Not verified"
+                : discoverySlow
+                  ? "Still checking…"
+                  : "Discovering…"
+              : declaredGroupOnly
+                ? "Release listing"
+                : isInteractive
+                  ? selectionMode === "auto"
+                    ? `Auto: ${autoSummary}`
+                    : activeSummary
+                  : tracks.length}
           </span>
           <ChevronDown className="text-muted-foreground size-3" />
         </Button>
@@ -141,15 +171,25 @@ function AudioTracksPopover({
             onSelect={onResetSelection}
           />
         )}
+        {declared && !declaredGroupOnly && (
+          <div className="text-muted-foreground px-3 py-1 text-[0.6875rem]">
+            From release listing
+          </div>
+        )}
+        {declaredGroupOnly && (
+          <div className="text-muted-foreground px-3 py-2 text-xs">
+            Audio · from release listing
+          </div>
+        )}
         {inventoryProvisional && !discoveryExpired && (
           <div className="text-muted-foreground flex items-center gap-2 px-3 py-2 text-xs">
             <Loader2 className="size-3 animate-spin" />
-            Discovering audio tracks…
+            {discoverySlow ? "Still checking for audio tracks…" : "Discovering audio tracks…"}
           </div>
         )}
         {inventoryProvisional && discoveryExpired && (
           <div className="text-muted-foreground flex items-center justify-between gap-2 px-3 py-2 text-xs">
-            <span>Audio tracks unavailable.</span>
+            <span>Tracks not verified. The release listing names none.</span>
             <button
               type="button"
               onClick={handleRetryInventory}
@@ -159,39 +199,39 @@ function AudioTracksPopover({
             </button>
           </div>
         )}
-        {(inventoryProvisional ? [] : tracks).map((track, index) => {
+        {(inventoryProvisional || declaredGroupOnly ? [] : tracks).map((track, index) => {
+          const identity = audioTrackIdentity(track, index + 1);
           const codec = audioTrackLabel(track);
           const channels = formatChannels(track.channels);
-          const language = getLanguageName(track.language ?? "");
-          const fallbackTitle = audioTitle(track);
-          const title = language || fallbackTitle;
           const embeddedTitle = track.title?.trim() || track.embedded_title?.trim() || "";
           const meta = [
-            embeddedTitle && embeddedTitle !== title ? embeddedTitle : "",
+            embeddedTitle && embeddedTitle !== identity.title ? embeddedTitle : "",
             compactAudioMeta(track),
           ]
             .filter(Boolean)
             .join(" \u00B7 ");
+          const hint = identity.languageUndeclared ? undeclaredLanguageHint() : undefined;
 
           return (
             <AudioOptionRow
-              key={`${track.language}-${track.codec}-${index}`}
+              key={`${index}-${identity.title}`}
               active={
                 isInteractive
                   ? selectionMode === "explicit" && explicitTrackIndex === index
                   : Boolean(track.default)
               }
-              title={title}
+              title={identity.title}
               description={meta}
+              hint={hint}
               onSelect={onSelectTrack ? () => onSelectTrack(index) : undefined}
               badges={
                 <>
-                  {codec && (
+                  {!identity.titleFromFormat && codec && (
                     <Badge variant="secondary" className="px-1.5 py-0 text-[0.625rem] uppercase">
                       {codec}
                     </Badge>
                   )}
-                  {channels && (
+                  {!identity.titleFromFormat && channels && (
                     <Badge variant="secondary" className="px-1.5 py-0 text-[0.625rem]">
                       {channels}
                     </Badge>

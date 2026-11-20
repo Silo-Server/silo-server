@@ -374,7 +374,7 @@ describe("useWatchDetail caching", () => {
     // The same options WatchPage's fetchQuery call sites and useWatchDetail
     // build: one query key means react-query coalesces the in-flight fetch.
     const options = {
-      queryKey: itemKeys.watchDetail("movie-1", 7, 1),
+      queryKey: itemKeys.watchDetail("movie-1", 1),
       queryFn: () => fetchWatchDetail("movie-1", 7, 1),
       staleTime: 30_000,
     };
@@ -384,6 +384,23 @@ describe("useWatchDetail caching", () => {
     await vi.waitFor(() => expect(mocks.v2).toHaveBeenCalledTimes(1));
     resolveApi({ content_id: "movie-1", versions: [], subtitles: [] });
     await Promise.all([first, second]);
+
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads one watch detail per item when the preferred file changes", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    mocks.v2.mockResolvedValue({ content_id: "movie-1", versions: [], subtitles: [] });
+    const wrapper = wrapperFor(client);
+
+    // The player and the page name the same title with different preferred
+    // files as the session resolves one. `file_id` is a server-side preference,
+    // not a different payload, so both reads share one cache entry.
+    const first = renderHook(() => useWatchDetail("movie-1", 7, 1), { wrapper });
+    await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
+
+    const second = renderHook(() => useWatchDetail("movie-1", 9, 1), { wrapper });
+    await waitFor(() => expect(second.result.current.isSuccess).toBe(true));
 
     expect(mocks.v2).toHaveBeenCalledTimes(1);
   });

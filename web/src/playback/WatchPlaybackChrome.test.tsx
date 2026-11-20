@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { Profiler, useEffect, type ReactNode } from "react";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
@@ -331,5 +331,53 @@ describe("PlaybackFullscreenRoot", () => {
     act(() => harness.controller().stopPlayback());
 
     expect(harness.exitFullscreen).not.toHaveBeenCalled();
+  });
+});
+
+describe("WatchPlaybackBar audio", () => {
+  // The minimised bar had no audio control at all, so a click meant for one
+  // landed on the bar's seek slider and jumped the playhead. The bar now
+  // carries the player's audio selector: it opens the plan's tracks and picks
+  // on the live session at the position the bar shows.
+  it("opens the audio selector without moving the playhead", () => {
+    const harness = renderPlaybackHarness();
+    const request = createWatchRouteRequest({ contentId: "movie-1", libraryId: 1 });
+    act(() => harness.controller().syncRouteRequest(request));
+    const select = vi.fn();
+    act(() =>
+      harness.controller().setTransportControls(request.requestKey, {
+        playPause: vi.fn(),
+        seekBy: vi.fn(),
+        skipBack: vi.fn(),
+        skipForward: vi.fn(),
+        seekTo: vi.fn(),
+        togglePictureInPicture: vi.fn(),
+        audio: {
+          tracks: [
+            { title: "Korean TrueHD", language: "ko", codec: "truehd", channels: 8, default: true },
+            { title: "Korean AC-3", language: "ko", codec: "ac3", channels: 6 },
+          ],
+          activeIndex: 0,
+          provisional: false,
+          pending: false,
+          failed: false,
+          select,
+          retry: vi.fn(),
+        },
+      }),
+    );
+    act(() => harness.controller().minimizePlayback());
+    harness.tick(request.requestKey, 97);
+
+    const transportSeek = harness.controller().state.transport?.seekTo as ReturnType<typeof vi.fn>;
+    fireEvent.click(screen.getByRole("button", { name: "Audio tracks" }));
+
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByText("Korean AC-3")).toBeInTheDocument();
+    expect(transportSeek).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /Korean AC-3/ }));
+    expect(select).toHaveBeenCalledWith(1, 97);
+    expect(transportSeek).not.toHaveBeenCalled();
   });
 });

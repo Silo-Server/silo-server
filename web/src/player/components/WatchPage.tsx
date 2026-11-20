@@ -29,6 +29,7 @@ import {
   resolveEffectiveVersion,
   type EffectiveVersionIdentity,
 } from "../utils/resolveEffectiveVersion";
+import { resolveVersionSubstitution } from "../utils/versionSubstitution";
 import { VideoPlayer } from "./VideoPlayer";
 import { fetchWatchDetail } from "@/hooks/queries/items";
 import {
@@ -127,6 +128,16 @@ function buildEffectiveVersionLabel(version: PlayerFileVersion): string | null {
     return null;
   }
   return `${parts.join(" ")}${version.hdr ? " HDR" : ""}`;
+}
+
+/**
+ * The release a row names, when it names one. `release_name` is the provider's
+ * release name; a virtual candidate's display label (`edition_raw`) is the
+ * wire's fallback for rows that carry no name. Blank values name nothing.
+ */
+function versionReleaseName(version: PlayerFileVersion): string | null {
+  const name = version.release_name?.trim() || version.edition_raw?.trim();
+  return name ? name : null;
 }
 
 /**
@@ -525,12 +536,10 @@ function WatchPagePlayer({
         : (activeVersion?.audio_tracks ?? []),
     [activeVersion, session.planAudioTracks],
   );
-  // The fallback list is catalog metadata, not evidence for the effective file.
-  // Mark it provisional when the plan has no inventory of its own, so the
-  // overlay gates its rows instead of presenting placeholders as final.
+  // Declared rows are the playing version's own inventory: show them now and
+  // let the menu mark them unverified. Only an empty list waits on a probe.
   const audioMenuProvisional = isOverlayInventoryProvisional(
     session.audioInventoryProvisional,
-    (session.planAudioTracks?.length ?? 0) > 0,
     audioTracks.length,
   );
 
@@ -554,14 +563,11 @@ function WatchPagePlayer({
     () => resolvePlayableSubtitles(session.subtitleUrls, versionSubtitles),
     [session.subtitleUrls, versionSubtitles],
   );
-  // `playableSubtitles` knowingly falls back to the catalog rows above when the
-  // plan has not published a selectable inventory yet. Those rows are the
-  // pre-probe placeholders; mark them provisional even if the plan carries no
-  // declared marker, so the overlay waits for probe evidence instead of
-  // treating another release's catalog list as this file's final tracks.
+  // The playing version's declared subtitle rows are shown immediately; only
+  // an empty list waits for probe evidence. The active version is resolved
+  // against the effective source above, so this is never a sibling's list.
   const subtitleMenuProvisional = isOverlayInventoryProvisional(
     session.subtitleInventoryProvisional,
-    hasSelectableSessionSubtitles(session.subtitleUrls),
     playableSubtitles.length,
   );
   // What the menu may actually offer. A provisional inventory with no selectable
@@ -583,7 +589,9 @@ function WatchPagePlayer({
 
   const handleSelectAutoVersion = useCallback(() => {
     session.selectAutoVersion();
-  }, [session]);
+    // Auto retracts the pin: the row now playing is the server's to replace.
+    onRequestedVersionChange?.(session.plan?.requested_media_file_id ?? fileId ?? null, false);
+  }, [fileId, onRequestedVersionChange, session]);
 
   /**
    * Manually re-lists the title's video candidates for the version menu.
@@ -601,7 +609,7 @@ function WatchPagePlayer({
     // Re-read the watch detail so the version list and the indexer releases
     // both come from the server's answer rather than a client-side merge.
     const detail = await queryClient.fetchQuery({
-      queryKey: itemKeys.watchDetail(contentId, fileId, libraryId),
+      queryKey: itemKeys.watchDetail(contentId, libraryId),
       queryFn: () => fetchWatchDetail(contentId, fileId, libraryId),
       staleTime: 0,
     });
@@ -738,8 +746,10 @@ function WatchPagePlayer({
   useEffect(() => {
     if (lastRequestedFileIdRef.current === committedRequestedFileId) return;
     lastRequestedFileIdRef.current = committedRequestedFileId;
-    onRequestedVersionChange?.(committedRequestedFileId);
-  }, [committedRequestedFileId, onRequestedVersionChange]);
+    // A row the session committed while Auto is armed is the server's choice,
+    // not the viewer's.
+    onRequestedVersionChange?.(committedRequestedFileId, !session.autoFallback);
+  }, [committedRequestedFileId, onRequestedVersionChange, session.autoFallback]);
 
   const handleSwitchAudio = useCallback(
     (index: number, currentPosition: number) => {
@@ -994,7 +1004,7 @@ function WatchPagePlayer({
         // key would keep reading the mount version's inventory (or a cached
         // payload for it) and never see the newly selected version's probe.
         const detail = await queryClient.fetchQuery({
-          queryKey: itemKeys.watchDetail(contentId, mediaFileId, libraryId),
+          queryKey: itemKeys.watchDetail(contentId, libraryId),
           queryFn: () =>
             fetchWatchDetail(contentId, mediaFileId, libraryId, { signal: controller.signal }),
           staleTime: isFirstAttempt ? 0 : WATCH_DETAIL_STALE_TIME_MS,
@@ -1243,7 +1253,7 @@ function WatchPagePlayer({
     // payload that still lacks chapters would otherwise be returned without a
     // network request, spending this file's single repair attempt for nothing.
     void queryClient.fetchQuery({
-      queryKey: itemKeys.watchDetail(contentId, fileId, libraryId),
+      queryKey: itemKeys.watchDetail(contentId, libraryId),
       queryFn: () => fetchWatchDetail(contentId, fileId, libraryId),
       staleTime: 0,
     });
@@ -1294,7 +1304,7 @@ function WatchPagePlayer({
     // re-applied below before this list replaces them.
     void queryClient
       .fetchQuery({
-        queryKey: itemKeys.watchDetail(contentId, fileId, libraryId),
+        queryKey: itemKeys.watchDetail(contentId, libraryId),
         queryFn: () => fetchWatchDetail(contentId, fileId, libraryId),
         staleTime: 0,
       })
@@ -1423,14 +1433,23 @@ function WatchPagePlayer({
   // virtual-source refusal gets a Try again action, as does a retryable
   // transcode start failure (e.g. a seek anchor that failed on a transient
   // relay error — a fresh start re-lists and can succeed where the same
-  // plan could not proceed); every other terminal keeps the plain Go Back
-  // dead-end. An adaptation refusal always offers the action: the server
-  // marks it non-retryable because replaying the same plan cannot work, but
-  // a *fresh start* can re-list and re-resolve the source.
+  // plan could not proceed), and a route ladder the server says can be tried
+  // again once its transient blocker clears. Every other terminal keeps the
+  // plain Go Back dead-end. An adaptation refusal always offers the action: the
+  // server marks it non-retryable because replaying the same plan cannot work,
+  // but a *fresh start* can re-list and re-resolve the source.
+  //
+  // A transport failure (a 5xx the server answers while it cannot reach a
+  // dependency, a timeout, a dropped connection) names no terminal reason at
+  // all: its description carries the retryable verdict instead, and its copy
+  // already says to try again.
   const canRetryTerminal =
     !session.plan &&
     (session.errorReason === "virtual_source_unavailable" ||
-    session.errorReason === "transcode_start_failed"
+    session.errorReason === "source_mismatch" ||
+    session.errorReason === "transcode_start_failed" ||
+    session.errorReason === "routes_exhausted" ||
+    session.errorReason === null
       ? session.errorRetryable === true
       : isAdaptationUnavailableReason(session.errorReason));
   // A session answered gone cannot be replanned or reconnected. The only
@@ -1532,12 +1551,13 @@ function WatchPagePlayer({
   // id comparison: the server collapses `effective_media_file_id` onto the
   // requested id and publishes the concrete candidate as `effective_virtual_uri`
   // instead, so the candidate's path is compared against the requested row's
-  // own path. When the requested row carries no path (older responses) the
-  // comparison says nothing, so the notice stays quiet rather than guess.
+  // own path.
   //
-  // The server also publishes the substitution additively
-  // (`substituted_from_file_id` + `substitution_reason`), which is authoritative
-  // when present and lets the notice name the cause without re-deriving it.
+  // A moved identity is not enough on its own: a sibling mirror of the same
+  // release is a different row but the same version. The decision therefore
+  // compares release identity (the server's `substituted_from_file_id` when it
+  // sent one, else the rows' release name/size), and stays quiet when that
+  // identity is unknown rather than claiming a substitution it cannot prove.
   const plan = session.plan;
   const requestedFileId = plan?.requested_media_file_id ?? fileId ?? null;
   const requestedVersion =
@@ -1559,8 +1579,7 @@ function WatchPagePlayer({
     !!effectiveVirtualUri &&
     requestedVersion?.file_path !== undefined &&
     requestedVersion.file_path !== effectiveVirtualUri;
-  const versionWasSubstituted =
-    (plan?.substituted_from_file_id != null && plan.substituted_from_file_id !== effectiveFileId) ||
+  const identitiesDiffer =
     (requestedFileId != null && effectiveFileId != null && requestedFileId !== effectiveFileId) ||
     virtualSubstitution;
   // Name the row the plan actually landed on when we can resolve it, so the
@@ -1575,19 +1594,39 @@ function WatchPagePlayer({
     mediaFileId: effectiveVirtualUri ? null : effectiveFileId,
     effectiveVirtualUri,
   });
-  const effectiveVersionLabel = effectiveVersionRow
-    ? buildEffectiveVersionLabel(effectiveVersionRow)
-    : null;
+  const { substituted: versionWasSubstituted } = resolveVersionSubstitution({
+    requestedVersion,
+    effectiveVersion: effectiveVersionRow,
+    identitiesDiffer,
+    substitutedFromFileId: plan?.substituted_from_file_id,
+  });
+  // The notice names the release when the row knows it. The viewer picked a
+  // release, not a resolution: "2160p HEVC HDR" cannot tell them which release
+  // replaced theirs, and it is misleading when the swap kept the format. The
+  // format label stays as the fallback for rows that carry no release name.
+  const effectiveReleaseName = effectiveVersionRow ? versionReleaseName(effectiveVersionRow) : null;
+  const effectiveVersionLabel =
+    effectiveVersionRow && !effectiveReleaseName
+      ? buildEffectiveVersionLabel(effectiveVersionRow)
+      : null;
+  const playingLabel = effectiveReleaseName ?? effectiveVersionLabel;
+  // Two catalog rows can be mirrors of one release, so a moved id is not on its
+  // own a swap the viewer should be told about. Rows that both name the same
+  // release are the same thing playing, and claiming a replacement would be a
+  // downgrade claim the client cannot support.
+  const requestedReleaseName = requestedVersion ? versionReleaseName(requestedVersion) : null;
+  const sameKnownRelease =
+    requestedReleaseName !== null && requestedReleaseName === effectiveReleaseName;
   const reasonPhrase = substitutionReasonPhrase(plan?.substitution_reason);
   const substitutionCopy = reasonPhrase
-    ? effectiveVersionLabel
-      ? `${reasonPhrase}, so Vio is playing ${effectiveVersionLabel} instead.`
+    ? playingLabel
+      ? `${reasonPhrase}, so Vio is playing ${playingLabel} instead.`
       : `${reasonPhrase} — playing a different version.`
-    : effectiveVersionLabel
-      ? `The selected version wasn't available, so Vio is playing ${effectiveVersionLabel} instead.`
+    : playingLabel
+      ? `The selected version wasn't available, so Vio is playing ${playingLabel} instead.`
       : "Playing a different version than selected — the requested version isn't playable on this device.";
   const versionSwapNotice =
-    versionWasSubstituted && !versionSwapNoticeDismissed ? (
+    versionWasSubstituted && !sameKnownRelease && !versionSwapNoticeDismissed ? (
       <div className="absolute top-[max(4.5rem,calc(env(safe-area-inset-top)+3.5rem))] left-1/2 z-50 -translate-x-1/2">
         <div className="flex items-center gap-2 rounded-full border border-white/15 bg-black/70 px-3 py-1.5 text-xs font-medium text-white/80 shadow-lg backdrop-blur">
           <span>{substitutionCopy}</span>
@@ -1637,6 +1676,8 @@ function WatchPagePlayer({
         pendingSwitchFileId={session.pendingSwitchFileId}
         replanError={fallingBack ? null : session.error}
         replanErrorTitle={session.errorTitle}
+        replanErrorRetryable={session.errorRetryable}
+        replanErrorReason={session.errorReason}
         initialSubtitleError={session.initialSubtitleError}
         sessionId={session.sessionId}
         selectedVersion={selectedVersion}

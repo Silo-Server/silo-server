@@ -377,6 +377,16 @@ items (series, season, lists), and failed lookups leave the field out. It
 appears on `GET /api/v2/catalog/items/{id}`, `GET /api/v2/watch/{id}`, and
 the admin metadata update response, keeping v1 answers byte-identical.
 
+A detail discovery also hands the listing it just persisted to the playback
+handler before its waiters return. The start that follows — the concrete
+candidate row a detail page lists, or the provider-neutral placeholder — reads
+its candidate metadata from that entry instead of listing the provider again,
+so a first play after a detail read costs the one listing the read already paid
+for rather than a second one, and a repeat play within the entry's lifetime
+lists nothing. A forced relist, a decode-rotation exclusion, and a row the
+catalog indicted each still list, because those need the provider's current
+answer rather than the one the detail read saw.
+
 After a detail-page read persists a listing, the server schedules one detached
 pre-play probe chain for the opened item: it re-reads the item's selected
 version when the detail read supplied `file_id`, otherwise its default version.
@@ -391,9 +401,12 @@ candidate, so the play path's own probe handles it. Chains are bounded (two
 concurrent, one per item, a whole-chain deadline, and the shared probe
 gate), never block any API response, and never wait for playback: a chain may
 record evidence before a play attempt resolves the same row, in which case that
-attempt reuses it, and a play attempt that resolves first probes on its own as
-usual. Foreground probing may still be required when the chain has not
-finished, or when it prepared a version the play attempt does not resolve.
+attempt reuses it, and a play attempt that resolves first joins the chain's
+in-flight probe instead of cancelling it. One ffprobe per candidate results:
+the shared probe cache single-flights the enumeration, so the chain's work is
+never discarded and then repeated. Foreground probing may still be required
+when the chain has not finished, or when it prepared a version the play attempt
+does not resolve.
 These bounds are per process: a deployment with several replicas prepares
 independently on each one. The queued evidence write follows the existing
 persistence rules, including their stale-write protections; probing
@@ -712,6 +725,53 @@ operation (see [Realtime API](realtime-api.md#room-membership-and-buffering)).
 Every viewer then starts a new fixed-file attempt for that room selection. Ordinary
 web, Apple, Android, and Jellyfin playback keep their existing behavior; Apple
 has no active room caller and Android's room UI remains disabled.
+
+## Version substitution
+
+`startPlayback` and `replanPlayback` may commit a release other than the row the
+client asked for: the requested release is dead or its provider listing failed, a
+transport or decode failure rotated the candidate, or the planner could not
+deliver the picked version to this client. The plan reports that instead of
+leaving the client to diff ids:
+
+- `substituted_from_file_id` is the catalog row the client asked for;
+- `substitution_reason` is the machine-readable cause.
+
+Both are omitted when the effective row is the requested one. The vocabulary is
+additive — `dead_release`, `listing_failed`, `transport_failed`,
+`decode_rejected`, `version_not_playable`, `unknown` — and a client must render
+an unknown value as a generic substitution rather than failing. The fields are
+UI-only: they are set after the plan identity is finalized and never change
+`plan_id` or `plan_attempt_key`. `effective_media_file_id` still names the row
+actually served, and `effective_virtual_uri` / `virtual_source_revision` follow
+it. Every plan decision and every replan that commits another row carries them,
+so a client never has to guess from an id diff.
+
+A substitution is bounded by the viewer's selection. A substitute that would
+offer fewer audio or subtitle tracks than the selected row, or contradict the
+item's runtime, is refused. So is a substitute whose served bytes contradict the
+release it claims: a row's own candidate may still play and carry its measured
+inventory when a provider posts it short, but unverified bytes never adopt
+another release's row, plan, or inventory. When no candidate can serve the
+selection, the start answers the retryable `virtual_source_unavailable` terminal
+with a message naming the version list, so the client offers the versions
+instead of playing a poorer or different release.
+
+A start's effective row is always one the item's version list carries, so the
+row a client records as playing is a row the same client can show and reconcile.
+A resolver substitution that lands on any other row is refused like an unusable
+candidate and the next one is tried; when none qualifies the terminal names the
+version list. Two cases are exempt: the requested row itself, and a
+provider-neutral listing row, which owns no bytes and therefore binds to the row
+that owns the served candidate as ordinary auto selection. A refusal for an
+unlisted row is not a verdict about the release and never stamps it failed.
+
+The refusal that reports served bytes contradicting the row answers the
+retryable `source_mismatch` terminal reason, the same verdict the version list
+publishes as `source_mismatch` (see [Catalog API](catalog-api.md)).
+The requested release is alive; the provider served the wrong file. Like every
+terminal reason, the value is additive: a client that does not recognize it
+renders the message, which names the version list.
 
 ## Progress and stop
 

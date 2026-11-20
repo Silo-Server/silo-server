@@ -1,7 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { AudioLines } from "lucide-react";
 import type { PlayerAudioTrack } from "../types";
-import { audioTrackLabel, formatChannels } from "@/lib/mediaFormat";
+import {
+  audioTrackIdentity,
+  audioTrackLabel,
+  formatChannels,
+  undeclaredLanguageHint,
+} from "@/lib/mediaFormat";
 import {
   audioTitle,
   compactAudioMeta,
@@ -32,6 +37,8 @@ interface AudioTrackMenuProps {
   /**
    * True while the server's inventory is declared metadata rather than probe
    * evidence, so the menu says so instead of presenting every row as final.
+   * Declared rows are still shown immediately and labelled; only an empty list
+   * waits in discovery.
    */
   provisional?: boolean;
   /**
@@ -61,6 +68,8 @@ interface AudioTrackMenuProps {
  */
 interface TrackDescriptor {
   title: string;
+  /** Spoken and hovered note for a row whose language is not declared. */
+  hint: string;
   meta: string;
   codecLabel: string;
   channelsLabel: string;
@@ -68,19 +77,27 @@ interface TrackDescriptor {
 }
 
 function describeTrack(track: PlayerAudioTrack, index: number): TrackDescriptor {
-  const title = audioTitle(track) || `Track ${index + 1}`;
+  const identity = audioTrackIdentity(track, index + 1);
+  // A declared language keeps the track's own title, which the release often
+  // writes better than we could. A row without one takes the shared identity
+  // (codec + layout, else its position) instead of a title that names a
+  // language nobody declared; its embedded title stays readable as meta text.
+  const title = identity.languageUndeclared ? identity.title : audioTitle(track);
   const language = track.languages?.length
     ? track.languages.map(formatLanguageName).filter(Boolean).join("/")
     : formatLanguageName(track.language ?? "");
+  const embeddedTitle = track.title?.trim() || track.embedded_title?.trim() || "";
   const metaParts = [
     language && language.toLowerCase() !== title.toLowerCase() ? language : "",
+    identity.languageUndeclared && embeddedTitle !== title ? embeddedTitle : "",
     compactAudioMeta(track),
   ].filter(Boolean);
   return {
     title,
+    hint: identity.languageUndeclared ? undeclaredLanguageHint() : "",
     meta: metaParts.join(" \u00B7 "),
-    codecLabel: audioTrackLabel(track),
-    channelsLabel: formatChannels(track.channels),
+    codecLabel: identity.titleFromFormat ? "" : audioTrackLabel(track),
+    channelsLabel: identity.titleFromFormat ? "" : formatChannels(track.channels),
     isDefault: Boolean(track.default),
   };
 }
@@ -196,11 +213,16 @@ export function AudioTrackMenu({
   // entry keeps its original inventory position so selection still names the
   // track the server has at that slot.
   const dedupedTracks = dedupeAudioTracks(tracks);
-  // Declared or pending rows are placeholders for the effective file, so they
-  // stay out of the menu until probe evidence lands. A terminal failure keeps
-  // the list under its explicit "discovery did not complete" notice instead of
-  // leaving the menu empty.
-  const displayedTracks = provisional && !failed ? [] : dedupedTracks;
+  // A declared list is shown immediately and marked unverified; probe evidence
+  // replaces it later. A declaration with no language or codec names no track,
+  // so it is grouped as the release listing instead of inventing a row.
+  const declaredWithoutDetail =
+    provisional &&
+    dedupedTracks.length > 0 &&
+    dedupedTracks.every(
+      ({ track }) => !track.language && !track.codec && !track.title && !track.embedded_title,
+    );
+  const displayedTracks = declaredWithoutDetail ? [] : dedupedTracks;
 
   return (
     <div ref={menuRef} className="relative" onBlur={handleBlur}>
@@ -247,13 +269,18 @@ export function AudioTrackMenu({
               <DiscoveryRetryButton onRetry={handleRetryDiscovery} buttonRef={retryButtonRef} />
             </div>
           )}
-          {!failed && provisional && !discoveryExpired && (
+          {provisional && dedupedTracks.length > 0 && (
+            <div className="px-3 py-1 text-xs text-white/45">
+              {declaredWithoutDetail ? "Audio · from release listing" : "From release listing"}
+            </div>
+          )}
+          {!failed && provisional && dedupedTracks.length === 0 && !discoveryExpired && (
             <div className="flex items-center gap-2 px-3 py-1 text-xs text-white/50">
               <span className="h-3 w-3 animate-spin rounded-full border border-white/20 border-t-white/80" />
               <span>Discovering audio tracks…</span>
             </div>
           )}
-          {!failed && provisional && discoveryExpired && (
+          {!failed && provisional && dedupedTracks.length === 0 && discoveryExpired && (
             <div className="flex items-center justify-between gap-2 px-3 py-1 text-xs text-white/50">
               <span>Audio tracks unavailable.</span>
               <DiscoveryRetryButton onRetry={handleRetryDiscovery} buttonRef={retryButtonRef} />
@@ -273,6 +300,7 @@ export function AudioTrackMenu({
                 }}
                 role="menuitem"
                 type="button"
+                title={descriptor.hint || undefined}
                 className={`flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
                   isActive ? "text-blue-400" : "text-white/85"
                 }`}
@@ -284,6 +312,7 @@ export function AudioTrackMenu({
                 <span className="flex min-w-0 flex-1 flex-col gap-1">
                   <span className="flex flex-wrap items-center gap-1.5">
                     <span className="truncate text-sm font-medium">{descriptor.title}</span>
+                    {descriptor.hint && <span className="sr-only">{descriptor.hint}</span>}
                     {descriptor.codecLabel && <TrackBadge>{descriptor.codecLabel}</TrackBadge>}
                     {descriptor.channelsLabel && (
                       <TrackBadge>{descriptor.channelsLabel}</TrackBadge>

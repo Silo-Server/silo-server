@@ -41,6 +41,9 @@ const (
 	subtitleServeSourceExtract = "source_extract"
 	// subtitleServePGSSupSource is the PGS variant of subtitleServeSourceExtract.
 	subtitleServePGSSupSource = "pgs_source"
+	// subtitleServePGSProgressive is a bounded PGS window answered from the
+	// running full-track fill's artifact, behind its coverage watermark.
+	subtitleServePGSProgressive = "pgs_progressive"
 )
 
 const (
@@ -90,6 +93,16 @@ var subtitleWarmPageOverlapSeconds = promauto.NewHistogramVec(prometheus.Histogr
 	// A window extract on a warm relay is the multi-second case under
 	// investigation; the long buckets keep that tail visible.
 	Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 15, 30, 60},
+}, []string{subtitleMetricLabelFormat})
+
+var subtitlePageCostRejections = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "vio_subtitle_page_read_budget_total",
+	Help: "Windowed bitmap page extracts killed for reading more of the source container than a page may cost, by output format. Measurement only.",
+}, []string{subtitleMetricLabelFormat})
+
+var subtitleWindowBudgetKills = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "vio_subtitle_window_budget_total",
+	Help: "Request-path text subtitle window extracts killed at their elapsed budget instead of running to the window timeout. Measurement only.",
 }, []string{subtitleMetricLabelFormat})
 
 // recordSubtitleServeSource attributes one response or extraction attempt to
@@ -147,4 +160,56 @@ func observeSubtitleRelayAdmissionWait(class string, waited time.Duration) {
 func recordSubtitleWarmPageOverlap(format string, elapsed time.Duration) {
 	subtitleWarmPageOverlaps.WithLabelValues(format).Inc()
 	subtitleWarmPageOverlapSeconds.WithLabelValues(format).Observe(elapsed.Seconds())
+}
+
+// recordSubtitlePageTooCostly counts one windowed bitmap page extract killed for
+// reading more of the source container than a page may cost.
+var subtitlePageRecoveries = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "vio_subtitle_page_recovery_total",
+	Help: "Bounded waits for a windowed bitmap page against its track's progressive artifact, by result (recovery_warm or unavailable). Measurement only.",
+}, []string{subtitleMetricLabelResult})
+
+const (
+	subtitlePageRecoveryStarted     = "recovery_warm"
+	subtitlePageRecoveryUnavailable = "unavailable"
+)
+
+// recordSubtitlePageRecoveryStarted counts one page's single recovery fill: the
+// first refusal for that page, the only request allowed to start it.
+func recordSubtitlePageRecoveryStarted() {
+	subtitlePageRecoveries.WithLabelValues(subtitlePageRecoveryStarted).Inc()
+}
+
+// recordSubtitlePageRecoveryUnavailable counts one page answered finally because
+// its progressive artifact could not reach it inside the recovery budget (or
+// stopped advancing toward it).
+func recordSubtitlePageRecoveryUnavailable() {
+	subtitlePageRecoveries.WithLabelValues(subtitlePageRecoveryUnavailable).Inc()
+}
+
+func recordSubtitlePageTooCostly() {
+	subtitlePageCostRejections.WithLabelValues(subtitleFormatSUP).Inc()
+}
+
+// recordSubtitlePageCostRefused counts one windowed bitmap page refused before
+// its extract because the container prefix it would read was priced beyond the
+// page budget. It shares the rejection counter with the runtime read cap: both
+// answer the same way, and the split that matters is pages refused versus pages
+// served from the artifact.
+func recordSubtitlePageCostRefused() {
+	subtitlePageCostRejections.WithLabelValues(subtitleFormatSUP).Inc()
+}
+
+// recordSubtitlePageTimeout counts one windowed bitmap page that ran out the
+// window extract deadline before emitting a byte. It shares the rejection
+// counter with the read-budget kills: the page was not served, and the reason a
+// reader needs is that a page was refused rather than which guard fired.
+func recordSubtitlePageTimeout() {
+	subtitlePageCostRejections.WithLabelValues(subtitleFormatSUP).Inc()
+}
+
+// recordSubtitleWindowBudgetKill counts one request-path text window extract
+// killed at its elapsed budget.
+func recordSubtitleWindowBudgetKill(format string) {
+	subtitleWindowBudgetKills.WithLabelValues(format).Inc()
 }

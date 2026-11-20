@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -39,6 +41,13 @@ func probeChainRow(fileID int, filePath string, probeUpdatedAt *time.Time) *mode
 		// reads the row's own freshness clock. These fixtures describe a
 		// candidate the discovery run just listed.
 		UpdatedAt: time.Now(),
+	}
+	if probeUpdatedAt != nil {
+		// A probed stamp is only a reason to skip the chain when the evidence it
+		// stamped actually describes tracks; a stamp with empty arrays is the
+		// state an unadoptable write leaves behind and must be re-probed.
+		row.AudioTracks = []models.AudioTrack{{Codec: "eac3", Channels: 6, Language: "eng"}}
+		row.SubtitleTracks = []models.SubtitleTrack{{Index: 0, Codec: "subrip", Language: "eng"}}
 	}
 	row.ResolvedURL = probeChainProviderURL(row)
 	return row
@@ -352,6 +361,31 @@ func TestScheduleDefaultFileProbeSkipsStampedRow(t *testing.T) {
 	}
 }
 
+// TestScheduleDefaultFileProbeReprobesAStampedRowWithoutInventory pins the
+// repair path for a row whose probe stamp outlived the evidence it stamped. A
+// write that could not adopt its candidate (or an invalidation) can leave the
+// stamp set with empty track arrays; treating that as "already probed" froze the
+// row forever, which is what kept the played 4K file's menu empty while every
+// chain skipped it.
+func TestScheduleDefaultFileProbeReprobesAStampedRowWithoutInventory(t *testing.T) {
+	stampedAt := time.Now().Add(-time.Hour)
+	row := probeChainRow(304, "virtual://movie/probe-chain?result=c4", &stampedAt)
+	row.AudioTracks = nil
+	row.SubtitleTracks = nil
+	h, target, prober := probeChainHandler(row)
+	target.releaseRow()
+
+	h.ScheduleDefaultFileProbe(probeChainTestContent, probeChainSourceRow(), probeChainStreams(row), catalog.AccessFilter{})
+	h.probeChainWG.Wait()
+
+	if prober.count() != 1 {
+		t.Fatalf("probe calls = %d, want 1: a stamp with no inventory is not evidence", prober.count())
+	}
+	if got := prober.last(); got != probeChainProviderURL(row) {
+		t.Fatalf("probed %q, want the row's own bytes %q", got, probeChainProviderURL(row))
+	}
+}
+
 func TestScheduleDefaultFileProbeSkipsNeutralGroupRow(t *testing.T) {
 	neutral := probeChainRow(303, "virtual://movie/probe-chain", nil)
 	h, target, prober := probeChainHandler(neutral)
@@ -584,30 +618,30 @@ func TestDiscoverScheduleSurvivesWaiterDisconnect(t *testing.T) {
 
 func TestDefaultProbeChainAdmissionIsAtomicWithoutGoroutines(t *testing.T) {
 	var admission defaultProbeChainAdmission
-	releaseA, refusal := admission.acquire("movie-a")
+	releaseA, refusal, _ := admission.acquire("movie-a", false)
 	if refusal != defaultProbeChainRefusalNone {
 		t.Fatalf("empty admission refused a fresh chain: %q", refusal)
 	}
-	if _, refusal := admission.acquire("movie-a"); refusal != defaultProbeChainRefusalLive {
+	if _, refusal, _ := admission.acquire("movie-a", false); refusal != defaultProbeChainRefusalLive {
 		t.Fatalf("a live chain did not deduplicate its item: %q", refusal)
 	}
-	releaseB, refusal := admission.acquire("movie-b")
+	releaseB, refusal, _ := admission.acquire("movie-b", false)
 	if refusal != defaultProbeChainRefusalNone || releaseB == nil {
 		t.Fatalf("second distinct item did not admit within the bound: %q", refusal)
 	}
 	releaseA()
-	releaseC, refusal := admission.acquire("movie-c")
+	releaseC, refusal, _ := admission.acquire("movie-c", false)
 	if refusal != defaultProbeChainRefusalNone {
 		t.Fatalf("a released chain kept its slot reserved: %q", refusal)
 	}
 	// A double release must not hand out the same slot twice: with both slots
 	// legitimately live (b and c), nothing else is admissible.
 	releaseA()
-	if _, refusal := admission.acquire("movie-d"); refusal != defaultProbeChainRefusalCapacity {
+	if _, refusal, _ := admission.acquire("movie-d", false); refusal != defaultProbeChainRefusalCapacity {
 		t.Fatalf("a double release freed an extra slot: %q", refusal)
 	}
 	releaseC()
-	releaseD, refusal := admission.acquire("movie-d")
+	releaseD, refusal, _ := admission.acquire("movie-d", false)
 	if refusal != defaultProbeChainRefusalNone {
 		t.Fatalf("a released slot was not reusable: %q", refusal)
 	}
@@ -1163,24 +1197,6 @@ func TestScheduleDefaultFileProbeSnapshotsAccessFilter(t *testing.T) {
 	}
 }
 
-func TestDefaultProbeChainAdmissionCancelsLiveChain(t *testing.T) {
-	var admission defaultProbeChainAdmission
-	ctx, cancel := context.WithCancel(context.Background())
-	release, refusal := admission.acquireWithCancel("content-1\x000", cancel)
-	if refusal != defaultProbeChainRefusalNone || release == nil {
-		t.Fatalf("acquire refusal=%q, release_nil=%v", refusal, release == nil)
-	}
-	defer release()
-	if !admission.cancelKey("content-1\x000") {
-		t.Fatal("cancelKey reported no live chain")
-	}
-	select {
-	case <-ctx.Done():
-	case <-time.After(time.Second):
-		t.Fatal("chain context was not canceled")
-	}
-}
-
 // TestScheduleSelectedFileProbeProbesTheSelectedRow pins probe-on-select: an
 // explicit selection schedules the shared chain for the row it names, never the
 // resolved default, and a row that already carries probe evidence schedules no
@@ -1209,13 +1225,57 @@ func TestScheduleSelectedFileProbeProbesTheSelectedRow(t *testing.T) {
 		t.Fatalf("file rows read = %v, want only the selected row %d", reads, selectedRow.ID)
 	}
 
-	// Fresh inventory: the same selection must schedule nothing to probe.
+	// Fresh inventory: the same selection must schedule nothing to probe. The
+	// stamp is only evidence when it describes the tracks the chain measured.
 	probedAt := time.Now()
 	selectedRow.ProbeUpdatedAt = &probedAt
+	selectedRow.AudioTracks = []models.AudioTrack{{Codec: "eac3", Channels: 6, Language: "eng"}}
 	h.ScheduleSelectedFileProbe(probeChainTestContent, selectedRow.ID, catalog.AccessFilter{AllowedLibraryIDs: []int{77}})
 	h.probeChainWG.Wait()
 	if prober.count() != 1 {
 		t.Fatalf("probes after a selected row with fresh inventory = %d, want no new probe", prober.count())
+	}
+}
+
+// TestScheduleSelectedFileProbePublishesInventoryWithoutAPlayback pins the
+// browse-then-select path end to end: the only event that happened is a
+// watch-detail read naming one version, the chain verified the row's bytes, and
+// the inventory reaches the open item page through the versions_updated publish
+// the evidence write already triggers. Nothing here can have committed a play:
+// the handler has no session manager, so there is no playback session to write,
+// and the chain is not part of any playback path (it is scheduled from the read
+// that renders the menu).
+//
+// This is the delivery half of the item-page latency measurement: the selection
+// probe's own result has to reach the browse surface when it verifies, rather
+// than waiting for a post-commit probe minutes later.
+func TestScheduleSelectedFileProbePublishesInventoryWithoutAPlayback(t *testing.T) {
+	defaultRow := probeChainRow(760, "virtual://movie/probe-chain?result=default", nil)
+	selectedRow := probeChainRow(761, "virtual://movie/probe-chain?result=selected", nil)
+	reader := &probeChainVersionReader{
+		files: []*models.MediaFile{defaultRow, selectedRow},
+		rows:  map[int]*models.MediaFile{defaultRow.ID: defaultRow, selectedRow.ID: selectedRow},
+	}
+	bus := &recordingEventBus{}
+	hub := notifications.NewHub("probe-chain-selection-event", bus)
+	prober := &recordingProber{}
+	h := &PlaybackHandler{
+		ServiceContext:              context.Background(),
+		EventsHub:                   hub.EventsHub(),
+		DefaultProbeTarget:          NewVirtualDefaultProbeTarget(reader, reader),
+		VirtualPlaybackSourceProber: prober.probe,
+		VirtualFileMetadataSaver: func(context.Context, models.VirtualFilePersistArgs) (VirtualFileMetadataUpdateResult, error) {
+			return VirtualFileMetadataUpdateResult{MetadataUpdated: true, RowsAffected: 1}, nil
+		},
+	}
+
+	h.ScheduleSelectedFileProbe(probeChainTestContent, selectedRow.ID, catalog.AccessFilter{AllowedLibraryIDs: []int{77}})
+	if payload := waitForRecordingEvent(t, bus, 2*time.Second, "catalog.item.changed", "versions_updated", probeChainTestContent); payload == "" {
+		t.Fatal("a verified selection probe did not publish versions_updated to the open item page")
+	}
+	h.probeChainWG.Wait()
+	if prober.count() != 1 || prober.last() != probeChainProviderURL(selectedRow) {
+		t.Fatalf("probes = %d, last = %q; want exactly the selected row %q", prober.count(), prober.last(), probeChainProviderURL(selectedRow))
 	}
 }
 
@@ -1348,7 +1408,7 @@ func TestScheduleSelectedFileWarmSkipsWhenProbeChainIsLive(t *testing.T) {
 			return nil
 		}),
 	}
-	release, refusal := h.defaultProbeChains.acquire(probeChainTestContent + "\x00" + strconv.Itoa(selectedRow.ID))
+	release, refusal, _ := h.defaultProbeChains.acquire(probeChainTestContent+"\x00"+strconv.Itoa(selectedRow.ID), true)
 	if refusal != defaultProbeChainRefusalNone {
 		t.Fatalf("probe admission refused: %s", refusal)
 	}
@@ -1463,9 +1523,13 @@ func TestWatchDetailSelectionSchedulesProbeOnlyForUnprobedVirtualRow(t *testing.
 	}
 
 	// A selected row with fresh inventory needs no probe, but still warms: the
-	// bytes may be cold even though the inventory is known.
+	// bytes may be cold even though the inventory is known. The inventory has
+	// to be there for the stamp to mean it: a stamp over empty track arrays is
+	// the shape the selection gate re-probes (see
+	// TestScheduleSelectedVirtualProbeRepairsAStampedEmptyRow).
 	probedAt := time.Now()
 	detail.Versions[1].ProbedAt = &probedAt
+	detail.Versions[1].AudioTracks = []models.AudioTrack{{Index: 1, Codec: "ac3", Channels: 6}}
 	h.scheduleSelectedVirtualProbe(detail.ContentID, detail.Type, detail.Versions, catalog.AccessFilter{SelectedFileID: 22})
 	if got := prober.snapshot(); len(got) != 1 {
 		t.Fatalf("fresh selection scheduled %d probes, want none", len(got)-1)
@@ -1497,12 +1561,139 @@ func TestPreprobeSelectedFileDeclinesWithoutAProbeTarget(t *testing.T) {
 // reports pending instead of opening a second probe on the same bytes.
 func TestPreprobeSelectedFileReportsPendingWhenAChainIsLive(t *testing.T) {
 	h := &PlaybackHandler{}
-	release, refusal := h.defaultProbeChains.acquire("movie:1\x005")
+	release, refusal, _ := h.defaultProbeChains.acquire("movie:1\x005", true)
 	if refusal != defaultProbeChainRefusalNone {
 		t.Fatalf("admission refused: %s", refusal)
 	}
 	defer release()
 	if got := h.PreprobeSelectedFile(t.Context(), "movie:1", 5, catalog.AccessFilter{}); got != VirtualPreprobePending {
 		t.Fatalf("preprobe with a live chain = %q, want pending", got)
+	}
+}
+
+// TestSelectionProbeAdmittedWhileBackgroundChainsAreFull pins the reserved lane:
+// two discovery chains own the whole background budget, and the probe the viewer
+// asked for by selecting a version is still admitted. The measured production case
+// lost the selection probe to `concurrency_full` while a browse burst held every
+// slot.
+func TestSelectionProbeAdmittedWhileBackgroundChainsAreFull(t *testing.T) {
+	backgroundA := probeChainRow(801, "virtual://movie/probe-lane-a?result=bg-a", nil)
+	backgroundB := probeChainRow(802, "virtual://movie/probe-lane-b?result=bg-b", nil)
+	selected := probeChainRow(803, "virtual://movie/probe-lane-sel?result=sel", nil)
+	targetA := &blockedDefaultTarget{open: make(chan struct{}), row: backgroundA}
+	targetB := &blockedDefaultTarget{open: make(chan struct{}), row: backgroundB}
+	targetSel := &blockedDefaultTarget{open: make(chan struct{}), row: selected}
+	targetSel.releaseRow()
+	targets := map[string]*blockedDefaultTarget{
+		"movie-probe-lane-a":   targetA,
+		"movie-probe-lane-b":   targetB,
+		"movie-probe-lane-sel": targetSel,
+	}
+	prober := &recordingProber{hits: make(chan struct{}, 1)}
+	h := &PlaybackHandler{
+		ServiceContext:              context.Background(),
+		VirtualPlaybackSourceProber: prober.probe,
+	}
+	h.DefaultProbeTarget = VirtualDefaultProbeTargetFunc(func(ctx context.Context, contentID string, _ catalog.AccessFilter) (*models.MediaFile, error) {
+		target := targets[contentID]
+		if target == nil {
+			return nil, fmt.Errorf("unexpected chain for %q", contentID)
+		}
+		return target.DefaultVirtualProbeTarget(ctx, contentID, catalog.AccessFilter{})
+	})
+
+	h.ScheduleDefaultFileProbe("movie-probe-lane-a", probeChainSourceRow(), probeChainStreams(backgroundA), catalog.AccessFilter{})
+	h.ScheduleDefaultFileProbe("movie-probe-lane-b", probeChainSourceRow(), probeChainStreams(backgroundB), catalog.AccessFilter{})
+	probeChainWaitFor(t, 1, targetA.callCount, "background chain A entered its read")
+	probeChainWaitFor(t, 1, targetB.callCount, "background chain B entered its read")
+
+	h.ScheduleSelectedFileProbe("movie-probe-lane-sel", selected.ID, catalog.AccessFilter{})
+	probeChainWaitFor(t, 1, targetSel.callCount, "selection chain entered its read")
+	select {
+	case <-prober.hits:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the selection probe never reached the provider while both background slots were held")
+	}
+
+	targetA.releaseRow()
+	targetB.releaseRow()
+	h.probeChainWG.Wait()
+}
+
+// TestSelectionProbeIgnoresTheFailureDamper pins the second admission rule: the
+// recently_failed damper keeps background re-probes off a failing provider, but a
+// fresh selection is the viewer asking now. The measured case had the selection
+// refused as recently_failed while the picker's menu waited.
+func TestSelectionProbeIgnoresTheFailureDamper(t *testing.T) {
+	selected := probeChainRow(811, "virtual://movie/probe-damper?result=sel", nil)
+	key := virtualProbeFailureKey(selected.FilePath, selected.VirtualOwnerInstallationID)
+	virtualProbeFailures.markWithReason(key, "context deadline exceeded")
+	t.Cleanup(func() { virtualProbeFailures.clear(key) })
+	if !virtualProbeBackedOff(key) {
+		t.Fatal("fixture did not arm the damper")
+	}
+
+	reader := &probeChainVersionReader{
+		files: []*models.MediaFile{selected},
+		rows:  map[int]*models.MediaFile{selected.ID: selected},
+	}
+	prober := &recordingProber{}
+	h := &PlaybackHandler{
+		ServiceContext:              context.Background(),
+		DefaultProbeTarget:          NewVirtualDefaultProbeTarget(reader, reader),
+		VirtualPlaybackSourceProber: prober.probe,
+	}
+
+	h.ScheduleSelectedFileProbe(probeChainTestContent, selected.ID, catalog.AccessFilter{AllowedLibraryIDs: []int{77}})
+	h.probeChainWG.Wait()
+	if prober.count() != 1 {
+		t.Fatalf("probes = %d, want the selection to probe despite a recently_failed mark", prober.count())
+	}
+}
+
+// TestSelectionProbeRetriesOnceAndReportsItsReason pins the retry inside the
+// selection's own bound and the reason it leaves behind: one provider failure earns
+// a second attempt, and the final state names the cause instead of a generic
+// "unavailable".
+func TestSelectionProbeRetriesOnceAndReportsItsReason(t *testing.T) {
+	prevDelay := virtualSelectionProbeRetryDelay
+	virtualSelectionProbeRetryDelay = time.Millisecond
+	t.Cleanup(func() { virtualSelectionProbeRetryDelay = prevDelay })
+
+	selected := probeChainRow(821, "virtual://movie/probe-retry?result=sel", nil)
+	key := virtualProbeFailureKey(selected.FilePath, selected.VirtualOwnerInstallationID)
+	virtualProbeFailures.clear(key)
+	t.Cleanup(func() { virtualProbeFailures.clear(key) })
+
+	reader := &probeChainVersionReader{
+		files: []*models.MediaFile{selected},
+		rows:  map[int]*models.MediaFile{selected.ID: selected},
+	}
+	var calls int
+	var mu sync.Mutex
+	h := &PlaybackHandler{
+		ServiceContext:     context.Background(),
+		DefaultProbeTarget: NewVirtualDefaultProbeTarget(reader, reader),
+		VirtualPlaybackSourceProber: func(context.Context, string, *models.MediaFile) (*models.MediaFile, error) {
+			mu.Lock()
+			calls++
+			mu.Unlock()
+			return nil, errors.New("ffprobe failed: exit status 1")
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if got := h.PreprobeSelectedFile(ctx, probeChainTestContent, selected.ID, catalog.AccessFilter{AllowedLibraryIDs: []int{77}}); got != VirtualPreprobePending {
+		t.Fatalf("preprobe with a failing provider = %q, want pending", got)
+	}
+	mu.Lock()
+	attempts := calls
+	mu.Unlock()
+	if attempts != virtualSelectionProbeAttempts {
+		t.Fatalf("attempts = %d, want %d inside the selection bound", attempts, virtualSelectionProbeAttempts)
+	}
+	if reason := virtualProbeFailures.reason(key); !strings.Contains(reason, "exit status 1") {
+		t.Fatalf("recorded failure reason = %q, want the provider's own error", reason)
 	}
 }

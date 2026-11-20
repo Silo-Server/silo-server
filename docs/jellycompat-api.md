@@ -892,6 +892,19 @@ transcoding profiles but no `DirectPlayProfiles` gets no direct play or
 direct stream, as in Jellyfin; Roku clients send one to ask for a remux after
 direct play fails.
 
+A version whose source container no `DirectPlayProfiles` entry lists is never
+offered as direct play, whatever its codecs admit. Silo also remembers a failed
+direct play per device and file: a Stopped report with Jellyfin's `Failed` flag,
+or a stop that never advanced inside the negotiation's startup window, records
+it, and the next PlaybackInfo for that device and file negotiates a packaged
+route even when the stored profile still claims the container. The record
+expires after the device-profile TTL and is scoped to the authenticated compat
+device, so a successful play and another device on the same account are
+unaffected. The `jellycompat direct play declined` log line names the rule that
+fired (`route_downgrade: client_profile_container`,
+`client_profile_refuses_direct_play`, or `direct_play_failed`), mirroring the
+native `route_downgrade` attribute.
+
 ## Transcode reasons
 
 `TranscodingUrl` carries a `TranscodeReasons` query parameter with Jellyfin's

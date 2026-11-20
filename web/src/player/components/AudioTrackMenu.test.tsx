@@ -39,9 +39,53 @@ describe("AudioTrackMenu", () => {
     expect(screen.getByText("French")).toBeTruthy();
   });
 
-  it("omits the language segment when no language resolves", () => {
+  it("keeps an undeclared row's embedded title as meta, not as its identity", () => {
     renderMenu([{ title: "Commentary", codec: "ac3", layout: "2.0" }]);
-    expect(screen.getByText("2.0")).toBeTruthy();
+    expect(screen.getByText("AC3")).toBeTruthy();
+    expect(screen.getByText("Commentary \u00B7 2.0")).toBeTruthy();
+  });
+
+  it("identifies an unlabelled row by codec and channel layout, not an unknown language", () => {
+    renderMenu([{ codec: "eac3", channels: 6 }]);
+    expect(screen.getByText("EAC3 5.1")).toBeTruthy();
+    expect(screen.queryByText("Unknown")).toBeNull();
+    expect(screen.queryByText("Inconnue")).toBeNull();
+    expect(screen.getByRole("menuitem")).toHaveAttribute("title", "Language: Unknown");
+  });
+
+  it("names the language for a row that declares one", () => {
+    renderMenu([{ language: "fr", codec: "aac", channels: 2 }]);
+    expect(screen.getByText("French")).toBeTruthy();
+    expect(screen.queryByText("Language: Unknown")).toBeNull();
+  });
+
+  it("falls back to the row's position when neither language nor format is known", () => {
+    renderMenu([{ language: "en", codec: "eac3", channels: 6 }, {}]);
+    const entries = screen.getAllByRole("menuitem");
+    expect(entries[0]).toHaveTextContent("English");
+    expect(entries[1]).toHaveTextContent("Track 2");
+    expect(entries[1]).toHaveAttribute("title", "Language: Unknown");
+  });
+
+  it("relabels the row when a probe replaces the unlabelled release entry", () => {
+    const view = renderMenu([{ codec: "eac3", channels: 6 }]);
+    expect(screen.getByText("EAC3 5.1")).toBeTruthy();
+
+    view.rerender(
+      createElement(AudioTrackMenu, {
+        tracks: [{ language: "fr", codec: "eac3", channels: 6 }],
+        activeIndex: 0,
+        onSelect: () => {},
+        currentPosition: 0,
+        open: true,
+        onOpenChange: () => {},
+        hideTrigger: true,
+      }),
+    );
+
+    expect(screen.getByText("French")).toBeTruthy();
+    expect(screen.queryByText("EAC3 5.1")).toBeNull();
+    expect(screen.queryByText("Language: Unknown")).toBeNull();
   });
 
   it("keeps the trigger enabled with a single track and opens to that entry", () => {
@@ -296,7 +340,7 @@ describe("AudioTrackMenu", () => {
     expect(screen.queryByText("Discovering audio tracks…")).toBeNull();
   });
 
-  it("gates declared track rows behind the discovery state while provisional", () => {
+  it("shows declared track rows immediately and marks them unverified", () => {
     render(
       createElement(AudioTrackMenu, {
         tracks: [{ title: "English", codec: "aac", channels: 2 }],
@@ -310,11 +354,13 @@ describe("AudioTrackMenu", () => {
       }),
     );
 
-    expect(screen.getByText("Discovering audio tracks…")).toBeTruthy();
-    expect(screen.queryByText("English")).toBeNull();
+    expect(screen.queryByText("Discovering audio tracks…")).toBeNull();
+    expect(screen.getByText("English")).toBeTruthy();
+    expect(screen.getByText("From release listing")).toBeTruthy();
+    expect(screen.getByText("Unverified")).toBeTruthy();
   });
 
-  it("swaps in live rows when the probed inventory arrives", () => {
+  it("swaps declared rows for probe evidence when it arrives", () => {
     const tracks = [{ title: "English", codec: "aac", channels: 2 }];
     const props = {
       tracks,
@@ -327,11 +373,13 @@ describe("AudioTrackMenu", () => {
       provisional: true,
     };
     const view = render(createElement(AudioTrackMenu, props));
-    expect(screen.queryByText("English")).toBeNull();
+    expect(screen.getByText("English")).toBeTruthy();
+    expect(screen.getByText("From release listing")).toBeTruthy();
 
     view.rerender(createElement(AudioTrackMenu, { ...props, provisional: false }));
 
     expect(screen.getByText("English")).toBeTruthy();
+    expect(screen.queryByText("From release listing")).toBeNull();
     expect(screen.queryByText("Discovering audio tracks…")).toBeNull();
     expect(screen.queryByText("Unverified")).toBeNull();
   });
@@ -463,7 +511,7 @@ describe("AudioTrackMenu discovery bound", () => {
   function renderProvisional(onRetryDiscovery?: () => void) {
     return render(
       createElement(AudioTrackMenu, {
-        tracks: [{ title: "English", codec: "aac", channels: 2 }],
+        tracks: [],
         activeIndex: 0,
         onSelect: () => {},
         currentPosition: 0,
@@ -487,9 +535,6 @@ describe("AudioTrackMenu discovery bound", () => {
 
     expect(screen.queryByText("Discovering audio tracks…")).toBeNull();
     expect(screen.getByText("Audio tracks unavailable.")).toBeTruthy();
-    // The stalled rows are still declared metadata, so the menu does not fall
-    // back to offering them.
-    expect(screen.queryByText("English")).toBeNull();
   });
 
   it("re-triggers discovery and shows progress again on retry", () => {
@@ -516,7 +561,7 @@ describe("AudioTrackMenu discovery bound", () => {
     vi.useFakeTimers();
     const tracks = [{ title: "English", codec: "aac", channels: 2 }];
     const props = {
-      tracks,
+      tracks: [],
       activeIndex: 0,
       onSelect: () => {},
       currentPosition: 0,
@@ -531,7 +576,7 @@ describe("AudioTrackMenu discovery bound", () => {
     });
     expect(screen.getByText("Audio tracks unavailable.")).toBeTruthy();
 
-    view.rerender(createElement(AudioTrackMenu, { ...props, provisional: false }));
+    view.rerender(createElement(AudioTrackMenu, { ...props, tracks, provisional: false }));
 
     expect(screen.getByText("English")).toBeTruthy();
     expect(screen.queryByText("Audio tracks unavailable.")).toBeNull();

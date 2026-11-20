@@ -317,10 +317,10 @@ function fireFrameTimeUpdate(video: HTMLVideoElement) {
   else Reflect.deleteProperty(video, "readyState");
 }
 
-function setMediaError(video: HTMLVideoElement, message: string) {
+function setMediaError(video: HTMLVideoElement, message: string, code = 3) {
   Object.defineProperty(video, "error", {
     configurable: true,
-    value: { code: 3, message },
+    value: { code, message },
   });
 }
 
@@ -1861,6 +1861,12 @@ describe("VideoPlayer room catch-up", () => {
 
   it("paces corrections that must load unbuffered media on a seekable stream", async () => {
     const { video, correct } = setup(90, 0, true);
+    // A stream the element reports as seekable: its own range, not the plan's
+    // can_seek_anywhere claim, is what makes the target local.
+    Object.defineProperty(video, "seekable", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => 10_000 } as unknown as TimeRanges,
+    });
     await correct("correction-1", 100);
     expect(playerSeek).toHaveBeenCalledTimes(1);
 
@@ -3577,19 +3583,102 @@ describe("VideoPlayer plan failure recovery", () => {
     }
   });
 
-  it("fails a direct-play start that shows no frame by the startup deadline", async () => {
+  // A fragment that answers 200 and is fetched again without buffering is the
+  // transport discarding bytes, and the load-failure ladder never sees it. One
+  // production plan refetched `seg_00000.ts` 199 times while the start showed no
+  // frame, so those reloads have to spend the same startup budget.
+  it("spends the startup segment budget on a fragment that reloads without buffering", async () => {
+    hlsJS.supported = true;
+    try {
+      const onPlanFailure = vi.fn();
+      const hlsPlan = fixturePlanV3({
+        delivery: "server_transcode_hls",
+        stream: {
+          url: "/playback/transcode/session-1/master.m3u8",
+          protocol: "hls",
+          headers: {},
+          header_refresh: "none",
+        },
+        effective_recipe: { video_codec: "h264", audio_codec: "aac" },
+      });
+      renderPlayer({ plan: hlsPlan, onPlanFailure });
+      await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+      const hls = hlsJS.latest;
+      if (!hls) throw new Error("expected an hls.js instance");
+      const frag = {
+        type: "main",
+        sn: 0,
+        url: "/playback/transcode/session-1/segment/seg_00000.ts",
+        stats: { loaded: 1_103_936, loading: { first: 1, end: 2 } },
+      };
+
+      // Every response is a complete 200 segment; only the buffer never grows.
+      for (let attempt = 0; attempt < 40 && onPlanFailure.mock.calls.length === 0; attempt += 1) {
+        act(() => hls.emit("fragLoaded", { frag }));
+      }
+
+      expect(onPlanFailure).toHaveBeenCalledOnce();
+      expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "network_error" });
+    } finally {
+      hlsJS.supported = false;
+    }
+  });
+
+  // A transport whose media begins after the playhead has no data at the
+  // requested position. The element stays at HAVE_METADATA, so the readiness
+  // gate never starts it and hls.js refetches fragments that cannot land at 0.
+  // A source whose audio starts before its first video frame produces exactly
+  // that after the remux, so the player has to move onto the media it has.
+  it("starts from the first buffered media when the transport begins after the playhead", async () => {
+    hlsJS.supported = true;
+    try {
+      const hlsPlan = fixturePlanV3({
+        delivery: "server_transcode_hls",
+        stream: {
+          url: "/playback/transcode/session-1/master.m3u8",
+          protocol: "hls",
+          headers: {},
+          header_refresh: "none",
+        },
+      });
+      const { container } = renderPlayer({ plan: hlsPlan });
+      await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+      const hls = hlsJS.latest;
+      if (!hls) throw new Error("expected an hls.js instance");
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      Object.defineProperty(video, "buffered", {
+        configurable: true,
+        value: { length: 1, start: () => 2.85, end: () => 10.75 },
+      });
+
+      act(() => hls.emit("bufferAppended", { parent: "main" }));
+
+      expect(video.currentTime).toBeCloseTo(2.85);
+    } finally {
+      hlsJS.supported = false;
+    }
+  });
+
+  // The startup deadline is the session's contract: a start that never showed a
+  // frame must end the route ladder rather than replan again. Under
+  // quality:auto the ladder used to adopt a fresh transport every 60 s and only
+  // answered "No playable version found" at 186 s.
+  it("surfaces the retryable error at the startup deadline instead of replanning", async () => {
     vi.useFakeTimers();
     try {
       const onPlanFailure = vi.fn();
-      const { container } = renderPlayer({ onPlanFailure });
+      const onRestartPlayback = vi.fn();
+      const { container } = renderPlayer({ onPlanFailure, onRestartPlayback });
       await act(async () => vi.advanceTimersByTimeAsync(0));
       const video = container.querySelector("video");
       if (!video) throw new Error("expected video element");
       expect(video.src).toContain("/api/v1/stream/session-1");
 
       act(() => vi.advanceTimersByTime(STARTUP_TIMEOUT_MS));
-      expect(onPlanFailure).toHaveBeenCalledOnce();
-      expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
+      expect(onPlanFailure).not.toHaveBeenCalled();
+      expect(screen.getByText("Playback failed. Please try again.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -5977,6 +6066,73 @@ describe("VideoPlayer lost connection", () => {
     expect(onPlanFailure).toHaveBeenCalledOnce();
   });
 
+  // The progressive remux plan claims can_seek_anywhere, but the transport is
+  // one forward-only generation: the element can only ask for a byte offset
+  // its origin does not have.
+  const progressiveRemuxPlan = fixturePlanV3({
+    ...directPlan,
+    delivery: "server_remux_progressive",
+    timeline: { ...directPlan.timeline, can_seek_anywhere: true },
+  });
+
+  it("reanchors a progressive remux seek instead of byte-seeking the element", () => {
+    const onReanchorSeek = vi.fn(() => true);
+    const { container } = renderPlayer({ plan: progressiveRemuxPlan, onReanchorSeek });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    video.currentTime = 40;
+    fireFrameTimeUpdate(video);
+
+    act(() => controls.current?.onSeek(1_200));
+
+    expect(onReanchorSeek).toHaveBeenCalledExactlyOnceWith(1_200);
+    // The element was never moved: a native seek is what makes Chromium
+    // re-request this stream at a byte offset the server cannot resume.
+    expect(video.currentTime).toBe(40);
+  });
+
+  it("hands an unsupported-source error on a played progressive remux to the reconnect", () => {
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container } = renderPlayer({
+      plan: progressiveRemuxPlan,
+      onConnectionLost,
+      onPlanFailure,
+    });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    video.currentTime = 40;
+    fireFrameTimeUpdate(video);
+
+    // A refused range reaches the element as an unsupported source, not as a
+    // network error.
+    setMediaError(video, "Failed to load because no supported source was found", 4);
+    fireEvent.error(video);
+
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(40, false);
+    expect(onPlanFailure).not.toHaveBeenCalled();
+    expect(screen.queryByText("Go Back")).not.toBeInTheDocument();
+  });
+
+  it("keeps a decode error on a played progressive remux on route recovery", () => {
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container } = renderPlayer({
+      plan: progressiveRemuxPlan,
+      onConnectionLost,
+      onPlanFailure,
+    });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    fireFrameTimeUpdate(video);
+
+    setMediaError(video, "decode failed", 3);
+    fireEvent.error(video);
+
+    expect(onConnectionLost).not.toHaveBeenCalled();
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+  });
+
   it("pauses behind a reconnecting notice the viewer can leave", async () => {
     const onExit = vi.fn();
     const onPlanFailure = vi.fn();
@@ -6020,6 +6176,83 @@ describe("VideoPlayer lost connection", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(onRetryConnection).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Go Back" })).toBeInTheDocument();
+  });
+
+  it("offers Try again on the error overlay for a retryable transport failure", () => {
+    // No plan-failure callback: the failure has nowhere to replan to, so the
+    // player's own card is what the viewer sees.
+    const onRestartPlayback = vi.fn();
+    const { container } = renderPlayer({ onRestartPlayback });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    setNetworkError(video);
+    fireEvent.error(video);
+
+    expect(screen.getByText("Playback error: PIPELINE_ERROR_NETWORK")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onRestartPlayback).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Go Back" })).toBeInTheDocument();
+  });
+
+  it("keeps a decoder verdict on the error overlay a Go Back-only dead-end", () => {
+    const onRestartPlayback = vi.fn();
+    const { container } = renderPlayer({ onRestartPlayback });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    setMediaError(video, "decoder failed");
+    fireEvent.error(video);
+
+    expect(screen.getByText("Playback error: decoder failed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Go Back" })).toBeInTheDocument();
+  });
+
+  it("offers Try again for a replan the session marked retryable", () => {
+    const onRestartPlayback = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container, rerenderPlayer } = renderPlayer({ onPlanFailure, onRestartPlayback });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    // The transport fails for this plan revision, so the refused recovery is
+    // the card the viewer gets.
+    setNetworkError(video);
+    fireEvent.error(video);
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+
+    rerenderPlayer({
+      replanError: "Vio could not update playback right now. Please try again.",
+      replanErrorRetryable: true,
+    });
+
+    expect(
+      screen.getByText("Vio could not update playback right now. Please try again."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onRestartPlayback).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a non-retryable refused replan a Go Back-only dead-end", () => {
+    const onRestartPlayback = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container, rerenderPlayer } = renderPlayer({ onPlanFailure, onRestartPlayback });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    setNetworkError(video);
+    fireEvent.error(video);
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+
+    rerenderPlayer({
+      replanError: "No playable version found",
+      replanErrorRetryable: false,
+    });
+
+    expect(screen.getByText("No playable version found")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Go Back" })).toBeInTheDocument();
   });
 
@@ -6098,9 +6331,10 @@ describe("VideoPlayer lost connection", () => {
       type: "networkError",
       details: "fragLoadError",
     };
-    // Before the first frame, hls.js keeps its startup recovery.
+    // Before the first frame, hls.js keeps its startup recovery. The retry is
+    // delayed, so the request follows rather than landing on the same tick.
     act(() => hlsJS.latest?.emit("error", fatalNetworkError));
-    expect(hlsJS.startLoad).toHaveBeenCalledOnce();
+    await waitFor(() => expect(hlsJS.startLoad).toHaveBeenCalledOnce(), { timeout: 3_000 });
     expect(onConnectionLost).not.toHaveBeenCalled();
 
     fireFrameTimeUpdate(video);
@@ -6126,18 +6360,20 @@ describe("VideoPlayer lost connection", () => {
     const fatalManifestError = { fatal: true, type: "networkError", details: "manifestLoadError" };
     vi.spyOn(Date, "now").mockReturnValue(10_000);
     act(() => hlsJS.latest?.emit("error", fatalManifestError));
-    expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(hlsJS.loadSource).toHaveBeenCalledTimes(2), { timeout: 3_000 });
     expect(hlsJS.loadSource.mock.calls[1]).toEqual(hlsJS.loadSource.mock.calls[0]);
     expect(hlsJS.startLoad).not.toHaveBeenCalled();
     expect(onPlanFailure).not.toHaveBeenCalled();
 
+    // The reload's own failure is a second failure of the manifest, so the
+    // startup guard has nothing left and the route is reported.
     vi.spyOn(Date, "now").mockReturnValue(20_000);
     act(() => hlsJS.latest?.emit("error", fatalManifestError));
     expect(onPlanFailure).toHaveBeenCalledOnce();
     expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
   });
 
-  it("reports the route failed when the reloaded manifest fails within the recovery cooldown", async () => {
+  it("reports the route failed when the reloaded manifest fails again", async () => {
     hlsJS.supported = true;
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
     const onPlanFailure = vi.fn();
@@ -6153,11 +6389,11 @@ describe("VideoPlayer lost connection", () => {
       type: "networkError",
       details: "manifestParsingError",
     };
-    vi.spyOn(Date, "now").mockReturnValue(10_000);
     act(() => hlsJS.latest?.emit("error", fatalManifestError));
-    expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(hlsJS.loadSource).toHaveBeenCalledTimes(2), { timeout: 3_000 });
 
-    vi.spyOn(Date, "now").mockReturnValue(10_500);
+    // The reload failed too. It reaches the guard rather than being dropped as
+    // a duplicate of the failure that scheduled it.
     act(() => hlsJS.latest?.emit("error", fatalManifestError));
     expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
     expect(onPlanFailure).toHaveBeenCalledOnce();
@@ -6192,7 +6428,7 @@ describe("VideoPlayer lost connection", () => {
     const fatalNetworkError = { fatal: true, type: "networkError", details: "fragLoadError" };
     vi.spyOn(Date, "now").mockReturnValue(10_000);
     act(() => hlsJS.latest?.emit("error", fatalNetworkError));
-    expect(hlsJS.startLoad).toHaveBeenCalledOnce();
+    await waitFor(() => expect(hlsJS.startLoad).toHaveBeenCalledOnce(), { timeout: 3_000 });
     // The startup guard gives up on a second fatal network error and reports
     // the route as failed, so the server can pick another one.
     vi.spyOn(Date, "now").mockReturnValue(20_000);
@@ -6201,6 +6437,128 @@ describe("VideoPlayer lost connection", () => {
     expect(onConnectionLost).not.toHaveBeenCalled();
     expect(onPlanFailure).toHaveBeenCalledOnce();
     expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
+  });
+
+  // A corrupt source asks the server for the same segment on every recovery,
+  // and a mid-stream transport without a reconnect handler had no bound: one
+  // deployment fetched seg_00037.ts 86 times in two minutes and kept the
+  // segment layer compiling a frame RPS it could never finish.
+  it("stops retrying the same segment and reports the route failed", async () => {
+    hlsJS.supported = true;
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const onPlanFailure = vi.fn();
+    const plan = fixturePlanV3({
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+    });
+    const { container } = renderPlayer({ plan, onPlanFailure });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+    // The stream played; a failure here is not startup recovery.
+    fireFrameTimeUpdate(video);
+    hlsJS.startLoad.mockClear();
+
+    const corruptSegment = {
+      fatal: true,
+      type: "networkError",
+      details: "fragLoadError",
+      frag: { sn: 37, url: "/playback/transcode/session-1/seg_00037.ts" },
+    };
+
+    act(() => hlsJS.latest?.emit("error", corruptSegment));
+    await waitFor(() => expect(hlsJS.startLoad).toHaveBeenCalledOnce(), { timeout: 3_000 });
+    expect(onPlanFailure).not.toHaveBeenCalled();
+
+    // The retry lands on the same segment and fails again: the budget for that
+    // index is spent, so the player stops asking and reports the route.
+    act(() => hlsJS.latest?.emit("error", corruptSegment));
+
+    await waitFor(() => expect(onPlanFailure).toHaveBeenCalledOnce());
+    expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "network_error" });
+    expect(hlsJS.startLoad).toHaveBeenCalledOnce();
+  });
+});
+
+describe("VideoPlayer blocked autoplay", () => {
+  beforeEach(() => {
+    hlsJS.supported = false;
+    hlsJS.latest = null;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+    Object.defineProperty(navigator, "userActivation", {
+      configurable: true,
+      value: { hasBeenActive: false },
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    Reflect.deleteProperty(navigator, "userActivation");
+    vi.restoreAllMocks();
+  });
+
+  function bufferedAhead(video: HTMLVideoElement, seconds: number) {
+    Object.defineProperty(video, "buffered", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => seconds },
+    });
+  }
+
+  it("offers a tap to play when the browser refuses the start", async () => {
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    play.mockRejectedValueOnce(new DOMException("Autoplay blocked", "NotAllowedError"));
+    const { container } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_FUTURE_DATA,
+    });
+    bufferedAhead(video, 121);
+    await act(async () => fireEvent.canPlay(video));
+
+    expect(play).toHaveBeenCalledOnce();
+    const tapToPlay = screen.getByRole("button", { name: "Tap to play" });
+    // The loading cover is gone: the player waits for the viewer, not data.
+    expect(screen.queryByRole("status", { name: "Loading video" })).not.toBeInTheDocument();
+
+    play.mockResolvedValue(undefined);
+    await act(async () => fireEvent.click(tapToPlay));
+
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: "Tap to play" })).not.toBeInTheDocument();
+  });
+
+  it("offers a tap when a ready player never ran autoplay at all", async () => {
+    // The measured dead end: readyState 4 with 121 s buffered, no gesture in
+    // the page's history, and nothing ever called play().
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { container } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_ENOUGH_DATA,
+    });
+    bufferedAhead(video, 121);
+    await act(async () => fireEvent.progress(video));
+
+    expect(play).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Tap to play" })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Loading video" })).not.toBeInTheDocument();
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Tap to play" })));
+    expect(play).toHaveBeenCalledOnce();
   });
 });
 
@@ -7139,5 +7497,146 @@ describe("VideoPlayer speed test media hold", () => {
     sourceLoads.mockClear();
     rerenderPlayer({ planRevision: 2 });
     expect(sourceLoads).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("VideoPlayer transport identity", () => {
+  beforeEach(() => {
+    hlsJS.supported = true;
+    hlsJS.constructed.mockClear();
+    hlsJS.startLoad.mockClear();
+    hlsJS.stopLoad.mockClear();
+    hlsJS.loadSource.mockClear();
+    hlsJS.latest = null;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("keeps the mounted element when a track change reuses the transport", async () => {
+    const removeAttr = vi.spyOn(HTMLMediaElement.prototype, "removeAttribute");
+    const load = vi.spyOn(HTMLMediaElement.prototype, "load");
+    const { container, rerenderPlayer } = renderPlayer({ transportRevision: 1 });
+    await waitFor(() => expect(container.querySelector("video")?.getAttribute("src")).toBeTruthy());
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    const src = video.getAttribute("src");
+    removeAttr.mockClear();
+    load.mockClear();
+
+    // A `track_change` on the running stream: the session adopted a new plan
+    // revision, but the A/V transport is the same one and the server rewrote
+    // the plan's start to the live playhead. Reloading would refetch a manifest
+    // the element is already playing.
+    rerenderPlayer({
+      plan: fixturePlanV3({
+        ...directPlan,
+        plan_id: "plan:2222222222222222",
+        plan_attempt_key: "v3:2222222222222222",
+        timeline: { ...directPlan.timeline, player_start_seconds: 42 },
+      }),
+      planRevision: 2,
+      transportRevision: 1,
+    });
+
+    expect(video.getAttribute("src")).toBe(src);
+    expect(removeAttr).not.toHaveBeenCalledWith("src");
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it("does not refetch an HLS manifest for a plan that moved only its start", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const { container, rerenderPlayer } = renderPlayer({
+      plan: fixturePlanV3(),
+      streamUrl: "/api/v1/stream/session-1/master.m3u8?token=token",
+      transportRevision: 1,
+    });
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+    expect(hlsJS.constructed).toHaveBeenCalledTimes(1);
+    expect(hlsJS.loadSource).toHaveBeenCalledTimes(1);
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    const src = video.getAttribute("src");
+
+    rerenderPlayer({
+      plan: fixturePlanV3({
+        plan_id: "plan:2222222222222222",
+        plan_attempt_key: "v3:2222222222222222",
+        timeline: { ...fixturePlanV3().timeline, player_start_seconds: 148 },
+      }),
+      planRevision: 2,
+      transportRevision: 1,
+    });
+
+    // One transport init per unchanged transport: no new hls.js instance, no
+    // second manifest request, and the element keeps its source.
+    expect(hlsJS.constructed).toHaveBeenCalledTimes(1);
+    expect(hlsJS.loadSource).toHaveBeenCalledTimes(1);
+    expect(video.getAttribute("src")).toBe(src);
+  });
+
+  it("re-initialises exactly once when the transport itself changes", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const { rerenderPlayer } = renderPlayer({
+      plan: fixturePlanV3(),
+      streamUrl: "/api/v1/stream/session-1/master.m3u8?token=token",
+      transportRevision: 1,
+    });
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+    expect(hlsJS.constructed).toHaveBeenCalledTimes(1);
+
+    // A quality change: a new transport URL and a new A/V revision.
+    rerenderPlayer({
+      plan: fixturePlanV3({
+        plan_id: "plan:3333333333333333",
+        plan_attempt_key: "v3:3333333333333333",
+        stream: {
+          url: "/stream/session-1/master.m3u8?quality=720",
+          protocol: "hls",
+          mime_type: "application/vnd.apple.mpegurl",
+          headers: {},
+          header_refresh: "none",
+        },
+      }),
+      streamUrl: "/api/v1/stream/session-1/master.m3u8?token=token&quality=720",
+      planRevision: 2,
+      transportRevision: 2,
+    });
+
+    await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalledTimes(2));
+    expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
+  });
+
+  it("reloads for a changed recipe even when the URL and revision stand", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const { rerenderPlayer } = renderPlayer({
+      plan: fixturePlanV3(),
+      streamUrl: "/api/v1/stream/session-1/master.m3u8?token=token",
+      transportRevision: 1,
+    });
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+    expect(hlsJS.constructed).toHaveBeenCalledTimes(1);
+
+    rerenderPlayer({
+      plan: fixturePlanV3({
+        plan_id: "plan:4444444444444444",
+        plan_attempt_key: "v3:4444444444444444",
+        effective_recipe: {
+          video_codec: "h264",
+          audio_codec: "aac",
+          height: 1080,
+          bitrate_kbps: 4_500,
+        },
+      }),
+      planRevision: 2,
+      transportRevision: 1,
+    });
+
+    await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalledTimes(2));
   });
 });

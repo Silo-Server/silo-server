@@ -485,6 +485,50 @@ describe("WatchPage playback errors", () => {
     expect(screen.getByRole("button", { name: "Go Back" })).toBeInTheDocument();
   });
 
+  it("offers Try again for a retryable transport failure with no terminal reason", () => {
+    const retryStart = vi.fn();
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        plan: null,
+        streamUrl: null,
+        sessionId: null,
+        mediaFileId: null,
+        errorTitle: "Playback unavailable",
+        // Copy the server's 503 answer carries; it already says to try again.
+        error: "Vio could not start playback right now. Please try again.",
+        errorReason: null,
+        errorRetryable: true,
+        retryStart,
+      }),
+    );
+
+    render(createElement(WatchPage, watchPageProps));
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(retryStart).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Go Back" })).toBeInTheDocument();
+  });
+
+  it("keeps a definitive transport refusal a Go Back-only dead-end", () => {
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        plan: null,
+        streamUrl: null,
+        sessionId: null,
+        mediaFileId: null,
+        errorTitle: "Authentication required",
+        error: "Your sign-in session has expired. Sign in again to continue playback.",
+        errorReason: null,
+        errorRetryable: false,
+      }),
+    );
+
+    render(createElement(WatchPage, watchPageProps));
+
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Go Back" })).toBeInTheDocument();
+  });
+
   it("keeps a refused initial bitmap subtitle off without treating it as a playback error", () => {
     playbackSessionMock.mockReturnValue(
       playbackSession({
@@ -598,7 +642,46 @@ describe("WatchPage exit selection", () => {
       }),
     );
 
-    await waitFor(() => expect(onRequestedVersionChange).toHaveBeenCalledWith(8));
+    // A row the session committed outside Auto is the viewer's pick, and the
+    // host records it as one so a later Play keeps pinning it.
+    await waitFor(() => expect(onRequestedVersionChange).toHaveBeenCalledWith(8, true));
+  });
+
+  it("reports the row Auto chose as a hint, not a pin", async () => {
+    const onRequestedVersionChange = vi.fn();
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        plan: fixturePlanV3({ requested_media_file_id: 7 }),
+        autoFallback: true,
+      }),
+    );
+    const { rerender } = render(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        onRequestedVersionChange,
+      }),
+    );
+    await waitFor(() => expect(videoPlayerMock).toHaveBeenCalled());
+
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        plan: fixturePlanV3({
+          plan_id: "plan:auto-pick",
+          requested_media_file_id: 9,
+          effective_media_file_id: 9,
+        }),
+        mediaFileId: 9,
+        autoFallback: true,
+      }),
+    );
+    rerender(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        onRequestedVersionChange,
+      }),
+    );
+
+    await waitFor(() => expect(onRequestedVersionChange).toHaveBeenCalledWith(9, false));
   });
 });
 
@@ -733,7 +816,7 @@ describe("WatchPage overlay inventory provenance", () => {
   const catalogAudio = { language: "eng", codec: "aac", channels: 2, default: true };
   const liveAudio = { language: "fra", codec: "ac3", channels: 6, default: true };
 
-  it("gates catalog subtitle rows until the probe lands, then swaps in the live inventory", () => {
+  it("shows the playing version's declared subtitles immediately, then swaps in probe evidence", () => {
     playbackSessionMock.mockReturnValue(
       playbackSession({ subtitleUrls: [], subtitleInventoryProvisional: false }),
     );
@@ -747,12 +830,11 @@ describe("WatchPage overlay inventory provenance", () => {
       shouldAutoPlay?: boolean;
       streamUrl?: string | null;
     };
-    // The pre-probe catalog rows are not offered as selectable rows: their
-    // ordinals belong to the catalog file, not the effective source, so the
-    // menus show their discovery state until the probe publishes real rows.
-    expect(props.subtitleUrls).toEqual([]);
-    expect(props.subtitleInventoryProvisional).toBe(true);
-    // Only the menu rows wait for the probe; playback starts unblocked.
+    // The playing version's own declaration is inventory: show it now rather
+    // than sitting on "Discovering" until the probe lands.
+    expect(props.subtitleUrls).toEqual([catalogSubtitle]);
+    expect(props.subtitleInventoryProvisional).toBe(false);
+    // Playback starts unblocked either way.
     expect(props.shouldAutoPlay).toBe(true);
     expect(props.streamUrl).toBe("/stream/session-1");
 
@@ -769,13 +851,17 @@ describe("WatchPage overlay inventory provenance", () => {
     expect(props.subtitleInventoryProvisional).toBe(false);
   });
 
-  it("gates catalog audio rows until the probe lands, then swaps in the live inventory", () => {
+  it("shows the plan's declared audio inventory immediately, then swaps in probe evidence", () => {
     const versionWithCatalogAudio: PlayerFileVersion = {
       ...version,
       audio_tracks: [catalogAudio],
     };
+    const declaredPlanAudio = { language: "eng", codec: "aac", channels: 2 };
     playbackSessionMock.mockReturnValue(
-      playbackSession({ planAudioTracks: [], audioInventoryProvisional: false }),
+      playbackSession({
+        planAudioTracks: [declaredPlanAudio],
+        audioInventoryProvisional: true,
+      }),
     );
     const view = render(
       createElement(WatchPage, { ...watchPageProps, versions: [versionWithCatalogAudio] }),
@@ -786,8 +872,10 @@ describe("WatchPage overlay inventory provenance", () => {
       audioInventoryProvisional?: boolean;
       shouldAutoPlay?: boolean;
     };
-    expect(props.audioTracks).toEqual([catalogAudio]);
-    expect(props.audioInventoryProvisional).toBe(true);
+    // The plan's declared rows are shown immediately and the menu labels them
+    // unverified; they are not withheld behind a discovery state.
+    expect(props.audioTracks).toEqual([declaredPlanAudio]);
+    expect(props.audioInventoryProvisional).toBe(false);
     expect(props.shouldAutoPlay).toBe(true);
 
     playbackSessionMock.mockReturnValue(
@@ -799,6 +887,25 @@ describe("WatchPage overlay inventory provenance", () => {
 
     props = videoPlayerMock.mock.calls.at(-1)?.[0] as typeof props;
     expect(props.audioTracks).toEqual([liveAudio]);
+    expect(props.audioInventoryProvisional).toBe(false);
+  });
+
+  it("falls back to the playing version's declared audio when the plan publishes none", () => {
+    const versionWithCatalogAudio: PlayerFileVersion = {
+      ...version,
+      audio_tracks: [catalogAudio],
+    };
+    playbackSessionMock.mockReturnValue(
+      playbackSession({ planAudioTracks: [], audioInventoryProvisional: true }),
+    );
+
+    render(createElement(WatchPage, { ...watchPageProps, versions: [versionWithCatalogAudio] }));
+
+    const props = videoPlayerMock.mock.calls.at(-1)?.[0] as {
+      audioTracks?: unknown[];
+      audioInventoryProvisional?: boolean;
+    };
+    expect(props.audioTracks).toEqual([catalogAudio]);
     expect(props.audioInventoryProvisional).toBe(false);
   });
 
@@ -1124,11 +1231,20 @@ describe("WatchPage version switch feedback", () => {
   it("shows a dismissible notice when the server played a different version than auto-selected", () => {
     playbackSessionMock.mockReturnValue(
       playbackSession({
-        plan: fixturePlanV3({ requested_media_file_id: 7, effective_media_file_id: 8 }),
+        plan: fixturePlanV3({
+          requested_media_file_id: 7,
+          effective_media_file_id: 8,
+          substituted_from_file_id: 7,
+        }),
       }),
     );
 
-    render(createElement(WatchPage, watchPageProps));
+    render(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        versions: [version],
+      }),
+    );
 
     expect(
       screen.getByText(
@@ -1150,11 +1266,21 @@ describe("WatchPage version switch feedback", () => {
     // release, an undecodable one). The viewer must still be told.
     playbackSessionMock.mockReturnValue(
       playbackSession({
-        plan: fixturePlanV3({ requested_media_file_id: 7, effective_media_file_id: 8 }),
+        plan: fixturePlanV3({
+          requested_media_file_id: 7,
+          effective_media_file_id: 8,
+          substituted_from_file_id: 7,
+        }),
       }),
     );
 
-    render(createElement(WatchPage, { ...watchPageProps, explicitFileSelection: true }));
+    render(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        versions: [version],
+        explicitFileSelection: true,
+      }),
+    );
 
     expect(
       screen.getByText(
@@ -1207,6 +1333,7 @@ describe("WatchPage virtual version substitution notice", () => {
           requested_media_file_id: 100,
           effective_media_file_id: 100,
           effective_virtual_uri: effectiveVirtualUri,
+          substituted_from_file_id: 100,
         }),
       }),
     );
@@ -1226,6 +1353,7 @@ describe("WatchPage virtual version substitution notice", () => {
           requested_media_file_id: 100,
           effective_media_file_id: 100,
           effective_virtual_uri: "/media/Movies/Example (2024)/Uncatalogued.mkv",
+          substituted_from_file_id: 100,
         }),
       }),
     );
@@ -1269,6 +1397,7 @@ describe("WatchPage virtual version substitution notice", () => {
           requested_media_file_id: 100,
           effective_media_file_id: 100,
           effective_virtual_uri: effectiveVirtualUri,
+          substituted_from_file_id: 100,
         }),
       }),
     );
@@ -1282,6 +1411,97 @@ describe("WatchPage virtual version substitution notice", () => {
     );
 
     expect(screen.getByText(labeledNotice)).toBeInTheDocument();
+  });
+
+  it("stays quiet when the effective row is a sibling mirror of the same release", () => {
+    // Two provider rows served the same release. The ids differ, and the
+    // server may even publish a substitution because the effective row moved,
+    // but the viewer is still watching the version they picked.
+    const requestedRow: PlayerFileVersion = {
+      ...version,
+      file_id: 7,
+      release_name: "Example.2024.1080p.BluRay-GRP",
+      file_size: 4_000_000_000,
+    };
+    const mirrorRow: PlayerFileVersion = { ...requestedRow, file_id: 8 };
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        mediaFileId: 8,
+        plan: fixturePlanV3({
+          requested_media_file_id: 7,
+          effective_media_file_id: 8,
+          substituted_from_file_id: 7,
+        }),
+      }),
+    );
+
+    render(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        versions: [requestedRow, mirrorRow],
+      }),
+    );
+
+    expect(screen.queryByText(genericNotice)).not.toBeInTheDocument();
+    expect(screen.queryByText(labeledNotice)).not.toBeInTheDocument();
+  });
+
+  it("shows the notice for a genuinely different release without a server signal", () => {
+    const requestedRow: PlayerFileVersion = {
+      ...version,
+      file_id: 7,
+      release_name: "Example.2024.1080p.BluRay-GRP",
+      file_size: 4_000_000_000,
+    };
+    const otherRelease: PlayerFileVersion = {
+      ...version,
+      file_id: 8,
+      release_name: "Example.2024.2160p.WEB-DL-OTHER",
+      file_size: 9_000_000_000,
+    };
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        mediaFileId: 8,
+        plan: fixturePlanV3({ requested_media_file_id: 7, effective_media_file_id: 8 }),
+      }),
+    );
+
+    render(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        versions: [requestedRow, otherRelease],
+      }),
+    );
+
+    // Both rows name a release, so the notice names the one now playing rather
+    // than its resolution: the viewer picked a release, and the format label
+    // would not say which release replaced theirs.
+    expect(
+      screen.getByText(
+        "The selected version wasn't available, so Vio is playing Example.2024.2160p.WEB-DL-OTHER instead.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("makes no claim when the rows do not identify a release and the server sent no signal", () => {
+    const requestedRow: PlayerFileVersion = { ...version, file_id: 7, file_size: 0 };
+    const effectiveRow: PlayerFileVersion = { ...version, file_id: 8, file_size: 0 };
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        mediaFileId: 8,
+        plan: fixturePlanV3({ requested_media_file_id: 7, effective_media_file_id: 8 }),
+      }),
+    );
+
+    render(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        versions: [requestedRow, effectiveRow],
+      }),
+    );
+
+    expect(screen.queryByText(genericNotice)).not.toBeInTheDocument();
+    expect(screen.queryByText(labeledNotice)).not.toBeInTheDocument();
   });
 
   it("names the server's substitution reason when it is published", () => {
@@ -1299,7 +1519,7 @@ describe("WatchPage virtual version substitution notice", () => {
     render(
       createElement(WatchPage, {
         ...watchPageProps,
-        versions: [version, { ...version, file_id: 8 }],
+        versions: [version, { ...version, file_id: 8, file_size: 2 }],
       }),
     );
 
@@ -1336,11 +1556,77 @@ describe("WatchPage virtual version substitution notice", () => {
     render(
       createElement(WatchPage, {
         ...watchPageProps,
-        versions: [version, { ...version, file_id: 8 }],
+        versions: [version, { ...version, file_id: 8, file_size: 2 }],
       }),
     );
 
     expect(screen.getByText(expected)).toBeInTheDocument();
+  });
+});
+
+describe("WatchPage substitution notice names the release", () => {
+  const requestedRow: PlayerFileVersion = {
+    ...version,
+    file_id: 7,
+    release_name: "Example.2024.1080p.BluRay.x264-GRP",
+  };
+  const effectiveRow: PlayerFileVersion = {
+    ...version,
+    file_id: 8,
+    resolution: "2160p",
+    codec_video: "hevc",
+    hdr: true,
+    release_name: "Example.2024.2160p.UHD.BluRay.x265-OTHER",
+  };
+  function substitute(rows: PlayerFileVersion[], plan: Record<string, unknown> = {}) {
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        plan: fixturePlanV3({
+          requested_media_file_id: 7,
+          effective_media_file_id: 8,
+          substituted_from_file_id: 7,
+          ...plan,
+        }),
+      }),
+    );
+    render(createElement(WatchPage, { ...watchPageProps, versions: rows }));
+  }
+
+  it("names the release that replaced the viewer's", () => {
+    substitute([requestedRow, effectiveRow], { substitution_reason: "transport_failed" });
+
+    expect(
+      screen.getByText(
+        "The selected version wouldn't start, so Vio is playing Example.2024.2160p.UHD.BluRay.x265-OTHER instead.",
+      ),
+    ).toBeInTheDocument();
+    // The format cannot tell the viewer which release took over.
+    expect(screen.queryByText(/Vio is playing 2160p HEVC HDR/)).not.toBeInTheDocument();
+  });
+
+  it("uses the provider's label when the row carries no release name", () => {
+    substitute([
+      requestedRow,
+      { ...effectiveRow, release_name: undefined, edition_raw: "2160p UHD remux" },
+    ]);
+
+    expect(
+      screen.getByText(
+        "The selected version wasn't available, so Vio is playing 2160p UHD remux instead.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("stays quiet when both rows name the same release", () => {
+    // A sibling mirror row is the same release playing, not a downgrade.
+    substitute([requestedRow, { ...effectiveRow, release_name: requestedRow.release_name }]);
+
+    expect(screen.queryByText(/so Vio is playing/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        "Playing a different version than selected — the requested version isn't playable on this device.",
+      ),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -2204,7 +2490,7 @@ describe("WatchPage live inventory refresh", () => {
 
     // The request is keyed on the live file, not the mount-time one.
     const lastQuery = fetchQueryMock.mock.calls.at(-1)?.[0] as { queryKey?: unknown[] };
-    expect(lastQuery?.queryKey).toEqual(itemKeys.watchDetail("content-1", 8, undefined));
+    expect(lastQuery?.queryKey).toEqual(itemKeys.watchDetail("content-1"));
     expect(applyAudioInventory).toHaveBeenCalledWith(richerForNewFile, 8);
   });
 
@@ -2282,7 +2568,7 @@ describe("WatchPage live inventory refresh", () => {
     queryClientOverride.current = client;
     // A payload cached at page mount (< staleTime old) without the probed
     // inventory; a cache-first read would return it and waste the attempt.
-    client.setQueryData(itemKeys.watchDetail("content-1", undefined, undefined), {
+    client.setQueryData(itemKeys.watchDetail("content-1"), {
       versions: [{ ...virtualVersion }],
     });
     fetchWatchDetailMock.mockResolvedValue({
@@ -2991,7 +3277,7 @@ describe("WatchPage chapter refresh", () => {
     const chapterlessVersion: PlayerFileVersion = { ...version, chapters: [] };
     // The mounted query already holds a fresh payload without chapters; a
     // cache-first read would consume the single attempt without a request.
-    client.setQueryData(itemKeys.watchDetail("content-1", undefined, undefined), {
+    client.setQueryData(itemKeys.watchDetail("content-1"), {
       versions: [chapterlessVersion],
     });
     fetchWatchDetailMock.mockResolvedValue({

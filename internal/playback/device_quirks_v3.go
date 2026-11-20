@@ -104,7 +104,7 @@ func dv8HDR10PlusRuntimeCorrectionV3(source SourceDescriptorV3, request StartReq
 // remains available when its native container claim is valid.
 func firefoxMatroskaAACTimingQuirkV3(source SourceDescriptorV3, request StartRequestV3) (*AppliedQuirkV3, bool) {
 	container := strings.ToLower(strings.TrimSpace(source.Container))
-	if !isFirefoxWebV3(request) || (container != containerMKVV3 && container != "matroska") ||
+	if !isFirefoxWebV3(request) || (container != containerMKVV3 && container != containerMatroskaV3) ||
 		!strings.EqualFold(strings.TrimSpace(source.AudioCodec), audioCodecAACV3) {
 		return nil, false
 	}

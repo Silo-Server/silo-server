@@ -1,9 +1,11 @@
 package jellycompat
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -169,6 +171,8 @@ type recordingCompatRelay struct {
 	proxyErr        error
 	lastRange       string
 	registerCalls   int
+	unregisterCalls int
+	registerURL     string
 	lastHeaders     map[string]string
 }
 
@@ -225,13 +229,21 @@ func (r *recordingCompatRelay) Register(ctx context.Context, source string) (str
 func (r *recordingCompatRelay) RegisterWithHeaders(ctx context.Context, source string, headers map[string]string) (string, func(), error) {
 	r.registerCalls++
 	r.lastHeaders = headers
-	return "http://127.0.0.1/relay", func() {}, nil
+	registered := r.registerURL
+	if registered == "" {
+		registered = "http://127.0.0.1/relay"
+	}
+	return registered, func() { r.unregisterCalls++ }, nil
 }
 
 func (r *recordingCompatRelay) RegisterInsecureWithHeaders(ctx context.Context, source string, headers map[string]string) (string, func(), error) {
 	r.registerCalls++
 	r.lastHeaders = headers
-	return "http://127.0.0.1/relay-insecure", func() {}, nil
+	registered := r.registerURL
+	if registered == "" {
+		registered = "http://127.0.0.1/relay-insecure"
+	}
+	return registered, func() { r.unregisterCalls++ }, nil
 }
 
 func TestServeVirtualDirectResolvesBoundSourceThroughRelay(t *testing.T) {
@@ -365,9 +377,9 @@ func TestProbeCompatVirtualSourcePassesRequestHeaders(t *testing.T) {
 		},
 	}
 
-	probed, ok := h.probeCompatVirtualSource(context.Background(), file, uri, 7, 1, "profile-1")
-	if !ok || probed == nil {
-		t.Fatalf("probeCompatVirtualSource ok=%v probed=%v", ok, probed)
+	probed, err := h.probeCompatVirtualSource(context.Background(), file, uri, 7, 1, "profile-1")
+	if err != nil || probed == nil {
+		t.Fatalf("probeCompatVirtualSource err=%v probed=%v", err, probed)
 	}
 	if headerCalls != 1 || plainCalls != 0 {
 		t.Fatalf("header prober calls=%d plain calls=%d, want 1/0", headerCalls, plainCalls)
@@ -396,9 +408,9 @@ func TestProbeCompatVirtualSourceFallsBackToPlainProber(t *testing.T) {
 		},
 	}
 
-	probed, ok := h.probeCompatVirtualSource(context.Background(), file, uri, 7, 1, "profile-1")
-	if !ok || probed == nil || plainCalls != 1 {
-		t.Fatalf("ok=%v probed=%v plainCalls=%d, want true/non-nil/1", ok, probed, plainCalls)
+	probed, err := h.probeCompatVirtualSource(context.Background(), file, uri, 7, 1, "profile-1")
+	if err != nil || probed == nil || plainCalls != 1 {
+		t.Fatalf("err=%v probed=%v plainCalls=%d, want nil/non-nil/1", err, probed, plainCalls)
 	}
 }
 
@@ -1648,5 +1660,60 @@ func TestResolveAndProbeVirtualSourceFallsBackOnProbeError(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if saverCalls != 0 {
 		t.Fatalf("saver calls = %d, want 0 after probe failure", saverCalls)
+	}
+}
+
+// The declared fallback used to be silent: a request that served unprobed
+// metadata looked exactly like one that probed and found a smaller inventory,
+// which is what made two clients disagree about one title's track count with
+// nothing in the log. The fallback names itself and its reason at warn level.
+func TestResolveAndProbeVirtualSourceLogsTheDeclaredFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		prober func(context.Context, string, *models.MediaFile) (*models.MediaFile, error)
+		reason string
+	}{
+		{
+			name: "probe failed",
+			prober: func(context.Context, string, *models.MediaFile) (*models.MediaFile, error) {
+				return nil, errors.New("ffprobe exited 1")
+			},
+			reason: "probe failed",
+		},
+		{
+			name: "probe timed out",
+			prober: func(context.Context, string, *models.MediaFile) (*models.MediaFile, error) {
+				return nil, context.DeadlineExceeded
+			},
+			reason: "probe timed out",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := &models.MediaFile{
+				ID: 42, FilePath: "virtual://movie/tt0133093?result=stable",
+				Container: "virtual", VirtualOwnerInstallationID: 7,
+			}
+			h := &PlaybackHandler{
+				VirtualMediaDetailedResolver: VirtualMediaDetailedResolverFunc(func(context.Context, string, int, int, string, bool, []string, string) (ResolvedVirtualMedia, error) {
+					return ResolvedVirtualMedia{URL: "https://provider.example/stream.mkv"}, nil
+				}),
+				VirtualSourceProber: tc.prober,
+			}
+
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+
+			if _, err := h.resolveAndProbeVirtualSource(context.Background(), file, 1, "profile-1"); err != nil {
+				t.Fatalf("resolveAndProbeVirtualSource: %v", err)
+			}
+			if !strings.Contains(logs.String(), "serving declared candidate metadata") {
+				t.Fatalf("fallback was not logged: %s", logs.String())
+			}
+			if !strings.Contains(logs.String(), tc.reason) {
+				t.Fatalf("fallback log does not name the reason %q: %s", tc.reason, logs.String())
+			}
+		})
 	}
 }

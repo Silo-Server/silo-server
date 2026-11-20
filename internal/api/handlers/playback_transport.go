@@ -398,7 +398,26 @@ func (h *PlaybackHandler) startLocalPlaybackTransportOnce(ctx context.Context, o
 	// timeout to the manifest wait, or the advertised cold-start budget stops
 	// being an end-to-end bound. startupCtx derives from the caller's ctx (not
 	// a detached background context) so cancellation still propagates.
-	startupCtx, startupCancel := context.WithTimeout(ctx, virtualStartupBudget)
+	//
+	// The bound comes from the request's remaining time, and the loop never
+	// starts when there is none. A bare WithTimeout on an already-spent start
+	// deadline produced a negative bound (bound_ms=-34, -65, -95, -126) and an
+	// attempt loop that "failed" every resolve before it ran; the last of those
+	// was then reported as a non-retryable transcode_start_failed, hiding that
+	// the start simply ran out of time. The cap is the readiness window the
+	// caller reserved for this loop, so it never claims a bound larger than the
+	// transport half of the phase it runs in.
+	startupBudget, startupAllowed := virtualResolveAttemptBudget(ctx, virtualStartReadinessBudget)
+	if !startupAllowed {
+		slog.WarnContext(ctx, "virtual transport startup skipped: the start budget is exhausted",
+			"component", "api", "signal", "start_budget_exhausted",
+			"file_id", catalogFileIDOrZero(file),
+			"remaining_ms", virtualResolveRemainingMilliseconds(ctx),
+			"candidate_id", initialPinnedResultID)
+		return nil, fmt.Errorf("%w: virtual transport startup exceeded the start budget: %w",
+			errVirtualProviderUnavailable, context.DeadlineExceeded)
+	}
+	startupCtx, startupCancel := context.WithTimeout(ctx, startupBudget)
 	defer startupCancel()
 	maxAttempts := h.maxVirtualFailoverAttempts(ctx)
 	if sessionVirtualURI != "" {

@@ -2,15 +2,21 @@ package playback
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // undecodableAudioFixtureFileV3 mirrors the #2274 file: the first audio track
 // is AVS3, which ffprobe's JSON leaves without a codec name, so the scanner
-// took the file-level audio codec from the next track.
+// took the file-level audio codec from the next track. It carries a probe stamp
+// because that is where the codec names came from: a codec verdict needs
+// measurement behind it (see AudioCodecVerdictSupported), and a row no probe has
+// measured is not refused this way.
 func undecodableAudioFixtureFileV3() *models.MediaFile {
 	file := detailedFixtureFileV3()
+	probedAt := time.Now().Add(-time.Hour)
+	file.ProbeUpdatedAt = &probedAt
 	file.CodecAudio = "eac3"
 	file.AudioTracks = []models.AudioTrack{
 		{Codec: "", Channels: 6, Language: "zh", Default: true},
@@ -59,6 +65,8 @@ func TestPlanPlaybackV3RefusesFileWithoutDecodableAudio(t *testing.T) {
 
 func TestPlanPlaybackV3RefusesUndecodableAudioOnlyTrack(t *testing.T) {
 	file := audioOnlyFixtureFileV3()
+	probedAt := time.Now().Add(-time.Hour)
+	file.ProbeUpdatedAt = &probedAt
 	file.AudioTracks[0].Codec = "unknown"
 	req := validStartRequestV3()
 	req.FileID = file.ID

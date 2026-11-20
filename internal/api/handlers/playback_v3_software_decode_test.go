@@ -41,6 +41,10 @@ func writePlaybackTestFFmpegDecodeFailure(t *testing.T) string {
 		"#EXTINF:2.0,\\nseg_0.m4s\\n#EXTINF:2.0,\\nseg_1.m4s\\n" +
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$last\" ;;\n" +
 		"esac\n" +
+		// The generation decoded video before its decoder turned on the source:
+		// the frames are what a real encode reports, and the start commits on
+		// them before the rejection lands.
+		playbackTestFFmpegProgress +
 		"sleep 30\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)

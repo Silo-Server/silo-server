@@ -13,9 +13,46 @@ export class StartupGuard {
   private fatalNetworkRecoveries = 0;
   private timeoutId: ReturnType<typeof setTimeout> | null;
 
-  /** `onFailure` hears whether the deadline passed or fatal network errors ran out. */
-  constructor(private readonly onFailure: (cause: "deadline" | "network") => void) {
-    this.timeoutId = setTimeout(() => this.fail("deadline"), STARTUP_TIMEOUT_MS);
+  /**
+   * `onFailure` hears whether the deadline passed or fatal network errors ran
+   * out. `replacement` says the deadline belonged to a transport that replaced
+   * one which had already played (a quality change or a reconnect), not to the
+   * session's own start: only the latter ends the route ladder.
+   */
+  constructor(
+    private readonly onFailure: (cause: "deadline" | "network", replacement: boolean) => void,
+  ) {
+    this.timeoutId = setTimeout(() => this.fail("deadline", false), STARTUP_TIMEOUT_MS);
+  }
+
+  /**
+   * A plan adoption installed a new transport. Returns whether the transport may
+   * start.
+   *
+   * Only a transport that already played gets a fresh startup window: a real
+   * reconnect is a new start. A start that has not shown a frame yet keeps the
+   * deadline it began with (so a session that keeps replanning still reaches its
+   * own failure), and a session whose deadline has already passed gets no window
+   * at all — that is the one case where the caller must surface the retryable
+   * error instead of loading another route. The Auto route ladder used to hand
+   * every replacement a fresh 60 s here, which turned the 60 s contract into
+   * 186 s of "Loading video" before "No playable version found".
+   */
+  armForReplacementTransport(): boolean {
+    if (this.state === "disposed") {
+      // The browser engine took the transport and owns its own readiness
+      // deadline (it called dispose). There is nothing to bound here, and the
+      // transport must load as it always did.
+      return true;
+    }
+    if (this.state === "playable") {
+      this.state = "starting";
+      this.fatalNetworkRecoveries = 0;
+      this.clearTimeout();
+      this.timeoutId = setTimeout(() => this.fail("deadline", true), STARTUP_TIMEOUT_MS);
+      return true;
+    }
+    return this.state === "starting";
   }
 
   handleFatalNetworkError(): boolean {
@@ -52,12 +89,12 @@ export class StartupGuard {
     this.clearTimeout();
   }
 
-  private fail(cause: "deadline" | "network") {
+  private fail(cause: "deadline" | "network", replacement = false) {
     if (this.state !== "starting") return;
 
     this.state = "failed";
     this.clearTimeout();
-    this.onFailure(cause);
+    this.onFailure(cause, replacement);
   }
 
   private clearTimeout() {

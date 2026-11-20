@@ -383,6 +383,10 @@ func displayContentType(ct string) string {
 	return ct
 }
 
+// compatAPIKeyAuthLabel is the request log's name for a token that arrived as
+// a query parameter, whichever of Jellyfin's two spellings carried it.
+const compatAPIKeyAuthLabel = "api_key"
+
 func authKind(r *http.Request) string {
 	for _, headerName := range []string{"Authorization", "X-Emby-Authorization"} {
 		header := strings.TrimSpace(r.Header.Get(headerName))
@@ -401,10 +405,10 @@ func authKind(r *http.Request) string {
 		return "x-emby-token"
 	case strings.TrimSpace(r.Header.Get("X-Mediabrowser-Token")) != "":
 		return "x-mediabrowser-token"
-	case strings.TrimSpace(newCaseInsensitiveQuery(r.URL.Query()).Get("ApiKey")) != "":
-		return "api_key"
-	case strings.TrimSpace(newCaseInsensitiveQuery(r.URL.Query()).Get("api_key")) != "":
-		return "api_key"
+	case strings.TrimSpace(newCaseInsensitiveQuery(r.URL.Query()).Get(compatAPIKeyParam)) != "":
+		return compatAPIKeyAuthLabel
+	case strings.TrimSpace(newCaseInsensitiveQuery(r.URL.Query()).Get(compatLegacyAPIKeyParam)) != "":
+		return compatAPIKeyAuthLabel
 	default:
 		return "none"
 	}

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   mediaDurationSeconds,
+  reloadStartSeconds,
+  replacedTransportPlayheadSeconds,
   subtitleChangePositionSeconds,
   subtitleStartPositionSeconds,
   toMediaTime,
@@ -43,6 +45,44 @@ describe("mediaDurationSeconds", () => {
     expect(mediaDurationSeconds(0, 0)).toBeUndefined();
     expect(mediaDurationSeconds(null, undefined)).toBeUndefined();
     expect(mediaDurationSeconds(undefined, NaN)).toBeUndefined();
+  });
+});
+
+describe("reloadStartSeconds", () => {
+  // The regression this exists for: a re-offer replan lands on the generation's
+  // origin while the transport it replaces has played to 120 s. Starting at the
+  // plan's zero asked the live generation for segment 9 while it was producing
+  // past segment 1268, and the 412 that answered it ended the session.
+  it("keeps a played transport's position when the new plan starts at its origin", () => {
+    expect(reloadStartSeconds(0, 120)).toBe(120);
+  });
+
+  it("uses the plan's start for a first start, a new session, or a moved anchor", () => {
+    expect(reloadStartSeconds(45, null)).toBe(45);
+    expect(reloadStartSeconds(0, Number.NaN)).toBe(0);
+    // The server moved the anchor past the viewer: a target behind it is not
+    // producible, so the plan's own start stands.
+    expect(reloadStartSeconds(130, 120)).toBe(130);
+  });
+});
+
+describe("replacedTransportPlayheadSeconds", () => {
+  // The start restart loop: the transport was rebuilt three times in two
+  // seconds while the element already sat at segment 739, and each rebuild went
+  // back to the plan's origin because the played flag had been reset by the
+  // previous rebuild. The element's own clock carries the position.
+  it("carries the element's position even when the outgoing transport never reported a played frame", () => {
+    expect(replacedTransportPlayheadSeconds(true, 739, 0)).toBe(739);
+  });
+
+  it("inherits nothing from another session or from a zero clock", () => {
+    expect(replacedTransportPlayheadSeconds(false, 739, 0)).toBeNull();
+    expect(replacedTransportPlayheadSeconds(true, 0, 0)).toBeNull();
+    expect(replacedTransportPlayheadSeconds(true, Number.NaN, 0)).toBeNull();
+  });
+
+  it("moves the position onto the new plan's player clock", () => {
+    expect(replacedTransportPlayheadSeconds(true, 3060, 3000)).toBe(60);
   });
 });
 

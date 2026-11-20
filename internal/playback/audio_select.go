@@ -213,6 +213,31 @@ func AnyAudioTrackDecodable(tracks []models.AudioTrack, fileCodec string) bool {
 	return false
 }
 
+// AudioCodecVerdictSupported reports whether f carries measured audio codec
+// evidence, i.e. whether a verdict about the file's audio codec may be
+// published at all.
+//
+// AudioTrackDecodable answers false for two different situations: a probe named
+// a codec FFmpeg has no decoder for (measured, and the file really cannot
+// play), and a row no probe has measured whose tracks and file-level codec are
+// all unnamed (unmeasured — a provider listing declares languages and channel
+// counts, not codec ids). Only the first is a codec incompatibility. The
+// second is an absence of evidence, and publishing it as
+// audio_conversion_unsupported told a viewer a file that plays fine "can't be
+// converted" with no retry offered, after a delivery timeout that never
+// measured its audio at all.
+//
+// ProbeUpdatedAt is the model's own record that a probe ran and wrote this
+// row's stream table, so it is the one field that separates a measured row from
+// a declared one. A row with named codecs never reaches this question:
+// AudioTrackDecodable answers true for it.
+func AudioCodecVerdictSupported(f *models.MediaFile) bool {
+	if f == nil {
+		return false
+	}
+	return f.ProbeUpdatedAt != nil
+}
+
 func probedAudioCodec(codec string) string {
 	return strings.ToLower(strings.TrimSpace(codec))
 }

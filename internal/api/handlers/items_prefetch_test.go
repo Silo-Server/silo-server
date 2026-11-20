@@ -8,7 +8,6 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -34,18 +33,17 @@ func (f *fakeVirtualFiles) GetByID(_ context.Context, id int) (*models.MediaFile
 	return f.files[id], nil
 }
 
-// Watch-detail prefetch must carry request identity into the background task:
+// The catalog prefetch must carry request identity into the background task:
 // the real PrefetchVirtualPlayback drops work with no user ID, so a prefetch
 // that loses auth silently warms nothing after doing the row reads.
-func TestWatchDetailPrefetchKeepsIdentity(t *testing.T) {
+func TestCatalogPrefetchKeepsIdentity(t *testing.T) {
 	prefetcher := &fakePrefetcher{calls: make(chan struct{}, 1)}
 	h := &ItemsHandler{}
 	h.SetVirtualPrefetcher(prefetcher, &fakeVirtualFiles{files: map[int]*models.MediaFile{
 		7: {ID: 7, FilePath: "virtual://movie/tt1?result=a"},
 	}})
 	ctx := apimw.SetClaims(context.Background(), &auth.Claims{UserID: 42})
-	detail := &catalog.WatchDetail{ContentID: "m1", Type: "movie", Versions: []catalog.FileVersion{{FileID: 7}}}
-	h.prefetchWatchDetailVirtual(ctx, detail, "profile-1")
+	h.prefetchVirtualFileIDs(ctx, []int{7}, "profile-1")
 	select {
 	case <-prefetcher.calls:
 	case <-time.After(2 * time.Second):
@@ -64,9 +62,8 @@ func TestCatalogPrefetchCollapsesRepeatReads(t *testing.T) {
 	h := &ItemsHandler{}
 	h.SetVirtualPrefetcher(prefetcher, loader)
 	ctx := apimw.SetClaims(context.Background(), &auth.Claims{UserID: 42})
-	detail := &catalog.WatchDetail{ContentID: "m1", Type: "movie", Versions: []catalog.FileVersion{{FileID: 7}}}
-	h.prefetchWatchDetailVirtual(ctx, detail, "profile-1")
-	h.prefetchWatchDetailVirtual(ctx, detail, "profile-1")
+	h.prefetchVirtualFileIDs(ctx, []int{7}, "profile-1")
+	h.prefetchVirtualFileIDs(ctx, []int{7}, "profile-1")
 	select {
 	case <-prefetcher.calls:
 	case <-time.After(2 * time.Second):

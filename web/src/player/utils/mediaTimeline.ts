@@ -8,6 +8,53 @@ export function toPlayerTime(mediaTimeSeconds: number, timelineOffsetSeconds = 0
   return mediaTimeSeconds - timelineOffsetSeconds;
 }
 
+/**
+ * Where a freshly attached transport begins.
+ *
+ * A plan's start is not always the viewer's. A replan the client did not seek
+ * for (a lowering, a re-offer of the same route) can land on the generation's
+ * origin while the transport it replaces has already played past it; starting
+ * there asks a live generation for segments it produced long ago, and the
+ * segment layer refuses them with a 412 that ends in a terminal recovery. A
+ * transport that replaces one that played therefore begins where that one had
+ * got to, unless the new plan's own start is further ahead (the server moved
+ * the anchor forward, and a target behind it is not producible).
+ *
+ * `replacedPlayheadSeconds` is on the new plan's player axis, or null when
+ * nothing played before this transport (a first start, a new session).
+ */
+export function reloadStartSeconds(
+  planStartSeconds: number,
+  replacedPlayheadSeconds: number | null,
+): number {
+  if (replacedPlayheadSeconds === null || !Number.isFinite(replacedPlayheadSeconds)) {
+    return planStartSeconds;
+  }
+  return replacedPlayheadSeconds > planStartSeconds ? replacedPlayheadSeconds : planStartSeconds;
+}
+
+/**
+ * The playhead a replacement transport inherits, on its own player clock.
+ *
+ * Reading the element's clock is what makes this independent of whether the
+ * outgoing transport ever reported a played frame: a transport that loaded and
+ * advanced (a start that began in the middle of the file) already has a
+ * position worth keeping, and a `streamPlayedRef` that is still false at the
+ * moment of a rebuild used to send the replacement back to the plan's origin.
+ * A transport of a different session inherits nothing — its clock belongs to
+ * another source — and a zero clock has no position to carry.
+ */
+export function replacedTransportPlayheadSeconds(
+  sameSession: boolean,
+  currentTimeSeconds: number,
+  timelineOffsetSeconds = 0,
+): number | null {
+  if (!sameSession || !Number.isFinite(currentTimeSeconds) || currentTimeSeconds <= 0) {
+    return null;
+  }
+  return toPlayerTime(currentTimeSeconds, timelineOffsetSeconds);
+}
+
 export function subtitleStartPositionSeconds(
   readyState: number,
   currentTimeSeconds: number,

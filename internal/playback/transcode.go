@@ -430,7 +430,7 @@ type TranscodeSession struct {
 	// generation-scoped progress probe. Production leaves both nil, using
 	// time.Now and the output-directory scan.
 	decodeNow   func() time.Time
-	decodeProbe func(outputDir string, cutoff time.Time) bool
+	decodeProbe func(outputDir string, cutoff time.Time, videoFrames int64) bool
 	// decodeReapTimeout is the per-session teardown bound for a confirmed
 	// generation. Zero uses decodeReapTimeout. Tests shrink it without
 	// mutating a package global.
@@ -445,6 +445,20 @@ type TranscodeSession struct {
 	// written by a previous generation (or a previous session sharing the
 	// directory) and describes media this process has not produced yet.
 	generationStartedAt time.Time
+	// videoFrames is how many video frames the current generation's FFmpeg
+	// -progress stream has reported, and videoOutTimeUS is the newest
+	// out_time_us reading (microseconds of muxed output). lastVideoFrameAt is
+	// when the count last advanced. A video encode writes a frame only after
+	// decoding it, so these are the only server-side evidence that a muxed
+	// segment carries decodable video at all; segment existence is not.
+	// Copy/remux plans pass no -progress, so they report zero. Resetting them
+	// with the generation keeps a replacement from inheriting a predecessor's
+	// frames, and progressGeneration fences the reader goroutine of a
+	// generation that has been replaced. All guarded by mu.
+	videoFrames        int64
+	videoOutTimeUS     int64
+	lastVideoFrameAt   time.Time
+	progressGeneration uint64
 	// observedStartupLatency is the time from the owning generation's spawn to
 	// its first produced segment, latched once per generation. It is reset
 	// whenever a generation starts so a restarted generation is never judged by
@@ -538,6 +552,11 @@ type SegmentProgress struct {
 	StartSegmentNumber            int
 	SegmentDuration               int
 	LastRequestedSegment          int
+	// VideoFrames is how many video frames the current generation has reported
+	// on its FFmpeg -progress stream. ProducedCount only counts muxed bytes, so
+	// a generation that is writing audio-only segments has a growing
+	// ProducedCount with VideoFrames still zero. Copy/remux plans report zero.
+	VideoFrames int64
 }
 
 // SegmentRecoveryDecision tells the segment handler whether to briefly wait
@@ -619,6 +638,23 @@ const (
 // rejection. It is deliberately a code constant, not a user setting: the window
 // is a safety margin sized to the segment cadence, not an operator preference.
 const decodeObservationWindow = time.Second
+
+// noVideoFramesGrace is how long a video encode may mux segments without
+// reporting a single decoded frame before its start is declared unplayable. A
+// healthy encode reports its first frames through FFmpeg's -progress stream
+// before it can write the first segment, so the grace only elapses for a
+// generation that is muxing audio without decoding video. It is deliberately a
+// code constant, not a user setting: it trades a few seconds of start latency
+// on a broken plan against the client's much longer startup guard.
+const noVideoFramesGrace = 8 * time.Second
+
+// reportsVideoFrames reports whether this plan's FFmpeg process is asked for a
+// -progress stream whose frame counter can be read. Only a video encode decodes
+// frames; a copy/remux passes no -progress, so its frame count is always zero
+// and must never be read as evidence about the source.
+func reportsVideoFrames(opts TranscodeOpts) bool {
+	return !strings.EqualFold(opts.TargetCodecVideo, "copy")
+}
 
 // decodeVerdictStage is the internal decoder-verdict lifecycle for one ffmpeg
 // generation: observing (no verdict), suspected (threshold crossed, awaiting a
@@ -835,6 +871,12 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	cmd.Dir = opts.OutputDir
 	cmd.Stderr = s.newStderrWriter(ctx)
 	cmd.WaitDelay = 3 * time.Second
+	progressPipe, err := attachProgressPipe(cmd, opts)
+	if err != nil {
+		cancel()
+		releaseHWDevice()
+		return nil, fmt.Errorf("create progress pipe: %w", err)
+	}
 
 	// Stamp the generation before the process can write anything, so every file
 	// this ffmpeg produces is strictly newer than the stamp.
@@ -850,10 +892,14 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	s.cmd = cmd
 	s.stdinPipe = stdinPipe
 	s.beginGeneration(startedAt)
+	progressGeneration := s.progressGeneration
 	s.inheritedManifest = inheritedManifest
 	s.startSubtitleSpanLocked(opts)
 	s.saveSubtitleSpans()
 	s.logFFmpegEvent(ctx, "ffmpeg process started", "")
+	if progressPipe != nil {
+		go s.consumeProgress(progressPipe, progressGeneration)
+	}
 
 	// Monitor ffmpeg in background. The process-specific reservation is released
 	// before done closes, so waiters can safely launch a replacement process.
@@ -1207,6 +1253,13 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 		"-hide_banner",
 		"-loglevel", "error",
 	}
+	// A video encode reports machine-readable progress on stdout: the frame
+	// counter is the only way to tell a muxing encode from one whose decoder
+	// produced nothing. Copy/remux plans are unchanged: they decode nothing, so
+	// a frame count would say nothing about them and their stdout stays unused.
+	if reportsVideoFrames(opts) {
+		args = append(args, "-progress", "pipe:1", "-nostats")
+	}
 
 	// Hardware acceleration — skip when copying video (no encoding needed).
 	if !isVideoCopy {
@@ -1215,11 +1268,22 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 
 	lowerInput := strings.ToLower(strings.TrimSpace(opts.InputPath))
 	isRemote := strings.HasPrefix(lowerInput, "http://") || strings.HasPrefix(lowerInput, "https://")
-	fflags := "+genpts+fastseek"
+	// A video *encode* decodes what it writes, so its seek must be the one a
+	// decoder needs. +fastseek seeks the demuxer without clamping to the
+	// preceding keyframe, which on open-GOP content (HEVC in particular) starts
+	// the decoder mid-GOP with reference frames it never saw: FFmpeg then muxes
+	// segments that carry no decodable picture. Without +fastseek the ordinary
+	// accurate seek lands on the keyframe and discards the leading pictures.
+	// A copy/remux keeps +fastseek: it copies packets and never decodes, and
+	// its own keyframe clamp lives in copy_seek_anchor.go.
+	fflags := "+genpts"
+	if isVideoCopy {
+		fflags = "+genpts+fastseek"
+	}
 	analyzeDuration := "3000000" // 3 seconds (default 5s)
 	probeSize := "5000000"       // 5 MB (default 5MB, explicit for clarity)
 	if isRemote {
-		fflags = "+genpts+fastseek+nobuffer"
+		fflags += "+nobuffer"
 		analyzeDuration = "1000000" // 1 second for remote streams to avoid WAN stalling
 		probeSize = "1000000"       // 1 MB
 	}
@@ -2855,8 +2919,58 @@ func (s *TranscodeSession) getManifest(currentGeneration bool) ([]byte, error) {
 			return nil, fmt.Errorf("invalid copy playback manifest: %w", err)
 		}
 	}
+	// Only readiness reads are gated on decoded video (see
+	// videoFramesVerdictLocked): a manifest re-read for a session that already
+	// served one must keep its prompt answer while a replacement warms up.
+	if currentGeneration || !s.manifestServed {
+		if err := s.videoFramesVerdictLocked(data, time.Now()); err != nil {
+			return nil, err
+		}
+	}
 
 	return data, nil
+}
+
+// videoFramesVerdictLocked decides whether a video encode generation has
+// produced decodable video or whether its start must be held back. A video
+// encode proves it can play only by decoding frames: segments on disk prove
+// the muxer wrote bytes, and an encode whose decoder produced nothing still
+// writes a non-empty segment for every audio packet, which is how a start once
+// committed a plan that never showed a frame and left the client to burn its
+// own startup guard. So the start is held until the generation's frame counter
+// moves, and a generation that keeps muxing past the grace without one is a
+// typed verdict the caller acts on instead of waiting out its budget.
+//
+// It reports nil for every plan that cannot answer the question: a copy/remux
+// plan (which passes no -progress), a finished generation (whose exit is judged
+// by the process outcome), and a session with no spawned generation (the
+// historical in-test fixtures). A completed playlist is also tolerated without
+// frames: a very short clip, or a seek that lands in the last fragment, can
+// legitimately finish with an audio-only tail, exactly as startupFilesReady
+// already tolerates an end-listed window below the live runway.
+//
+// Callers must hold mu.
+func (s *TranscodeSession) videoFramesVerdictLocked(manifest []byte, now time.Time) error {
+	if !s.running || s.generationStartedAt.IsZero() || !reportsVideoFrames(s.opts) {
+		return nil
+	}
+	if s.videoFrames > 0 {
+		return nil
+	}
+	// A completed playlist needs no further frames: the generation has already
+	// reached the end of what it can produce.
+	if bytes.Contains(manifest, []byte("#EXT-X-ENDLIST")) {
+		return nil
+	}
+	elapsed := now.Sub(s.generationStartedAt)
+	if elapsed < noVideoFramesGrace {
+		// Still inside the grace: hold the start rather than call it sick. A
+		// healthy encoder reports its first frames before it can write its
+		// first segment, so this normally lasts one poll.
+		return ErrManifestNotReady
+	}
+	return fmt.Errorf("%w: 0 frames decoded after %s while muxing (out_time_us=%d)",
+		ErrTranscodeNoVideoFrames, elapsed.Round(time.Millisecond), s.videoOutTimeUS)
 }
 
 // statManifest returns the output directory's current stream.m3u8, or nil.
@@ -3720,6 +3834,7 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 		SegmentDuration:               opts.SegmentDuration,
 		LastRequestedSegment:          s.lastRequestedSegment,
 		GenerationStartedAt:           s.generationStartedAt,
+		VideoFrames:                   s.videoFrames,
 	}
 	s.mu.Unlock()
 
@@ -3828,10 +3943,17 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 // beginGeneration records that a new owning ffmpeg generation spawned at
 // startedAt. Callers hold mu, except StartTranscode before it publishes the
 // session. Startup latency is measured per generation, so a replacement starts
-// unmeasured instead of inheriting what an earlier generation cost.
+// unmeasured instead of inheriting what an earlier generation cost. The frame
+// counters belong to the same generation: a replacement that has not decoded a
+// frame yet must not look like one that has, and progressGeneration fences the
+// reader of the process that was just replaced.
 func (s *TranscodeSession) beginGeneration(startedAt time.Time) {
 	s.generationStartedAt = startedAt
 	s.observedStartupLatency = 0
+	s.videoFrames = 0
+	s.videoOutTimeUS = 0
+	s.lastVideoFrameAt = time.Time{}
+	s.progressGeneration++
 }
 
 // startupLatencyOf reports how long a generation needed from its spawn stamp to
@@ -4974,6 +5096,17 @@ func (s *TranscodeSession) restart(
 	cmd.Dir = opts.OutputDir
 	cmd.Stderr = s.newStderrWriter(ctx)
 	cmd.WaitDelay = 3 * time.Second
+	progressPipe, progressErr := attachProgressPipe(cmd, opts)
+	if progressErr != nil {
+		cancel()
+		s.mu.Lock()
+		flight.err = progressErr
+		s.restarting = nil
+		s.waitErr = progressErr
+		s.mu.Unlock()
+		close(flight.done)
+		return fmt.Errorf("create progress pipe: %w", progressErr)
+	}
 
 	// The previous process released its reservation before closing done. Keep
 	// this session on the same concrete GPU while accounting for the replacement
@@ -4992,6 +5125,9 @@ func (s *TranscodeSession) restart(
 	if !s.lifecycleAliveNow() {
 		cancel()
 		releaseHWDevice()
+		if progressPipe != nil {
+			_ = progressPipe.Close()
+		}
 		s.mu.Lock()
 		flight.err = ErrSessionSuperseded
 		s.restarting = nil
@@ -5032,6 +5168,7 @@ func (s *TranscodeSession) restart(
 	s.lastRequestedSegment = requestedSegment
 	s.lastCompletedSegment = startSegment - 1
 	s.beginGeneration(startedAt)
+	progressGeneration := s.progressGeneration
 	// The verdict generation was already opened when the old process died,
 	// before this replacement's stderr writer was created; do not bump it
 	// again here or that writer would be fenced as stale.
@@ -5044,6 +5181,9 @@ func (s *TranscodeSession) restart(
 	close(flight.done)
 
 	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
+	if progressPipe != nil {
+		go s.consumeProgress(progressPipe, progressGeneration)
+	}
 
 	// Re-check after spawning: a stop that unregistered the session while this
 	// process was starting already closed the previous one, so it would not have
@@ -6563,9 +6703,10 @@ func (s *TranscodeSession) evaluateDecodeVerdict() {
 	outputDir := s.outputDir
 	suspectAt := s.decodeSuspectAt
 	probe := s.decodeProbe
+	videoFrames := s.videoFrames
 	s.mu.Unlock()
 
-	recovered, ok := s.runDecodeProbe(generation, outputDir, suspectAt, probe)
+	recovered, ok := s.runDecodeProbe(generation, outputDir, suspectAt, videoFrames, probe)
 	if !ok {
 		// Another probe owns the sampling path; a later tick applies its own
 		// result. Never block a verdict read behind slow I/O.
@@ -6578,8 +6719,9 @@ func (s *TranscodeSession) evaluateDecodeVerdict() {
 // coalescing concurrent probes: while one probe is in flight, other callers
 // return ok=false rather than launching a scan or serializing behind the first.
 // A session with no output directory (unit fixtures) reports no recovery so the
-// suspicion can still confirm on expiry.
-func (s *TranscodeSession) runDecodeProbe(generation uint64, outputDir string, cutoff time.Time, probe func(string, time.Time) bool) (recovered bool, ok bool) {
+// suspicion can still confirm on expiry. videoFrames is the generation's frame
+// count snapshot: muxed output never counts as recovery without it.
+func (s *TranscodeSession) runDecodeProbe(generation uint64, outputDir string, cutoff time.Time, videoFrames int64, probe func(string, time.Time, int64) bool) (recovered bool, ok bool) {
 	if outputDir == "" {
 		return false, true
 	}
@@ -6594,7 +6736,7 @@ func (s *TranscodeSession) runDecodeProbe(generation uint64, outputDir string, c
 	if probe == nil {
 		probe = videoProgressAfter
 	}
-	recovered = probe(outputDir, cutoff)
+	recovered = probe(outputDir, cutoff, videoFrames)
 
 	s.decodeProbeMu.Lock()
 	s.decodeProbeRunning = false
@@ -6724,12 +6866,17 @@ func (s *TranscodeSession) reapRejectedGeneration(generation uint64) {
 	}
 }
 
-// videoProgressAfter reports whether ffmpeg muxed non-empty segment output
-// newer than cutoff. Segment existence (not content) is the signal: any muxed
-// segment proves the decoder is extracting usable video, which contradicts a
-// source-undecodable verdict. Manifests, empty files, and unparseable names
-// never count. It runs outside the session mutex.
-func videoProgressAfter(outputDir string, cutoff time.Time) bool {
+// videoProgressAfter reports whether the generation both decoded video and
+// muxed non-empty segment output newer than cutoff. A segment alone says
+// nothing about the decoder: an encode that decoded no frame still writes a
+// non-empty segment for every audio packet, so segment existence must never
+// cancel a decode suspicion. Manifests, empty files, unparseable names, and a
+// generation that has not advanced its frame counter never count. It runs
+// outside the session mutex.
+func videoProgressAfter(outputDir string, cutoff time.Time, videoFrames int64) bool {
+	if videoFrames <= 0 {
+		return false
+	}
 	entries, err := os.ReadDir(outputDir)
 	if err != nil {
 		return false

@@ -38,9 +38,12 @@ start is not blamed on it.
   the server stores and prefetches. A request anchored on the raw playhead is a
   range no other request computes, so nothing is ever reused and each page
   boundary waits on a fresh container read. The fetcher asks for the next page
-  30 seconds before the current one ends; an extend requests the page after the
-  committed coverage, never the page already held, and keeps the parser's epoch
-  state, while a fresh window starts a new parser.
+  30 seconds before the current one ends; an extend requests the page that
+  contains the committed coverage, never a page already fully held, and keeps the
+  parser's epoch state, while a fresh window starts a new parser. A response's
+  `X-Subtitle-Coverage` bounds what it committed: a page the server could answer
+  only in part commits that shorter range and asks for the same page again, so
+  the tail it did not send is never skipped.
 - A screen stays up until the next display set replaces it, but never past
   what has loaded: the end of the last finished window or, beyond it, the
   latest segment read from the window on the wire. Screens more than one page
@@ -72,16 +75,92 @@ start is not blamed on it.
   retry, the player refreshes the subtitle inventory, and the refreshed
   generation rebuilds the parser and window. If the refresh re-mints the same
   URL, the refresh revision still forces one retry; a repeated conflict ends in
-  the visible error state rather than an endless "loading" overlay.
+  the visible error state rather than an endless "loading" overlay. This verdict
+  is the serve path's own probe of the release it is about to read. A layout
+  verdict from a background fill instead answers the retryable
+  `503 subtitle_source_unavailable`, because a retry may still be served from the
+  cached window or the committed artifact and the client's plan is not what was
+  proven stale.
 - A `503 subtitle_source_unavailable` carries `Retry-After`. The client waits at
   least that long, then uses its normal capped backoff. Four consecutive
   non-retryable failures or twelve retryable failures end the fetch for that
   mount; a seek, track change, replay, or manual retry starts a new window.
+  `503 subtitle_page_not_ready` is the same retryable shape for a page whose
+  start the server's progressive bitmap artifact has not parsed yet: it is a
+  wait, not a failure of the source.
+- Any retryable 503 is handled in the background: the pages already parsed stay
+  on screen, the track stays selected, and the overlay keeps saying it is loading
+  without offering a manual retry. Only a non-retryable failure (a 404 for a
+  track this file does not have, an unsupported format) or a spent retry budget
+  moves the overlay to its error state.
 - On the server, windowed `.sup` extraction uses the same last-good window
   cache, in-flight coalescing, and per-identity extraction cooldown as text
   windows. A repeated or concurrent window does not spawn a second ffmpeg, and
   an upstream failure can answer 503 without reopening the source. Full-track
   `.sup` caching and Range/HEAD behavior are unchanged.
+
+## Bitmap pages on a large relay source
+
+A windowed PGS extract cannot seek a non-seekable relay, so ffmpeg reads the
+container from byte 0 and discards the prefix. A page at offset S therefore costs
+`(S + W) × bitrate`, not `W × bitrate`: a 120 s page of an 18.25 GB / 35 Mbps
+source is ~525 MB, which is also the window extraction timeout. What hurts is the
+prefix, and it is not only bytes: on a relay that answers the seek with range
+reads a page at 3600 s read under the byte cap and still took 88 s. Three rules
+follow.
+
+- One unbounded `.sup` demux runs per (source identity, track, format
+  generation), single-flighted through the cache's warm slot and detached relay
+  budget. It writes the track's artifact and publishes how far the display sets
+  it has parsed reach (a coverage watermark), so a page inside that coverage is
+  a local read of the artifact rather than another source read. The watermark
+  advances only at a complete display set (`PCS … END`), and a page the artifact
+  has parsed is never answered with a truncated run.
+
+  A page whose start is parsed but whose end is still ahead of the watermark is
+  served from the parsed prefix: the response is a 200 and `X-Subtitle-Coverage`
+  reports the shorter range it really produced, so the client keeps only that
+  range and asks for the page again — it never treats the unparsed tail as
+  delivered. A page that starts at or past the watermark answers
+  `503 subtitle_page_not_ready` with `Retry-After` and the covered range; that
+  code is distinct from `subtitle_source_unavailable` because the source was never
+  read. A `.sup` fill flips into the committed whole-track entry when its extract
+  reaches end of file.
+- A bounded page that misses the cache starts that fill while the viewer is
+  playing. The fill is the page path — it produces the pages the client asks for
+  next — so it replaces the bounded window prefetch for bitmap pages. The
+  complete-track bitmap warm for any other request (a whole-track fetch, or an
+  open-ended window) stays paused-only. The fill is single-flighted, so a burst
+  of page requests starts exactly one.
+- A page extract seeks to its own start, so it reads its window plus a fixed
+  opening cost rather than the container prefix. Before a page reads its source,
+  the server prices that window — its span times the row's byte rate (size and
+  runtime, or bitrate), and in seconds the rate this identity's extracts have
+  measured. Only a window that cannot be read inside one page extract (120 s at
+  the measured rate) is refused before the extract with
+  `503 subtitle_page_too_costly`, `Retry-After` and `X-Subtitle-Coverage`, and
+  that refusal starts the fill. An opening page always extracts. The extract
+  itself is capped at 48 MB of opening cost plus twice its window (floor 64 MB,
+  ceiling 3 GB); an unpriceable window keeps the 256 MB cap. One killed that way,
+  or one that runs out the two-minute window extract deadline before emitting a
+  byte, answers the same retryable shape instead of a 500. A container without an
+  index, or a provider that ignores Range, is what the cap and the deadline stop;
+  the seek cannot help there.
+
+  A retry that arrives while the identity is inside the extraction cooldown a
+  refusal armed is answered with the same page shape, not a generic
+  `subtitle_source_unavailable`: `subtitle_page_not_ready` with the artifact's
+  watermark while the fill is still parsing, `subtitle_page_too_costly` with an
+  empty covered range when no fill is running. The handler starts the fill from a
+  page refusal only, so naming the state is also what keeps a refusal that lost
+  its fill from becoming a dead end.
+
+All of it applies only to a remote identity, and pricing only to one whose size
+and runtime (or bitrate) are known: an unpriceable page keeps its source extract
+under the 256 MB cap rather than being refused, or priced from the link, for an
+assumption. A text (WebVTT/SRT/ASS) window and a local file keep their existing
+paths; a windowed text extract is held until it completes, so a slice cut short
+by the deadline or a canceled request is never served as a 200 with half a cue.
 
 ## Jellyfin compatibility
 

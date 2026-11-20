@@ -66,6 +66,10 @@ func writePlaybackTestFFmpegRejectAfterManifest(t *testing.T) string {
 		"#EXTINF:2.0,\\nseg_0.m4s\\n#EXTINF:2.0,\\nseg_1.m4s\\n" +
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$last\" ;;\n" +
 		"esac\n" +
+		// The generation decoded video until its decoder turned on the source,
+		// which is what makes this a *post-start* rejection: the muxed segments
+		// carry real pictures, so the start commits before the storm arrives.
+		playbackTestFFmpegProgress +
 		"sleep 1\n" +
 		"i=0\n" +
 		"while [ $i -lt 20 ]; do echo \"[hevc @ 0x1] Error submitting packet to decoder: Invalid data found when processing input\" >&2; i=$((i+1)); done\n" +

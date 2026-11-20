@@ -172,8 +172,13 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 			return nil, &TranscodeStartupError{Err: ctx.Err(), WasRunning: wasRunning, FailedDevice: failedDevice}
 		}
 
+		// A generation that muxes segments without decoding a frame cannot show
+		// a picture on this path. It is still running, so the process-exit
+		// branch below would neither advance nor retry it: stop it and treat it
+		// as the failure it is.
+		frameLess := errors.Is(err, ErrTranscodeNoVideoFrames)
 		wasRunning := session.IsRunning()
-		if wasRunning && reconstruct {
+		if wasRunning && reconstruct && !frameLess {
 			slog.WarnContext(ctx, "reconstructed transcode slow to produce a manifest",
 				"component", "playback",
 				"playback_session_id", attempt.SessionID,
@@ -184,7 +189,7 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 
 		failedDevice := session.Opts().HWDevice
 		next := false
-		if !wasRunning {
+		if !wasRunning || frameLess {
 			if pipeline.AdvanceAfterFailure(failedDevice) {
 				attempt = pipeline.Current()
 				next = true
@@ -203,12 +208,10 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 			return nil, &TranscodeStartupError{Err: err, WasRunning: wasRunning, FailedDevice: failedDevice}
 		}
 
-		slog.WarnContext(ctx, "transcode exited during startup; trying a safer path",
-			"component", "playback",
-			"playback_session_id", attempt.SessionID,
-			"failed_device", failedDevice,
-			"next_hw_accel", attempt.HWAccel,
-			"next_software_decode", attempt.SoftwareVideoDecode,
+		slog.WarnContext(ctx, "transcode did not become ready during startup; trying a safer path",
+			"component", "playback", "playback_session_id", attempt.SessionID,
+			"failed_device", failedDevice, "no_video_frames", frameLess,
+			"next_hw_accel", attempt.HWAccel, "next_software_decode", attempt.SoftwareVideoDecode,
 			"error", err,
 		)
 	}

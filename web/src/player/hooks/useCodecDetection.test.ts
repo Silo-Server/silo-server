@@ -535,15 +535,44 @@ describe("probeWebCapabilities", () => {
     expect(capabilities.progressiveCodecsAudio).not.toContain("vorbis");
   });
 
-  it("keeps advertising native MKV playback on other capable browsers", () => {
+  it("keeps advertising native MKV playback on a browser whose MSE accepts it", () => {
     vi.stubGlobal("navigator", {
       userAgent:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140.0 Safari/537.36",
+    });
+    vi.stubGlobal("MediaSource", {
+      isTypeSupported: (mime: string) => mime === 'video/x-matroska; codecs="avc1.640028"',
     });
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
       mime === 'video/x-matroska; codecs="avc1.640028"' ? "probably" : "",
     );
 
     expect(probeWebCapabilities().containers).toContain("mkv");
+  });
+
+  // Chrome 157 answers "maybe" for `video/x-matroska` and "probably" for the
+  // codec-qualified type while MediaSource rejects both. Trusting
+  // `canPlayType` advertised mkv as a direct-play container, the planner chose
+  // `original_http`, and the element stalled on a 206 response with
+  // readyState 0 until the startup guard fired. MSE is the strict answer; keep
+  // the h264/aac claims so the planner still picks a codec-copy remux.
+  it("does not advertise native MKV playback when MSE rejects the container", () => {
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+    });
+    vi.stubGlobal("MediaSource", {
+      isTypeSupported: (mime: string) =>
+        mime === 'video/mp4; codecs="avc1.640028"' || mime === 'audio/mp4; codecs="mp4a.40.2"',
+    });
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
+      mime.startsWith("video/x-matroska") ? "probably" : "",
+    );
+
+    const capabilities = probeWebCapabilities();
+
+    expect(capabilities.containers).not.toContain("mkv");
+    expect(capabilities.codecsVideo).toContain("h264");
+    expect(capabilities.codecsAudio).toContain("aac");
   });
 });

@@ -39,6 +39,7 @@ const (
 	terminalMessageLowerVersionServesV3    = "A lower-resolution version serves this quality."
 	containerMP4V3                         = "mp4"
 	containerMKVV3                         = "mkv"
+	containerMatroskaV3                    = "matroska"
 	containerHLSV3                         = "hls"
 	mimeVideoMP4V3                         = "video/mp4"
 	mimeVideoMSVideoV3                     = "video/x-msvideo"
@@ -259,6 +260,11 @@ type PlannerResultV3 struct {
 	// serve the request. It exists so the handler can log the stickiness
 	// decision where DeliveryChange logging already lives.
 	StickyDeliveryKept bool
+	// RouteDowngrade names the server-side rule that kept a route the client's
+	// own claims would have allowed out of this plan (see
+	// RouteDowngradeUnverifiedContainerV3). Diagnostic only: it is logged next
+	// to decision_reason and is never serialized to a client.
+	RouteDowngrade string
 }
 
 // hlsToneMapCapabilities resolves the lazy pooled inventory when present and
@@ -305,11 +311,60 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			stickyInput.DeliveryAllowList = []string{stickyClass}
 			if sticky := planPlaybackOnceV3(stickyInput); sticky.Plan != nil {
 				sticky.StickyDeliveryKept = true
-				return sticky
+				result = sticky
 			}
 		}
 	}
-	return result
+	return preferPackagedOverUnverifiedContainerV3(input, result)
+}
+
+// preferPackagedOverUnverifiedContainerV3 re-plans a direct route as a packaged
+// one when the client's container evidence cannot be trusted (see
+// directPlayContainerTrustedV3).
+//
+// The re-plan is a preference, not a prohibition: when no packaged route exists
+// the direct plan is kept, because refusing it would turn a playable file into
+// a terminal. That is the case for a source only the original bytes can carry
+// (a client-managed Dolby Vision profile 7 file, for example). The direct plan
+// also carries the client's own claim, so a client that genuinely plays the
+// container loses nothing when a remux is not what its capabilities allow.
+func preferPackagedOverUnverifiedContainerV3(input PlannerInputV3, direct PlannerResultV3) PlannerResultV3 {
+	if direct.Plan == nil || direct.Plan.Delivery != DeliveryOriginalHTTPV3 {
+		return direct
+	}
+	if directPlayContainerTrustedV3(direct.Plan.Source.Container, input.Request) {
+		return direct
+	}
+	packagedInput := input
+	packagedInput.DeliveryAllowList = packagedDeliveryAllowListV3(input.DeliveryAllowList)
+	if len(packagedInput.DeliveryAllowList) == 0 {
+		// The session's policy admits only direct play, so no packaged route
+		// exists to prefer.
+		return direct
+	}
+	packaged := planPlaybackOnceV3(packagedInput)
+	if packaged.Plan == nil {
+		return direct
+	}
+	packaged.RouteDowngrade = RouteDowngradeUnverifiedContainerV3
+	return packaged
+}
+
+// packagedDeliveryAllowListV3 intersects the packaged delivery classes with the
+// session's policy allow list. An empty result means the policy admits no
+// packaged route.
+func packagedDeliveryAllowListV3(allow []string) []string {
+	packaged := []string{DeliveryClassProgressiveV3, DeliveryClassHLSV3}
+	if len(allow) == 0 {
+		return packaged
+	}
+	intersection := make([]string, 0, len(packaged))
+	for _, class := range packaged {
+		if containsFoldV3(allow, class) {
+			intersection = append(intersection, class)
+		}
+	}
+	return intersection
 }
 
 func planPlaybackOnceV3(input PlannerInputV3) (result PlannerResultV3) {
@@ -343,7 +398,19 @@ func planPlaybackOnceV3(input PlannerInputV3) (result PlannerResultV3) {
 	// a codec the probe could not name. Default selection skips such tracks,
 	// so this one was chosen explicitly or the file has no other. Retrying
 	// cannot help; choosing another track can.
-	if input.AudioTrackIndex >= 0 && input.AudioTrackIndex < len(file.AudioTracks) && !AudioTrackDecodable(file.AudioTracks, input.AudioTrackIndex, file.CodecAudio) {
+	//
+	// The refusal needs measurement behind it (AudioCodecVerdictSupported). A
+	// declared provider row names its tracks without codec ids, so this gate saw
+	// "an unnamed track was selected" and published a non-retryable codec
+	// verdict about a file nobody had probed. A replan pins the previous plan's
+	// audio index, which is what made the gate reachable at all: the first play
+	// passes index -1 (auto) and the replan passes the resolved index. When the
+	// row has no probe evidence the gate has nothing to say — the same posture
+	// the auto path takes — and a delivery that fails afterwards answers the
+	// retryable transport cause instead of a codec verdict.
+	if input.AudioTrackIndex >= 0 && input.AudioTrackIndex < len(file.AudioTracks) &&
+		AudioCodecVerdictSupported(file) &&
+		!AudioTrackDecodable(file.AudioTracks, input.AudioTrackIndex, file.CodecAudio) {
 		message := TerminalAudioTrackUndecodableMessageV3
 		if !AnyAudioTrackDecodable(file.AudioTracks, file.CodecAudio) {
 			message = TerminalNoDecodableAudioMessageV3
@@ -3730,6 +3797,56 @@ func audioRemuxFitsServerCapV3(input PlannerInputV3, file *models.MediaFile, aac
 	}
 	_, aacKbps := ResolveAACOutputV3(aacChannels, 0)
 	return totalBitrateKbps+aacKbps <= optionalValueV3(input.Request.BandwidthCapKbps)
+}
+
+// RouteDowngradeUnverifiedContainerV3 is the planner attribution for a direct
+// route declined because the client's container claim was a boolean statement
+// the server cannot verify. See directPlayContainerTrustedV3.
+const RouteDowngradeUnverifiedContainerV3 = "unverified_container"
+
+// opaqueDirectPlayContainerV3 reports whether container carries a stream
+// arrangement a boolean capability statement cannot validate. Matroska is the
+// case that matters: one mkv file can carry H.264/HEVC/AV1 video, any audio
+// codec, and arbitrary track layouts, so "the client lists mkv" says nothing
+// about whether its player can render the particular bytes. Container types
+// with a narrow, fixed stream shape (mp4/mov/m4v) and formats a platform
+// genuinely probes (webm in browsers) are not in this set.
+func opaqueDirectPlayContainerV3(container string) bool {
+	switch strings.ToLower(strings.TrimSpace(container)) {
+	case containerMKVV3, containerMatroskaV3:
+		return true
+	default:
+		return false
+	}
+}
+
+// directPlayContainerTrustedV3 reports whether the client's evidence is strong
+// enough to ship an opaque container as original bytes.
+//
+// A declared block is a boolean statement (web MediaSource.isTypeSupported)
+// that the server cannot verify and cannot update in a client it cannot ship:
+// an older first-party build or a third-party native client still lists mkv,
+// the direct stream is what reaches the device, and the player stalls. Those
+// clients get a packaged route (codec-copy MP4 remux, or a transcode whose
+// output the server produces and can therefore guarantee) instead.
+//
+// Probed evidence keeps direct play. exact (Android MediaCodecList) and
+// platform_attested (Apple's VideoToolbox plus pinned software stack) are
+// decoder attestations, not boolean container claims, so the ExoPlayer-class
+// clients that really do play Matroska are untouched. The known Apple
+// AVPlayer mis-advertisement is corrected earlier by
+// appleAVPlayerMKVContainerFallback, which strips mkv from the effective
+// container list for that client regardless of its evidence tier.
+func directPlayContainerTrustedV3(container string, request StartRequestV3) bool {
+	if !opaqueDirectPlayContainerV3(container) {
+		return true
+	}
+	switch request.Capabilities.VideoEvidence {
+	case EvidenceExactV3, EvidencePlatformAttestedV3:
+		return true
+	default:
+		return false
+	}
 }
 
 func trySelectDeliverablePlanV3(request StartRequestV3, deliveryClass string, plan PlanV3, attempted []string, routeExcluded *bool) bool {

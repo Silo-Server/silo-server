@@ -111,10 +111,12 @@ func serveLadderSegments(t *testing.T, handler *PlaybackHandler, sessionID, stre
 
 // TestReplanV3AbortedCopyRecipeKeepsTheHLSClassAndStepsToTranscode is the field
 // scenario: a TV aborts direct play, plays the HLS copy for a few seconds, then
-// aborts that too. Both aborts name player_failure, which cannot prove the
-// delivery class unusable — the client parsed the plan and fetched media. The
-// copy recipe is spent, so the ladder must step to the transcode behind the same
-// HLS class instead of answering a non-retryable adaptation_unavailable.
+// aborts that too. The direct abort retires original_http for the attempt — the
+// client reported it could not play the source bytes — while both aborts name
+// player_failure, which cannot prove the HLS delivery class unusable: the client
+// parsed the plan and fetched media. The copy recipe is spent, so the ladder must
+// step to the transcode behind the same HLS class instead of answering a
+// non-retryable adaptation_unavailable.
 func TestReplanV3AbortedCopyRecipeKeepsTheHLSClassAndStepsToTranscode(t *testing.T) {
 	file := ladderTVSourceFile(t)
 	handler := ladderTVHandler(t, file)
@@ -166,8 +168,12 @@ func TestReplanV3AbortedCopyRecipeKeepsTheHLSClassAndStepsToTranscode(t *testing
 		t.Fatalf("two aborts retired the whole HLS class: %+v", hls)
 	}
 	directCapability := record.NormalizedRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
-	if !directCapability.Enabled || directCapability.FailureReason == demoteDeliveryReasonV3 {
-		t.Fatalf("an abort retired direct play: %+v", directCapability)
+	if directCapability.Enabled || directCapability.FailureReason != demoteDeliveryReasonV3 {
+		// A player_failure on original_http now retires direct play for the
+		// attempt: the client reported it could not play the source bytes, so
+		// the ladder starts at the packaged routes instead of offering the same
+		// direct plan again. The HLS class above stays eligible.
+		t.Fatalf("an aborted direct plan was not retired: %+v", directCapability)
 	}
 	if excluded := record.RecoveryState.RecipeExclusions; !containsStringExactV3(excluded, copyPlan.PlanAttemptKey) {
 		t.Fatalf("abandoned copy recipe was not recorded durably: %v", excluded)
@@ -244,8 +250,11 @@ func TestReplanV3TrackChangeDoesNotReplayAnAbandonedCopyRecipe(t *testing.T) {
 
 // TestReplanV3AbortLadderTerminatesAfterEveryRecipeIsSpent walks the ladder to
 // its end: every recipe the source and output allow is served once, and the
-// terminal is the non-retryable exhaustion. It is the termination proof for the
-// recipe-exclusion rule — the exclusion must spend the ladder, never loop.
+// terminal is bounded. It is the termination proof for the recipe-exclusion
+// rule — the exclusion must spend the ladder, never loop. Because this chain
+// began by retiring a direct route the client reported failing (player_failure),
+// the exhaustion is the retryable routes_exhausted: the ladder is spent for
+// this attempt, and a fresh start negotiates again.
 func TestReplanV3AbortLadderTerminatesAfterEveryRecipeIsSpent(t *testing.T) {
 	file := ladderTVSourceFile(t)
 	handler := ladderTVHandler(t, file)
@@ -285,11 +294,17 @@ func TestReplanV3AbortLadderTerminatesAfterEveryRecipeIsSpent(t *testing.T) {
 		t.Fatalf("the ladder never terminated after %d recipes: %v", len(served), served)
 	}
 	switch terminal.Reason {
-	case "adaptation_exhausted", "adaptation_unavailable":
+	case "adaptation_exhausted", "adaptation_unavailable", playback.TerminalRoutesExhaustedV3:
 	default:
-		t.Fatalf("terminal = %#v, want adaptation_exhausted or adaptation_unavailable", terminal)
+		t.Fatalf("terminal = %#v, want a bounded exhaustion", terminal)
 	}
-	if terminal.Retryable {
+	// routes_exhausted is retryable by contract: the client failed direct play
+	// and every packaged recipe, and a fresh start re-negotiates.
+	if terminal.Reason == playback.TerminalRoutesExhaustedV3 {
+		if !terminal.Retryable {
+			t.Fatalf("terminal = %#v, want a retryable exhaustion", terminal)
+		}
+	} else if terminal.Retryable {
 		t.Fatalf("terminal = %#v, want a non-retryable exhaustion", terminal)
 	}
 	if len(served) < 3 {
@@ -322,5 +337,76 @@ func TestDecodeFailureStillDemotesTheDeliveryClass(t *testing.T) {
 	direct := record.NormalizedRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
 	if direct.Enabled || direct.FailureReason != demoteDeliveryReasonV3 {
 		t.Fatalf("a decoder failure did not retire direct play: %+v", direct)
+	}
+}
+
+// TestReplanV3StartupTimeoutRetiresDirectPlay is the documented gap: a
+// startup_timeout names nothing about the decoder, so under the old rule a
+// direct plan stayed eligible and the client was handed the same bytes that
+// never produced a frame. A direct route now retires on any recognized
+// playback failure, and the remaining chain is bounded and retryable.
+func TestReplanV3StartupTimeoutRetiresDirectPlay(t *testing.T) {
+	file := ladderTVSourceFile(t)
+	handler := ladderTVHandler(t, file)
+	start := ladderTVStartRequest()
+
+	started := postPlaybackStartV3(t, handler, marshalV3StartRequest(t, start))
+	if started.PlaybackPlan == nil || started.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 {
+		t.Fatalf("start plan = %#v, want direct play", started.PlaybackPlan)
+	}
+	defer handler.tm.CloseTranscodeSession(started.SessionID, "")
+	direct := started.PlaybackPlan
+
+	first := ladderReplanRequest(start, direct, "0401", "startup_timeout", nil, 1)
+	recovered := postPlaybackReplanV3(t, handler, started.SessionID, first)
+	if recovered.Terminal != nil || recovered.PlaybackPlan == nil {
+		t.Fatalf("timeout recovery = %#v", recovered)
+	}
+	if recovered.PlaybackPlan.Delivery == playback.DeliveryOriginalHTTPV3 {
+		t.Fatalf("a startup_timeout re-issued direct play: %s", recovered.PlaybackPlan.Delivery)
+	}
+	if recovered.PlaybackPlan.PlanAttemptKey == direct.PlanAttemptKey {
+		t.Fatal("a startup_timeout replayed the failed direct plan")
+	}
+
+	record, err := handler.PlanStoreV3.GetAttempt(t.Context(), started.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability := record.NormalizedRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
+	if capability.Enabled || capability.FailureReason != demoteDeliveryReasonV3 {
+		t.Fatalf("direct play was not retired for the attempt: %+v", capability)
+	}
+
+	// Keep failing on whatever the server builds. The chain must terminate
+	// instead of returning to the retired direct plan, and the terminal must be
+	// retryable because a fresh start negotiates again.
+	plan := recovered.PlaybackPlan
+	attempted := first.AttemptedPlanKeys
+	var terminal *playback.TerminalV3
+	for attempt := 2; attempt <= 8; attempt++ {
+		request := ladderReplanRequest(start, plan, fmt.Sprintf("04%02d", attempt), "startup_timeout", attempted, attempt)
+		attempted = request.AttemptedPlanKeys
+		response := postPlaybackReplanV3(t, handler, started.SessionID, request)
+		if response.Terminal != nil {
+			terminal = response.Terminal
+			break
+		}
+		if response.PlaybackPlan == nil {
+			t.Fatalf("attempt %d returned neither a plan nor a terminal", attempt)
+		}
+		if response.PlaybackPlan.Delivery == playback.DeliveryOriginalHTTPV3 {
+			t.Fatalf("attempt %d went back to the retired direct plan", attempt)
+		}
+		if response.PlaybackPlan.Delivery == playback.DeliveryRemuxHLSV3 {
+			serveLadderSegments(t, handler, started.SessionID, response.PlaybackPlan.Stream.URL)
+		}
+		plan = response.PlaybackPlan
+	}
+	if terminal == nil {
+		t.Fatal("a repeatedly failing client never reached a terminal")
+	}
+	if terminal.Reason != playback.TerminalRoutesExhaustedV3 || !terminal.Retryable {
+		t.Fatalf("terminal = %#v, want the retryable %s", terminal, playback.TerminalRoutesExhaustedV3)
 	}
 }

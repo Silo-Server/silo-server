@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
-import {
-  publishPlaybackInventory,
-  planInventoryDescribesRequestedFile,
-} from "../playbackInventoryMirror";
+import { inventoryPublicationTargets, publishPlaybackInventory } from "../playbackInventoryMirror";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { startPlaybackV2 } from "../start-v2";
 import { hasSequencedProgress, stopSequencedSession } from "../session-mutations";
@@ -45,7 +42,7 @@ import {
   resolvePlanAudioIdentity,
 } from "../utils/audioTrackMatch";
 import { buildPublishedSubtitleTracks, subtitleLanguageBase } from "../utils/subtitleInventory";
-import { isBitmapCodec } from "../utils/subtitleCodecs";
+import { isBitmapCodec, subtitleDeliveryClass } from "../utils/subtitleCodecs";
 import {
   isInventoryProvisional,
   isPlanSubtitleInventoryProvisional,
@@ -269,6 +266,17 @@ export const RECONNECT_BASE_DELAY_MS = 1_000;
 export const RECONNECT_MAX_DELAY_MS = 15_000;
 export const RECONNECT_MAX_ATTEMPTS = 12;
 const RECONNECT_STABLE_MS = 30_000;
+
+/**
+ * How long a replan may stay on the wire before the player names it as a
+ * failure. A replan that has not adopted a new plan yet armed no transport
+ * startup guard (the guard is armed per adopted plan), so a server that holds
+ * the request left a bare spinner with only Exit. This deadline sits inside the
+ * player's own per-attempt replan budget, so a slow but working replan still
+ * lands; the value is deliberately separate from the 60 s transport startup
+ * guard, which covers a plan that did arrive.
+ */
+export const REPLAN_DEADLINE_MS = 45_000;
 
 /** Delay before reconnect attempt `attempt` (0-based). */
 export function reconnectDelayMs(attempt: number): number {
@@ -915,6 +923,55 @@ function mapSubtitleInventory(
       ? buildPlayerStreamUrl(config.apiBaseUrl, item.font_bundle_url, token)
       : undefined,
   }));
+}
+
+/**
+ * Whether a rotated plan's subtitle selection still names the track the viewer
+ * was watching on the inventory the 409 was earned against.
+ *
+ * `index` is that plan's selected ordinal. A plan whose selection moved is the
+ * server's own carry, which is authoritative. A plan that kept the ordinal is
+ * only usable when the inventory entry at it is still the same track: after a
+ * release rotation the same ordinal commonly names another language, and a
+ * missing entry names nothing at all.
+ */
+function planSubtitleSelectionSurvivedRotation(
+  plan: PlanV3,
+  index: number,
+  watched: SubtitleInventoryItemV3,
+): boolean {
+  const selected = plan.selected_tracks.subtitle;
+  if (selected?.index != null && selected.index !== index) return true;
+  const candidate = plan.subtitle.inventory.find((item) => item.combined_index === index);
+  if (!candidate) return false;
+  return (
+    (candidate.language ?? "").trim().toLowerCase() ===
+      (watched.language ?? "").trim().toLowerCase() &&
+    subtitleDeliveryClass(candidate.codec) === subtitleDeliveryClass(watched.codec) &&
+    Boolean(candidate.forced) === Boolean(watched.forced) &&
+    Boolean(candidate.hearing_impaired) === Boolean(watched.hearing_impaired)
+  );
+}
+
+/**
+ * The track to re-select on a rotated inventory: the same track by identity
+ * (language, flags and codec) first, then any track the release offers in the
+ * same delivery class. Null means the class itself is gone, which is the one
+ * case the player reports as a failure instead of re-selecting.
+ */
+function subtitleReplacementAfterRotation(
+  inventory: SubtitleInventoryItemV3[],
+  watched: SubtitleInventoryItemV3,
+): SubtitleInventoryItemV3 | null {
+  const deliveryClass = subtitleDeliveryClass(watched.codec);
+  // The class is the URL family the server promised to produce. The identity
+  // matcher breaks ties inside a class but does not require one, so an English
+  // SRT would otherwise stand in for an English PGS and the server would refuse
+  // the muxer change.
+  if (deliveryClass === null) return null;
+  const sameClass = inventory.filter((item) => subtitleDeliveryClass(item.codec) === deliveryClass);
+  if (sameClass.length === 0) return null;
+  return matchSubtitleTrackAcrossVersions(sameClass, watched) ?? sameClass[0] ?? null;
 }
 
 /**
@@ -1590,6 +1647,29 @@ export function usePlaybackSession(
 
   const sessionIdRef = useRef<string | null>(null);
   const planRef = useRef<PlanV3 | null>(null);
+  // The version list moves on every catalog projection of the title: the
+  // inventory poll's merged rows, a restamp, the version-liveness check's
+  // verdicts. Every callback below reads it through this ref so a new list
+  // never changes their identity — the player's transport effect depends on
+  // `onPlanFailure`, which is built from them, and a versions-only change must
+  // not tear the media element down mid-play.
+  const versionsRef = useRef(versions);
+  versionsRef.current = versions;
+  // The same goes for the other two file-selection inputs. A caller that
+  // rebuilds them per render (WatchPage falls back to fresh arrays) would
+  // otherwise churn `selectFileId`, and with it every start and replan path.
+  const playbackVariantsRef = useRef(playbackVariants);
+  playbackVariantsRef.current = playbackVariants;
+  const resumeHintsRef = useRef(resumeHints);
+  resumeHintsRef.current = resumeHints;
+  // The pre-play subtitle picks are read the same way. The watch route builds
+  // them fresh on every host render, and as direct `loadSession` dependencies
+  // they ran through `replan` -> `onPlanFailure` into the player's transport
+  // effect, reloading the media element while it was already playing.
+  const initialSubtitleTrackIndexRef = useRef(initialSubtitleTrackIndexByFileId);
+  initialSubtitleTrackIndexRef.current = initialSubtitleTrackIndexByFileId;
+  const initialBitmapSubtitleTrackIndexRef = useRef(initialBitmapSubtitleTrackIndexByFileId);
+  initialBitmapSubtitleTrackIndexRef.current = initialBitmapSubtitleTrackIndexByFileId;
   const planRevisionRef = useRef(0);
   const transportRevisionRef = useRef(0);
   const replayRevisionRef = useRef(0);
@@ -1763,6 +1843,10 @@ export function usePlaybackSession(
   const attemptedPlanKeysRef = useRef<string[]>([]);
   const attemptCountRef = useRef(1);
   const replanInFlightRef = useRef(false);
+  // The deadline armed for the replan on the wire, cleared when it answers or
+  // fails. It is what turns a replan that never returns into the same retryable
+  // failure overlay a failed start already offers.
+  const replanDeadlineRef = useRef<number | null>(null);
   // The attempt whose first frame is still to be reported. `intentAt` is the
   // `performance.now()` of the viewer's request that started it, or null when
   // nothing timed it; the event is still sent, just without a duration.
@@ -2398,6 +2482,9 @@ export function usePlaybackSession(
       // resolves it and the choice is not ours to second-guess.
       if (preferredFileId) return preferredFileId;
 
+      const versions = versionsRef.current;
+      const playbackVariants = playbackVariantsRef.current;
+      const resumeHints = resumeHintsRef.current;
       const mode = normalizeSubtitleMode(subtitleMode);
       const lastFileId = resumeHints?.lastFileId;
       const lastVersion =
@@ -2453,7 +2540,7 @@ export function usePlaybackSession(
       if (subtitleCandidate) return subtitleCandidate.file_id;
       return variantFileId ?? versions[0]?.file_id ?? null;
     },
-    [playbackVariants, resumeHints, subtitleMode, versions],
+    [subtitleMode],
   );
 
   const loadSession = useCallback(
@@ -2637,7 +2724,7 @@ export function usePlaybackSession(
         const targetSubtitleIndex =
           carriedSubtitleTrackIndex !== undefined
             ? (carriedSubtitleTrackIndex ?? undefined)
-            : initialSubtitleTrackIndexByFileId?.[selectedFileId];
+            : initialSubtitleTrackIndexRef.current?.[selectedFileId];
 
         const startAudioTrackIndex = tracks ? tracks.audioIndex : explicitAudioTrackIndex;
         const decision = await requestStart(
@@ -2666,7 +2753,9 @@ export function usePlaybackSession(
 
         let decisionToAdopt = decision;
         let initialSubtitleFailure: PlaybackSessionErrorState | null = null;
-        const targetVersion = versions.find((v) => v.file_id === selectedFileId);
+        // The list as it stands when the answer lands, not when the start was
+        // requested: a projection that arrived meanwhile names the rows better.
+        const targetVersion = versionsRef.current.find((v) => v.file_id === selectedFileId);
         // Shared ordinal derivation; `targetSubtitleIndex` is the server's
         // published index, so look it up on the same mapping. See
         // subtitleInventory.ts.
@@ -2684,12 +2773,12 @@ export function usePlaybackSession(
           ? tracks.subtitleBurnIn
             ? tracks.subtitleIndex
             : undefined
-          : initialBitmapSubtitleTrackIndexByFileId?.[selectedFileId];
+          : initialBitmapSubtitleTrackIndexRef.current?.[selectedFileId];
         const hasBitmapSubtitle =
           requestedIsBitmap ||
           bitmapSubtitleTrackIndex !== undefined ||
           (carriedSubtitleTrackIndex === undefined &&
-            initialBitmapSubtitleTrackIndexByFileId?.[selectedFileId] !== undefined);
+            initialBitmapSubtitleTrackIndexRef.current?.[selectedFileId] !== undefined);
         if (!decision.playback_plan && hasBitmapSubtitle && isBitmapSubtitleRefusal(decision)) {
           initialSubtitleFailure = describeDecisionWithoutPlan(decision);
           if (decision.session_id) {
@@ -2805,13 +2894,10 @@ export function usePlaybackSession(
       endAdoption,
       endReconnect,
       explicitAudioTrackIndex,
-      initialBitmapSubtitleTrackIndexByFileId,
-      initialSubtitleTrackIndexByFileId,
       requestStart,
       selectFileId,
       stopSession,
       transitionSourceIdentity,
-      versions,
     ],
   );
   const loadSessionRef = useRef(loadSession);
@@ -2896,6 +2982,10 @@ export function usePlaybackSession(
       // instead of adopting it into an abandoned player.
       loadSequenceRef.current += 1;
       pendingSeekRef.current = null;
+      if (replanDeadlineRef.current !== null) {
+        window.clearTimeout(replanDeadlineRef.current);
+        replanDeadlineRef.current = null;
+      }
       // A held pick dies with the player: nothing will fold its plan.
       pendingTrackPicksRef.current = [];
       // A viewer who leaves while the player reconnects stops the retries.
@@ -3092,6 +3182,30 @@ export function usePlaybackSession(
         errorReason: null,
         errorRetryable: false,
       }));
+      // No plan has been adopted yet, so no transport startup guard is armed
+      // (that guard is armed per adopted plan). A replan that never answers
+      // would otherwise leave the player on a bare spinner with no failure and
+      // no retry; name it once the deadline passes. The request stays on the
+      // wire: a late decision still adopts and replaces the error.
+      if (replanDeadlineRef.current !== null) window.clearTimeout(replanDeadlineRef.current);
+      replanDeadlineRef.current = window.setTimeout(() => {
+        replanDeadlineRef.current = null;
+        if (loadSequence !== loadSequenceRef.current) return;
+        if (!replanInFlightRef.current) return;
+        setState((current) =>
+          current.replanning || current.replanningQuality
+            ? {
+                ...current,
+                replanning: false,
+                replanningQuality: false,
+                errorTitle: "Playback update timed out",
+                error: "The server didn't answer the playback update in time. Please try again.",
+                errorReason: "replan_timeout",
+                errorRetryable: true,
+              }
+            : current,
+        );
+      }, REPLAN_DEADLINE_MS);
 
       try {
         const decision = await replanV2(config, sessionId, body);
@@ -3113,10 +3227,15 @@ export function usePlaybackSession(
         // Keep a refused-start subtitle pinned off across unrelated replans.
         // A successful explicit subtitle choice is the one action that clears
         // the marker and lets the new server-selected track take ownership.
+        //
+        // A reconnect replaces a transport that is already dead, so it must
+        // reload even when the fresh plan reuses the same session-scoped URL,
+        // route and track selection: the shape heuristic cannot see that the
+        // generation behind that URL stopped answering.
         const adopted = adoptDecision(
           decision,
           options.operation === "track_change" && options.subtitle !== undefined ? null : undefined,
-          isFailureRecovery,
+          isFailureRecovery || reconnect,
         );
         if (
           subtitlePickKey !== null &&
@@ -3325,6 +3444,10 @@ export function usePlaybackSession(
         }));
         return false;
       } finally {
+        if (replanDeadlineRef.current !== null) {
+          window.clearTimeout(replanDeadlineRef.current);
+          replanDeadlineRef.current = null;
+        }
         replanInFlightRef.current = false;
         setState((current) =>
           current.replanning || current.replanningQuality
@@ -4105,16 +4228,52 @@ export function usePlaybackSession(
   }, [reanchorSeek]);
 
   /**
-   * Re-reads the subtitle inventory.
+   * Re-reads the subtitle inventory, and re-selects when the rotation moved the
+   * track under the selection.
    *
    * There is no "refresh" operation in v3, and there does not need to be: a
    * `track_change` that changes nothing returns a fresh plan — inventory
-   * included — without excluding the route already playing.
+   * included — without excluding the route already playing. That fresh plan is
+   * what a `subtitle_source_changed` 409 asks for.
+   *
+   * The replan alone is not enough. A rotated release answers the plan-time
+   * ordinal with another 409 because that ordinal named a layout the release no
+   * longer has, and the player then re-selects the same ordinal against the new
+   * inventory. The ordinal is only meaningful inside one inventory, so when the
+   * track the viewer was watching is not what the new plan's ordinal now names,
+   * this re-selects the equivalent track from the new inventory: the same
+   * language and class first, then any track of the same class. Only when the
+   * class itself is gone does it stop, leaving the player's own failure on
+   * screen instead of replaying an ordinal that can never resolve.
    */
   const refreshSubtitles = useCallback(
     async (currentPosition: number): Promise<boolean> => {
-      if (!planRef.current) return false;
-      return replan({ operation: "track_change", positionSeconds: currentPosition });
+      const outgoing = planRef.current;
+      if (!outgoing) return false;
+      const watchedIndex = outgoing.selected_tracks.subtitle?.index ?? null;
+      const watched =
+        watchedIndex !== null
+          ? (outgoing.subtitle.inventory.find((item) => item.combined_index === watchedIndex) ??
+            null)
+          : null;
+
+      const refreshed = await replan({
+        operation: "track_change",
+        positionSeconds: currentPosition,
+      });
+      if (!refreshed || !watched || watchedIndex === null) return refreshed;
+
+      const next = planRef.current;
+      if (!next) return refreshed;
+      if (planSubtitleSelectionSurvivedRotation(next, watchedIndex, watched)) return refreshed;
+
+      const replacement = subtitleReplacementAfterRotation(next.subtitle.inventory, watched);
+      if (!replacement) return false;
+      return replan({
+        operation: "track_change",
+        positionSeconds: currentPosition,
+        subtitle: { id: replacement.track_id ?? "", index: replacement.combined_index },
+      });
     },
     [replan],
   );
@@ -5014,7 +5173,7 @@ export function usePlaybackSession(
             carriedSubtitleTrackIndex: resolveCarriedSubtitleIndexAcrossVersions(
               planRef.current,
               newFileId,
-              versions,
+              versionsRef.current,
             ),
             // A version switch is always an explicit user action: the server
             // must not silently substitute yet another version.
@@ -5061,7 +5220,7 @@ export function usePlaybackSession(
         }
       })();
     },
-    [allowAlternateVersions, loadSession, setAutoFallback, versions],
+    [allowAlternateVersions, loadSession, setAutoFallback],
   );
 
   /**
@@ -5282,17 +5441,24 @@ export function usePlaybackSession(
   // substituted (or lower-version) release's track table says nothing about the
   // version the viewer selected.
   useEffect(() => {
-    const plan = planRef.current;
-    const requestedFileId = plan?.requested_media_file_id ?? null;
-    publishPlaybackInventory(state.mediaFileId, state.planAudioTracks, state.subtitleUrls);
-    if (
-      requestedFileId &&
-      requestedFileId !== state.mediaFileId &&
-      planInventoryDescribesRequestedFile(plan)
-    ) {
-      publishPlaybackInventory(requestedFileId, state.planAudioTracks, state.subtitleUrls);
+    // Declared rows are the plan's release listing, not probe evidence. They
+    // are published as such so the item page can show them immediately and
+    // still let verified rows win without ever regressing back.
+    const provenance = {
+      audioVerified: !state.audioInventoryProvisional,
+      subtitleVerified: !state.subtitleInventoryProvisional,
+    };
+    for (const fileId of inventoryPublicationTargets(planRef.current, state.mediaFileId)) {
+      publishPlaybackInventory(fileId, state.planAudioTracks, state.subtitleUrls, provenance);
     }
-  }, [state.mediaFileId, state.planAudioTracks, state.planRevision, state.subtitleUrls]);
+  }, [
+    state.audioInventoryProvisional,
+    state.mediaFileId,
+    state.planAudioTracks,
+    state.planRevision,
+    state.subtitleInventoryProvisional,
+    state.subtitleUrls,
+  ]);
 
   return {
     ...state,

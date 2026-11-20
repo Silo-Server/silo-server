@@ -304,6 +304,23 @@ function testMediaType(mime: string): boolean {
   }
 }
 
+/**
+ * True when the browser's MSE accepts any of the listed types, false when it
+ * rejects them all. `undefined` means there is no MSE to ask: a browser without
+ * it can only offer progressive playback, so the media-element answer is all
+ * we have.
+ */
+function mediaSourceAccepts(mimeTypes: readonly string[]): boolean | undefined {
+  if (typeof MediaSource === "undefined") return undefined;
+  return mimeTypes.some((mime) => {
+    try {
+      return MediaSource.isTypeSupported(mime);
+    } catch {
+      return false;
+    }
+  });
+}
+
 function testMediaElementType(mime: string): boolean {
   if (typeof document === "undefined") return false;
   try {
@@ -342,7 +359,17 @@ export function probeWebCapabilities(): WebCapabilityProbe {
     // (Mozilla bug 2000420). Advertising that container turns direct play into
     // a full-file download. Keep the codec claims so the planner can select a
     // codec-copy remux instead.
-    if (name === "mkv" && isFirefox) continue;
+    //
+    // The same rule covers every other browser whose media element merely
+    // recognizes Matroska while MSE rejects it: `canPlayType` answers "maybe"
+    // or even "probably" for a container the pipeline cannot demux
+    // progressively, so a direct-play mkv plan mounts and never produces a
+    // frame. MSE is the strict probe; its rejection disqualifies the container
+    // even when `canPlayType` is positive.
+    if (name === "mkv") {
+      if (isFirefox) continue;
+      if (mediaSourceAccepts(mimeTypes) === false) continue;
+    }
     if (mimeTypes.some(testMediaType)) {
       containers.push(name);
     }

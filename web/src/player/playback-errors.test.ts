@@ -125,6 +125,23 @@ describe("describePlanTerminal", () => {
     });
   });
 
+  it("names a source mismatch and keeps the server's version-list hint", () => {
+    expect(
+      describePlanTerminal({
+        reason: "source_mismatch",
+        message:
+          "The provider served a different release's bytes for this version. Refresh the version list and choose again.",
+        retryable: true,
+      }),
+    ).toEqual({
+      title: "This version's source is wrong",
+      message:
+        "The provider served a different release's bytes for this version. Refresh the version list and choose again.",
+      reason: "source_mismatch",
+      retryable: true,
+    });
+  });
+
   it("falls back to the server's own message for reasons it does not name", () => {
     expect(
       describePlanTerminal({
@@ -160,6 +177,7 @@ describe("describePlaybackTransportError", () => {
       title: "Update required",
       message:
         "This server speaks a newer playback protocol than this app. Reload the page to pick up the current version.",
+      retryable: false,
     });
   });
 
@@ -175,6 +193,7 @@ describe("describePlaybackTransportError", () => {
     ).toEqual({
       title: "Playback session expired",
       message: "This playback session is no longer active. Start it again to keep watching.",
+      retryable: false,
     });
   });
 
@@ -182,11 +201,13 @@ describe("describePlaybackTransportError", () => {
     expect(describePlaybackTransportError(new PlayerFetchError(401, "Unauthorized"))).toEqual({
       title: "Authentication required",
       message: "Your sign-in session has expired. Sign in again to continue playback.",
+      retryable: false,
     });
 
     expect(describePlaybackTransportError(new PlayerFetchError(403, "Forbidden"))).toEqual({
       title: "Playback unavailable",
       message: "You do not have permission to play this item.",
+      retryable: false,
     });
   });
 
@@ -199,6 +220,43 @@ describe("describePlaybackTransportError", () => {
     expect(describePlaybackTransportError(error, "update")?.message).toBe(
       "Vio could not update playback right now. Please try again.",
     );
+  });
+
+  it("marks a server 5xx retryable, including the store fault it now answers with 503", () => {
+    expect(
+      describePlaybackTransportError(new PlayerFetchError(502, "Bad Gateway"))?.retryable,
+    ).toBe(true);
+    expect(
+      describePlaybackTransportError(
+        new PlayerFetchError(503, "Dependency unavailable", "dependency_unavailable"),
+      )?.retryable,
+    ).toBe(true);
+  });
+
+  it("marks a request that never completed retryable", () => {
+    // The start lane aborts on its own deadline with a TimeoutError, and a
+    // fetch that never reached the server rejects with a TypeError.
+    expect(
+      describePlaybackTransportError(new DOMException("Playback start timed out", "TimeoutError")),
+    ).toMatchObject({ title: "Connection problem", retryable: true });
+    expect(describePlaybackTransportError(new TypeError("Failed to fetch"))).toMatchObject({
+      title: "Connection problem",
+      retryable: true,
+    });
+    // A deliberate abort is not a failure worth retrying; it has no copy.
+    expect(
+      describePlaybackTransportError(new DOMException("The operation was aborted", "AbortError")),
+    ).toBeNull();
+  });
+
+  it("keeps the definitive answers non-retryable", () => {
+    const retryable = (error: PlayerFetchError) => describePlaybackTransportError(error)?.retryable;
+    // A missing file or version, an auth refusal, and a protocol this build
+    // cannot speak are all verdicts: asking again cannot change them.
+    expect(retryable(new PlayerFetchError(404, "Not Found"))).toBe(false);
+    expect(retryable(new PlayerFetchError(401, "Unauthorized"))).toBe(false);
+    expect(retryable(new PlayerFetchError(403, "Forbidden"))).toBe(false);
+    expect(retryable(new PlayerFetchError(426, "Upgrade required"))).toBe(false);
   });
 
   it("ignores 4xx statuses it has nothing specific to say about", () => {

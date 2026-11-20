@@ -5,6 +5,7 @@
 
 import { t, type MessageKey } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
+import { displayLanguageName } from "@/lib/languageNames";
 import { formatDecimal } from "@/lib/numberFormat";
 
 export const CODEC_LABELS: Record<string, string> = {
@@ -118,6 +119,83 @@ export function audioTrackHasAtmos(track: AudioTrackFormat): boolean {
 /** Audio-family label for one track ("DD+ Atmos", "TrueHD", …), or "" without a codec. */
 export function audioTrackLabel(track: AudioTrackFormat): string {
   return track.codec ? mapAudioLabel(track.codec, audioTrackAtmosEvidence(track)) : "";
+}
+
+/** The audio-track fields an identity label reads. */
+export interface AudioTrackIdentitySource extends AudioTrackFormat {
+  language?: string;
+  languages?: string[];
+  channels?: number;
+}
+
+export interface AudioTrackIdentity {
+  /** Primary row label: the declared language, else codec + layout, else the row's position. */
+  title: string;
+  /**
+   * True when the track declares no language. Surfaces say the language is not
+   * declared in a hint instead of printing the localized "unknown" word as the
+   * row's identity, which reads as a fact about a track nobody described.
+   */
+  languageUndeclared: boolean;
+  /** True when `title` is the codec + channel layout rather than a language. */
+  titleFromFormat: boolean;
+}
+
+/** Language values that name no language: the undetermined code and its spellings. */
+const UNDECLARED_LANGUAGE_CODES = new Set(["und", "unknown", "unk"]);
+
+/**
+ * Names for the languages a track declares, joined with "/". A tag CLDR knows
+ * becomes its name in the interface language; a release marker a provider put
+ * in the field ("MULTI") is shown as written.
+ */
+function declaredLanguageLabel(tags: ReadonlyArray<string | undefined>): string {
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  for (const raw of tags) {
+    const tag = raw?.trim();
+    if (!tag || UNDECLARED_LANGUAGE_CODES.has(tag.toLowerCase())) continue;
+    const label = displayLanguageName(tag) ?? tag;
+    const identity = label.toLowerCase();
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    labels.push(label);
+  }
+  return labels.join("/");
+}
+
+/**
+ * The primary label for one audio row, shared by the item page and the player
+ * menus: the declared language when there is one, else the codec and channel
+ * layout ("EAC3 5.1"), else the row's 1-based `position` ("Track 2"). Nothing
+ * here guesses a language from a release name; the next render re-derives the
+ * label, so a probed language replaces the gap on its own.
+ */
+export function audioTrackIdentity(
+  track: AudioTrackIdentitySource,
+  position: number,
+): AudioTrackIdentity {
+  const language = declaredLanguageLabel(
+    track.languages?.length ? track.languages : [track.language],
+  );
+  if (language) return { title: language, languageUndeclared: false, titleFromFormat: false };
+
+  const format = [audioTrackLabel(track), formatChannels(track.channels)].filter(Boolean).join(" ");
+  if (format) return { title: format, languageUndeclared: true, titleFromFormat: true };
+
+  return {
+    title: t("web.player.audioMenu.trackFallback", { number: position }),
+    languageUndeclared: true,
+    titleFromFormat: false,
+  };
+}
+
+/**
+ * The honest gap for a row whose language is not declared: "Language: Unknown"
+ * in the interface language, read by assistive tech and shown as a tooltip.
+ */
+export function undeclaredLanguageHint(): string {
+  return `${t("web.detail.mediaInfo.row.language")}: ${t("web.detail.audio.unknown")}`;
 }
 
 interface FormatFileSizeOptions {

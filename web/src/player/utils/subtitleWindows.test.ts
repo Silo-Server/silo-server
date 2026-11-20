@@ -4,7 +4,10 @@ import {
   createSubtitleWindowFetcher,
   nextSubtitleRetryDelay,
   planSubtitleWindow,
+  SUBTITLE_COVERAGE_HEADER,
   SUBTITLE_FETCH_RETRY_MAX_BACKOFF_MS,
+  subtitleCoverageEnd,
+  subtitleWindowStartForPlayhead,
   subtitleWindowUrl,
   type SubtitleWindowFetcherOptions,
   type SubtitleWindowState,
@@ -71,11 +74,51 @@ describe("subtitleWindowUrl", () => {
   });
 });
 
+describe("subtitleWindowStartForPlayhead", () => {
+  it("maps every playhead inside one grid cell to the same start", () => {
+    // The playhead reported by the anchor and the one the element's clock
+    // settles on can differ; inside one cell they must still name one window,
+    // or the second request re-demuxes a range the first already covered.
+    expect(subtitleWindowStartForPlayhead(812)).toBe(810);
+    expect(subtitleWindowStartForPlayhead(820.4)).toBe(810);
+    expect(subtitleWindowStartForPlayhead(838)).toBe(810);
+    expect(subtitleWindowStartForPlayhead(841.9)).toBe(810);
+  });
+
+  it("moves to the next cell only when the playhead crosses its boundary", () => {
+    expect(subtitleWindowStartForPlayhead(842)).toBe(840);
+    expect(subtitleWindowStartForPlayhead(872)).toBe(870);
+  });
+
+  it("keeps the seek backoff and never returns a negative start", () => {
+    // 810 sits exactly on a grid boundary; the 2 s backoff keeps the cue on
+    // screen inside the window by starting the previous cell.
+    expect(subtitleWindowStartForPlayhead(810)).toBe(780);
+    expect(subtitleWindowStartForPlayhead(2)).toBe(0);
+    expect(subtitleWindowStartForPlayhead(0)).toBe(0);
+    expect(subtitleWindowStartForPlayhead(-5)).toBe(0);
+  });
+});
+
 describe("nextSubtitleRetryDelay", () => {
   it("doubles up to the cap", () => {
     expect(nextSubtitleRetryDelay(0)).toBe(5_000);
     expect(nextSubtitleRetryDelay(5_000)).toBe(10_000);
     expect(nextSubtitleRetryDelay(40_000)).toBe(SUBTITLE_FETCH_RETRY_MAX_BACKOFF_MS);
+  });
+});
+
+describe("subtitleCoverageEnd", () => {
+  it("reads the produced end of a bounded response", () => {
+    expect(subtitleCoverageEnd("0.000-126.543")).toBe(126.543);
+    expect(subtitleCoverageEnd("120.000-240.000")).toBe(240);
+  });
+
+  it("treats a missing, open-ended, or unreadable header as no range", () => {
+    expect(subtitleCoverageEnd(null)).toBeNull();
+    expect(subtitleCoverageEnd("")).toBeNull();
+    expect(subtitleCoverageEnd("600.000-*")).toBeNull();
+    expect(subtitleCoverageEnd("garbage")).toBeNull();
   });
 });
 
@@ -139,7 +182,7 @@ describe("createSubtitleWindowFetcher", () => {
       onWindowStart: (fresh) => events.push(fresh ? "start fresh" : "start extend"),
       onChunk: (chunk) => events.push(`chunk ${new TextDecoder().decode(chunk)}`),
       onWindowCommitted: () => events.push("committed"),
-      onWindowFailed: () => events.push("failed"),
+      onWindowFailed: (retryable) => events.push("failed", retryable ? "retryable" : "hard"),
       ...overrides,
     });
     return { fetcher, events };
@@ -182,6 +225,106 @@ describe("createSubtitleWindowFetcher", () => {
     }
   });
 
+  it("tells a retryable refusal apart from a failure the same request cannot survive", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      // A page refusal the server is recovering from: the caller keeps the
+      // track selected and lets the backoff retry it.
+      let status = 503;
+      const fetchMock = vi.fn(() => respond([], false, { status }));
+      vi.stubGlobal("fetch", fetchMock);
+      const { fetcher, events } = makeFetcher(() => 100);
+      fetcher.maybeFetch();
+      await vi.waitFor(() => expect(events).toContain("failed"));
+      expect(events).toContain("retryable");
+      expect(events).not.toContain("hard");
+      fetcher.dispose();
+
+      // A track that does not exist for this file: only a rebuild can fix it.
+      status = 404;
+      const missing = makeFetcher(() => 100);
+      missing.fetcher.maybeFetch();
+      await vi.waitFor(() => expect(missing.events).toContain("failed"));
+      expect(missing.events).toContain("hard");
+      expect(missing.events).not.toContain("retryable");
+      missing.fetcher.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports one stalled transition while a retryable ladder keeps retrying", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      // A server that keeps answering the budget refusal: the first refusal is
+      // the documented "your retry will be served from the recovery
+      // extraction" answer, so a second one means that promise did not hold.
+      let status = 503;
+      const fetchMock = vi.fn(() =>
+        respond([], false, { status, headers: { "Retry-After": "2" } }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const stalled = vi.fn();
+      const { fetcher, events } = makeFetcher(() => 100, { onStalled: stalled });
+      fetcher.maybeFetch();
+      await vi.waitFor(() => expect(events).toContain("failed"));
+      expect(stalled).not.toHaveBeenCalled();
+
+      // Second refusal: the overlay must stop claiming a load is in progress.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      await vi.waitFor(() => expect(stalled).toHaveBeenCalledTimes(1));
+
+      // The ladder keeps retrying in the background: only the terminal state is
+      // the caller's to show, and the stall notice does not repeat per attempt.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(2);
+      expect(stalled).toHaveBeenCalledTimes(1);
+
+      // A window that finally streams in clears the episode.
+      status = 200;
+      fetchMock.mockImplementation(() => respond(["c"]));
+      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.waitFor(() => expect(events).toContain("committed"));
+      expect(fetcher.coverage().hasFetched).toBe(true);
+      fetcher.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still ends the track when the retryable ladder is spent", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const fetchMock = vi.fn(() => respond([], false, { status: 503 }));
+      vi.stubGlobal("fetch", fetchMock);
+      const stalled = vi.fn();
+      const terminal = vi.fn();
+      // A two-attempt budget stands in for the production twelve: the terminal
+      // answer must still arrive, and it must arrive once.
+      const { fetcher, events } = makeFetcher(() => 100, {
+        onStalled: stalled,
+        onTerminal: terminal,
+        maxRetryableFailures: 2,
+      });
+      fetcher.maybeFetch();
+      await vi.waitFor(() => expect(events).toContain("failed"));
+      expect(terminal).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.waitFor(() => expect(terminal).toHaveBeenCalledTimes(1));
+      expect(stalled).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(terminal).toHaveBeenCalledTimes(1);
+      fetcher.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("signals a source change once and never retries it", async () => {
     vi.useFakeTimers();
     try {
@@ -204,6 +347,40 @@ describe("createSubtitleWindowFetcher", () => {
       await vi.advanceTimersByTimeAsync(120_000);
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(onSourceChanged).toHaveBeenCalledTimes(1);
+      fetcher.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The server's final page answer: the track's artifact cannot reach this page.
+  // It must end the fetch loop at once — no backoff, no retry — so the overlay
+  // reports it once instead of spinning until the retry budget runs out.
+  it("ends the track when the server gives up on a page", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn(() =>
+        respond([], false, {
+          status: 503,
+          json: {
+            type: "https://siloserver.org/docs/api/v2/problems/subtitle_page_unavailable",
+            status: 503,
+          },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const onTerminal = vi.fn();
+      const { fetcher, events } = makeFetcher(() => 100, { onTerminal });
+      fetcher.maybeFetch();
+      await vi.waitFor(() => expect(onTerminal).toHaveBeenCalledTimes(1));
+      // The listener is told not to retry, and nothing is scheduled.
+      expect(events).toContain("hard");
+      expect(events).not.toContain("retryable");
+      fetcher.maybeFetch();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(onTerminal).toHaveBeenCalledTimes(1);
       fetcher.dispose();
     } finally {
       vi.useRealTimers();
@@ -310,6 +487,46 @@ describe("createSubtitleWindowFetcher", () => {
     fetcher.maybeFetch();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect(fetchMock.mock.calls[2]?.[0]).toBe("/sub?position=960&duration=120");
+    fetcher.dispose();
+  });
+
+  it("commits only the range a partly produced page says it covered and asks for that page again", async () => {
+    let playhead = 5;
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
+      respond(["a"], true, { headers: { [SUBTITLE_COVERAGE_HEADER]: "0.000-18.000" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { fetcher } = makeFetcher(() => playhead, {
+      seekBackoffSeconds: 0,
+      windowSeconds: BITMAP_SUBTITLE_PAGE_SECONDS,
+      pageSpanSeconds: BITMAP_SUBTITLE_PAGE_SECONDS,
+      prefetchLeadSeconds: 30,
+    });
+    fetcher.maybeFetch();
+    await vi.waitFor(() => expect(fetcher.coverage().windowEnd).toBe(18));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/sub?position=0&duration=120");
+
+    // The page the server has only partly parsed is asked for again, not
+    // skipped: committing the requested end would leave 18-120 s marked as
+    // covered while nothing there ever arrived.
+    playhead = 10;
+    fetcher.maybeFetch();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/sub?position=0&duration=120");
+    fetcher.dispose();
+  });
+
+  it("keeps a page whole when the response carries no coverage header", async () => {
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => respond([]));
+    vi.stubGlobal("fetch", fetchMock);
+    const { fetcher } = makeFetcher(() => 5, {
+      seekBackoffSeconds: 0,
+      windowSeconds: BITMAP_SUBTITLE_PAGE_SECONDS,
+      pageSpanSeconds: BITMAP_SUBTITLE_PAGE_SECONDS,
+      prefetchLeadSeconds: 30,
+    });
+    fetcher.maybeFetch();
+    await vi.waitFor(() => expect(fetcher.coverage().windowEnd).toBe(120));
     fetcher.dispose();
   });
 

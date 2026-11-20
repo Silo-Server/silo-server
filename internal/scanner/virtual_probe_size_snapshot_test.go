@@ -93,11 +93,12 @@ func TestVirtualServedSizeSnapshotDrivesLaterEvidenceComparisons(t *testing.T) {
 		t.Fatalf("later probe verdict = %v, want admitted against the observed baseline", verdict)
 	}
 	// A size the declared baseline would have accepted is a different posting
-	// against the observed baseline; with no duration proof it is a rejection,
-	// not merely unverified evidence.
+	// against the observed baseline. Size alone is not an identity verdict, so
+	// the bytes stay usable but unverified; only a duration contradiction
+	// rejects them.
 	declaredBaselineOnly := snapshotDeclaredBytes
-	if verdict := ClassifyVirtualServedEvidenceForPin(pin, snapshotDeclaredBytes, declaredBaselineOnly, 0, 0, token); verdict != VirtualServedEvidenceMismatch {
-		t.Fatalf("different posting verdict = %v, want mismatch (observed baseline disagrees)", verdict)
+	if verdict := ClassifyVirtualServedEvidenceForPin(pin, snapshotDeclaredBytes, declaredBaselineOnly, 0, 0, token); verdict != VirtualServedEvidenceUnverified {
+		t.Fatalf("different posting verdict = %v, want unverified (size alone is not identity)", verdict)
 	}
 }
 
@@ -283,9 +284,10 @@ func TestVirtualServedSizeSnapshotRefusesImplausibleGap(t *testing.T) {
 		t.Fatal("repeated implausible serves recorded a snapshot")
 	}
 
-	// Without a duration proof the same gap is a mismatch, exactly as before.
-	if verdict := ClassifyVirtualServedEvidenceForPinWithSnapshot(pin, declared, served, 0, runtime, token); verdict != VirtualServedEvidenceMismatch {
-		t.Fatalf("unproven implausible serve verdict = %v, want mismatch", verdict)
+	// Without a measured duration the same gap is still usable: size alone
+	// never rejects, and only identity stays unproven.
+	if verdict := ClassifyVirtualServedEvidenceForPinWithSnapshot(pin, declared, served, 0, runtime, token); verdict != VirtualServedEvidenceUnverified {
+		t.Fatalf("implausible serve without a duration verdict = %v, want unverified", verdict)
 	}
 }
 

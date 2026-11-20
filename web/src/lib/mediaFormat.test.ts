@@ -1,8 +1,9 @@
 // @vitest-environment node
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   audioTrackHasAtmos,
+  audioTrackIdentity,
   audioTrackLabel,
   compactHdrSuffix,
   formatChannels,
@@ -10,7 +11,24 @@ import {
   formatFileSize,
   mapAudioLabel,
   prettyResolution,
+  undeclaredLanguageHint,
 } from "./mediaFormat";
+import { resolveAppLocale, setAppLocale } from "./appLocale";
+import { loadLanguageNames } from "./languageNames";
+
+function applyLanguage(stored: string) {
+  setAppLocale(
+    resolveAppLocale({
+      stored,
+      navigatorLanguages: [],
+      runtimeLocale: "en-US",
+      hasCatalog: () => true,
+      pseudoLocales: false,
+    }),
+  );
+}
+
+afterEach(() => applyLanguage("en"));
 
 describe("formatCodecLabel", () => {
   it("uppercases unknown codecs", () => {
@@ -142,5 +160,52 @@ describe("audioTrackLabel", () => {
 
   it("matches Atmos only as a word", () => {
     expect(audioTrackLabel({ codec: "eac3", title: "Atmospheric score" })).toBe("EAC3");
+  });
+});
+
+describe("audioTrackIdentity", () => {
+  it("uses the declared language, in the interface language", async () => {
+    expect(audioTrackIdentity({ language: "en", codec: "eac3", channels: 6 }, 1)).toEqual({
+      title: "English",
+      languageUndeclared: false,
+      titleFromFormat: false,
+    });
+
+    applyLanguage("fr");
+    await loadLanguageNames("fr");
+    expect(audioTrackIdentity({ language: "en", codec: "eac3", channels: 6 }, 1).title).toBe(
+      "anglais",
+    );
+  });
+
+  it("joins every declared language", () => {
+    expect(audioTrackIdentity({ languages: ["en", "fr", "en"] }, 1).title).toBe("English/French");
+  });
+
+  it("describes an unlabelled row by codec and channel layout", () => {
+    expect(audioTrackIdentity({ codec: "eac3", channels: 6 }, 2)).toEqual({
+      title: "EAC3 5.1",
+      languageUndeclared: true,
+      titleFromFormat: true,
+    });
+    expect(audioTrackIdentity({ codec: "aac", channels: 2 }, 2).title).toBe("AAC stereo");
+  });
+
+  it("treats the undetermined code as no language", () => {
+    expect(audioTrackIdentity({ language: "und", codec: "ac3", channels: 2 }, 1).title).toBe(
+      "AC3 stereo",
+    );
+  });
+
+  it("falls back to the row's position, never to the unknown-language word", () => {
+    const identity = audioTrackIdentity({ title: "????" }, 2);
+    expect(identity.title).toBe("Track 2");
+    expect(identity.languageUndeclared).toBe(true);
+    expect(identity.title).not.toBe("Unknown");
+    expect(identity.title).not.toBe("Inconnue");
+  });
+
+  it("names the missing language in a hint", () => {
+    expect(undeclaredLanguageHint()).toBe("Language: Unknown");
   });
 });

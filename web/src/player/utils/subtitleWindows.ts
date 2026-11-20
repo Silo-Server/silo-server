@@ -7,8 +7,15 @@
  */
 
 import { toMediaTime } from "./mediaTimeline";
+import { isSubtitlePageUnavailable } from "./subtitlePageUnavailable";
 import { isSubtitleSourceChanged } from "./subtitleSourceChanged";
 
+// The source-time range a bounded subtitle response produced. It is `<start>-<end>`
+// in seconds with three decimals, or `<start>-*` when the extract runs to the end
+// of the input. A page the server answers from its progressive artifact before
+// the artifact has parsed the page's end carries the shorter range it really
+// produced.
+export const SUBTITLE_COVERAGE_HEADER = "X-Subtitle-Coverage";
 // Explicitly bound each subtitle fetch to this many source-time seconds. A
 // bitmap slice has to be fully extracted before it can be painted, so a cold
 // remote 600 s window costs ~18-24 s. Two minutes keeps the first paint short;
@@ -25,6 +32,16 @@ export const BITMAP_SUBTITLE_PAGE_SECONDS = 120;
 // Start fetching the next window this many seconds before the current one's
 // requested end, so the new cues are already on hand when playback crosses in.
 export const SUBTITLE_PREFETCH_LEAD_SECONDS = 30;
+// Source-time grid a text window starts on. The playhead moves every
+// timeupdate, but the server keys a window on its exact `position`, so a fresh
+// fetch re-derived from the raw playhead would ask for a new 120 s window every
+// second and demux almost the whole slice again. Every position inside one cell
+// asks for the same window, and the server can answer a later request from the
+// window it already produced.
+export const SUBTITLE_WINDOW_ALIGN_SECONDS = 30;
+// Pull the anchor back this much before snapping it to the grid, so a small
+// scrub back still lands inside the window instead of in the previous cell.
+export const SUBTITLE_WINDOW_SEEK_BACKOFF_SECONDS = 2;
 // Overlap consecutive windows by a few seconds so ffmpeg boundary rounding
 // can't drop a cue that straddles the join.
 export const SUBTITLE_WINDOW_OVERLAP_SECONDS = 5;
@@ -42,6 +59,16 @@ export const SUBTITLE_FETCH_MAX_CONSECUTIVE_FAILURES = 4;
 // Transient failures are worth more attempts, but still bounded: a server that
 // keeps answering 503 must not keep a timeupdate loop fetching forever.
 export const SUBTITLE_FETCH_MAX_RETRYABLE_FAILURES = 12;
+// After this many consecutive retryable refusals with nothing on screen, the
+// track is reported stalled while the retry ladder keeps running in the
+// background. Two is the honest count for the server's recovery contract: the
+// first refusal answers `subtitle_window_budget_exceeded` and starts the
+// covering extraction, and the retry after it is meant to be a cache hit. A
+// second refusal means that promise did not hold, so the overlay must stop
+// claiming a load is in progress and offer the viewer a decision instead of
+// spinning through the remaining ten attempts (production: 26 s per attempt plus
+// Retry-After, so the ladder alone is a quarter of an hour).
+export const SUBTITLE_FETCH_STALL_REPORT_FAILURES = 2;
 // Statuses that describe a condition the same request may survive: a
 // timeout, a rate limit, or a gateway that could not reach the extractor.
 const RETRYABLE_WINDOW_STATUSES = new Set([408, 429, 502, 503, 504]);
@@ -136,6 +163,35 @@ export function subtitleRetryAfterMs(header: string | null, now = Date.now()): n
   return Number.isFinite(date) ? Math.max(0, date - now) : 0;
 }
 
+/**
+ * Backoff before retrying a failed window: the doubling ladder, raised by the
+ * server's `Retry-After` when it asked for longer. The header never shortens the
+ * client's own backoff and the result stays inside the ladder's cap, so a large
+ * server delay cannot park the retry past the budget's remaining room.
+ */
+export function subtitleRetryDelayMs(previousMs: number, retryAfterMs: number): number {
+  return Math.min(
+    Math.max(nextSubtitleRetryDelay(previousMs), retryAfterMs),
+    SUBTITLE_FETCH_RETRY_MAX_BACKOFF_MS,
+  );
+}
+
+/**
+ * The source-time end a coverage header reports, or null when the response
+ * carried none (a whole-track or unwindowed response) or an open end. The value
+ * is what the response really produced, which for a bitmap page answered from a
+ * partially parsed track is earlier than the page it asked for.
+ */
+export function subtitleCoverageEnd(header: string | null): number | null {
+  if (!header) return null;
+  const dash = header.indexOf("-");
+  if (dash < 0) return null;
+  const end = header.slice(dash + 1).trim();
+  if (end === "*" || end === "") return null;
+  const value = Number(end);
+  return Number.isFinite(value) ? value : null;
+}
+
 /** The request for the window starting at `position`, in source seconds. */
 export function subtitleWindowUrl(
   url: string,
@@ -167,12 +223,24 @@ export function alignSubtitleWindowStart(
 }
 
 /**
- * The first grid boundary at or after a source position: the page after the
- * coverage already on hand, never the page the client already holds.
+ * The one window start a text track asks for at `playhead`, in source seconds.
+ *
+ * This is the canonical base: every consumer of the same track (the first
+ * fetch, a seek, and the next-window prefetch) derives its start here, so they
+ * cannot disagree about which window the playhead is in. Passing an already
+ * aligned start back in is not supported — the argument is a playhead, and the
+ * seek backoff is applied once, here.
+ *
+ * Bitmap pages deliberately keep their own grid (BITMAP_SUBTITLE_PAGE_SECONDS):
+ * the server stores exactly one page span, so the client must ask for whole
+ * pages rather than this text grid.
  */
-export function subtitlePageBoundary(position: number, pageSeconds: number): number {
-  if (!(pageSeconds > 0)) return Math.max(0, position);
-  return Math.ceil(Math.max(0, position) / pageSeconds) * pageSeconds;
+export function subtitleWindowStartForPlayhead(playhead: number): number {
+  return alignSubtitleWindowStart(
+    playhead,
+    SUBTITLE_WINDOW_ALIGN_SECONDS,
+    SUBTITLE_WINDOW_SEEK_BACKOFF_SECONDS,
+  );
 }
 
 /**
@@ -239,8 +307,13 @@ export interface SubtitleWindowFetcherOptions {
   onResponseEnd?: () => void;
   /** The whole window streamed in and its range now counts as covered. */
   onWindowCommitted: (fresh: boolean) => void;
-  /** A window failed or stalled; it is retried after a backoff. */
-  onWindowFailed: () => void;
+  /**
+   * A window failed or stalled; it is retried after a backoff. `retryable`
+   * reports whether the same request may survive (a 503 + Retry-After, a
+   * timeout, a stall) or the failure is one only a rebuild can fix (a 404, an
+   * unsupported format): the latter ends the track instead of retrying.
+   */
+  onWindowFailed: (retryable: boolean) => void;
   /**
    * The server answered `subtitle_source_changed` (409): the virtual release
    * rotated under this plan. No retry is scheduled and no failure budget is
@@ -252,6 +325,13 @@ export interface SubtitleWindowFetcherOptions {
    * rebuilds the fetcher.
    */
   onTerminal?: () => void;
+  /**
+   * Consecutive retryable refusals reached SUBTITLE_FETCH_STALL_REPORT_FAILURES
+   * with no window committed. The retry ladder keeps running; this reports that
+   * it has stopped being a load the viewer should keep waiting on, so the caller
+   * can offer a retry instead of an indefinite spinner.
+   */
+  onStalled?: () => void;
   /** Abort a window that delivers nothing for this long; defaults to 30 s. */
   stallTimeoutMs?: number;
   /** Consecutive non-retryable failures before giving up; defaults to 4. */
@@ -300,6 +380,9 @@ export function createSubtitleWindowFetcher(
   // retrying far longer than a 404 the same request can never survive.
   let hardFailures = 0;
   let retryableFailures = 0;
+  // Reported once per stall episode (cleared by a committed window), so the
+  // caller sees one "stalled" transition instead of one per refused retry.
+  let stalledReported = false;
   let terminal = false;
   let sourceChanged = false;
   let sourceChangedNotified = false;
@@ -353,10 +436,22 @@ export function createSubtitleWindowFetcher(
     const url = options.windowUrl(seekStart, duration);
     let succeeded = false;
     let sourceChangedNow = false;
+    let pageUnavailableNow = false;
+    let producedEnd = requestedEnd;
     let failure: { retryable: boolean; retryAfterMs: number } | null = null;
     try {
       armStallTimer();
       const response = await fetch(url, { signal: controller.signal });
+      // A windowed .sup page can be answered before its own end: the server's
+      // progressive artifact has parsed only part of it, so the response covers
+      // less than it asked for and says so. Committing the requested end would
+      // leave the rest of the page marked as covered and never requested again.
+      const coveredEnd = subtitleCoverageEnd(
+        response.headers?.get?.(SUBTITLE_COVERAGE_HEADER) ?? null,
+      );
+      if (coveredEnd !== null) {
+        producedEnd = Math.min(Math.max(coveredEnd, seekStart), requestedEnd);
+      }
       const sourceChangedResponse = await isSubtitleSourceChanged(response);
       // The 409 check reads the body asynchronously. A seek or disposal while
       // that read is pending must not signal a refresh for a request that is
@@ -372,6 +467,16 @@ export function createSubtitleWindowFetcher(
           sourceChangedNotified = true;
           options.onSourceChanged?.();
         }
+        return;
+      }
+      // A page the server has given up on is final for this track: retrying it
+      // pays the same container prefix and produces the same answer. Report it
+      // once and stop instead of spending the retry budget on it.
+      if (await isSubtitlePageUnavailable(response)) {
+        pageUnavailableNow = true;
+        terminal = true;
+        options.onWindowFailed(false);
+        options.onTerminal?.();
         return;
       }
       if (!response.ok || !response.body) {
@@ -414,17 +519,27 @@ export function createSubtitleWindowFetcher(
         lastFetchFailureAt = 0;
         hardFailures = 0;
         retryableFailures = 0;
-        // Commit coverage only after the whole window streamed in. A failed
-        // or stalled fetch must leave the range uncovered, or the gap would
-        // read as fetched and never be retried.
-        windowEnd = Math.max(windowEnd, requestedEnd);
+        stalledReported = false;
+        // Commit coverage only after the whole window streamed in, and only the
+        // range the response says it produced: a page answered from a partially
+        // parsed artifact is shorter than requested, and its tail must stay
+        // uncovered so the next request asks for it again. A failed or stalled
+        // fetch must leave the range uncovered too, or the gap would read as
+        // fetched and never be retried.
+        windowEnd = Math.max(windowEnd, producedEnd);
         // End-of-input only when the window reaches the known media duration.
         // Where a window's cues stop says nothing: a window that ends inside a
         // dialogue gap looks the same as the end of the file.
         const mediaDuration = options.duration();
-        if (mediaDuration > 0 && requestedEnd >= mediaDuration) atEOF = true;
+        if (mediaDuration > 0 && producedEnd >= mediaDuration) atEOF = true;
         options.onWindowCommitted(fresh);
-      } else if (!succeeded && !superseded && !disposed && !sourceChangedNow) {
+      } else if (
+        !succeeded &&
+        !superseded &&
+        !disposed &&
+        !sourceChangedNow &&
+        !pageUnavailableNow
+      ) {
         // A real failure (error, stall, or non-ok response) rather than a seek
         // superseding this fetch: count it, then back off or give up.
         if (stalled) {
@@ -437,9 +552,19 @@ export function createSubtitleWindowFetcher(
           retryAfterMs: 0,
         };
         lastFetchFailureAt = Date.now();
-        options.onWindowFailed();
+        options.onWindowFailed(retryable);
         if (retryable) retryableFailures += 1;
         else hardFailures += 1;
+        if (
+          retryable &&
+          !stalledReported &&
+          retryableFailures >= SUBTITLE_FETCH_STALL_REPORT_FAILURES
+        ) {
+          // The retry ladder continues; this only stops the overlay from
+          // presenting a broken recovery as an in-progress load.
+          stalledReported = true;
+          options.onStalled?.();
+        }
         if (hardFailures >= maxConsecutiveFailures || retryableFailures >= maxRetryableFailures) {
           terminal = true;
           console.error(
@@ -448,7 +573,7 @@ export function createSubtitleWindowFetcher(
           options.onTerminal?.();
         } else {
           // `Retry-After` raises the delay; it never shortens the backoff.
-          retryDelay = Math.max(nextSubtitleRetryDelay(retryDelay), retryAfterMs);
+          retryDelay = subtitleRetryDelayMs(retryDelay, retryAfterMs);
           retryTimer = setTimeout(maybeFetch, retryDelay);
         }
       }
@@ -489,16 +614,19 @@ export function createSubtitleWindowFetcher(
     );
     if (pageSpanSeconds > 0) {
       // Page grid: a fresh window is the page that contains the playhead, and
-      // an extend is the page after the coverage already committed. The
+      // an extend is the page that contains the coverage already committed. The
       // planner's own anchors (playhead minus a backoff, coverage minus an
       // overlap) are deliberately off that grid, so aligning them here is what
       // makes the request, the page the server stores, and the server's page
-      // prefetch the same window.
+      // prefetch the same window. A page the server could only partly produce —
+      // a page whose artifact has not parsed its end yet — commits the shorter
+      // range it really covered, so the alignment asks for that same page again
+      // rather than skipping the part it did not send.
       action =
         action.kind === "fresh"
           ? { kind: "fresh", start: alignSubtitleWindowStart(action.start, pageSpanSeconds) }
           : action.kind === "extend"
-            ? { kind: "extend", start: subtitlePageBoundary(windowEnd, pageSpanSeconds) }
+            ? { kind: "extend", start: alignSubtitleWindowStart(windowEnd, pageSpanSeconds) }
             : action;
     }
     if (action.kind === "fresh") void fetchWindow(action.start, true);

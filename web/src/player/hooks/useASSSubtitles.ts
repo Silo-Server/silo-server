@@ -3,6 +3,7 @@ import type JASSUB from "jassub";
 import type { PlayerSubtitleInfo, VideoFitMode } from "../types";
 import { isASSCodec } from "../utils/subtitleCodecs";
 import { isSubtitleSourceChanged } from "../utils/subtitleSourceChanged";
+import { subtitleRetryDelayMs, subtitleRetryAfterMs } from "../utils/subtitleWindows";
 import {
   applyASSMarginInset,
   coverZoom,
@@ -72,8 +73,9 @@ const ASS_STALL_TIMEOUT_MS = 60_000;
 // Consecutive windowed failures tolerated before falling back to the
 // param-less whole-track URL once.
 const ASS_WINDOW_MAX_ATTEMPTS = 3;
-// Retry backoff after a failed windowed attempt.
-const ASS_RETRY_BACKOFF_MS = 5_000;
+// Retry backoff after a failed windowed attempt is the shared 5 s floor from
+// subtitleWindows (subtitleRetryDelayMs), raised by the server's Retry-After when
+// it asks for longer and capped so a long delay cannot park the retry.
 // Hard ceiling on consecutive subtitle TEXT fetch failures for one mount,
 // counting the windowed attempts and the whole-track fallback together. The
 // per-position windowed budget resets on a seek so a new position gets a fair
@@ -86,6 +88,11 @@ const ASS_TEXT_MAX_FAILURES = 4;
 // 4-deep terminal budget above, but a source that never recovers still
 // terminates instead of polling forever.
 const ASS_RETRYABLE_TEXT_MAX_FAILURES = 12;
+// Two consecutive retryable refusals with no committed script: the first is a
+// budget refusal whose retry the server promises to serve from the recovery
+// extraction, so a second one means that promise did not hold. Report the track
+// as stalled and keep retrying in the background.
+const ASS_RETRYABLE_TEXT_STALL_REPORT_FAILURES = 2;
 // The server's implicit window for a param-less subtitle request against a
 // cold large/unknown remote source: 600 s from just behind the session
 // position, flagged with the windowed headers. A param-less fallback that
@@ -142,6 +149,8 @@ class SubtitleFetchError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** `Retry-After` the response carried, in milliseconds (0 when absent). */
+    readonly retryAfterMs = 0,
   ) {
     super(message);
     this.name = "SubtitleFetchError";
@@ -316,7 +325,7 @@ export function useASSSubtitles(
   subtitleDelayMs: number,
   // "refreshing" is a reload of the track on screen for new timing: its
   // current events stay up meanwhile, so it is not announced as loading.
-  onLoadState?: (state: "idle" | "loading" | "refreshing" | "ready" | "error") => void,
+  onLoadState?: (state: "idle" | "loading" | "refreshing" | "ready" | "stalled" | "error") => void,
   // Fired when the server answers the subtitle fetch with
   // `subtitle_source_changed` (409): a virtual release rotated under this plan
   // and every URL for the active track is stale. The caller must refresh the
@@ -494,6 +503,11 @@ export function useASSSubtitles(
     // budget so a transient upstream flap does not spend the terminal budget
     // and wedge the mount on "Retrying…".
     let retryableTextFailures = 0;
+    // One report per stall episode: two consecutive retryable refusals with no
+    // committed script mean the server's recovery did not serve the retry, so
+    // the overlay stops claiming a load is in progress (the ladder keeps
+    // retrying in the background). Cleared by the next successful load.
+    let stalledReported = false;
     let busy = false;
     // One rate-limited param-less probe at a time, only while the loaded
     // script is a bounded window. A complete answer upgrades the script in
@@ -731,7 +745,9 @@ export function useASSSubtitles(
       wholeTrack: boolean,
     ): Promise<boolean> {
       if (!video || cancelled) return false;
-      onLoadStateRef.current?.("loading");
+      // A retry of an already-stalled track keeps the stalled card up until
+      // this attempt actually commits.
+      if (!stalledReported) onLoadStateRef.current?.("loading");
 
       // Lazy-load JASSUB module (only once).
       if (!jassubImportRef.current) {
@@ -769,7 +785,11 @@ export function useASSSubtitles(
               onSourceChangedRef.current?.();
               throw new DOMException("Subtitle source changed", "AbortError"); // bypass the retry
             }
-            throw new SubtitleFetchError(response.status, `HTTP ${response.status}`);
+            throw new SubtitleFetchError(
+              response.status,
+              `HTTP ${response.status}`,
+              subtitleRetryAfterMs(response.headers.get("Retry-After")),
+            );
           }
           received.wholeTrack = isWholeTrackResponse(response);
           received.coverage = subtitleCoverageRange(response);
@@ -895,6 +915,7 @@ export function useASSSubtitles(
         windowFailures = 0;
         textFailures = 0;
         retryableTextFailures = 0;
+        stalledReported = false;
         builtRef.current = {
           url: activeUrl!,
           revision: cueRevisionRef.current,
@@ -962,7 +983,6 @@ export function useASSSubtitles(
           return;
         }
         console.error("[useASSSubtitles] Unable to load subtitles:", err);
-        onLoadStateRef.current?.("error");
         // Count every genuine failure (a 4xx, 5xx, stall, or network error)
         // against the shared ceiling before deciding the next step — except
         // explicitly-retryable statuses, which ride the same backoff loop on
@@ -971,14 +991,29 @@ export function useASSSubtitles(
         const retryableFailure =
           err instanceof SubtitleFetchError && isRetryableSubtitleStatus(err.status);
         if (retryableFailure) {
+          // A retryable answer (503 + Retry-After from a page or window-budget
+          // refusal the server is already recovering from) must not move the
+          // player to its terminal state: playback continues, the track stays
+          // selected, and the retry below happens in the background while the
+          // script already on screen keeps rendering.
           retryableTextFailures += 1;
           if (retryableTextFailures >= ASS_RETRYABLE_TEXT_MAX_FAILURES) {
+            // The retry budget is spent: the final failure stays honest.
+            onLoadStateRef.current?.("error");
             terminal = true;
             return;
+          }
+          if (
+            retryableTextFailures >= ASS_RETRYABLE_TEXT_STALL_REPORT_FAILURES &&
+            !stalledReported
+          ) {
+            stalledReported = true;
+            onLoadStateRef.current?.("stalled");
           }
         } else {
           retryableTextFailures = 0;
           textFailures += 1;
+          onLoadStateRef.current?.("error");
         }
         if (wholeTrack && !retryableFailure) {
           // The whole-track fallback failed too: terminal, no retry loop.
@@ -1014,10 +1049,17 @@ export function useASSSubtitles(
           : playheadKnown()
             ? Math.max(0, sourcePosition() - ASS_WINDOW_LEAD_SECONDS)
             : start;
-        retryTimer = setTimeout(() => {
-          retryTimer = null;
-          void attempt(retryStart, usingWholeTrack, recheckAfterCommit);
-        }, ASS_RETRY_BACKOFF_MS);
+        // The fixed attempt backoff, raised by a Retry-After the server sent for
+        // a refusal it is already recovering from and capped so a long delay
+        // cannot park the retry.
+        const retryAfterMs = err instanceof SubtitleFetchError ? err.retryAfterMs : 0;
+        retryTimer = setTimeout(
+          () => {
+            retryTimer = null;
+            void attempt(retryStart, usingWholeTrack, recheckAfterCommit);
+          },
+          subtitleRetryDelayMs(0, retryAfterMs),
+        );
       } finally {
         if (timeout !== null) clearTimeout(timeout);
         if (activeController === attemptController) activeController = null;

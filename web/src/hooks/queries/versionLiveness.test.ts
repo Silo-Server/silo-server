@@ -6,20 +6,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileVersion } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
-  api: vi.fn(),
+  v2: vi.fn(),
+  apiV1: vi.fn(),
+}));
+
+vi.mock("@/api/v2/request", () => ({
+  v2: mocks.v2,
 }));
 
 vi.mock("@/api/client", () => ({
-  api: mocks.api,
-  apiV1: mocks.api,
+  api: mocks.apiV1,
+  apiV1: mocks.apiV1,
 }));
 
 import {
   VERSION_LIVENESS_BATCH_SIZE,
+  VERSION_LIVENESS_FORCED_MIN_INTERVAL_MS,
   applyVersionAvailability,
+  checkVersionLiveness,
   chunkVirtualFileIds,
   fetchVersionLiveness,
+  markVersionLivenessStale,
   mergeVersionLiveness,
+  resetVersionLivenessCache,
   useVersionLiveness,
 } from "./versionLiveness";
 
@@ -53,20 +62,142 @@ function createWrapper(queryClient: QueryClient) {
   };
 }
 
+// The check gate is module state, shared by every mounted list: each test
+// starts from an empty one.
+beforeEach(() => {
+  resetVersionLivenessCache();
+});
+
 describe("fetchVersionLiveness", () => {
   beforeEach(() => {
-    mocks.api.mockReset();
+    mocks.v2.mockReset();
+    mocks.apiV1.mockReset();
   });
-
-  it("POSTs the file_ids to the batched check endpoint", async () => {
-    mocks.api.mockResolvedValue({ results: [] });
+  it("POSTs the file_ids to the v2 check operation and never the retired v1 route", async () => {
+    mocks.v2.mockResolvedValue({ results: [] });
     await fetchVersionLiveness([1, 2, 3]);
 
-    expect(mocks.api).toHaveBeenCalledWith("/catalog/versions/check", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file_ids: [1, 2, 3] }),
+    expect(mocks.v2).toHaveBeenCalledWith("POST /api/v2/catalog/versions/check", {
+      body: { file_ids: ["1", "2", "3"] },
     });
+    expect(mocks.apiV1).not.toHaveBeenCalled();
+  });
+
+  it("maps the v2 string ids and source mismatch back to numeric rows", async () => {
+    mocks.v2.mockResolvedValue({
+      results: [
+        {
+          file_id: 40,
+          available: false,
+          failed: true,
+          source_mismatch: { served_bytes: 42, declared_bytes: 64 },
+        },
+      ],
+    });
+
+    expect(await fetchVersionLiveness([40])).toEqual({
+      results: [
+        {
+          file_id: 40,
+          available: false,
+          failed: true,
+          source_mismatch: { served_bytes: 42, declared_bytes: 64 },
+        },
+      ],
+    });
+  });
+});
+
+describe("checkVersionLiveness", () => {
+  beforeEach(() => {
+    mocks.v2.mockReset();
+    mocks.apiV1.mockReset();
+    resetVersionLivenessCache();
+  });
+
+  it("coalesces duplicate requests for the same row set", async () => {
+    mocks.v2.mockResolvedValue({ results: [{ file_id: "1", available: true }] });
+
+    const [first, second] = await Promise.all([
+      checkVersionLiveness([1, 2]),
+      checkVersionLiveness([2, 1]),
+    ]);
+
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
+    expect(second).toBe(first);
+  });
+
+  it("reuses an answer inside the freshness window instead of re-probing", async () => {
+    mocks.v2.mockResolvedValue({ results: [{ file_id: "1", available: true }] });
+
+    await checkVersionLiveness([1]);
+    const again = await checkVersionLiveness([1]);
+
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
+    expect(again.results[0]?.available).toBe(true);
+  });
+
+  it("checks a changed row set at once", async () => {
+    mocks.v2.mockResolvedValue({ results: [{ file_id: "1", available: true }] });
+
+    await checkVersionLiveness([1]);
+    await checkVersionLiveness([1, 2]);
+
+    expect(mocks.v2).toHaveBeenCalledTimes(2);
+  });
+
+  it("holds a slow probe's answer for ten times its own latency", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      mocks.v2.mockImplementation(async () => {
+        // A provider resolution that took 40 s: 10x is 400 s, past the 5 min
+        // base window, so the slow answer is the one that governs.
+        vi.setSystemTime(new Date(Date.now() + 40_000));
+        return { results: [{ file_id: "1", available: true }] };
+      });
+
+      await checkVersionLiveness([1]);
+      expect(mocks.v2).toHaveBeenCalledTimes(1);
+
+      // Six minutes on: past the base window, inside the slow probe's.
+      vi.setSystemTime(new Date(Date.now() + 6 * 60_000));
+      await checkVersionLiveness([1]);
+      expect(mocks.v2).toHaveBeenCalledTimes(1);
+
+      // Past 400 s the answer is spent and the row set is checked again.
+      vi.setSystemTime(new Date(Date.now() + 2 * 60_000));
+      await checkVersionLiveness([1]);
+      expect(mocks.v2).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a catalog event forces one re-check per row set, then the floor holds", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      mocks.v2.mockResolvedValue({ results: [{ file_id: "1", available: true }] });
+
+      await checkVersionLiveness([1]);
+      expect(mocks.v2).toHaveBeenCalledTimes(1);
+
+      // A refresh announces a burst of stamped rows, one event at a time. The
+      // floor turns the burst into one new check.
+      vi.setSystemTime(new Date(Date.now() + VERSION_LIVENESS_FORCED_MIN_INTERVAL_MS));
+      for (let i = 0; i < 12; i += 1) markVersionLivenessStale();
+      await checkVersionLiveness([1]);
+      await checkVersionLiveness([1]);
+      expect(mocks.v2).toHaveBeenCalledTimes(2);
+
+      // Another event inside the floor is answered from the check just made.
+      markVersionLivenessStale();
+      await checkVersionLiveness([1]);
+      expect(mocks.v2).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -160,7 +291,8 @@ describe("mergeVersionLiveness", () => {
 
 describe("useVersionLiveness", () => {
   beforeEach(() => {
-    mocks.api.mockReset();
+    mocks.v2.mockReset();
+    mocks.apiV1.mockReset();
   });
 
   it("does not fire while disabled", () => {
@@ -169,7 +301,7 @@ describe("useVersionLiveness", () => {
       wrapper: createWrapper(createQueryClient()),
     });
 
-    expect(mocks.api).not.toHaveBeenCalled();
+    expect(mocks.v2).not.toHaveBeenCalled();
   });
 
   it("fires one batched request per chunk with the sorted virtual file_ids", async () => {
@@ -178,10 +310,10 @@ describe("useVersionLiveness", () => {
       makeVersion({ file_id: 1, container: "virtual" }),
       makeVersion({ file_id: 3, container: "mkv" }),
     ];
-    mocks.api.mockResolvedValue({
+    mocks.v2.mockResolvedValue({
       results: [
-        { file_id: 1, available: true },
-        { file_id: 2, available: false },
+        { file_id: "1", available: true },
+        { file_id: "2", available: false },
       ],
     });
 
@@ -191,12 +323,11 @@ describe("useVersionLiveness", () => {
 
     await waitFor(() => expect(result.current.get(2)?.available).toBe(false));
 
-    expect(mocks.api).toHaveBeenCalledTimes(1);
-    expect(mocks.api).toHaveBeenCalledWith("/catalog/versions/check", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file_ids: [1, 2] }),
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
+    expect(mocks.v2).toHaveBeenCalledWith("POST /api/v2/catalog/versions/check", {
+      body: { file_ids: ["1", "2"] },
     });
+    expect(mocks.apiV1).not.toHaveBeenCalled();
     expect(result.current.get(1)?.available).toBe(true);
     expect(result.current.has(3)).toBe(false);
   });
@@ -206,10 +337,10 @@ describe("useVersionLiveness", () => {
       makeVersion({ file_id: 1, container: "virtual", available: false }),
       makeVersion({ file_id: 2, container: "virtual" }),
     ];
-    mocks.api.mockResolvedValue({
+    mocks.v2.mockResolvedValue({
       results: [
-        { file_id: 1, available: true },
-        { file_id: 2, available: false },
+        { file_id: "1", available: true },
+        { file_id: "2", available: false },
       ],
     });
 
@@ -229,7 +360,7 @@ describe("useVersionLiveness", () => {
     // fresh array with the same virtual ids must keep the cached chunk keys,
     // or the check re-probes the same rows for every re-render.
     const rows = [makeVersion({ file_id: 1, container: "virtual" })];
-    mocks.api.mockResolvedValue({ results: [{ file_id: 1, available: true }] });
+    mocks.v2.mockResolvedValue({ results: [{ file_id: "1", available: true }] });
 
     const { result, rerender } = renderHook(
       ({ versions }: { versions: FileVersion[] }) => useVersionLiveness(versions, true),
@@ -240,18 +371,18 @@ describe("useVersionLiveness", () => {
     );
 
     await waitFor(() => expect(result.current.get(1)?.available).toBe(true));
-    expect(mocks.api).toHaveBeenCalledTimes(1);
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
 
     rerender({ versions: [makeVersion({ file_id: 1, container: "virtual" })] });
     rerender({ versions: [makeVersion({ file_id: 1, container: "virtual", resolution: "4k" })] });
 
     await waitFor(() => expect(result.current.get(1)?.available).toBe(true));
-    expect(mocks.api).toHaveBeenCalledTimes(1);
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
   });
 
   it("caches results across re-enables (no second request while fresh)", async () => {
     const versions = [makeVersion({ file_id: 1, container: "virtual" })];
-    mocks.api.mockResolvedValue({ results: [{ file_id: 1, available: false }] });
+    mocks.v2.mockResolvedValue({ results: [{ file_id: "1", available: false }] });
 
     const queryClient = createQueryClient();
     const { result, rerender } = renderHook(
@@ -263,13 +394,13 @@ describe("useVersionLiveness", () => {
     );
 
     await waitFor(() => expect(result.current.get(1)?.available).toBe(false));
-    expect(mocks.api).toHaveBeenCalledTimes(1);
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
 
     rerender({ enabled: false });
     rerender({ enabled: true });
 
     await waitFor(() => expect(result.current.get(1)?.available).toBe(false));
-    expect(mocks.api).toHaveBeenCalledTimes(1);
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
   });
 });
 

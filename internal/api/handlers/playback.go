@@ -153,6 +153,15 @@ type PlaybackFileVersionFetcher interface {
 	GetByEpisodeID(ctx context.Context, episodeID string) ([]*models.MediaFile, error)
 }
 
+// PlaybackVersionListLookup answers the item's selectable version rows — the
+// detail service's own version-list projection, including its duplicate
+// collapse and access filter. The start path refuses to commit a plan whose
+// effective row is outside that list, so the row a client is told is playing is
+// always a row the same client can show and reconcile.
+type PlaybackVersionListLookup interface {
+	SelectableVersionFileIDs(ctx context.Context, contentID string, filter catalog.AccessFilter) (map[int]struct{}, error)
+}
+
 type PlaybackProbeEnsurer interface {
 	EnsureProbeOnly(ctx context.Context, file *models.MediaFile) (*models.MediaFile, error)
 	EnsureCopySafetyCached(ctx context.Context, file *models.MediaFile) (*models.MediaFile, error)
@@ -524,7 +533,11 @@ type PlaybackHandler struct {
 	OriginalLangLookup PlaybackOriginalLanguageLookup
 	SettingsRepo       PlaybackSettingsReader     // optional; reads server settings (e.g., allow_4k_transcode)
 	FileVersionFetcher PlaybackFileVersionFetcher // optional; queries sibling file versions for 4K guard
-	ProbeEnsurer       PlaybackProbeEnsurer       // optional; repairs missing probe metadata on demand
+	// VersionList, when wired, bounds a start plan's effective row to the item's
+	// selectable version rows (see confineEffectiveVersionV3). Optional: without
+	// it a resolver substitution is planned exactly as before.
+	VersionList  PlaybackVersionListLookup
+	ProbeEnsurer PlaybackProbeEnsurer // optional; repairs missing probe metadata on demand
 	// probeRefreshed memoizes start-path probe refreshes by file id so a burst
 	// of starts for one file schedules a single detached repair. probeStartBudget
 	// overrides the default bounded wait in tests. probeRefreshWG tracks the
@@ -1779,8 +1792,12 @@ func identityRecipeCard(s *playback.Session) playback.RecipeCard {
 		card.RemuxResumeLeadingPictureDrop = s.RemuxResumeLeadingPictureDrop
 		card.TargetCodecAudio = s.TargetAudioCodec
 		if !s.TranscodeAudio {
-			// A copied track's planned codec is the source track's codec.
-			card.CopyAudioCodec = s.TargetAudioCodec
+			// A copied track's planned codec is the source track's codec, but the
+			// remux filter exists for ADTS framing only: a copied E-AC-3, TrueHD
+			// or DTS track would be refused by aac_adtstoasc, and AAC in MKV/MP4
+			// is already AudioSpecificConfig. Carry the codec only when the
+			// container really frames it as ADTS.
+			card.CopyAudioCodec = playback.CopiedAudioADTSCodec(s.TargetAudioCodec, s.SourceContainer)
 		}
 		card.TargetAudioChannels = s.TargetAudioChannels
 		card.TargetAudioBitrateKbps = s.TargetAudioBitrateKbps

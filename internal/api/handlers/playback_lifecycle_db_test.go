@@ -362,3 +362,69 @@ func lifecycleTestFile(t *testing.T, ctx context.Context, pool *pgxpool.Pool) in
 	}
 	return file
 }
+
+// expiringPlanStore records the idle expiry the sweep asks for.
+type expiringPlanStore struct {
+	playback.PlanStoreV3
+	calls []string
+	idle  time.Time
+}
+
+func (s *expiringPlanStore) ExpireIdleAttempt(_ context.Context, sessionID, _ string, idleBefore time.Time) (bool, error) {
+	s.calls = append(s.calls, sessionID)
+	s.idle = idleBefore
+	return true, nil
+}
+
+// TestLifecycleSweepReapsAPausedRowAtItsWindowDB pins the abandoned-session
+// window: a paused row nobody holds is ended once it is idle past the paused
+// grace, and one still inside it is left alone. A client that crashes while
+// paused leaves exactly this row, and before the window was pinned nothing
+// proved it was bounded.
+func TestLifecycleSweepReapsAPausedRowAtItsWindowDB(t *testing.T) {
+	ctx, pool, account := lifecycleTestDB(t)
+	file := lifecycleTestFile(t, ctx, pool)
+	insert := func(idle time.Duration) string {
+		t.Helper()
+		id := uuid.NewString()
+		if _, err := pool.Exec(ctx, `INSERT INTO playback_session_lifecycle
+			(session_id, frontend, state, seq, user_id, profile_id, media_file_id, requested_media_file_id, started_at, updated_at)
+			VALUES ($1, 'native', 'paused', nextval('playback_session_lifecycle_seq'), $2, 'p-1', $3, $3, $4, $4)`,
+			id, account, file, time.Now().Add(-idle)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO playback_v3_attempts
+			(playback_attempt_id, session_id, user_id, profile_id, requested_media_file_id, effective_media_file_id,
+			 current_plan_id, current_plan, normalized_request, expires_at, updated_at)
+			VALUES ($1, $2::uuid, $3, 'p-1', $4, $4, 'plan-1', '{}', '{}', NOW() + interval '1 hour', $5)`,
+			uuid.NewString(), id, account, file, time.Now().Add(-idle)); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	abandoned := insert(lifecyclePausedGrace + 5*time.Minute)
+	stillPaused := insert(lifecyclePausedGrace - 5*time.Minute)
+
+	store := &expiringPlanStore{}
+	now := time.Now()
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.PlanStoreV3 = store
+	handler.sweepLifecycle(ctx, pool, now)
+
+	expired := map[string]bool{}
+	for _, id := range store.calls {
+		expired[id] = true
+	}
+	if !expired[abandoned] {
+		t.Fatalf("the paused row idle past its grace was not expired (expired %v)", store.calls)
+	}
+	if expired[stillPaused] {
+		t.Fatalf("a paused row still inside its grace was expired")
+	}
+	// The window the claim is fenced on is the paused grace, not the shorter
+	// playing one.
+	wantIdle := now.Add(-lifecyclePausedGrace)
+	if d := wantIdle.Sub(store.idle); d > time.Second || d < -time.Second {
+		t.Fatalf("expiry idle bound = %v, want %v (paused grace)", store.idle, wantIdle)
+	}
+}

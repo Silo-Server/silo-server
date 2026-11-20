@@ -13,14 +13,26 @@
  *
  * A stored row is a hint, not a source of truth: when the catalog no longer
  * carries it the page stays in its pick-again state instead of selecting
- * something else.
+ * something else. It also records whether the viewer named the row, so a later
+ * Play can tell their pick from one the server made for them.
  */
 const STORAGE_KEY = "silo-requested-version";
 /** Bounded so a long-lived browser cannot grow the map without limit. */
 const MAX_ENTRIES = 200;
 
-interface RequestedVersionEntry {
+export interface RequestedVersion {
   fileId: number;
+  /**
+   * True when the viewer named this row themselves. Progress and history
+   * record whichever row served the bytes, so an Auto start writes its
+   * effective row here too; only this flag says the row is a choice the server
+   * must not substitute. A remembered entry without it (written before the
+   * flag existed) is a hint, not a pick.
+   */
+  explicit: boolean;
+}
+
+interface RequestedVersionEntry extends RequestedVersion {
   updatedAt: number;
 }
 
@@ -52,10 +64,15 @@ function readMap(): RequestedVersionMap {
   const map: RequestedVersionMap = {};
   for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
     if (value === null || typeof value !== "object") continue;
-    const { fileId, updatedAt } = value as { fileId?: unknown; updatedAt?: unknown };
+    const { fileId, updatedAt, explicit } = value as {
+      fileId?: unknown;
+      updatedAt?: unknown;
+      explicit?: unknown;
+    };
     if (typeof fileId !== "number" || !Number.isFinite(fileId) || fileId <= 0) continue;
     map[key] = {
       fileId,
+      explicit: explicit === true,
       updatedAt: typeof updatedAt === "number" && Number.isFinite(updatedAt) ? updatedAt : 0,
     };
   }
@@ -67,31 +84,51 @@ function readMap(): RequestedVersionMap {
  * picked one (or their profile has not resolved yet). The caller falls back to
  * the server's `last_file_id`.
  */
-export function readRequestedFileId(contentId: string, profileId: string | null): number | null {
+export function readRequestedVersion(
+  contentId: string,
+  profileId: string | null,
+): RequestedVersion | null {
   if (!contentId) return null;
   const key = entryKey(contentId, profileId);
   if (!key) return null;
-  return readMap()[key]?.fileId ?? null;
+  const entry = readMap()[key];
+  return entry ? { fileId: entry.fileId, explicit: entry.explicit } : null;
 }
 
 /**
- * Records an explicit version pick for `contentId`. The caller must only pass
- * a row the viewer actually requested; the effective playback row belongs to
- * the server's progress/history fields, not here.
+ * The row the viewer last requested for `contentId`, ignoring whether they
+ * named it themselves. Callers that decide what to play on the server's behalf
+ * must use {@link readRequestedVersion}.
+ */
+export function readRequestedFileId(contentId: string, profileId: string | null): number | null {
+  return readRequestedVersion(contentId, profileId)?.fileId ?? null;
+}
+
+/**
+ * Records a version pick for `contentId`. The caller must only pass a row the
+ * viewer actually requested; the effective playback row belongs to the
+ * server's progress/history fields, not here.
+ *
+ * `explicit` says whether the viewer named the row. Omit it to keep the standing
+ * the stored row already has: a later write that only refreshes which row
+ * played must not turn an Auto choice into a pin, or a pin into an Auto choice.
  */
 export function rememberRequestedFileId(
   contentId: string,
   fileId: number | null | undefined,
   profileId: string | null,
+  options: { explicit?: boolean } = {},
 ): void {
   if (!contentId || fileId == null || !Number.isFinite(fileId) || fileId <= 0) return;
 
   const map = readMap();
   const key = entryKey(contentId, profileId);
   if (!key) return;
+  const previous = map[key];
+  const explicit = options.explicit ?? previous?.explicit ?? false;
   // Re-insert so the map keeps most-recently-used order before trimming.
   delete map[key];
-  map[key] = { fileId, updatedAt: Date.now() };
+  map[key] = { fileId, explicit, updatedAt: Date.now() };
 
   const entries = Object.entries(map);
   if (entries.length > MAX_ENTRIES) {

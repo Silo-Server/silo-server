@@ -715,10 +715,10 @@
       },
       "expected": {
         "outcome": "playable",
-        "delivery": "original_http",
-        "decision_reason": "validated_original_playback",
-        "plan_id": "plan:112292a396dba70825480f538c5e1ab3",
-        "plan_attempt_key": "v3:407f095ab06f0d06",
+        "delivery": "server_remux_progressive",
+        "decision_reason": "container_normalization",
+        "plan_id": "plan:03d3d4ece0c19ea961519c3e57fa857c",
+        "plan_attempt_key": "v3:d8fc69b0207dcaf7",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -745,8 +745,7 @@
           "subtitles": {
             "ass_styling_preserved": false,
             "bitmap_overlay": false,
-            "bitmap_sidecar": false,
-            "reason": "inventory_unavailable"
+            "bitmap_sidecar": false
           }
         },
         "available_qualities": [

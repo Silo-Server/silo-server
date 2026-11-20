@@ -59,7 +59,6 @@ import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { usePageActivity } from "@/hooks/usePageActivity";
 import {
   adminKeys,
-  catalogKeys,
   historyImportKeys,
   libraryKeys,
   notInterestedKeys,
@@ -72,6 +71,7 @@ import {
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "@/hooks/queries/mediaSurfaceRefresh";
+import { scheduleVersionLivenessRefresh } from "@/hooks/queries/versionLiveness";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router";
@@ -763,17 +763,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         {
           // The coalesced sweep below would also invalidate these checks, but
           // only once its window closes; a stamped row has to leave an open
-          // version menu at once. versions_updated is rare (a stamp or a
-          // refresh), so the checks are re-run directly here.
+          // version menu at once. A refresh announces its burst one row at a
+          // time, so the re-check is coalesced and rate-limited per row set
+          // (see scheduleVersionLivenessRefresh).
           if (isVersionsUpdatedEvent(message)) {
-            // A refresh can announce a burst of stamped rows. Let an in-flight
-            // check finish and answer for the rows it already has instead of
-            // cancelling and restarting the same provider resolution per
-            // event; the next event still invalidates the settled result.
-            void queryClient.invalidateQueries(
-              { queryKey: catalogKeys.versionLiveness },
-              { cancelRefetch: false },
-            );
+            scheduleVersionLivenessRefresh(queryClient);
           }
           const isItemChange = CATALOG_ITEM_CHANGED_EVENTS.has(message.event);
           catalogInvalidation.schedule({

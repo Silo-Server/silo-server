@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
 import { fixturePlanV3, fixtureSubtitleInventoryItemV3 } from "../protocol-v3.fixtures";
 import type { PlanV3 } from "../protocol-v3";
-import type { SubtitleMode } from "../types";
+import type { PlayerFileVersion, SubtitleMode } from "../types";
 import { resetCodecDetectionForTests } from "../hooks/useCodecDetection";
 import { usePlaybackSession, type UsePlaybackSessionResult } from "../hooks/usePlaybackSession";
 import { resetSessionMutations } from "../session-mutations";
@@ -20,6 +20,8 @@ const controls = vi.hoisted(() => ({
 }));
 const hlsJS = vi.hoisted(() => ({
   latest: null as null | { emit: (event: string, data: unknown) => void },
+  loadSource: vi.fn(),
+  startLoad: vi.fn(),
 }));
 // Captures the progress sampler's gone-session callback so a test can drive a
 // mid-stream eviction the way the real sampler reports one.
@@ -93,9 +95,13 @@ vi.mock("hls.js", () => ({
     emit(event: string, data: unknown) {
       this.handlers.get(event)?.(event, data);
     }
-    startLoad() {}
+    startLoad() {
+      hlsJS.startLoad();
+    }
     stopLoad() {}
-    loadSource() {}
+    loadSource() {
+      hlsJS.loadSource();
+    }
     attachMedia() {}
     destroy() {}
   },
@@ -204,14 +210,32 @@ function stubServer(handlers: {
 
 const sessionRef: { current: UsePlaybackSessionResult | null } = { current: null };
 
+const NO_VERSIONS: PlayerFileVersion[] = [];
+
 function Harness({
   subtitleMode = "auto",
   preferredSubtitleLanguage = null,
+  versions = NO_VERSIONS,
+  initialSubtitleTrackIndexByFileId,
 }: {
   subtitleMode?: SubtitleMode;
   preferredSubtitleLanguage?: string | null;
+  versions?: PlayerFileVersion[];
+  initialSubtitleTrackIndexByFileId?: Record<number, number>;
 }) {
-  const playback = usePlaybackSession("request-1", [], [], 7, 0, false, "auto");
+  const playback = usePlaybackSession(
+    "request-1",
+    versions,
+    [],
+    7,
+    0,
+    false,
+    "auto",
+    null,
+    undefined,
+    null,
+    initialSubtitleTrackIndexByFileId,
+  );
   // Published after commit, so the test reads the session the player rendered.
   useEffect(() => {
     sessionRef.current = playback;
@@ -222,6 +246,8 @@ function Harness({
     streamUrl: playback.streamUrl,
     plan: playback.plan,
     planRevision: playback.planRevision,
+    transportRevision: playback.transportRevision,
+    replayRevision: playback.replayRevision,
     shouldAutoPlay: playback.shouldAutoPlay,
     replanning: playback.replanning,
     replanError: playback.error,
@@ -286,6 +312,8 @@ beforeEach(() => {
   sessionRef.current = null;
   controls.current = null;
   hlsJS.latest = null;
+  hlsJS.loadSource.mockClear();
+  hlsJS.startLoad.mockClear();
   progressOptions.current = null;
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
@@ -372,10 +400,12 @@ describe("VideoPlayer with the playback session: reconnect", () => {
     await waitFor(() => expect(hlsJS.latest).not.toBeNull());
 
     // The new transport never starts: hls.js gives up twice on the network,
-    // and the startup guard reports the route as failed.
+    // and the startup guard reports the route as failed. The recovery is
+    // delayed with backoff, so the second failure is the reload's.
     const fatal = { fatal: true, type: "networkError", details: "manifestLoadError" };
     const now = vi.spyOn(Date, "now").mockReturnValue(10_000);
     act(() => hlsJS.latest?.emit("error", fatal));
+    await waitFor(() => expect(hlsJS.loadSource).toHaveBeenCalledTimes(2), { timeout: 3_000 });
     now.mockReturnValue(20_000);
     act(() => hlsJS.latest?.emit("error", fatal));
     now.mockRestore();
@@ -536,5 +566,136 @@ describe("VideoPlayer with the playback session: reconnect", () => {
     expect(requests.starts[1]?.start_position).toBe(321.5);
     expect(sessionRef.current?.connectionStatus).toBe("connected");
     expect(sessionRef.current?.shouldAutoPlay).toBe(true);
+  });
+});
+
+describe("VideoPlayer with the playback session: version projection", () => {
+  it("does not reload the media element when a version check restamps the list", async () => {
+    const requests = stubServer({
+      start: () => jsonResponse(playable("session-1", directPlan()), 201),
+      replan: () => jsonResponse(playable("session-1", directPlan()), 200),
+    });
+    const versions: PlayerFileVersion[] = [
+      {
+        file_id: 7,
+        file_path: "/release-a.mkv",
+        resolution: "1080p",
+        codec_video: "h264",
+        codec_audio: "aac",
+        hdr: false,
+        container: "mkv",
+        file_size: 1,
+        duration: 3600,
+        bitrate: 1,
+      },
+    ];
+    const view = renderHarness({ versions });
+    const video = await startWatching();
+    const src = video.getAttribute("src");
+    const loadCalls = vi.mocked(HTMLMediaElement.prototype.load).mock.calls.length;
+
+    // The catalog's version-liveness check answered: the same rows, now
+    // carrying the verdict it stamped on them. That is a new list identity
+    // arriving while the transport plays.
+    view.rerender(
+      createElement(Harness, {
+        versions: [{ ...versions[0]!, available: true }],
+      }),
+    );
+    await act(async () => {});
+
+    expect(video.getAttribute("src")).toBe(src);
+    expect(document.querySelector("video")).toBe(video);
+    expect(vi.mocked(HTMLMediaElement.prototype.load).mock.calls.length).toBe(loadCalls);
+    expect(requests.starts).toHaveLength(1);
+    expect(requests.replans).toHaveLength(0);
+    expect(sessionRef.current?.planRevision).toBe(1);
+  });
+});
+
+describe("VideoPlayer with the playback session: transport identity", () => {
+  it("initialises one transport per plan when the host re-renders", async () => {
+    const requests = stubServer({
+      start: () => jsonResponse(playable("session-1", directPlan()), 201),
+      replan: () => jsonResponse(playable("session-1", directPlan()), 200),
+    });
+    const view = renderHarness();
+    const video = await startWatching();
+    const src = video.getAttribute("src");
+    const loadCalls = vi.mocked(HTMLMediaElement.prototype.load).mock.calls.length;
+
+    // WatchPlaybackChrome rebuilds the pre-play subtitle index maps on every
+    // host render. As `loadSession` dependencies they re-keyed `onPlanFailure`,
+    // which the transport effect lists, so each render tore the media element
+    // down and reloaded the stream from the plan's origin.
+    view.rerender(createElement(Harness, { initialSubtitleTrackIndexByFileId: { 7: 0 } }));
+    await act(async () => {});
+    view.rerender(createElement(Harness, { initialSubtitleTrackIndexByFileId: { 7: 1 } }));
+    await act(async () => {});
+
+    expect(video.getAttribute("src")).toBe(src);
+    expect(document.querySelector("video")).toBe(video);
+    expect(vi.mocked(HTMLMediaElement.prototype.load).mock.calls.length).toBe(loadCalls);
+    expect(sessionRef.current?.planRevision).toBe(1);
+    expect(requests.starts).toHaveLength(1);
+    expect(requests.replans).toHaveLength(0);
+  });
+});
+
+describe("VideoPlayer with the playback session: transport identity", () => {
+  it("keeps the HLS transport for a track_change the server answers on the same stream", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const hlsPlan = fixturePlanV3({
+      plan_id: "plan:hls",
+      plan_attempt_key: "v3:hls",
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        mime_type: "application/vnd.apple.mpegurl",
+        headers: {},
+        header_refresh: "none",
+      },
+    });
+    // The server kept the running generation: same stream, same route, same
+    // audio selection, only the plan's own start follows the live playhead.
+    const sameStreamPlan = fixturePlanV3({
+      plan_id: "plan:hls-track",
+      plan_attempt_key: "v3:hls-track",
+      stream: hlsPlan.stream,
+      timeline: { ...hlsPlan.timeline, player_start_seconds: 150 },
+    });
+    const requests = stubServer({
+      start: () => jsonResponse(playable("session-1", directPlan()), 201),
+      replan: (_url, body) =>
+        jsonResponse(
+          playable("session-1", body.operation === "quality_change" ? hlsPlan : sameStreamPlan),
+        ),
+    });
+
+    renderHarness();
+    const video = await startWatching();
+    act(() => sessionRef.current?.changeQuality("720p", 100));
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+    expect(hlsJS.loadSource).toHaveBeenCalledTimes(1);
+    vi.mocked(HTMLMediaElement.prototype.load).mockClear();
+    const src = video.getAttribute("src");
+
+    // Subtitles off on a plan that shows none is a track change that changes
+    // nothing: the A/V transport is reused, so the element must not reload and
+    // the manifest must not be fetched again.
+    act(() => sessionRef.current?.changeSubtitleTrack(null, 150));
+    await waitFor(() =>
+      expect(requests.replans.map(({ body }) => body.operation)).toEqual([
+        "quality_change",
+        "track_change",
+      ]),
+    );
+    await waitFor(() => expect(sessionRef.current?.planRevision).toBe(3));
+    await act(async () => Promise.resolve());
+
+    expect(sessionRef.current?.transportRevision).toBe(2);
+    expect(hlsJS.loadSource).toHaveBeenCalledTimes(1);
+    expect(HTMLMediaElement.prototype.load).not.toHaveBeenCalled();
+    expect(video.getAttribute("src")).toBe(src);
   });
 });

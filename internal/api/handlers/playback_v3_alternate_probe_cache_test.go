@@ -65,7 +65,7 @@ func TestPrepareVirtualAlternateFileSkipsProbeForCachedCandidate(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/replan", nil)
-	prepared, provenance, err := h.prepareVirtualAlternateFileV3(req, alternate, "profile-1")
+	prepared, provenance, err := h.prepareVirtualAlternateFileV3(req, alternate, "profile-1", false)
 	if err != nil {
 		t.Fatalf("prepareVirtualAlternateFileV3 error: %v", err)
 	}

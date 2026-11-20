@@ -17,6 +17,12 @@ import (
 // writeNodeFFmpegFailingOn writes a fake FFmpeg that exits before its first
 // manifest when its arguments contain failPattern and otherwise writes a
 // playable manifest and keeps running. Every transcode invocation is logged.
+// nodeFFmpegProgress is the -progress stream a real video encode writes to
+// stdout while it muxes. A fake transport that stands for a playable encode
+// must report decoded frames: the frame counter is what tells a decode that
+// produced pictures from one that only muxed audio.
+const nodeFFmpegProgress = "printf 'frame=48\\nout_time_us=4000000\\nprogress=continue\\n';\n"
+
 func writeNodeFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegPath, logPath string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -36,6 +42,7 @@ func writeNodeFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegPath, log
 		"#EXTINF:2.0,\\nseg_0.m4s\\n#EXTINF:2.0,\\nseg_1.m4s\\n" +
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$last\" ;;\n" +
 		"esac\n" +
+		nodeFFmpegProgress +
 		"exec sleep 30\n"
 	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
 		t.Fatal(err)

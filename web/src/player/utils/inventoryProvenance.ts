@@ -38,35 +38,55 @@ export function isInventoryProvisional(
 }
 
 /**
- * Whether the player overlay's track rows are still placeholders rather than
- * probe evidence for the effective file.
+ * Whether the player overlay's track menu has no rows to show yet.
+ *
+ * A row the plan or the selected version already declares is inventory: the
+ * menu renders it immediately and marks it unverified, then swaps in probe
+ * evidence when it lands. Only an empty list waits in discovery, so a declared
+ * track list never renders as "Discovering"/"Unavailable" and an empty verified
+ * list keeps its final empty state.
  *
  * `planProvisional` is the plan's own verdict from `isInventoryProvisional`.
- * When it is false, rows can still be the catalog fallback the menus use before
- * a plan publishes selectable inventory for the effective source. Those rows
- * are pre-probe metadata, not evidence the file carries them, so they stay
- * provisional until the session or plan publishes its own inventory.
- *
- * Empty rows are never stale data: they keep the final empty state even when
- * the plan had to fall back, so the menu can say "No subtitles available"
- * instead of spinning forever.
  */
-export function isOverlayInventoryProvisional(
-  planProvisional: boolean,
-  publishedRows: boolean,
-  rowCount: number,
-): boolean {
-  if (planProvisional) return true;
-  return rowCount > 0 && !publishedRows;
+export function isOverlayInventoryProvisional(planProvisional: boolean, rowCount: number): boolean {
+  if (rowCount > 0) return false;
+  return planProvisional;
 }
 
 /**
- * How long a provisional menu may spin before it stops implying progress and
- * offers an explicit retry. A deferred probe usually lands in seconds; a menu
- * that is still provisional after this long is a stuck discovery the viewer
- * must be able to act on rather than watch forever.
+ * How long a provisional menu may wait before it stops implying progress and
+ * offers an explicit retry.
+ *
+ * This is the client's copy of the server's selection-probe bound, not an
+ * independent deadline. The server bounds one selection probe chain at 20 s
+ * (`virtualSelectionProbeBudget` in
+ * internal/api/handlers/playback_virtual_probe_chain.go) and answers the last
+ * enumeration attempt inside it, so the menu must wait at least that long or it
+ * declares "Not verified" while the server is still working — the measured
+ * behaviour with the previous 15 s window, which is shorter than a cold probe
+ * and produced "Not verified" at 15.2 s for selections the server answered
+ * afterwards. The margin covers one poll interval plus the read that delivers
+ * the answer. Keep the two numbers together when either changes.
  */
-export const PROVISIONAL_INVENTORY_TIMEOUT_MS = 15_000;
+export const PROVISIONAL_INVENTORY_TIMEOUT_MS = 22_000;
+
+/**
+ * How often a provisional menu re-reads its inventory while it waits.
+ *
+ * The answer normally arrives as the server's `versions_updated` event, but the
+ * event only invalidates the query: a missed or delayed frame, or a detail read
+ * that started before the evidence committed, would otherwise park the menu on
+ * declared metadata until the viewer pressed Retry. Polling makes the wait
+ * follow the server's own answer within one interval.
+ */
+export const PROVISIONAL_INVENTORY_POLL_MS = 3_000;
+
+/**
+ * When a provisional menu stops saying "Discovering" and says it is still
+ * checking. The first seconds are a probe landing; after that the honest state
+ * is "this is taking a while", not a fresh discovery.
+ */
+export const PROVISIONAL_INVENTORY_SLOW_MS = 8_000;
 
 /**
  * Whether a provisional menu has outlived the bound at `now`.
@@ -83,6 +103,21 @@ export function isProvisionalInventoryExpired(
 ): boolean {
   if (!provisional || provisionalSince === null) return false;
   return now - provisionalSince >= timeoutMs;
+}
+
+/**
+ * Whether a provisional menu has waited long enough to stop claiming it is
+ * discovering and say it is still checking. It is presentation only: the retry
+ * affordance still waits for `isProvisionalInventoryExpired`.
+ */
+export function isProvisionalInventorySlow(
+  provisional: boolean,
+  provisionalSince: number | null,
+  now: number,
+  slowMs: number = PROVISIONAL_INVENTORY_SLOW_MS,
+): boolean {
+  if (!provisional || provisionalSince === null) return false;
+  return now - provisionalSince >= slowMs;
 }
 
 /**

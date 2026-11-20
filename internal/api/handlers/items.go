@@ -633,9 +633,15 @@ func (h *ItemsHandler) HandleGetWatchDetail(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, detail)
 }
 
-// prefetchVirtualFileIDs warms virtual candidate listings for raw file rows,
-// shared by watch-detail, item-detail, and episode-list triggers. Dedupes,
-// caps at 2, and runs fully off the response path.
+// prefetchVirtualFileIDs warms virtual candidate listings for raw file rows
+// surfaced by the item-detail, versions, and episode-list reads. Dedupes, caps
+// at 2, and runs fully off the response path.
+//
+// The watch detail is not a trigger: a v2 watch read runs its own candidate
+// discovery (which lists, persists, and seeds the play path's listing cache —
+// see PlaybackHandler.SeedVirtualListing) and warms the rows it lists, so a
+// list-only prefetch from that read would pay provider traffic discovery
+// already paid for.
 func (h *ItemsHandler) prefetchVirtualFileIDs(ctx context.Context, fileIDs []int, profileID string) {
 	if h == nil || h.virtualPrefetcher == nil || h.virtualFileByID == nil || profileID == "" {
 		return
@@ -3050,31 +3056,6 @@ func hasMaskedMetadataCuration(ctx context.Context, user *models.User, groups ac
 		return false
 	}
 	return slices.Contains(auth.PolicyPermissions(effective), string(auth.PermissionMetadataCuration))
-}
-
-// prefetchWatchDetailVirtual warms virtual candidate listings for the rows a
-// watch detail offers, off the playback click path. Fire-and-forget:
-// PrefetchVirtualPlayback is already bounded (2 files), deduped, and runs on
-// a detached worker pool, so this never blocks the detail response. Only the
-// first virtual version is warmed; the start path ranks per device from the
-// neutral cache entry.
-func (h *ItemsHandler) prefetchWatchDetailVirtual(ctx context.Context, detail *catalog.WatchDetail, profileID string) {
-	if detail == nil {
-		return
-	}
-	if detail.Type != itemTypeMovie && detail.Type != itemTypeEpisode {
-		return
-	}
-	fileIDs := make([]int, 0, 2)
-	for _, v := range detail.Versions {
-		if v.FileID != 0 {
-			fileIDs = append(fileIDs, v.FileID)
-		}
-		if len(fileIDs) >= 2 {
-			break
-		}
-	}
-	h.prefetchVirtualFileIDs(ctx, fileIDs, profileID)
 }
 
 // HandleDelete handles DELETE /api/v1/admin/items/{id}.

@@ -1132,6 +1132,15 @@ type VirtualFilePersistArgs struct {
 	// automatic path leaves it false so a failure committed after the caller's
 	// last verdict read is still fenced out at write time.
 	AllowFailedVerdict bool
+	// SameReleaseRematch marks a required adoption the resolver certified as the
+	// same release under a new provider result id (a renumber). When the fence
+	// refuses such an adoption — the new id's path is already owned by a sibling
+	// row of that release, or carries a live failed verdict — the refusal is not
+	// stale-pin evidence: the row's release is proven, and its pin simply cannot
+	// move onto a path the catalog already assigns elsewhere. The saver logs the
+	// concrete cause but does not count the refusal, so a healthy row cannot be
+	// marched to a terminal failed verdict by a duplicate that owns the id.
+	SameReleaseRematch bool
 	// ExpectedProvider* is the adopting row's current durable identity,
 	// snapshotted with the CAS fields. When AdoptPath is set, the saver compares
 	// it to the incoming Provider* identity to decide whether the adopted

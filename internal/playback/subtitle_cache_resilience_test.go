@@ -238,7 +238,7 @@ func TestServeExtractWindowedUpstreamFailureBacksOff(t *testing.T) {
 		if calls != wantCalls*(i+1) {
 			t.Fatalf("attempt %d extract calls = %d, want %d", i, calls, wantCalls*(i+1))
 		}
-		remaining, cooling := c.extractionCoolingDown(opts, format)
+		remaining, _, cooling := c.extractionCoolingDown(opts, format)
 		if !cooling {
 			t.Fatalf("attempt %d: no cooldown after the failure", i)
 		}
@@ -265,7 +265,7 @@ func TestServeExtractWindowedUpstreamFailureBacksOff(t *testing.T) {
 	// at the base cooldown.
 	c.noteExtractionSuccess(opts, format)
 	c.noteExtractionFailure(opts, format)
-	remaining, cooling := c.extractionCoolingDown(opts, format)
+	remaining, _, cooling := c.extractionCoolingDown(opts, format)
 	if !cooling || remaining <= subtitleExtractionFailureBaseCooldown-time.Second || remaining > subtitleExtractionFailureBaseCooldown {
 		t.Fatalf("cooldown after success = %s (cooling=%t), want %s", remaining, cooling, subtitleExtractionFailureBaseCooldown)
 	}
@@ -484,7 +484,7 @@ func TestServeExtractFreshSourceRetryBypassesIdentityBackoff(t *testing.T) {
 	if len(calls) != 2 || calls[1] != freshPath {
 		t.Fatalf("extract calls = %v, want the failed URL then %q", calls, freshPath)
 	}
-	if _, cooling := c.extractionCoolingDown(freshOpts, format); cooling {
+	if _, _, cooling := c.extractionCoolingDown(freshOpts, format); cooling {
 		t.Fatal("fresh-source success left the identity cooling down")
 	}
 }

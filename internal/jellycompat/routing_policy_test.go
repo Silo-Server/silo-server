@@ -142,7 +142,7 @@ func TestBuildPlaybackSourceHonorsProgressiveRemuxRoutingPolicy(t *testing.T) {
 				t.Fatalf("SupportsDirectStream = %v, want %v", source.SupportsDirectStream, test.wantDirectStream)
 			}
 
-			dto := handler.mediaSourceDTO("item", "play", source)
+			dto := handler.mediaSourceDTO("item", "play", "", source)
 			if (dto.DirectStreamURL != "") != test.wantDirectStream {
 				t.Fatalf("DirectStreamURL = %q, advertised direct stream = %v", dto.DirectStreamURL, test.wantDirectStream)
 			}

@@ -204,6 +204,7 @@ func TestEnsureTranscodeSessionDoesNotHoldLifecycleLockWhileWaitingForManifest(t
 		"eval \"last=\\\"\\${$#}\\\"\"\n" +
 		"if [ \"$last\" = '-' ]; then exit 0; fi\n" +
 		"touch " + startedMarker + "\n" +
+		compatTestFFmpegProgress +
 		"exec sleep 30\n"
 	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
 		t.Fatal(err)
@@ -315,6 +316,7 @@ func TestEnsureTranscodeSessionGivesSoftwareFallbackFreshManifestBudget(t *testi
 		"mkdir -p \"$out\"\n" +
 		"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
 		"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
+		compatTestFFmpegProgress +
 		"exec sleep 30\n"
 	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
 		t.Fatal(err)

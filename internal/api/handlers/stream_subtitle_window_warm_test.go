@@ -981,9 +981,12 @@ func TestVirtualTextWindowWarmStartsDuringPlayback(t *testing.T) {
 	waitForCommittedTextEntry(t, handler.SubtitleCache, identity, 0, "subrip")
 }
 
-// The text exception is text-only: a bitmap .sup full track is tens of
-// megabytes and stays paused-only, so a playing session never warms it.
-func TestVirtualPGSWindowWarmSkipsActivePlayback(t *testing.T) {
+// The paused-only admission is for the full-track bitmap warm and must stay for
+// it: a whole .sup is tens of megabytes demuxed from the whole container, and it
+// is never the page playback needs next. Only a bounded bitmap page routes to the
+// progressive fill while playing (TestVirtualBitmapPageMissStartsProgressiveFillWhilePlaying);
+// the full-track shape still waits for a pause.
+func TestVirtualPGSFullTrackWarmSkipsActivePlayback(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script test helper is unix-only")
 	}
@@ -994,7 +997,7 @@ func TestVirtualPGSWindowWarmSkipsActivePlayback(t *testing.T) {
 	session.IsPaused = false
 	identity := virtualSubtitleCacheIdentity(file, virtualURI, 0)
 
-	handler.warmVirtualSubtitleAfterWindowMiss(file, file.SubtitleTracks[0], session, playback.StreamExtractOpts{
+	handler.warmVirtualSubtitle(file, file.SubtitleTracks[0], session, playback.StreamExtractOpts{
 		InputPath:       "unused",
 		CacheIdentity:   identity,
 		TrackIndex:      0,
@@ -1002,10 +1005,10 @@ func TestVirtualPGSWindowWarmSkipsActivePlayback(t *testing.T) {
 		SeekSeconds:     100,
 		DurationSeconds: 120,
 		FFmpegPath:      filepath.Join(dir, "ffmpeg"),
-	}, nil, true, "")
+	}, nil, true, "", false, false, false)
 
 	if _, err := os.Stat(argsLog); !os.IsNotExist(err) {
-		t.Fatalf("no PGS warm should run while the session is playing: %v", err)
+		t.Fatalf("no full-track PGS warm should run while the session is playing: %v", err)
 	}
 }
 
@@ -1076,11 +1079,11 @@ func TestVirtualImplicitWindowAppliesToASS(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("ASS whole-track fetch = %d %q", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get(playback.SubtitleCoverageHeader); got != "0.000-600.000" {
-		t.Fatalf("ASS windowed coverage header = %q, want 0.000-600.000", got)
+	if got := rec.Header().Get(playback.SubtitleCoverageHeader); got != "0.000-120.000" {
+		t.Fatalf("ASS windowed coverage header = %q, want 0.000-120.000", got)
 	}
 	windowLine := windowedFFmpegArgs(t, argsLog)
-	for _, want := range []string{"-ss 0.000", "-to 600.000", "-copyts", "-c:s copy", "-f ass pipe:1"} {
+	for _, want := range []string{"-ss 0.000", "-to 120.000", "-copyts", "-c:s copy", "-f ass pipe:1"} {
 		if !strings.Contains(windowLine, want) {
 			t.Fatalf("implicit ASS window args %q missing %q", windowLine, want)
 		}
@@ -1510,8 +1513,8 @@ func TestVirtualWholeTrackTextFetchServesImplicitWindowThenWarms(t *testing.T) {
 	}
 	// A whole-track request served only a window must say so, or the client
 	// cannot know it needs to request subsequent windows.
-	if got := rec.Header().Get(playback.SubtitleCoverageHeader); got != "0.000-600.000" {
-		t.Fatalf("windowed coverage header = %q, want 0.000-600.000", got)
+	if got := rec.Header().Get(playback.SubtitleCoverageHeader); got != "0.000-120.000" {
+		t.Fatalf("windowed coverage header = %q, want 0.000-120.000", got)
 	}
 	if got := rec.Header().Get(playback.SubtitleWindowedHeader); got != "true" {
 		t.Fatalf("windowed marker = %q, want true", got)
@@ -1542,8 +1545,8 @@ func TestVirtualWholeTrackTextFetchServesImplicitWindowThenWarms(t *testing.T) {
 			windowLine = line
 		}
 	}
-	if !strings.Contains(windowLine, "-ss 0.000") || !strings.Contains(windowLine, "-to 600.000") {
-		t.Fatalf("implicit window args = %q, want -ss 0.000 -to 600.000", windowLine)
+	if !strings.Contains(windowLine, "-ss 0.000") || !strings.Contains(windowLine, "-to 120.000") {
+		t.Fatalf("implicit window args = %q, want -ss 0.000 -to 120.000", windowLine)
 	}
 
 	// Warm regression: once the detached warm has committed, a second
@@ -1695,8 +1698,8 @@ func TestVirtualPositionWithoutDurationClampsToImplicitWindow(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "WEBVTT") {
 		t.Fatalf("position-only fetch = %d %q", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get(playback.SubtitleCoverageHeader); got != "0.000-600.000" {
-		t.Fatalf("position-only coverage header = %q, want 0.000-600.000", got)
+	if got := rec.Header().Get(playback.SubtitleCoverageHeader); got != "0.000-120.000" {
+		t.Fatalf("position-only coverage header = %q, want 0.000-120.000", got)
 	}
 	if got := rec.Header().Get(playback.SubtitleWindowedHeader); got != "true" {
 		t.Fatalf("position-only windowed marker = %q, want true", got)
@@ -1704,7 +1707,7 @@ func TestVirtualPositionWithoutDurationClampsToImplicitWindow(t *testing.T) {
 	// The advertised range must match the ffmpeg command: the open `-ss 0`
 	// without a `-to` was the unbounded extract this finding is about.
 	windowLine := windowedFFmpegArgs(t, argsLog)
-	for _, want := range []string{"-ss 0.000", "-to 600.000"} {
+	for _, want := range []string{"-ss 0.000", "-to 120.000"} {
 		if !strings.Contains(windowLine, want) {
 			t.Fatalf("position-only window args %q missing %q", windowLine, want)
 		}
@@ -1803,13 +1806,13 @@ func TestSubtitleUpstreamFailureAnswersRetryableAndBacksOff(t *testing.T) {
 	}
 }
 
-// The implicit window keeps the legacy 600 s bound for text whole-track clients
-// without a windowing contract, so a native client that does not refetch does
-// not lose subtitles after two minutes. The page starts on the span-aligned
-// grid so every retry inside it asks for the same window.
+// The implicit window is the same 120 s page the web player requests, so a
+// text whole-track client without a windowing contract is still bounded to a
+// read that finishes inside a fetch deadline. The page starts on the
+// span-aligned grid so every retry inside it asks for the same window.
 func TestVirtualSubtitleImplicitWindowDurationAndResumeStart(t *testing.T) {
-	if virtualSubtitleImplicitWindowSeconds != 600 {
-		t.Fatalf("implicit window = %vs, want 600s", virtualSubtitleImplicitWindowSeconds)
+	if virtualSubtitleImplicitWindowSeconds != 120 {
+		t.Fatalf("implicit window = %vs, want 120s", virtualSubtitleImplicitWindowSeconds)
 	}
 	handler := &StreamHandler{}
 	opts := playback.StreamExtractOpts{TrackIndex: 0, SourceCodec: "subrip"}
@@ -1820,8 +1823,8 @@ func TestVirtualSubtitleImplicitWindowDurationAndResumeStart(t *testing.T) {
 	if opts.SeekSeconds != 3600 {
 		t.Fatalf("implicit start = %v, want the containing page start (3600)", opts.SeekSeconds)
 	}
-	if opts.DurationSeconds != 600 {
-		t.Fatalf("implicit duration = %v, want 600", opts.DurationSeconds)
+	if opts.DurationSeconds != 120 {
+		t.Fatalf("implicit duration = %v, want 120", opts.DurationSeconds)
 	}
 }
 
@@ -1895,13 +1898,14 @@ func TestVirtualWholeTrackBitmapPageIsReusedWithinItsPage(t *testing.T) {
 	}
 	dir := t.TempDir()
 	argsLog := filepath.Join(dir, "ffmpeg.args")
-	handler, session, file, _ := newVirtualSubtitleWindowFixture(t, dir,
+	handler, session, file, virtualURI := newVirtualSubtitleWindowFixture(t, dir,
 		pgsWindowStubScript(argsLog))
 	file.FileSize = 50 << 30
 	file.SubtitleTracks = []models.SubtitleTrack{{Index: 0, Codec: "hdmv_pgs_subtitle", Language: "fr"}}
 	session.VirtualSubtitleTracks = file.SubtitleTracks
-	// A playing session: the full-track .sup warm stays paused-only, so the
-	// artifact can never answer either request.
+	// A playing session: the paused-only full-track warm would never run, but a
+	// page miss starts the progressive fill, whose artifact then answers every
+	// later request for the track.
 	session.IsPaused = false
 	writeSubtitleLayoutProbe(t, dir, file.SubtitleTracks...)
 
@@ -1930,27 +1934,33 @@ func TestVirtualWholeTrackBitmapPageIsReusedWithinItsPage(t *testing.T) {
 	if second.Code != http.StatusOK {
 		t.Fatalf("second fetch = %d %q", second.Code, second.Body.String())
 	}
-	// The page the first request produced must answer the second one: a window
-	// anchored at the shifted playhead would be a second full container read.
+	// No page is extracted a second time: not at the shifted playhead, and not
+	// the page again. The track's artifact answered the request whole, which is
+	// why it carries no bounded-window coverage.
 	if got := countArgsMatching(t, argsLog, "-ss 6.000"); got != 0 {
 		t.Fatalf("playhead-anchored page [6,126] was extracted %d times, want 0", got)
 	}
 	if got := countArgsMatching(t, argsLog, "-ss 0.000", "-to 120.000"); got != 1 {
 		t.Fatalf("page [0,120] was extracted %d times, want exactly 1", got)
 	}
-	if got := second.Header().Get(playback.SubtitleCoverageHeader); got != "0.000-120.000" {
-		t.Fatalf("second coverage = %q, want the same page 0.000-120.000", got)
+	if got := second.Header().Get(playback.SubtitleCoverageHeader); got != "" {
+		t.Fatalf("second coverage = %q, want none: the committed artifact is served whole", got)
 	}
 	if second.Body.String() != first.Body.String() {
 		t.Fatalf("second body = %q, want the first page's bytes %q", second.Body.String(), first.Body.String())
 	}
+	if !handler.SubtitleCache.HasCommittedEntry(file.FilePath, virtualSubtitleCacheIdentity(file, virtualURI, 0), 0, "hdmv_pgs_subtitle", "") {
+		t.Fatal("the progressive fill never committed the track's artifact")
+	}
 }
 
-// A playing bitmap track must prefetch the page after the one it was served:
-// without it every page boundary re-demuxes the relay input and playback goes
-// silent until that extract finishes. The full-track .sup warm stays
-// paused-only, so the prefetch must be a bounded page and nothing else.
-func TestVirtualBitmapWindowPrefetchRunsWhilePlaying(t *testing.T) {
+// A playing bitmap page is what the track's progressive artifact exists to
+// answer, so a page miss starts that fill — and only that fill. The fill demuxes
+// the track once from source zero and publishes pages from the artifact as it
+// parses, so the bounded page prefetch would read the same source a second time
+// for pages the fill already produces. Both the page the viewer is on and every
+// later page come from that one artifact.
+func TestVirtualBitmapPageMissStartsProgressiveFillWhilePlaying(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script test helper is unix-only")
 	}
@@ -1972,14 +1982,21 @@ func TestVirtualBitmapWindowPrefetchRunsWhilePlaying(t *testing.T) {
 		t.Fatalf("fetch = %d %q", rec.Code, rec.Body.String())
 	}
 
-	// The prefetch is detached: wait for it to settle before reading the log.
+	// The fill is detached: wait for it to settle before reading the log.
 	handler.waitForBackgroundSubtitleWarms()
-	if got := countArgsMatching(t, argsLog, "-ss 120.000"); got != 1 {
-		t.Fatalf("next-page prefetch extracts = %d, want exactly 1", got)
+	window, warm := ffmpegLogLines(t, argsLog)
+	if warm != 1 {
+		t.Fatalf("progressive fills = %d, want exactly 1: a page miss is what starts it", warm)
 	}
-	if _, warm := ffmpegLogLines(t, argsLog); warm != 0 {
-		t.Fatalf("full-track warms = %d, want 0: a playing bitmap track warms pages only", warm)
+	if window != 1 {
+		t.Fatalf("source extracts = %d, want only the page this request served", window)
 	}
+	if got := countArgsMatching(t, argsLog, "-ss 120.000"); got != 0 {
+		t.Fatalf("next-page prefetch extracts = %d, want 0: the fill publishes that page", got)
+	}
+	// The fill reached end of file in this stub, so its artifact replaced every
+	// later source read for the track.
+	waitForCommittedEntry(t, handler.SubtitleCache, virtualSubtitleCacheIdentity(file, session.VirtualSourceURI, 0), 0, "hdmv_pgs_subtitle")
 }
 
 // A bitmap request whose start is off the page grid must be extracted as the
@@ -2048,11 +2065,12 @@ func TestVirtualBitmapUnalignedWindowSnapsToItsPage(t *testing.T) {
 	}
 }
 
-// A prefetched bitmap page must be the page the client asks for next, so that
-// the request is a cache hit. Deriving the prefetch from the live playhead's
-// page (not from the triggering request's start, and not from position plus a
-// fixed lead) is what makes this hold by construction.
-func TestVirtualBitmapPagePrefetchServesTheNextPage(t *testing.T) {
+// The page after a served page must come from the track's progressive artifact,
+// not from a second relay read. The fill parses the track once from source zero
+// and keeps every display set it has read, so the next page is cut out of the
+// local artifact even though the artifact is whole-track bytes rather than a
+// page-shaped slice.
+func TestVirtualBitmapNextPageIsCutFromTheFillArtifact(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script test helper is unix-only")
 	}
@@ -2079,11 +2097,11 @@ func TestVirtualBitmapPagePrefetchServesTheNextPage(t *testing.T) {
 		t.Fatalf("first page = %d %q", first.Code, first.Body.String())
 	}
 	handler.waitForBackgroundSubtitleWarms()
-
-	// The detached prefetch pulled the page after the playhead's page — the page
-	// the client asks for next.
-	if got := countArgsMatching(t, argsLog, "-ss 1920.000", "-to 2040.000"); got != 1 {
-		t.Fatalf("next-page prefetch extracts = %d, want exactly 1", got)
+	// Two relay reads so far: the page this request served, and the fill that
+	// page miss started. Nothing here is a second page read.
+	relayReadsAfterFirst := countArgsMatching(t, argsLog, "http://")
+	if relayReadsAfterFirst != 2 {
+		t.Fatalf("relay reads after the first page = %d, want the page extract plus the one fill", relayReadsAfterFirst)
 	}
 	if got := countArgsMatching(t, argsLog, "-ss 1824"); got != 0 {
 		t.Fatalf("live-playhead slice [1824.6,...] was extracted %d times, want 0", got)
@@ -2094,13 +2112,19 @@ func TestVirtualBitmapPagePrefetchServesTheNextPage(t *testing.T) {
 		t.Fatalf("next page = %d %q", second.Code, second.Body.String())
 	}
 	handler.waitForBackgroundSubtitleWarms()
-	// The natural next request was answered by the prefetched page: no second
-	// extraction of it.
-	if got := countArgsMatching(t, argsLog, "-ss 1920.000", "-to 2040.000"); got != 1 {
-		t.Fatalf("page [1920,2040] was extracted %d times, want the prefetch's 1", got)
+	// The next page was cut from the local artifact: no second relay read for
+	// any window of this track.
+	if got := countArgsMatching(t, argsLog, "http://"); got != relayReadsAfterFirst {
+		t.Fatalf("relay reads after the next page = %d, want the %d from before: the artifact answers it", got, relayReadsAfterFirst)
 	}
-	if second.Body.String() != first.Body.String() {
-		t.Fatalf("next page body = %q, want the page bytes %q", second.Body.String(), first.Body.String())
+	// The page is cut from the local artifact (its input is the cached .sup, not
+	// the relay), with the artifact's own seek slack applied.
+	if got := countArgsMatching(t, argsLog, "-seek_timestamp 1", ".sup"); got == 0 {
+		logged, _ := os.ReadFile(argsLog)
+		t.Fatalf("the next page was never cut from the artifact; ffmpeg log:\n%s", logged)
+	}
+	if second.Body.Len() == 0 {
+		t.Fatal("the next page body is empty")
 	}
 }
 
@@ -2751,4 +2775,142 @@ func TestVirtualSubtitleWarmStaysFullTrackAtStart(t *testing.T) {
 		t.Fatalf("from-start warm ffmpeg invocations = %d window, %d full-track; want 0/1", window, warm)
 	}
 	waitForCommittedTextEntry(t, handler.SubtitleCache, identity, 0, "subrip")
+}
+
+// A windowed text extract that fails after its muxer wrote the WebVTT header
+// must not commit a 200 whose body is only "WEBVTT\n". FFmpeg writes the header
+// before it reaches the window's first packet; a failed source read after that
+// used to look like a successful empty subtitle document to the browser, which
+// is why the measured SRT path showed a 200 with 7 bytes before the next
+// request got a real window.
+func TestVirtualWindowHeaderOnlyFailureAnswersRetryable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helper is unix-only")
+	}
+	dir := t.TempDir()
+	handler, session, file, _ := newVirtualSubtitleWindowFixture(t, dir,
+		"#!/bin/sh\n"+
+			"printf 'WEBVTT\\n'\n"+
+			"printf 'Server returned 500 Server Error reply\\n' >&2\n"+
+			"exit 1\n")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/subtitle?position=600&duration=120", nil)
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				t.Fatalf("header-only failure committed a response instead of answering retryably: %v", recovered)
+			}
+		}()
+		handler.streamEmbeddedSubtitle(rec, req, file, 0, session, false, "vtt")
+	}()
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("header-only failure = %d %q, want a retryable 503", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "WEBVTT") {
+		t.Fatalf("header-only failure body = %q, want no subtitle document", rec.Body.String())
+	}
+	if got := rec.Header().Get("Retry-After"); got == "" {
+		t.Fatal("retryable header-only failure carried no Retry-After")
+	}
+}
+
+// A committed .sup artifact pins the release it was extracted from. A seek that
+// re-requests the whole track must serve that artifact even when the live
+// layout probe cannot reach the provider; re-probing first is what turned a
+// completed artifact into a 503 after a seeking client came back.
+func TestVirtualPGSCommittedArtifactSkipsDriftProbe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helper is unix-only")
+	}
+	dir := t.TempDir()
+	argsLog := filepath.Join(dir, "ffmpeg.args")
+	probeLog := filepath.Join(dir, "ffprobe.log")
+	handler, session, file, virtualURI := newVirtualSubtitleWindowFixture(t, dir,
+		pgsWindowStubScript(argsLog))
+	file.SubtitleTracks = []models.SubtitleTrack{{Index: 0, Codec: "hdmv_pgs_subtitle"}}
+	session.VirtualSubtitleTracks = file.SubtitleTracks
+
+	identity := virtualSubtitleCacheIdentity(file, virtualURI, 0)
+	done := handler.SubtitleCache.WarmTrackInBackground(playback.StreamExtractOpts{
+		InputPath:     "unused",
+		CacheIdentity: identity,
+		TrackIndex:    0,
+		SourceCodec:   "hdmv_pgs_subtitle",
+		FFmpegPath:    filepath.Join(dir, "ffmpeg"),
+	}, playback.StreamExtractSubtitle, "")
+	<-done
+	if !handler.SubtitleCache.HasCommittedEntry("unused", identity, 0, "hdmv_pgs_subtitle", "") {
+		t.Fatal("pre-warm did not commit the .sup artifact")
+	}
+	// A provider that cannot answer ffprobe is the measured post-seek case: the
+	// artifact is on disk, but the probe used to run first and fail closed.
+	writeExecutableScript(t, filepath.Join(dir, "ffprobe"),
+		"#!/bin/sh\necho probe >> '"+probeLog+"'\nexit 1\n")
+	if err := os.Remove(argsLog); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/subtitle", nil)
+	handler.streamEmbeddedSubtitle(rec, req, file, 0, session, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("seek re-request = %d %q, want the committed .sup artifact", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() == 0 {
+		t.Fatal("committed .sup artifact served an empty body")
+	}
+	if got := countLogLines(t, probeLog); got != 0 {
+		t.Fatalf("drift probe ran %d times despite a committed .sup artifact, want 0", got)
+	}
+	if _, err := os.Stat(argsLog); !os.IsNotExist(err) {
+		t.Fatalf("ffmpeg ran for a committed .sup cache hit: %v", err)
+	}
+}
+
+// A probe failure is answered retryably, but the retry can only succeed if the
+// artifact it reads exists. The handler therefore starts a detached fill whose
+// own probe gets another chance; production showed repeated probe-timeout 503s
+// because nothing was ever warmed between them.
+func TestVirtualProbeFailureWarmsSoRetryIsServed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helper is unix-only")
+	}
+	dir := t.TempDir()
+	argsLog := filepath.Join(dir, "ffmpeg.args")
+	probeLog := filepath.Join(dir, "ffprobe.log")
+	marker := filepath.Join(dir, "first-probe")
+	handler, session, file, virtualURI := newVirtualSubtitleWindowFixture(t, dir,
+		"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '"+argsLog+"'\ncat <<'VTT'\n"+warmSubtitleVTT+"VTT\n")
+	// The first probe fails; every later probe reports the fixture's layout, so
+	// the detached warm can validate its own registration and commit.
+	writeExecutableScript(t, filepath.Join(dir, "ffprobe"),
+		"#!/bin/sh\necho probe >> '"+probeLog+"'\n"+
+			"if [ ! -f '"+marker+"' ]; then : > '"+marker+"'; exit 1; fi\n"+
+			"printf '%s' '{\"streams\":[{\"index\":0,\"codec_name\":\"subrip\",\"codec_type\":\"subtitle\",\"tags\":{}}]}'\n")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/subtitle?position=600&duration=120", nil)
+	handler.streamEmbeddedSubtitle(rec, req, file, 0, session, true)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("failed probe = %d %q, want a retryable 503", rec.Code, rec.Body.String())
+	}
+
+	identity := virtualSubtitleCacheIdentity(file, virtualURI, 0)
+	waitForCommittedTextEntry(t, handler.SubtitleCache, identity, 0, "subrip")
+	probesAfterWarm := countLogLines(t, probeLog)
+	if probesAfterWarm < 2 {
+		t.Fatalf("probes after the warm = %d, want the failed serve probe plus the warm's probe", probesAfterWarm)
+	}
+
+	retry := httptest.NewRecorder()
+	retryReq := httptest.NewRequest(http.MethodGet, "/subtitle?position=600&duration=120", nil)
+	handler.streamEmbeddedSubtitle(retry, retryReq, file, 0, session, true)
+	if retry.Code != http.StatusOK || !strings.Contains(retry.Body.String(), "WEBVTT") {
+		t.Fatalf("retry after the warm = %d %q, want the committed artifact", retry.Code, retry.Body.String())
+	}
+	if got := countLogLines(t, probeLog); got != probesAfterWarm {
+		t.Fatalf("retry probed the source again: probes %d -> %d, want a committed-artifact hit", probesAfterWarm, got)
+	}
 }

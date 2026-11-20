@@ -8,8 +8,12 @@ import {
 } from "../utils/parseVTT";
 import type { PlayerSubtitleInfo } from "../types";
 import { isASSCodec, isBitmapCodec } from "../utils/subtitleCodecs";
-import { alignSubtitleWindowStart } from "../utils/subtitleWindows";
-import { toMediaTime } from "../utils/mediaTimeline";
+import {
+  subtitlePlayheadSeconds,
+  subtitleRetryAfterMs,
+  subtitleRetryDelayMs,
+  subtitleWindowStartForPlayhead,
+} from "../utils/subtitleWindows";
 import { isSubtitleSourceChanged } from "../utils/subtitleSourceChanged";
 import { isPlaybackSessionGoneResponse } from "../playback-errors";
 
@@ -29,15 +33,8 @@ const PREFETCH_LEAD = 30;
 // Overlap consecutive windows by a few seconds so ffmpeg boundary
 // rounding can't drop a cue that straddles the join.
 const WINDOW_OVERLAP = 5;
-// Pull back this many seconds from the current position when starting
-// a fresh fetch, so a quick scrub back still lands inside the window.
-const SEEK_BACKOFF = 2;
-// Start windows on a coarse source-time grid instead of at the exact
-// playhead. Repeated polls while the playhead advances would otherwise ask
-// for a new 120 s window every second and re-demux almost the whole slice;
-// every position inside one grid cell asks for the same window, and the
-// server can answer a shifted request from a covering cached window.
-const WINDOW_ALIGN_SECONDS = 30;
+// The window grid (cell length and seek backoff) lives in subtitleWindows so
+// every consumer of a track snaps to the same start.
 // Abort a window fetch when the response goes this long without delivering
 // a chunk. Extraction streams cues progressively, so a healthy-but-slow
 // ffmpeg keeps resetting the clock; only a genuinely hung one trips it.
@@ -45,10 +42,10 @@ const WINDOW_ALIGN_SECONDS = 30;
 // 60s matches the server relay's first-byte budget (30s) plus headroom for
 // a slow-but-progressing Usenet/altmount extraction.
 const FETCH_STALL_TIMEOUT_MS = 60_000;
-// Wait this long after a failed window fetch before retrying, so a
-// persistently failing extraction doesn't turn timeupdate into a fetch storm.
-const FETCH_RETRY_BACKOFF_MS = 5_000;
-const FETCH_RETRY_MAX_BACKOFF_MS = 60_000;
+// The backoff ladder after a failed window fetch lives in subtitleWindows
+// (subtitleRetryDelayMs): doubling, capped, and raised by the server's
+// Retry-After so a refusal it is already recovering from is not asked again too
+// early.
 // Consecutive window failures tolerated before the fetcher stops scheduling
 // retries for this track mount — the same terminal-after-budget policy the
 // ASS path (useASSSubtitles) applies to its text fetches. Without it a source
@@ -65,6 +62,12 @@ const FETCH_MAX_CONSECUTIVE_FAILURES = 4;
 // the same backoff loop on a separate, generous budget so a flap recovers
 // while a truly dead source still terminates instead of polling forever.
 const FETCH_MAX_RETRYABLE_FAILURES = 12;
+// After this many consecutive retryable refusals with no cue on screen the
+// mount reports `stalled` while it keeps retrying: the second refusal is the
+// one that disproves the server's promise that a budget refusal's retry is
+// served from the recovery extraction. See subtitleWindows.ts for the same
+// threshold on the windowed (bitmap) path.
+const RETRYABLE_STALL_REPORT_FAILURES = 2;
 // Coverage end for a whole-track (sidecar/downloaded) fetch when the media
 // duration is not known yet: large enough that no playhead can outrun it, so
 // the track never looks like it needs a windowed refetch.
@@ -208,13 +211,14 @@ function wholeSecondPosition(position: number): number {
 }
 
 /**
- * Snap a fetch anchor to the window grid. The request starts up to one grid
- * cell behind the playhead, so the current cue stays covered while every
- * position in that cell shares one server window. The math is shared with the
- * bitmap page fetcher so the two grids cannot drift apart.
+ * Snap a fetch anchor to the window grid (see subtitleWindowStartForPlayhead).
+ * The request starts up to one grid cell behind the playhead, so the current
+ * cue stays covered while every position in that cell shares one server
+ * window. The math is shared with the bitmap page fetcher so the two grids
+ * cannot drift apart.
  */
 function alignWindowStart(position: number): number {
-  return alignSubtitleWindowStart(position, WINDOW_ALIGN_SECONDS, SEEK_BACKOFF);
+  return subtitleWindowStartForPlayhead(position);
 }
 
 /** Request the same bounded interval used by the coverage tracker. */
@@ -277,7 +281,7 @@ export function useSubtitleTracks(
   // fetched before the first media metadata arrives.
   streamGeneration = 0,
   onLoadState?: (
-    state: "idle" | "loading" | "refreshing" | "ready" | "error" | "unavailable",
+    state: "idle" | "loading" | "refreshing" | "ready" | "stalled" | "error" | "unavailable",
   ) => void,
   // Fired when the server answers a window fetch with `subtitle_source_changed`
   // (409): a virtual release rotated under this plan, so every URL for the
@@ -379,6 +383,30 @@ export function useSubtitleTracks(
   // parked, while a track, version, or session change — each of which mints a
   // new URL — clears the latch as a deliberate fresh attempt.
   const parkedTrackUrlRef = useRef<string | null>(null);
+
+  // A stream reload replaces the <video> element, so a build can land in the
+  // gap where the ref is null. `videoRef` is stable, so nothing re-runs the
+  // effect when the element arrives, and a build that returned early installed
+  // no timeupdate listener either: the track would fetch nothing and never
+  // load. Watch for the element while it is missing, then rebuild once.
+  const [elementEpoch, setElementEpoch] = useState(0);
+  useEffect(() => {
+    if (videoRef.current) return;
+    let frame = 0;
+    let attempts = 0;
+    const look = () => {
+      if (videoRef.current) {
+        setElementEpoch((epoch) => epoch + 1);
+        return;
+      }
+      // Bound the wait to about five seconds of frames: a player that goes
+      // away for good must not leave a frame loop running.
+      if (++attempts > 300) return;
+      frame = requestAnimationFrame(look);
+    };
+    frame = requestAnimationFrame(look);
+    return () => cancelAnimationFrame(frame);
+  }, [videoRef, elementEpoch]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -503,6 +531,15 @@ export function useSubtitleTracks(
     let inflight: AbortController | null = null;
     let inflightStart = 0;
     let inflightURL: string | null = null;
+    // Set when the playhead moved into a different window while one was still
+    // on the wire. Extraction is the expensive part of a subtitle slice, so a
+    // request that was already streaming is never cancelled to chase the
+    // playhead: it runs to completion, lands in the server's window cache, and
+    // the planner runs again afterwards. A deliberate seek still supersedes
+    // (see fetchWindow). Re-planning rather than replaying a remembered start
+    // is what keeps the retry on the playhead's own window: a position that is
+    // now covered issues no request at all.
+    let windowRequestedWhileBusy = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     if (restored?.hasFetched) onLoadStateRef.current?.("ready");
     // Set on a failed (errored or stalled) window fetch; maybeFetch waits out
@@ -530,6 +567,16 @@ export function useSubtitleTracks(
     // response: network error or stall). Read by the failure branch to route
     // retryable statuses away from the terminal budget.
     let lastResponseStatus = 0;
+    // `Retry-After` the latest window attempt carried, in milliseconds. The
+    // server raises it for a refusal it is already recovering from (a subtitle
+    // page or window-budget answer), so honoring it is what lets the retry land
+    // on the recovery work instead of asking again too early.
+    let lastResponseRetryAfterMs = 0;
+
+    // True once this mount has told the player that the retryable ladder has
+    // stopped being a load worth waiting on. Cleared by the next committed
+    // window, so one stall episode reports once.
+    let stalledReported = false;
 
     // Clear the spent failure budget so a deliberate new window request (a
     // seek or a refresh rebuild) gets its own retries instead of inheriting
@@ -539,6 +586,7 @@ export function useSubtitleTracks(
       retryableFailures = 0;
       retryDelay = 0;
       lastFetchFailureAt = 0;
+      stalledReported = false;
     }
 
     // Reads the track's current active cues. The browser drives this through
@@ -622,9 +670,16 @@ export function useSubtitleTracks(
     /**
      * Fetch one slice. `seekStart === null` requests the whole track (sidecar
      * and downloaded text), which has no position/duration parameters and
-     * covers the entire media.
+     * covers the entire media. `supersede` is set only by a deliberate seek:
+     * a position the viewer jumped to must not wait behind an extraction,
+     * while a playhead that merely drifted is re-planned once the window on the
+     * wire settles.
      */
-    async function fetchWindow(seekStart: number | null, resetExisting: boolean) {
+    async function fetchWindow(
+      seekStart: number | null,
+      resetExisting: boolean,
+      supersede = false,
+    ) {
       if (!activeUrl) return;
 
       // A player event burst can ask for the same window two or three times
@@ -633,6 +688,7 @@ export function useSubtitleTracks(
       // bytes, so coalesce onto the identical in-flight request.
       const url = seekStart === null ? activeUrl : appendPosition(activeUrl, seekStart);
       if (inflight && inflightURL === url) {
+        windowRequestedWhileBusy = false;
         if (resetExisting) {
           // Preserve the caller's reset intent without replacing the fetch:
           // the in-flight window already covers this range.
@@ -641,14 +697,25 @@ export function useSubtitleTracks(
           coverageStart = seekStart ?? 0;
           windowEnd = seekStart ?? 0;
           atEOF = false;
-          onLoadStateRef.current?.(placeholders ? "refreshing" : "loading");
+          if (!stalledReported) {
+            onLoadStateRef.current?.(placeholders ? "refreshing" : "loading");
+          }
         }
         return;
       }
 
-      // Only one window on the wire at a time: each fetch keeps an
-      // ffmpeg process alive, double-fetching wastes that.
+      // Only one window on the wire at a time: each fetch keeps an ffmpeg
+      // process alive, and a cancelled one throws away the extraction the
+      // server had already done. A playhead that moved into a different window
+      // is remembered and re-planned once this one settles; only a seek
+      // cancels an in-flight window.
+      if (inflight && !supersede) {
+        windowRequestedWhileBusy = true;
+        return;
+      }
+
       inflight?.abort();
+      windowRequestedWhileBusy = false;
       const controller = new AbortController();
       inflight = controller;
       inflightStart = seekStart ?? 0;
@@ -675,11 +742,17 @@ export function useSubtitleTracks(
 
       let succeeded = false;
       lastResponseStatus = 0;
+      lastResponseRetryAfterMs = 0;
+      // Cues this window actually delivered. A window that streams in whole
+      // and carries none is a valid empty window, not a failure.
+      let producedCues = 0;
       try {
         armStallTimer();
         const resp = await fetch(url, { signal: controller.signal });
         if (!resp.ok || !resp.body) {
           lastResponseStatus = resp.status;
+          // Read before any body probe: those consume the response.
+          lastResponseRetryAfterMs = subtitleRetryAfterMs(resp.headers.get("Retry-After"));
           if (await isPlaybackSessionGoneResponse(resp)) {
             // A response that lands after the track was rebuilt belongs to the
             // session this fetch was minted for, not the one on screen now.
@@ -739,6 +812,7 @@ export function useSubtitleTracks(
             buf = buf.slice(split + 2);
             const cues = parseVTT(safe);
             if (cues.length > 0) {
+              producedCues += cues.length;
               addParsedCues(cues);
               onLoadStateRef.current?.("ready");
             }
@@ -749,6 +823,7 @@ export function useSubtitleTracks(
           if (buf.trim()) {
             const cues = parseVTT(buf);
             if (cues.length > 0) {
+              producedCues += cues.length;
               addParsedCues(cues);
               onLoadStateRef.current?.("ready");
             }
@@ -796,6 +871,22 @@ export function useSubtitleTracks(
               atEOF = true;
             }
           }
+          // A window that streamed in whole with no cues is valid — a
+          // dialogue gap, or a track whose first cue starts later. It must not
+          // read as a failure (it does not) and must not leave the rest of the
+          // slot unevaluated, so the next window is asked for now instead of
+          // when the prefetch lead comes due. Only a fresh window chains:
+          // an extend that is empty too leaves the normal lead in charge, so a
+          // silent track cannot turn into a fetch loop.
+          if (seekStart !== null && !atEOF && producedCues === 0) {
+            void fetchWindow(alignWindowStart(requestedEnd - WINDOW_OVERLAP), false);
+          } else if (windowRequestedWhileBusy) {
+            // Something asked for a different window while this one was on the
+            // wire. Plan again against where the playhead is now: if this
+            // window covers it, no request is made.
+            windowRequestedWhileBusy = false;
+            maybeFetch();
+          }
         } else if (!succeeded && !superseded && !cancelled) {
           // Genuine failure (error, stall, or non-ok response) rather than a
           // seek superseding this fetch — back off before retrying. A signaled
@@ -804,31 +895,48 @@ export function useSubtitleTracks(
           // 404 proved the track missing, so no retry can succeed. Guarded
           // inline rather than with a `return` — this block runs inside a
           // finally.
+          // A queued window is dropped: the backoff retry re-plans from the
+          // playhead, so replaying the old request would only add a request.
+          windowRequestedWhileBusy = false;
           if (!sourceChangedSignaled && !sessionGoneSignaled && !isParked()) {
             lastFetchFailureAt = Date.now();
-            onLoadStateRef.current?.("error");
             if (isRetryableSubtitleStatus(lastResponseStatus)) {
-              // Explicitly retryable (upstream flap, rate limit): same backoff
-              // loop, but on its own generous budget so a seconds-long outage
-              // does not spend the terminal budget and wedge the mount on
-              // "Retrying…".
+              // Explicitly retryable (a page or budget refusal the server is
+              // already recovering from, an upstream flap, a rate limit): same
+              // backoff loop, but on its own generous budget, and it must not
+              // move the player to its terminal state. Playback continues and
+              // the track stays selected; nothing on screen is dropped, and a
+              // mount that has not produced cues yet keeps claiming to load
+              // instead of telling the viewer the track failed.
               retryableFailures += 1;
               if (retryableFailures >= FETCH_MAX_RETRYABLE_FAILURES) {
+                // The retry budget is spent. That is the honest failure: the
+                // server kept refusing and no further retry is scheduled.
+                onLoadStateRef.current?.("error");
                 consecutiveFailures = FETCH_MAX_CONSECUTIVE_FAILURES;
+              } else if (retryableFailures >= RETRYABLE_STALL_REPORT_FAILURES && !hasFetched) {
+                // The server's recovery contract did not hold: the retry that a
+                // budget refusal promises is meant to be served from the
+                // covering extraction, and it was refused too. Keep retrying in
+                // the background, but stop presenting this as a load in progress.
+                if (!stalledReported) {
+                  stalledReported = true;
+                  onLoadStateRef.current?.("stalled");
+                }
+              } else if (!hasFetched && !stalledReported) {
+                onLoadStateRef.current?.(placeholders ? "refreshing" : "loading");
               }
             } else {
               retryableFailures = 0;
               consecutiveFailures += 1;
+              onLoadStateRef.current?.("error");
             }
             // On the final failure the budget is spent: schedule no retry and
             // let the spent-budget gate in maybeFetch hold the mount terminal.
             // A later track rebuild (stream restart, source refresh) starts a
             // fresh budget.
             if (consecutiveFailures < FETCH_MAX_CONSECUTIVE_FAILURES) {
-              retryDelay = Math.min(
-                retryDelay ? retryDelay * 2 : FETCH_RETRY_BACKOFF_MS,
-                FETCH_RETRY_MAX_BACKOFF_MS,
-              );
+              retryDelay = subtitleRetryDelayMs(retryDelay, lastResponseRetryAfterMs);
               retryTimer = setTimeout(maybeFetch, retryDelay);
             }
           }
@@ -847,19 +955,18 @@ export function useSubtitleTracks(
     //     the next window, overlapping slightly with the previous
     // `seeked` marks the calls made from a seeking/seeked event: a seek that
     // leaves the fetched range is a new window request, not a retry of a failed
-    // one, so it is allowed to reset the failure budget.
+    // one, so it is allowed to reset the failure budget. It is also the only
+    // trigger allowed to cancel a window that is already extracting.
     function maybeFetch(seeked = false) {
       if (sourceChangedSignaled) return; // stale URL; waiting for replan
       if (sessionGoneSignaled) return; // the session is gone; offer a restart
       if (isParked()) return; // the track is missing for this file; stay parked
       if (cancelled) return;
-      // Until the element has media loaded, currentTime reads 0 rather than
-      // the position playback will actually start at (resume target, or a
-      // seek that restarted the stream) — use the intended position instead.
-      const mediaTime =
-        videoEl.readyState > 0
-          ? toMediaTime(videoEl.currentTime, streamOriginRef.current ?? 0)
-          : (fetchAnchorRef.current ?? 0);
+      const mediaTime = subtitlePlayheadSeconds(
+        videoEl,
+        streamOriginRef.current ?? 0,
+        fetchAnchorRef.current,
+      );
       // Sidecar/downloaded text is one complete artifact. Fetch it whole once
       // and hold every cue; seeks inside it need no request. A refresh or
       // stream rebuild is a fresh mount and fetches once more. A failed whole
@@ -877,8 +984,10 @@ export function useSubtitleTracks(
           mediaTime <= inflightStart + WINDOW_DURATION + 1
         )
           return;
-        // A seek outside the requested range must not wait for extraction.
-        fetchWindow(alignWindowStart(mediaTime), true);
+        // A seek outside the requested range must not wait for extraction; a
+        // playhead that merely drifted is queued behind it instead, because
+        // cancelling would throw away the extraction already in progress.
+        fetchWindow(alignWindowStart(mediaTime), true, seeked);
         return;
       }
       // Ahead of the backoff and terminal gates: a deliberate seek deserves a
@@ -895,7 +1004,7 @@ export function useSubtitleTracks(
         if (seekNeedsFreshWindow) {
           resetFailureBudget();
           atEOF = false;
-          fetchWindow(alignWindowStart(mediaTime), true);
+          fetchWindow(alignWindowStart(mediaTime), true, true);
           return;
         }
       }
@@ -1025,6 +1134,7 @@ export function useSubtitleTracks(
     transportRevision,
     replayRevision,
     videoRef,
+    elementEpoch,
   ]);
 
   // Re-base already-loaded cues when the media timeline remaps — e.g. a

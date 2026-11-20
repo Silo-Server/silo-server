@@ -16,7 +16,7 @@ import { normalizeSubtitleMode } from "@/player/utils/subtitleMode";
 import { resolveSubtitleAutoSelect } from "@/player/utils/subtitleSort";
 import { getSubtitleFormatLabel } from "@/player/utils/subtitleCodecs";
 import { buildPublishedSubtitleTracks } from "@/player/utils/subtitleInventory";
-import { audioTrackLabel, formatChannels } from "@/lib/mediaFormat";
+import { audioTrackIdentity, audioTrackLabel, formatChannels } from "@/lib/mediaFormat";
 import { t } from "@/i18n";
 import {
   buildVersionSubtitleInventory,
@@ -147,10 +147,15 @@ export function formatAudioTrackSummary(track: VersionAudioTrack | undefined): s
     return t("web.detail.audio.unknown");
   }
 
-  const language = getLanguageName(track.language ?? "") || t("web.detail.audio.unknown");
+  const identity = audioTrackIdentity(track, 1);
   const codec = audioTrackLabel(track);
   const channels = formatChannels(track.channels);
-  return [language, codec, channels].filter(Boolean).join(" · ");
+  // A row with no declared language leads with its format instead of naming a
+  // language it never had; the summary still lists the format details once.
+  if (identity.languageUndeclared) {
+    return [codec, channels].filter(Boolean).join(" · ") || t("web.detail.audio.unknown");
+  }
+  return [identity.title, codec, channels].filter(Boolean).join(" · ");
 }
 
 export function toSubtitleTrackSignature(

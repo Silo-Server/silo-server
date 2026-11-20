@@ -149,10 +149,11 @@ func TestReplanV3SecondAudioInitFailureDemotesAndNamesTheAudioOutput(t *testing.
 	}
 }
 
-// A player failure with no audio-output evidence retires the recipe, not the
-// class: the direct plan must not come back, but the HLS class stays eligible
-// for the recipes behind it.
-func TestReplanV3PlayerFailureWithoutAudioEvidenceRetiresOnlyTheRecipe(t *testing.T) {
+// A player failure with no audio-output evidence retires the direct route and
+// keeps the HLS class eligible: the direct plan must not come back, but the
+// recipes behind the packaged class are still untried. This is the direct-play
+// half of the "any recognized failure retires the route that failed" rule.
+func TestReplanV3PlayerFailureRetiresDirectPlayKeepsTheHLSClass(t *testing.T) {
 	file := audioShapeHandlerSource(t)
 	handler := newAudioShapeHandler(t, file)
 	start := audioShapeStartRequest()
@@ -168,8 +169,8 @@ func TestReplanV3PlayerFailureWithoutAudioEvidenceRetiresOnlyTheRecipe(t *testin
 		t.Fatal(err)
 	}
 	direct := record.NormalizedRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
-	if !direct.Enabled || direct.FailureReason == demoteDeliveryReasonV3 {
-		t.Fatalf("an abort retired the direct-play class: %+v", direct)
+	if direct.Enabled || direct.FailureReason != demoteDeliveryReasonV3 {
+		t.Fatalf("a player failure did not retire the direct-play class: %+v", direct)
 	}
 	abandonedKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, start.ClientPlaybackContext.Output.OutputContextID, nil)
 	if !containsStringExactV3(record.RecoveryState.RecipeExclusions, abandonedKey) {
@@ -184,8 +185,9 @@ func TestReplanV3PlayerFailureWithoutAudioEvidenceRetiresOnlyTheRecipe(t *testin
 
 // A web-shaped attempt with no surround decode limits and nothing to downmix
 // keeps its historical terminal: the audio-shape path cannot fire, the abort
-// retires only the recipe, and an exhausted ordinary failure stays the generic
-// non-retryable terminal.
+// retires the direct route (and its recipe), and with no packaged delivery the
+// exhaustion stays the generic non-retryable terminal — there is no route a
+// retry could negotiate.
 func TestReplanV3WebShapedPlayerFailureKeepsGenericTerminal(t *testing.T) {
 	file := v3HandlerFixtureFile(t) // stereo AAC, direct play only
 	handler := newAudioShapeHandler(t, file)
@@ -205,8 +207,8 @@ func TestReplanV3WebShapedPlayerFailureKeepsGenericTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	direct := record.NormalizedRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
-	if !direct.Enabled || direct.FailureReason == demoteDeliveryReasonV3 {
-		t.Fatalf("an abort retired the web-shaped direct-play class: %+v", direct)
+	if direct.Enabled || direct.FailureReason != demoteDeliveryReasonV3 {
+		t.Fatalf("an abort did not retire the web-shaped direct-play class: %+v", direct)
 	}
 	abandonedKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, start.ClientPlaybackContext.Output.OutputContextID, nil)
 	if !containsStringExactV3(record.RecoveryState.RecipeExclusions, abandonedKey) {

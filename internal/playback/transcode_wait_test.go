@@ -71,6 +71,12 @@ func TestWaitsReturnOutputWrittenDuringTheWait(t *testing.T) {
 		dir := t.TempDir()
 		opts := startupTestOpts()
 		session := fakeStartupSession(t, opts, dir, false, true)
+		// A playlist is served only by a generation that has decoded video, so
+		// the fixture reports frames: this test is about output that appears
+		// during a wait, not about decode evidence.
+		session.mu.Lock()
+		session.videoFrames = 72
+		session.mu.Unlock()
 		// A running session's playlist is ready once it lists the startup
 		// segments and each of them is on disk.
 		var files [][2]string

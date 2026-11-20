@@ -60,10 +60,28 @@ export function useWatchDetail(
   id: string | undefined,
   fileId?: number,
   libraryId?: number,
-  options?: { enabled?: boolean; staleTime?: number },
+  options?: {
+    enabled?: boolean;
+    staleTime?: number;
+    /**
+     * Re-read interval while the caller still needs an answer. The function form
+     * receives the query, so a caller can stop polling once the payload carries
+     * what it waited for: the hook's own return value is not in scope when the
+     * options are built.
+     */
+    refetchInterval?:
+      | number
+      | false
+      | ((query: { state: { data: WatchDetail | undefined } }) => number | false);
+  },
 ) {
   return useQuery({
-    queryKey: itemKeys.watchDetail(id!, fileId, libraryId),
+    // One entry per item and library. `fileId` only names a preferred file for
+    // the server's own default (`playback_variants[].default_file_id`, the
+    // top-level markers); every field the web reads from this payload is
+    // per-version or per-item, so keying on it split the same title's read into
+    // a second cache entry — the player and the page then each fetched it.
+    queryKey: itemKeys.watchDetail(id!, libraryId),
     queryFn: () => fetchWatchDetail(id!, fileId, libraryId),
     enabled: (options?.enabled ?? true) && !!id,
     // Player navigation remounts this query (detail -> player -> back). A short
@@ -71,6 +89,7 @@ export function useWatchDetail(
     // reconcile reach share one payload instead of each issuing its own
     // `staleTime: 0` fetch; explicit invalidations still force a refetch.
     staleTime: options?.staleTime ?? 30_000,
+    refetchInterval: options?.refetchInterval,
   });
 }
 

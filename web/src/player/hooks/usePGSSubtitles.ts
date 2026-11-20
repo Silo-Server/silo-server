@@ -43,7 +43,10 @@ interface DecodedBitmap {
   bitmap: CanvasImageSource | null;
 }
 
-export type PGSLoadState = "idle" | "loading" | "ready" | "error";
+// "stalled" is a retryable refusal loop that has stopped being a load the
+// viewer should keep waiting on. The fetcher keeps retrying in the background;
+// the overlay offers a retry and a way out instead of an endless spinner.
+export type PGSLoadState = "idle" | "loading" | "ready" | "stalled" | "error";
 
 export interface UsePGSSubtitlesOptions {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -406,6 +409,10 @@ export function usePGSSubtitles({
       frameRequest = requestAnimationFrame(renderFrame);
     }
 
+    // One report per stall episode: a retry that produces a display set clears
+    // it, and further refusals before then do not re-fire.
+    let stalledReported = false;
+
     const fetcher = createSubtitleWindowFetcher({
       windowUrl: (start, duration) => subtitleWindowUrl(url, start, "windowed=1", duration),
       playhead: () => Math.max(0, sourceTime()),
@@ -429,9 +436,19 @@ export function usePGSSubtitles({
         onSourceChangedRef.current?.();
       },
       onTerminal: () => onLoadStateRef.current?.("error"),
+      onStalled: () => {
+        // The retryable ladder keeps running; this only tells the player to stop
+        // presenting the track as loading (a deep page or a refused window that
+        // did not recover).
+        if (stalledReported) return;
+        stalledReported = true;
+        onLoadStateRef.current?.("stalled");
+      },
       onWindowStart: (fresh) => {
         if (fresh) {
-          onLoadStateRef.current?.("loading");
+          // A retry of the same stalled track keeps the stalled card up until
+          // this attempt actually produces a display set.
+          if (!stalledReported) onLoadStateRef.current?.("loading");
           timeline = [];
         }
         // A fresh window starts a new epoch history. An extend continues the
@@ -445,9 +462,11 @@ export function usePGSSubtitles({
         const parsed = parser?.push(chunk) ?? [];
         if (parsed.length === 0) return;
         timeline = mergePGSCompositions(timeline, parsed);
+        stalledReported = false;
         onLoadStateRef.current?.("ready");
       },
       onWindowCommitted: (fresh) => {
+        stalledReported = false;
         onLoadStateRef.current?.("ready");
         // Keep about one window behind the playhead, so a straight run
         // through a long film holds a bounded number of screens.
@@ -457,7 +476,15 @@ export function usePGSSubtitles({
           fetcher.releaseBefore(keepFrom);
         }
       },
-      onWindowFailed: () => onLoadStateRef.current?.("error"),
+      onWindowFailed: (retryable) => {
+        // A retryable answer (503 + Retry-After from a page or budget refusal,
+        // a timeout, a stall) is retried in the background while playback
+        // continues: the pages already parsed stay on screen and the fetch
+        // ladder owns the retry. Only a failure the same request cannot
+        // survive ends the overlay; a spent budget still reports through
+        // onTerminal, so the final failure stays honest.
+        if (!retryable) onLoadStateRef.current?.("error");
+      },
     });
     const maybeFetch = () => fetcher.maybeFetch();
     const maybeFetchAfterSeek = () => fetcher.maybeFetch(true);

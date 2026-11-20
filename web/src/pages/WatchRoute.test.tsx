@@ -73,6 +73,19 @@ describe("buildWatchRouteRequest", () => {
     expect(buildWatchHref(makeRequest())).toBe("/watch/movie-1");
   });
 
+  it("treats an explicit pick as a different request from an Auto start", () => {
+    // Two starts for the same row are not the same request: one may be
+    // replaced by the server, the other may not.
+    const explicit = createWatchRouteRequest({
+      contentId: "movie-1",
+      fileId: 42,
+      explicitFileSelection: true,
+    });
+    const auto = createWatchRouteRequest({ contentId: "movie-1", fileId: 42 });
+
+    expect(explicit.requestKey).not.toBe(auto.requestKey);
+  });
+
   it("keeps a shuffle in the watch href and the request key", () => {
     const shuffled = makeRequest("shuffle=shuffle-1");
 
@@ -83,6 +96,69 @@ describe("buildWatchRouteRequest", () => {
 });
 
 describe("buildWatchPageProps", () => {
+  it("forwards a pick the navigation carried", () => {
+    const props = buildWatchPageProps({
+      request: createWatchRouteRequest({
+        contentId: "movie-1",
+        fileId: 42,
+        explicitFileSelection: true,
+      }),
+      item: makeWatchDetail(),
+      currentProfile: profile,
+    });
+
+    expect(props.explicitFileSelection).toBe(true);
+  });
+
+  it("leaves an Auto start substitutable", () => {
+    const props = buildWatchPageProps({
+      request: createWatchRouteRequest({ contentId: "movie-1", fileId: 42 }),
+      item: makeWatchDetail(),
+      currentProfile: profile,
+    });
+
+    expect(props.explicitFileSelection).toBe(false);
+  });
+
+  // A reload keeps the remembered row but loses the navigation that carried
+  // why the row was chosen; the store's standing is what the watch page has
+  // left to tell a pick from an Auto start.
+  it("derives the pick from the remembered row after a reload", () => {
+    const props = buildWatchPageProps({
+      request: createWatchRouteRequest({ contentId: "movie-1", fileId: 42 }),
+      item: makeWatchDetail(),
+      currentProfile: profile,
+      requestedFileId: 42,
+      requestedVersionExplicit: true,
+    });
+
+    expect(props.explicitFileSelection).toBe(true);
+  });
+
+  it("does not pin the remembered row when the viewer did not name it", () => {
+    const props = buildWatchPageProps({
+      request: createWatchRouteRequest({ contentId: "movie-1", fileId: 42 }),
+      item: makeWatchDetail(),
+      currentProfile: profile,
+      requestedFileId: 42,
+      requestedVersionExplicit: false,
+    });
+
+    expect(props.explicitFileSelection).toBe(false);
+  });
+
+  it("does not pin a remembered row this request does not play", () => {
+    const props = buildWatchPageProps({
+      request: createWatchRouteRequest({ contentId: "movie-1", fileId: 42 }),
+      item: makeWatchDetail(),
+      currentProfile: profile,
+      requestedFileId: 7,
+      requestedVersionExplicit: true,
+    });
+
+    expect(props.explicitFileSelection).toBe(false);
+  });
+
   it("forwards the watch detail's virtual ranking to the player", () => {
     const virtualRanking = {
       profile_label: "4K HDR",

@@ -432,6 +432,12 @@ func virtualResolveContextWithPersistedTrust(ctx context.Context, row *models.Me
 	if row == nil {
 		return ctx
 	}
+	// A caller that dropped the trust for a delisted automatic selection must
+	// not have it re-established here: the degraded retry exists precisely to
+	// let the resolver serve a live sibling.
+	if virtuallibrary.PersistedCandidateTrustSuppressed(ctx) {
+		return ctx
+	}
 	insecure := false
 	if len(allowInsecure) > 0 {
 		insecure = allowInsecure[0]
@@ -565,6 +571,12 @@ func adoptRematchedVirtualResolution(
 		LibraryID:                   row.MediaFolderID,
 		AdoptPath:                   adoptPath,
 		RequireAdopt:                true,
+		// The resolver certified this candidate as the same release under a new
+		// result id, so a fence refusal is not stale-pin evidence. Without this
+		// flag a duplicate row owning the new id counted every rematch as a
+		// refusal (production: 80 in 25 minutes) and stamped the healthy row's
+		// terminal failed verdict, which then vetoed its own evidence writes.
+		SameReleaseRematch: true,
 		// The old probe stamp referenced the previous result= identity, so it
 		// no longer describes the row; clear it so the next start re-probes
 		// instead of trusting the declared placeholder inventory.

@@ -6,15 +6,28 @@ import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FileVersion } from "@/api/types";
-import { PROVISIONAL_INVENTORY_TIMEOUT_MS } from "@/player/utils/inventoryProvenance";
+import {
+  PROVISIONAL_INVENTORY_POLL_MS,
+  PROVISIONAL_INVENTORY_SLOW_MS,
+  PROVISIONAL_INVENTORY_TIMEOUT_MS,
+} from "@/player/utils/inventoryProvenance";
 import ActionBar from "./ActionBar";
 
 // The media page reads the selected file's probed tracks from the watch detail.
 // These tests drive that read directly so they can hold it at "no rows yet"
-// (the catalog fallback the page used to offer) and then publish rows.
+// and then publish probe evidence for the same file.
 const watchDetail = vi.hoisted(() => ({
   data: undefined as { versions?: FileVersion[] } | undefined,
   refetch: vi.fn(),
+  // The options the page passed to the read: the inventory poll lives there.
+  options: undefined as
+    | {
+        refetchInterval?:
+          | number
+          | false
+          | ((query: { state: { data: unknown } }) => number | false);
+      }
+    | undefined,
 }));
 
 const playback = vi.hoisted(() => ({ startPlayback: vi.fn() }));
@@ -23,7 +36,10 @@ vi.mock("@/hooks/queries/items", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/queries/items")>();
   return {
     ...actual,
-    useWatchDetail: () => watchDetail,
+    useWatchDetail: (...args: unknown[]) => {
+      watchDetail.options = args[3] as typeof watchDetail.options;
+      return watchDetail;
+    },
     useDeleteMediaItem: () => ({ isPending: false, mutate: vi.fn() }),
   };
 });
@@ -51,8 +67,8 @@ const selectedVersion: FileVersion = {
   file_size: 0,
   duration: 7_200,
   bitrate: 0,
-  // Catalog fallback rows. They are not probe evidence for this file until the
-  // watch detail publishes its own inventory.
+  // The selected row's own release listing. It is not probe evidence, but it
+  // is this row's inventory and must render immediately.
   audio_tracks: [{ language: "eng", codec: "eac3", channels: 6 }],
   subtitle_tracks: [{ index: 0, language: "en", codec: "subrip", title: "English" }],
 };
@@ -109,46 +125,59 @@ describe("ActionBar pre-play track inventory", () => {
   afterEach(() => {
     vi.useRealTimers();
     watchDetail.data = undefined;
+    watchDetail.options = undefined;
     watchDetail.refetch.mockReset();
     playback.startPlayback.mockReset();
   });
 
-  it("withholds catalog subtitle rows until the selected file publishes its own inventory", () => {
-    watchDetail.data = { versions: [{ ...selectedVersion, subtitle_tracks: [] }] };
+  it("renders the selected row's declared tracks immediately, with no discovery state", () => {
     renderActionBar();
 
-    expect(screen.getByRole("button", { name: /Subs/ })).toHaveTextContent("Discovering…");
-
-    openPopover(/Subs/);
-    expect(screen.getByText("Discovering subtitles…")).toBeTruthy();
-    // The fallback row is not evidence the file carries it, so offering it is
-    // how a stale pick reached playback.
-    expect(screen.queryByText("English")).toBeNull();
-  });
-
-  it("withholds catalog audio rows until the selected file publishes its own inventory", () => {
-    watchDetail.data = { versions: [{ ...selectedVersion, audio_tracks: [] }] };
-    renderActionBar();
-
-    expect(screen.getByRole("button", { name: /Audio/ })).toHaveTextContent("Discovering…");
+    expect(screen.getByRole("button", { name: /Audio/ })).not.toHaveTextContent("Discovering…");
+    expect(screen.getByRole("button", { name: /Subs/ })).not.toHaveTextContent("Discovering…");
 
     openPopover(/Audio/);
-    expect(screen.getByText("Discovering audio tracks…")).toBeTruthy();
-    expect(screen.queryByText("English")).toBeNull();
+    expect(screen.queryByText("Discovering audio tracks…")).toBeNull();
+    expect(screen.getAllByText("English").length).toBeGreaterThan(0);
+    expect(screen.getByText("From release listing")).toBeTruthy();
   });
 
-  it("shows the live rows once the watch detail publishes the probed inventory", () => {
-    watchDetail.data = { versions: [{ ...selectedVersion, subtitle_tracks: [] }] };
+  it("renders declared subtitles immediately instead of reporting them undiscovered", () => {
+    renderActionBar();
+
+    openPopover(/Subs/);
+    expect(screen.queryByText("Discovering subtitles…")).toBeNull();
+    expect(screen.getAllByText("English").length).toBeGreaterThan(0);
+    expect(screen.getByText("From release listing")).toBeTruthy();
+  });
+
+  it("replaces the declared view with probe evidence when it lands", () => {
     const view = renderActionBar();
     openPopover(/Subs/);
-    expect(screen.getByText("Discovering subtitles…")).toBeTruthy();
+    expect(screen.getByText("From release listing")).toBeTruthy();
+    expect(screen.queryByText("French")).toBeNull();
 
     watchDetail.data = { versions: [probedVersion] };
     view.rerender();
 
     expect(screen.queryByText("Discovering subtitles…")).toBeNull();
+    expect(screen.queryByText("From release listing")).toBeNull();
     expect(screen.getAllByText("English").length).toBeGreaterThan(0);
     expect(screen.getAllByText("French").length).toBeGreaterThan(0);
+  });
+
+  it("never reports a row with declared tracks as unavailable", () => {
+    vi.useFakeTimers();
+    renderActionBar();
+    openPopover(/Audio/);
+
+    act(() => {
+      vi.advanceTimersByTime(PROVISIONAL_INVENTORY_TIMEOUT_MS);
+    });
+
+    expect(screen.queryByText("Tracks not verified. The release listing names none.")).toBeNull();
+    expect(screen.queryByText("Unavailable")).toBeNull();
+    expect(screen.getAllByText("English").length).toBeGreaterThan(0);
   });
 
   it("keeps Play available while the inventory probe is still running", () => {
@@ -157,48 +186,58 @@ describe("ActionBar pre-play track inventory", () => {
 
     const play = screen.getByRole("button", { name: /Play/ });
     expect(play).toBeEnabled();
-    // Both menus are still in discovery: the catalog lists are declared
-    // placeholders, not evidence for this file.
-    expect(screen.getAllByText("Discovering…").length).toBeGreaterThan(0);
 
-    // The probe gates the menu rows only; starting playback never waits for it.
+    // The declared lists render immediately; starting playback never waits for
+    // a probe.
     fireEvent.click(play);
     expect(playback.startPlayback).toHaveBeenCalledOnce();
   });
 
-  it("replaces the stalled subtitle spinner with a retry that re-reads the watch detail", () => {
+  it("shows discovery for a row with no declared tracks, then retries after the probe window", () => {
     vi.useFakeTimers();
-    watchDetail.data = { versions: [{ ...selectedVersion, subtitle_tracks: [] }] };
-    renderActionBar();
+    const emptyVersion: FileVersion = {
+      ...selectedVersion,
+      audio_tracks: [],
+      subtitle_tracks: [],
+    };
+    watchDetail.data = { versions: [emptyVersion] };
+    renderActionBar({ versions: [emptyVersion], selectedVersion: emptyVersion });
     openPopover(/Subs/);
+
+    expect(screen.getByText("Discovering subtitles…")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Subs/ })).toHaveTextContent("Discovering…");
 
     act(() => {
       vi.advanceTimersByTime(PROVISIONAL_INVENTORY_TIMEOUT_MS);
     });
 
     expect(screen.queryByText("Discovering subtitles…")).toBeNull();
-    expect(screen.getByText("Subtitles unavailable.")).toBeTruthy();
-    expect(screen.queryByText("English")).toBeNull();
+    expect(screen.getByText("Tracks not verified. The release listing names none.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(watchDetail.refetch).toHaveBeenCalledOnce();
     expect(screen.getByText("Discovering subtitles…")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Subs/ })).toHaveTextContent("Discovering…");
   });
 
-  it("replaces the stalled audio spinner with a retry that re-reads the watch detail", () => {
+  it("shows the same discovery-then-retry path for an empty audio inventory", () => {
     vi.useFakeTimers();
-    watchDetail.data = { versions: [{ ...selectedVersion, audio_tracks: [] }] };
-    renderActionBar();
+    const emptyVersion: FileVersion = {
+      ...selectedVersion,
+      audio_tracks: [],
+      subtitle_tracks: [],
+    };
+    watchDetail.data = { versions: [emptyVersion] };
+    renderActionBar({ versions: [emptyVersion], selectedVersion: emptyVersion });
     openPopover(/Audio/);
+
+    expect(screen.getByText("Discovering audio tracks…")).toBeTruthy();
 
     act(() => {
       vi.advanceTimersByTime(PROVISIONAL_INVENTORY_TIMEOUT_MS);
     });
 
-    expect(screen.queryByText("Discovering audio tracks…")).toBeNull();
-    expect(screen.getByText("Audio tracks unavailable.")).toBeTruthy();
+    expect(screen.getByText("Tracks not verified. The release listing names none.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
@@ -236,18 +275,19 @@ describe("ActionBar pre-play track inventory", () => {
     expect(screen.queryByText("No subtitles available.")).toBeNull();
   });
 
-  it("does not list the declared audio placeholder as a track", () => {
-    // A discovered virtual row carries one synthesized audio track from the
-    // release declaration. It is not a track the file was enumerated to carry.
-    watchDetail.data = { versions: [selectedVersion] };
-    renderActionBar();
-
-    expect(screen.getByRole("button", { name: /Audio/ })).toHaveTextContent("Discovering…");
+  it("groups a declaration with no language or codec instead of inventing a track", () => {
+    const placeholderVersion: FileVersion = {
+      ...selectedVersion,
+      audio_tracks: [{ channels: 2 }],
+    };
+    watchDetail.data = { versions: [placeholderVersion] };
+    renderActionBar({ versions: [placeholderVersion], selectedVersion: placeholderVersion });
 
     openPopover(/Audio/);
-    expect(screen.getByText("Discovering audio tracks…")).toBeTruthy();
+    expect(screen.getByText("Audio · from release listing")).toBeTruthy();
     expect(screen.queryByText("Unknown")).toBeNull();
-    expect(screen.queryByText(/DTS-HD/)).toBeNull();
+    expect(screen.queryByText("Track 1")).toBeNull();
+    expect(screen.queryByText("Discovering audio tracks…")).toBeNull();
   });
 
   it("lists audio tracks once the watch detail carries a probe stamp", () => {
@@ -259,5 +299,111 @@ describe("ActionBar pre-play track inventory", () => {
     openPopover(/Audio/);
     expect(screen.getAllByText("English").length).toBeGreaterThan(0);
     expect(screen.queryByText("Discovering audio tracks…")).toBeNull();
+    expect(screen.queryByText("From release listing")).toBeNull();
+  });
+
+  // The server bounds a selection probe at 20 s and answers inside it, so a
+  // selection that verifies at 16-18 s must still be waiting when the answer
+  // lands. The previous 15 s window declared "Not verified" first.
+  it("keeps waiting through the old 15 s deadline and shows the tracks when they land", () => {
+    vi.useFakeTimers();
+    const emptyVersion: FileVersion = {
+      ...selectedVersion,
+      audio_tracks: [],
+      subtitle_tracks: [],
+    };
+    watchDetail.data = { versions: [emptyVersion] };
+    const view = renderActionBar({ versions: [emptyVersion], selectedVersion: emptyVersion });
+    openPopover(/Subs/);
+
+    expect(screen.getByText("Discovering subtitles…")).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(16_000);
+    });
+
+    expect(screen.queryByText("Tracks not verified. The release listing names none.")).toBeNull();
+    expect(screen.queryByText("Not verified")).toBeNull();
+
+    // The server's answer: the re-read now carries the probed row.
+    const answered: FileVersion = {
+      ...emptyVersion,
+      probed_at: "2026-11-18T14:47:30Z",
+      subtitle_tracks: [{ index: 0, language: "en", codec: "subrip", title: "English" }],
+    };
+    watchDetail.data = { versions: [answered] };
+    view.rerender({ versions: [answered], selectedVersion: answered });
+
+    expect(screen.queryByText("Discovering subtitles…")).toBeNull();
+    expect(screen.queryByText("Not verified")).toBeNull();
+    expect(screen.getAllByText("English").length).toBeGreaterThan(0);
+  });
+
+  it("says it is still checking rather than still discovering once the wait is long", () => {
+    vi.useFakeTimers();
+    const emptyVersion: FileVersion = {
+      ...selectedVersion,
+      audio_tracks: [],
+      subtitle_tracks: [],
+    };
+    watchDetail.data = { versions: [emptyVersion] };
+    renderActionBar({ versions: [emptyVersion], selectedVersion: emptyVersion });
+    openPopover(/Audio/);
+
+    act(() => {
+      vi.advanceTimersByTime(PROVISIONAL_INVENTORY_SLOW_MS);
+    });
+
+    expect(screen.getByText("Still checking for audio tracks…")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Audio/ })).toHaveTextContent("Still checking…");
+    expect(screen.queryByText("Tracks not verified. The release listing names none.")).toBeNull();
+  });
+
+  it("polls the selected row's inventory until the server answers", () => {
+    const emptyVersion: FileVersion = {
+      ...selectedVersion,
+      audio_tracks: [],
+      subtitle_tracks: [],
+    };
+    watchDetail.data = { versions: [emptyVersion] };
+    renderActionBar({ versions: [emptyVersion], selectedVersion: emptyVersion });
+
+    const interval = watchDetail.options?.refetchInterval;
+    expect(typeof interval).toBe("function");
+    if (typeof interval !== "function") return;
+
+    // No payload yet: keep asking.
+    expect(interval({ state: { data: undefined } })).toBe(PROVISIONAL_INVENTORY_POLL_MS);
+    // Still declared: keep asking.
+    expect(interval({ state: { data: { versions: [emptyVersion] } } })).toBe(
+      PROVISIONAL_INVENTORY_POLL_MS,
+    );
+    // The server answered for this row: stop.
+    const answered: FileVersion = { ...emptyVersion, probed_at: "2026-11-18T14:47:30Z" };
+    expect(interval({ state: { data: { versions: [answered] } } })).toBe(false);
+  });
+
+  it("stops polling once the selection window is spent instead of asking forever", () => {
+    vi.useFakeTimers();
+    const emptyVersion: FileVersion = {
+      ...selectedVersion,
+      audio_tracks: [],
+      subtitle_tracks: [],
+    };
+    watchDetail.data = { versions: [emptyVersion] };
+    renderActionBar({ versions: [emptyVersion], selectedVersion: emptyVersion });
+
+    const interval = watchDetail.options?.refetchInterval;
+    if (typeof interval !== "function") {
+      throw new Error("the selected read is not polling at all");
+    }
+    // The read mounts and arms its window on the first evaluation.
+    expect(interval({ state: { data: undefined } })).toBe(PROVISIONAL_INVENTORY_POLL_MS);
+
+    act(() => {
+      vi.advanceTimersByTime(PROVISIONAL_INVENTORY_TIMEOUT_MS);
+    });
+
+    expect(interval({ state: { data: { versions: [emptyVersion] } } })).toBe(false);
   });
 });

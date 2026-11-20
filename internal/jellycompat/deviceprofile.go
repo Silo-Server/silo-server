@@ -93,8 +93,11 @@ type DeviceProfileStore struct {
 	pool     *pgxpool.Pool
 	mu       sync.RWMutex
 	profiles map[string]storedDeviceProfile
-	ttl      time.Duration
-	now      func() time.Time
+	// directPlayFailures remembers direct-play routes this device reported
+	// failing, keyed by directPlayFailureKey. See directplay_failures.go.
+	directPlayFailures map[string]time.Time
+	ttl                time.Duration
+	now                func() time.Time
 }
 
 type storedDeviceProfile struct {
@@ -111,9 +114,10 @@ func NewDeviceProfileStore(ttl time.Duration, now func() time.Time) *DeviceProfi
 		ttl = 6 * time.Hour
 	}
 	return &DeviceProfileStore{
-		profiles: make(map[string]storedDeviceProfile),
-		ttl:      ttl,
-		now:      now,
+		profiles:           make(map[string]storedDeviceProfile),
+		directPlayFailures: make(map[string]time.Time),
+		ttl:                ttl,
+		now:                now,
 	}
 }
 
@@ -210,6 +214,17 @@ func normalizeSubtitleProfileFormat(format string) string {
 // checks codec profiles alone.
 func (p DeviceProfile) refusesDirectPlay() bool {
 	return len(p.DirectPlayProfiles) == 0 && len(p.TranscodingProfiles) > 0
+}
+
+// directPlayContainerListed reports whether any video DirectPlayProfile names
+// container. An empty or wildcard Container lists everything, as in Jellyfin.
+func (p DeviceProfile) directPlayContainerListed(container string) bool {
+	for _, profile := range p.DirectPlayProfiles {
+		if matchesVideoType(profile.Type) && matchesCSV(profile.Container, container) {
+			return true
+		}
+	}
+	return false
 }
 
 // SupportsDirectPlay reports whether a version can be served as-is.

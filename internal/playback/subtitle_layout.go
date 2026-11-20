@@ -652,6 +652,43 @@ func subtitleLayoutClass(codec string) string {
 	}
 }
 
+// SubtitleLayoutClass is the deliverable class a codec extracts as ("sup",
+// "ass", "webvtt"), or "" for a codec with no sidecar representation. It is the
+// same narrowing MatchEmbeddedSubtitleTrack applies, exposed so a diagnosis can
+// name the class it was looking for.
+func SubtitleLayoutClass(codec string) string {
+	return subtitleLayoutClass(codec)
+}
+
+// SubtitleLayoutClassInventory counts the live tracks that share codec's
+// extraction class and lists the languages they declare (deduplicated, in live
+// order, "und" for an undeclared one). A probe that found no match uses it to
+// say whether the class is missing entirely or present in other languages —
+// answers that look identical otherwise.
+func SubtitleLayoutClassInventory(codec string, live []models.SubtitleTrack) (count int, languages []string) {
+	class := subtitleLayoutClass(codec)
+	if class == "" {
+		return 0, nil
+	}
+	seen := make(map[string]struct{}, len(live))
+	for _, track := range live {
+		if subtitleLayoutClass(track.Codec) != class {
+			continue
+		}
+		count++
+		language := strings.TrimSpace(track.Language)
+		if language == "" {
+			language = "und"
+		}
+		if _, ok := seen[language]; ok {
+			continue
+		}
+		seen[language] = struct{}{}
+		languages = append(languages, language)
+	}
+	return count, languages
+}
+
 // canonicalSubtitleContainerTrackID mirrors the catalog scanner's container
 // track ID normalization so a live probe compares equal to plan-time evidence.
 // FFprobe emits MP4 track IDs as hexadecimal strings; the canonical form is

@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -171,5 +173,88 @@ func TestVirtualCandidateRotationPendingHonorsExplicitPin(t *testing.T) {
 	explicit.NormalizedRequest.FileSelection = playback.FileSelectionExplicitV3
 	if f.handler.virtualCandidateRotationPendingV3(&explicit, req) {
 		t.Fatal("explicit pin held the delivery for a rotation the explicit pick will not take")
+	}
+}
+
+// TestTrustedPinDegradesForAutoSelectionOnly pins the delisted-pin degrade. The
+// trust window keys on the row's own updated_at, not on presence in the listing,
+// so a candidate dropped today stays "trusted" for up to candidate_store_hours
+// and every replan refuses. Once the bounded forced relist has also failed and
+// the row has no usable stored URL, an automatic selection degrades the pin to
+// rotatable; an explicit pick keeps the refusal, because the viewer chose that
+// release and must never be silently moved off it.
+func TestTrustedPinDegradesForAutoSelectionOnly(t *testing.T) {
+	const (
+		neutralURI = "virtual://movie/tt-delisted-trust"
+		pinnedURI  = neutralURI + "?result=pinned"
+		siblingURI = neutralURI + "?result=sibling"
+	)
+
+	for _, tc := range []struct {
+		name        string
+		selection   playback.FileSelectionV3
+		wantRotated bool
+	}{
+		{name: "auto selection degrades and rotates", selection: playback.FileSelectionAutoV3, wantRotated: true},
+		{name: "explicit pick keeps the refusal", selection: playback.FileSelectionExplicitV3, wantRotated: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			h.VirtualCandidateTrustWindow = func() time.Duration { return 720 * time.Hour }
+			h.VirtualPlaybackResolver = VirtualPlaybackResolverFunc(func(context.Context, string, int, string, int) (string, error) {
+				return "http://127.0.0.1:9/unused", nil
+			})
+			var trustSeen []bool
+			h.VirtualMediaDetailedResolver = VirtualMediaDetailedResolverFunc(func(ctx context.Context, _ string, _ int, _ int, _ string, _ bool, _ []string, _ string) (ResolvedVirtualMedia, error) {
+				trusted := virtuallibrary.PersistedCandidateTrusted(ctx)
+				trustSeen = append(trustSeen, trusted)
+				if trusted {
+					return ResolvedVirtualMedia{}, fmt.Errorf("trusted persisted virtual candidate %q is no longer listed: %w", "pinned", virtuallibrary.ErrPersistedCandidateTrusted)
+				}
+				return ResolvedVirtualMedia{
+					URL: "http://127.0.0.1:9/sibling", URI: siblingURI, CandidateID: "sibling",
+					ProviderVideoHash: "hash-b", ProviderReleaseName: "Other.Release.2024",
+				}, nil
+			})
+			delivered := time.Now()
+			file := &models.MediaFile{
+				ID: 7, ContentID: "movie-delisted-trust", FilePath: pinnedURI, Container: "virtual",
+				VirtualOwnerInstallationID: 5, UpdatedAt: time.Now(),
+				ProviderVideoHash: "hash-a", ProviderReleaseName: "Movie.2024",
+				// Delivery evidence without a stored URL: the trust window
+				// applies, but there is nothing on the row to re-serve, which is
+				// the state the degrade exists for.
+				LastDeliveredAt: &delivered,
+			}
+			record := &playback.AttemptRecordV3{NormalizedRequest: playback.StartRequestV3{FileSelection: tc.selection}}
+
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/playback/replan", nil).WithContext(newAuthorizedPlaybackContext())
+			resolved, err := h.resolveRehydratedVirtualSourceWithAttemptV3(r, file, "profile-1", nil, "pinned", "auto", 0,
+				virtualResolveOptionsV3{sessionBound: true, sessionAnchorURI: pinnedURI, bypassProviderFloor: true}, record)
+
+			if tc.wantRotated {
+				if err != nil {
+					t.Fatalf("err = %v, want the rotated sibling", err)
+				}
+				if got := virtualResultCandidateID(resolved.URI); got != "sibling" {
+					t.Fatalf("resolved %q, want the rotated sibling", got)
+				}
+				// The pin was trusted for the first attempt and the forced
+				// relist, and only the degraded attempt ran without it.
+				if len(trustSeen) != 3 || !trustSeen[0] || !trustSeen[1] || trustSeen[2] {
+					t.Fatalf("trust intents = %v, want [true true false]", trustSeen)
+				}
+				return
+			}
+			if !errors.Is(err, virtuallibrary.ErrPersistedCandidateTrusted) {
+				t.Fatalf("err = %v, want the trusted-absent refusal", err)
+			}
+			if got := virtualResultCandidateID(resolved.URI); got != "" {
+				t.Fatalf("resolved %q, want no release swap for an explicit pick", got)
+			}
+			if len(trustSeen) != 1 {
+				t.Fatalf("trusted resolve attempts = %d, want 1 (no rotation retry for an explicit pin)", len(trustSeen))
+			}
+		})
 	}
 }

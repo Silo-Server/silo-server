@@ -497,6 +497,22 @@ client advertising a strict tier must populate `video_decode[]`; the flat lists
 alone earn it nothing. On `declared` the flat lists grant eligibility and any
 `video_decode[]` entry only restricts it, so that tier never produces this signal.
 
+**A declared container claim does not earn direct play for Matroska.** A
+`containers` list says the player accepted the container *type*, not that it can
+render the particular bytes: one mkv file can carry any video or audio codec and
+arbitrary track layouts. When the route would be `original_http` on an mkv or
+matroska source and `video_evidence` is `declared`, the planner re-plans with
+direct play excluded and prefers a codec-copy MP4 remux (or the transcode that
+follows it), and logs the rule as `route_downgrade: unverified_container` beside
+`decision_reason`. A probed tier (`exact`, `platform_attested`) keeps direct
+play for containers it genuinely supports, which is what the ExoPlayer-class
+clients that play Matroska report; the Apple AVPlayer Matroska mis-advertisement
+is corrected separately by its device quirk. If no packaged route exists — a
+source only the original bytes can carry, such as a client-managed Dolby Vision
+Profile 7 file — the direct plan is kept rather than turning a playable file into
+a terminal. This is a server-side rule precisely because the clients that
+over-claim cannot all be updated.
+
 Note the precise trigger: the signal fires only when *no* entry named the codec.
 If an entry matched the codec but the source exceeded one of its bounds — a
 4K file against a `max_height: 1080` decoder — that is a real device limit, and
@@ -1518,6 +1534,24 @@ An audio-output initialization failure is a verdict on the audio shape the
 recipe delivered (§6.2.1); once its one stereo retry is spent, the class retires
 as it always did.
 
+**A failed direct play retires direct play for the attempt.** `original_http`
+ships the source container untouched, so it has no server-side executor that can
+transform the bytes around what a device could not render. Any recognized
+client-reported failure — decode, parser, `player_failure`, `http_failure`,
+`startup_timeout`, a connectivity loss before the transport's first frame, or an
+`unsupported_*` engine refusal — therefore disqualifies the direct class, not
+just the failed recipe. The next plan is a packaged route (a codec-copy remux or
+a transcode). This is stricter than the class-vs-recipe rule above on purpose:
+for a packaged class an abort cannot prove the class unusable, but for the
+original bytes it is the only route that can ever carry them, so handing the
+same file back is the loop that stalled a browser claiming Matroska. The
+documented connectivity reissue after a rendered first frame is unchanged, and
+the audio-shape retry keeps direct play while its one stereo retry is untried.
+The retirement is durable attempt evidence: every later replan in the attempt
+reads it, and a fresh start negotiates normally. When the packaged ladder is
+also spent, the terminal is the retryable `routes_exhausted` (a new start
+negotiates again) rather than a non-retryable exhaustion.
+
 The server applies one more distinction from its own evidence: whether the
 client ever read from the stream it is indicting. A `failure_recovery` that
 arrives after the server answered this attempt's playlist but before a single
@@ -1738,7 +1772,10 @@ help. Delivered inside a `201` (start) or `200` (replan), never a 4xx.
 `video_conversion_unsupported`,
 `dv_conversion_unsupported`, `transcoding_disabled`,
 `subtitle_conversion_unsupported`, `bitrate_policy_unavailable` (no route fits
-the administrator's local or remote per-stream bitrate limit). `audio_conversion_unsupported` is not
+the administrator's local or remote per-stream bitrate limit), `routes_exhausted`
+(retryable: attempt history already retired the source-preserving routes — or the
+client reported the direct route failing — and the remaining route needs video
+adaptation; a fresh start negotiates again). `audio_conversion_unsupported` is not
 retryable when the selected audio track has no codec FFmpeg can name, and so
 no decoder: the planner refuses it before any route is tried, and choosing
 another track is the remedy. `audio_output_unsupported` is the audio-output
@@ -2275,11 +2312,14 @@ The implicit window starts on a fixed grid derived from its own length, not at
 the live playhead. A page anchored a few seconds behind the playhead is never
 reused: the next request's range runs past the page the previous one produced,
 no stored page contains it, and the server demuxes the source again for every
-request. Text pages are 600 s. A bitmap (PGS) page is 120 s, the page the web
-player already requests, because a bitmap page can only be produced by demuxing
-the container: on a 50 GB / 2h52m release a 600 s page reads about 2.9 GB and
-measured 65-105 s per request, longer than the fetch that asked for it, so it
-was abandoned and never stored.
+request. Text and bitmap pages are both 120 s, the page the web player already
+requests, because a page can only be produced by demuxing the container up to
+its end: a 600 s text page measured 41-63 s per extract on a virtual source for
+a few kilobytes of output, and on a 50 GB / 2h52m release a 600 s bitmap page
+reads about 2.9 GB and measured 65-105 s per request, longer than the fetch that
+asked for it, so it was abandoned and never stored. The shorter text page also
+keeps an ASS retry inside a client fetch deadline instead of re-reading ten
+minutes of container for four kilobytes of script.
 
 The same grid is what a windowed request and the window prefetch use, so the page
 one stores is the page the client asks for next. Per class: a bitmap client asks
@@ -2307,19 +2347,19 @@ or failed extracts are never published. Text and ASS cache misses stream while
 extracting; repeated complete requests reuse the finished artifact. A windowed
 miss on a large virtual source starts detached fill work so later requests do
 not re-demux the source. A session still at the start warms the complete track
-(text and ASS while playing, bitmap while paused), and later requests read the
+(text and ASS while playing, a bitmap track while paused — a bitmap *page* starts
+its progressive fill while playing, see below), and later requests read the
 small cached artifact.
 
-A session past the start never builds a complete-track artifact, and that is a
-correctness rule rather than a capacity one: a complete extract always starts at
-source zero, so one started from a mid-file playhead would publish a tail slice
-as the whole track, with offsets that do not match the source timeline and
-without every cue before the seek. Playback there is served by bounded windows
-only. Such a session prefetches at most two bounded windows on the request grid
-above — the cell the live playhead falls in and the cell after it — and keeps
-them as last-good window slices. That bounded prefetch runs for a bitmap track
-while playing too, because a playing bitmap track otherwise re-demuxes the source
-at every page boundary; the complete-track bitmap warm itself stays paused-only. A
+A session past the start never builds a complete-track artifact on its own
+initiative, and that is a correctness rule rather than a capacity one: a complete
+extract always starts at source zero, so one started from a mid-file playhead
+would publish a tail slice as the whole track, with offsets that do not match the
+source timeline and without every cue before the seek. Playback there is served by
+bounded windows only. Such a session prefetches at most two bounded windows on the
+request grid above — the cell the live playhead falls in and the cell after it —
+and keeps them as last-good window slices. That bounded prefetch runs for a text
+track while playing. A
 warm that cannot reserve the track because a fill already owns it (typically the
 client's own whole-track request, or another warm) skips instead of queueing
 behind that fill and logs `subtitle cache warm skipped: a fill already owns this
@@ -2336,6 +2376,83 @@ extract from the committed artifact produces, and the advertised coverage stays
 the requested range. A failed extraction returns an error response before
 output begins, or aborts an already-started stream so clients can distinguish
 failure from a complete track and retry.
+
+A bitmap (PGS) track is the exception, because a page is not a slice the source
+can produce cheaply. A bounded bitmap page that missed the cache starts the
+track's progressive fill while the viewer is playing: that one unbounded demux
+from source zero is what publishes the pages the client keeps asking for. It
+replaces the bounded prefetch for bitmap pages, which would read the same source
+again for pages the fill is already producing, and it goes through the cache's
+warm slot and detached relay budget, never the request path. It is single-flighted
+per source identity, track and format, so a burst of pages starts exactly one
+fill. Every other bitmap request keeps its existing admission rules: the
+full-track warm is paused-only, and a request whose window names a playhead uses
+the bounded prefetch.
+
+A bounded bitmap page is extracted with an input seek to its own start (`-ss
+<start>` before `-i`, `-copyts` after it), so against a source that honors Range
+and a container with a usable index it reads its window and not the container
+prefix before it. Measured with the production argument shape on a 3600 s,
+101 MB Matroska: a 120 s page at 3000 s read 13.0 MB, where the same page read
+without Range (or from an MKV with its cues stripped) read 94-114 MB and the
+whole file 102 MB.
+
+Before a page reads its source, the server therefore prices that window, not the
+prefix: its span times the container's byte rate (the row's declared size and
+runtime, or its bitrate), and in wall-clock terms the read rate the identity's
+own extracts have measured. Only a window that cannot be read inside one page
+extract (120 s at the measured rate) is refused before the extract, with
+`503 subtitle_page_too_costly`, `Retry-After`, and `X-Subtitle-Coverage`
+describing the progressive artifact's watermark; that refusal is what starts the
+fill when the handler does not already own one. An opening page always extracts
+normally. A page nothing can price (no size, runtime or bitrate) is not priced
+from the link's throughput, which says nothing about how many bytes a window
+holds.
+
+The extract itself is capped at 48 MB of fixed opening cost plus twice its
+window, floored at 64 MB and capped at 3 GB; an unpriceable window keeps the
+256 MB cap. A page killed that way, or one that runs out the two-minute window
+extract deadline without emitting a byte, answers the same retryable shape
+instead of a 500. The cap stops the case the seek cannot help — a container
+without an index, or a provider that answers every range request with 200.
+
+A windowed text extract is held until it completes, so a slice cut short by that
+deadline or by a canceled request is never committed as a 200 carrying a header
+and half a cue: nothing is written and the client receives the retryable
+answer.
+
+A page whose start the artifact has parsed is served from it even while the page's
+own end is still ahead of the watermark: the display sets that show in the parsed
+prefix are complete on disk, so the response answers them as a 200 and its
+`X-Subtitle-Coverage` reports the shorter range it really produced. The watermark
+is the last display set read in full (`PCS … END`), so a run still arriving never
+travels with a page. A page that starts at or past the watermark is not ready, not
+unavailable: it answers `503 subtitle_page_not_ready` with `Retry-After` and the
+same coverage header, which is a distinct code from `subtitle_source_unavailable`
+because the source was never the problem. A client that receives less than it
+asked for keeps the covered range only and asks for the same page again, so the
+part the server had not parsed is never treated as delivered.
+
+A text or ASS window the client is waiting on is bounded: an extract started for
+a relay input that has not finished after 20 s is killed. If it produced
+nothing, the answer is `503 subtitle_window_budget_exceeded` with `Retry-After`
+and the identity enters its usual extraction cooldown so a retry does not repeat
+the read; if part of the slice had already streamed, the response is aborted
+rather than completed. The code is distinct from `subtitle_source_unavailable`
+because the source is reachable and only this window is too expensive for one
+request. The breach also
+starts a detached recovery warm for the breached window extended by one client
+grid cell, so both an exact retry and the shifted window the client asks for
+next are covered; a retry whose range lies inside an in-flight warm joins that
+warm instead of starting a second read. The recovery warm is exempt from the
+cooldown the breach armed and is not bounded by the 20 s request budget. The
+budget never applies to a whole-track extract, to a window read from a committed
+artifact, or to a bitmap page (PGS keeps its own page path and bounds), and the
+detached warm may run to the window timeout because it is what fills the window
+cache. 20 s sits under the web player's 30 s subtitle fetch stall deadline, so
+the server answers before the client gives up. An opening window is attempted
+like any other rather than refused up front, so a relay too slow to deliver a
+page still gets the retryable answer instead of silence.
 
 ---
 

@@ -663,6 +663,16 @@ func TestHandleReplanPlaybackV3TriesLater4KAlternateAfterNon4KTerminal(t *testin
 			if replanned.PlaybackPlan.EffectiveMediaFileID != playable.ID {
 				t.Fatalf("effective file = %d, want later directly playable 4K alternate %d", replanned.PlaybackPlan.EffectiveMediaFileID, playable.ID)
 			}
+			// A replan that commits a release other than the row the viewer
+			// picked must report it on that replan's plan too, not only on the
+			// start plan: the client renders the notice from the plan it is
+			// about to play.
+			if replanned.PlaybackPlan.SubstitutedFromFileID != source.ID {
+				t.Fatalf("replan substituted_from_file_id = %d, want the requested row %d", replanned.PlaybackPlan.SubstitutedFromFileID, source.ID)
+			}
+			if replanned.PlaybackPlan.SubstitutionReason == "" {
+				t.Fatal("replan substitution_reason is empty; a substituted replan must name its cause")
+			}
 
 		})
 	}
@@ -6434,6 +6444,7 @@ printf '%b' '` + manifest + `' > '` + filepath.Join(outputDir, "stream.m3u8") + 
 printf a > '` + filepath.Join(outputDir, "seg_00000.m4s") + `'
 printf b > '` + filepath.Join(outputDir, "seg_00001.m4s") + `'
 printf c > '` + filepath.Join(outputDir, "seg_00002.m4s") + `'
+printf 'frame=48\nout_time_us=4000000\nprogress=continue\n'
 exec sleep 30
 `
 	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
@@ -9019,6 +9030,7 @@ func writePlaybackTestFFmpegFailingForInputPattern(t *testing.T, failPattern str
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$arg\" ;;\n" +
 		"  esac\n" +
 		"done\n" +
+		playbackTestFFmpegProgress +
 		"exec sleep 30\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write conditional fake ffmpeg: %v", err)
@@ -9724,7 +9736,7 @@ func TestPrepareVirtualAlternateFileV3BindsOwnerInstallationAndResolvedURI(t *te
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", nil).WithContext(newAuthorizedPlaybackContext())
-	prepared, _, err := handler.prepareVirtualAlternateFileV3(req, virtualFile, "profile-test-1")
+	prepared, _, err := handler.prepareVirtualAlternateFileV3(req, virtualFile, "profile-test-1", true)
 	if err != nil {
 		t.Fatalf("prepareVirtualAlternateFileV3 failed: %v", err)
 	}
@@ -10437,6 +10449,7 @@ func writePlaybackTestFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegP
 		"#EXTINF:2.0,\\nseg_0.m4s\\n#EXTINF:2.0,\\nseg_1.m4s\\n" +
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$last\" ;;\n" +
 		"esac\n" +
+		playbackTestFFmpegProgress +
 		"exec sleep 30\n"
 	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
@@ -10467,6 +10480,14 @@ func autoNVENCPipelineSeamV3(t *testing.T) func(context.Context, playback.Transc
 
 func prepareAutoLocalTransportV3(t *testing.T, ffmpegPath, sessionID string) (*PlaybackHandler, preparedTransportV3, *transportErrorV3) {
 	t.Helper()
+	return prepareAutoLocalTransportV3InContext(t, context.Background(), ffmpegPath, sessionID)
+}
+
+// prepareAutoLocalTransportV3InContext is prepareAutoLocalTransportV3 under a
+// caller's deadline, so a test can run the hw_accel=auto walk inside the window
+// a virtual start reserves for it.
+func prepareAutoLocalTransportV3InContext(t *testing.T, ctx context.Context, ffmpegPath, sessionID string) (*PlaybackHandler, preparedTransportV3, *transportErrorV3) {
+	t.Helper()
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	transcodeDir := t.TempDir()
 	handler.PlaybackConfig = func() config.PlaybackConfig {
@@ -10479,7 +10500,7 @@ func prepareAutoLocalTransportV3(t *testing.T, ffmpegPath, sessionID string) (*P
 		PlayMethod: playback.PlayTranscode, TargetVideoCodec: "h264", TargetAudioCodec: "aac", TargetResolution: "720p",
 		SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1,
 	}
-	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	request := httptest.NewRequest(http.MethodPost, "/", nil).WithContext(ctx)
 	timeline, timelineErr := handler.prepareTransportTimelineV3(request.Context(), &playback.Session{ID: sessionID}, file, result)
 	if timelineErr != nil {
 		t.Fatalf("prepare timeline: %v", timelineErr)

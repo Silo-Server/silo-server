@@ -250,8 +250,9 @@ func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float6
 // buildRemuxArgsWithLeadingPictureDropV3 adds the resume leading-picture drop
 // to the video bitstream filters. It applies only to a seeked copy with video:
 // a start at zero begins on the stream's first keyframe and has no leading
-// pictures to drop. copyAudioCodec is the codec of the source audio track a
-// copy remux carries over.
+// pictures to drop. copyAudioCodec is the copied audio codec that needs ADTS
+// framing converted for MP4, as answered by CopiedAudioADTSCodec; empty means
+// this copy needs no audio bitstream filter.
 func buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagSampleEntry, audioOnly bool, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps int, dropLeadingPictures bool, copyAudioCodec string) []string {
 	args := []string{
 		"-nostdin",
@@ -360,7 +361,9 @@ func buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat string, seekS
 			// muxer rejects the first ADTS packet ("Malformed AAC bitstream")
 			// and the response ends after the header. The filter passes
 			// already-raw AAC from MKV/MP4 through unchanged, but it refuses
-			// any other codec, so it is only added for a copied AAC track.
+			// any other codec, so the caller passes a codec only when the
+			// source container really frames that track as ADTS (see
+			// CopiedAudioADTSCodec).
 			args = append(args, "-bsf:a", "aac_adtstoasc")
 		}
 	}
@@ -519,6 +522,131 @@ func (s *RemuxSession) Close() error {
 // stable identity to match.
 var errRemuxNoOutput = errors.New("remux produced no output")
 
+// ErrRemuxRecipeFault reports a remux that FFmpeg refused because of an argument
+// this server built — a bitstream filter that does not accept the mapped stream
+// ("Codec 'eac3' ... is not supported by the bitstream filter 'aac_adtstoasc'").
+// It says nothing about the source bytes, so a caller must not treat it as the
+// release failing: indicting the candidate rotates away from a healthy release
+// and the verdict the client ends up with is about a file it never faulted.
+var ErrRemuxRecipeFault = errors.New("remux recipe fault")
+
+// remuxByteRange is the byte range a progressive remux answer honors.
+//
+// A generated stream has no seekable file behind it: its body starts at the
+// media position the plan anchored, and there is no byte offset that maps back
+// to a media position. So the only range the answer can honor is a prefix,
+// `bytes=0-N` (the shape a probe or a ranged download of a live-like body
+// uses), which is answered by ending the response after N+1 bytes.
+//
+// A range that starts past zero is not an error: it is a client resuming its
+// own read of a body whose shape it believes is byte-addressable — Chromium
+// does exactly that on a seek, and on an interrupted read. The answer is the
+// whole stream from the generation's start (the pre-range behavior), so the
+// client re-reads from the origin and keeps playing. It must never be a fatal
+// status: a 416 here closes the player instead of costing it a seek.
+//
+// The remux output length is unknown until it has been generated, so no range
+// is unsatisfiable against a known total and 416 is never this transport's
+// answer; a seekable file keeps it through http.ServeContent (see
+// ServeDirectPlay and the v2 delivery contract).
+type remuxByteRange struct {
+	// prefix is true when the answer must stop after length bytes.
+	prefix bool
+	length int64
+}
+
+// parseRemuxByteRange reads the single byte range a progressive remux can
+// honor. Everything it cannot answer as a prefix — a start offset, a suffix
+// range, a multi-range set, an unparseable or absent header — is answered with
+// the whole stream from the generation's start.
+func parseRemuxByteRange(header string) remuxByteRange {
+	spec, ok := strings.CutPrefix(strings.TrimSpace(header), "bytes=")
+	if !ok {
+		return remuxByteRange{}
+	}
+	if strings.Contains(spec, ",") {
+		return remuxByteRange{}
+	}
+	firstText, lastText, found := strings.Cut(strings.TrimSpace(spec), "-")
+	if !found {
+		return remuxByteRange{}
+	}
+	firstText, lastText = strings.TrimSpace(firstText), strings.TrimSpace(lastText)
+	// A suffix range ("-N") addresses the end of a body whose length is not
+	// known until it is generated, so it has no prefix to answer.
+	if firstText == "" {
+		return remuxByteRange{}
+	}
+	first, err := strconv.ParseInt(firstText, 10, 64)
+	if err != nil || first != 0 {
+		// A start offset names a byte position the generation has no media
+		// position for; the stream restarts from the plan's anchor instead.
+		return remuxByteRange{}
+	}
+	if lastText == "" {
+		// `bytes=0-` is the whole stream.
+		return remuxByteRange{}
+	}
+	last, err := strconv.ParseInt(lastText, 10, 64)
+	if err != nil || last < first {
+		return remuxByteRange{}
+	}
+	return remuxByteRange{prefix: true, length: last - first + 1}
+}
+
+// remuxRecipeFault classifies FFmpeg's own rejection of the arguments we built.
+// An empty answer means the failure is not attributable to the recipe.
+func remuxRecipeFault(stderr string) error {
+	if !strings.Contains(stderr, "is not supported by the bitstream filter") {
+		return nil
+	}
+	return fmt.Errorf("%w: ffmpeg rejected a bitstream filter: %s", ErrRemuxRecipeFault, strings.TrimSpace(stderr))
+}
+
+// remuxInputRefusalCause names one permanent input refusal FFmpeg prints when it
+// cannot open or identify the source at all, with the words a viewer-facing
+// sentence uses for it.
+type remuxInputRefusalCause struct {
+	needle   string
+	sentence string
+}
+
+// remuxInputRefusalCauses are the stderr fragments that mean the input will
+// never produce a byte, however long the transport waits: the scheme is not
+// buildable, the provider answered an error status, the file is absent or
+// unreadable, or the bytes are not media at all.
+//
+// Only permanent refusals belong here. A transient read error, a slow connect or
+// an aborted read is exactly the case the slow-source extension exists for, so
+// listing one would turn a play that would have delivered into an abort.
+var remuxInputRefusalCauses = []remuxInputRefusalCause{
+	{needle: "Protocol not found", sentence: "the input protocol is not available"},
+	{needle: "Invalid data found when processing input", sentence: "the source is not a readable media file"},
+	{needle: "Server returned 4", sentence: "the source server refused the request"},
+	{needle: "Server returned 5", sentence: "the source server failed the request"},
+	{needle: "HTTP error 4", sentence: "the source server refused the request"},
+	{needle: "HTTP error 5", sentence: "the source server failed the request"},
+	{needle: "No such file or directory", sentence: "the source file is missing"},
+	{needle: "Permission denied", sentence: "the source file is not readable"},
+	{needle: "moov atom not found", sentence: "the source container is truncated"},
+	{needle: "could not find codec parameters", sentence: "the source has no readable stream parameters"},
+	{needle: "does not contain any stream", sentence: "the source contains no playable stream"},
+	{needle: "matches no streams", sentence: "the source contains none of the requested streams"},
+}
+
+// remuxInputRefusal reports whether FFmpeg's own stderr names a permanent reason
+// the input cannot be read, so the first-output watchdog can indict the delivery
+// from evidence instead of from elapsed time. A nil result means "no cause named
+// yet", which is what buys a silent process its one extension.
+func remuxInputRefusal(stderr string) error {
+	for _, cause := range remuxInputRefusalCauses {
+		if strings.Contains(stderr, cause.needle) {
+			return errors.New(cause.sentence)
+		}
+	}
+	return nil
+}
+
 // Kind values for remuxInputKind.
 const (
 	remuxInputVirtual = "virtual"
@@ -617,6 +745,40 @@ func copiedAudioIsAAC(copyAudioCodec string) bool {
 	return strings.EqualFold(strings.TrimSpace(copyAudioCodec), "aac")
 }
 
+// CopiedAudioADTSCodec answers which copied audio codec a remux must move from
+// ADTS framing into MP4, or "" when this copy needs no audio bitstream filter.
+//
+// Only AAC is ever ADTS-framed, and only in containers that carry it that way:
+// MPEG-TS and raw ADTS (and a container the row does not name, which keeps the
+// historical answer for older tokens). Matroska, MP4 and WebM store the
+// AudioSpecificConfig, so their AAC frames need no filter and are copied
+// unmoved. A codec string alone is not enough evidence: a copied E-AC-3,
+// TrueHD or DTS track is refused by aac_adtstoasc ("Codec 'eac3' ... is not
+// supported by the bitstream filter"), and production reached that with a
+// row whose copy codec was mislabeled AAC. Any other codec therefore never
+// gets the filter, and neither does an AAC copy whose container cannot frame
+// it as ADTS.
+func CopiedAudioADTSCodec(codec, container string) string {
+	if !copiedAudioIsAAC(codec) {
+		return ""
+	}
+	switch normalizeContainerV3(container) {
+	case "", containerMPEGTSV3, containerM2TSV3, containerRawAACV3, containerADTSV3:
+		return audioCodecAACV3
+	}
+	return ""
+}
+
+// Container spellings that carry AAC as ADTS. normalizeContainerV3 answers "ts"
+// for mpegts; the others are the raw-ADTS names a catalog row or an older token
+// can still carry.
+const (
+	containerMPEGTSV3 = "ts"
+	containerM2TSV3   = "m2ts"
+	containerRawAACV3 = "aac"
+	containerADTSV3   = "adts"
+)
+
 // RemuxServeOptions carries the optional serving concerns that not every
 // caller sets, keeping the positional argument list from growing further.
 type RemuxServeOptions struct {
@@ -637,9 +799,11 @@ type RemuxServeOptions struct {
 	SourceAudioChannels    int
 	TargetAudioChannels    int
 	TargetAudioBitrateKbps int
-	// CopyAudioCodec is the codec of the source audio track the remux copies;
-	// a copied AAC track gets aac_adtstoasc. Empty (older tokens) keeps the
-	// plain copy. It is ignored when audio is transcoded.
+	// CopyAudioCodec is the copied audio codec that needs ADTS framing moved
+	// into MP4, as answered by CopiedAudioADTSCodec. A copied AAC track gets
+	// aac_adtstoasc; every other codec, and AAC that the container already
+	// frames with a config record, keeps the plain copy. Empty (older tokens)
+	// keeps the plain copy. It is ignored when audio is transcoded.
 	CopyAudioCodec string
 	// DropResumeLeadingPictures removes open-GOP leading pictures from a
 	// seeked video copy when this executor's FFmpeg supports it. It is a
@@ -679,6 +843,20 @@ type RemuxServeOptions struct {
 // this is deliberately loose enough for a slow provider open yet far below the
 // time a client will wait before giving up.
 var remuxFirstOutputTimeout = 15 * time.Second
+
+// remuxFirstOutputSlowSourceGrace is the one extension a silent but still-live
+// remux earns before it is indicted, so the whole first-output window is
+// remuxFirstOutputTimeout + this grace (25 s by default).
+//
+// The evidence for it is the production measurement: cold AltMount providers
+// produced their first byte at 15-20 s, and the 15 s watchdog aborted ten of
+// those plays in one window — plays that then delivered on the retry. Waiting is
+// only ever spent on a process that has named no failure (see
+// remuxInputRefusal) and is still running, and the total stays under the client's
+// 60 s transport startup guard and its 45 s per-attempt replan budget, so a
+// genuinely dead candidate still answers a retryable failure well before the
+// viewer gives up.
+var remuxFirstOutputSlowSourceGrace = 10 * time.Second
 
 // RemuxContentType returns the override required for an audio-only fMP4.
 func RemuxContentType(audioOnly bool) string {
@@ -775,6 +953,13 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Transfer-Encoding", "chunked")
 	}
+	// A generated stream can answer a prefix range and nothing else: `bytes=0-N`
+	// ends the response after N+1 bytes, and every other range (a start offset,
+	// a suffix, a multi-range set) gets the whole stream from the generation's
+	// start. It is never a fatal status: a browser resumes its own read of the
+	// body with a byte offset, and refusing that closes the player instead of
+	// costing it a seek (see remuxByteRange).
+	byteRange := parseRemuxByteRange(r.Header.Get("Range"))
 	// net/http discards a HEAD response's body, so a remux started for one
 	// would run ffmpeg over the whole file for nothing. Answer with the
 	// headers a GET sends instead.
@@ -830,47 +1015,121 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 	}()
 	var n int
 	var readErr error
-	select {
-	case result := <-readResult:
-		n, readErr = result.n, result.err
-	case <-time.After(firstTimeout):
-		session.Abort()
-		// Reap before logging: Close is what waits for FFmpeg and for its
-		// stderr to be copied, and the deferred Close would otherwise run
-		// after the diagnostic line was written.
-		_ = session.Close()
-		logRemuxNoOutput(r.Context(), filePath, session)
-		err := fmt.Errorf("%w: first output timeout after %s: %w", errRemuxNoOutput, firstTimeout, io.EOF)
-		writeStartError(w, opts.DeferStartError, "failed to remux", http.StatusBadGateway)
-		return err
+	// The first-output window has two phases so the watchdog can tell a slow
+	// provider from a dead one. Phase one is the ordinary budget: a healthy
+	// remote source answers in a few hundred milliseconds, so nothing that is
+	// still silent at the budget and has not named a cause is being fast. Phase
+	// two is one bounded extension for that case, because a cold provider that
+	// takes 15-20 s to open is slowness, not a verdict — aborting it killed plays
+	// that would have delivered (ten occurrences in one production window, one
+	// of which the client then reported as a non-retryable audio-codec failure).
+	// A process that already named a permanent input refusal is indicted at the
+	// ordinary budget: waiting cannot change "Protocol not found".
+	window := firstTimeout
+	extended := false
+	for {
+		timer := time.NewTimer(window)
+		select {
+		case result := <-readResult:
+			timer.Stop()
+			n, readErr = result.n, result.err
+		case <-timer.C:
+			if !extended && remuxInputRefusal(session.stderr.String()) == nil {
+				extended = true
+				window = remuxFirstOutputSlowSourceGrace
+				slog.InfoContext(r.Context(), "remux first output still pending; extending the window for a live source",
+					logKeyComponent, logValuePlayback,
+					"input_kind", remuxInputKind(filePath),
+					"first_output_timeout", firstTimeout,
+					"extension", remuxFirstOutputSlowSourceGrace,
+				)
+				continue
+			}
+			session.Abort()
+			// Reap before logging: Close is what waits for FFmpeg and for its
+			// stderr to be copied, and the deferred Close would otherwise run
+			// after the diagnostic line was written.
+			_ = session.Close()
+			logRemuxNoOutput(r.Context(), filePath, session)
+			if fault := remuxRecipeFault(session.stderr.String()); fault != nil {
+				writeStartError(w, opts.DeferStartError, "failed to remux", http.StatusBadGateway)
+				return fault
+			}
+			if refusal := remuxInputRefusal(session.stderr.String()); refusal != nil {
+				writeStartError(w, opts.DeferStartError, "failed to remux", http.StatusBadGateway)
+				return fmt.Errorf("%w: %s: %w", errRemuxNoOutput, refusal.Error(), io.EOF)
+			}
+			budget := firstTimeout
+			if extended {
+				budget = firstTimeout + remuxFirstOutputSlowSourceGrace
+			}
+			err := fmt.Errorf("%w: first output timeout after %s: %w", errRemuxNoOutput, budget, io.EOF)
+			writeStartError(w, opts.DeferStartError, "failed to remux", http.StatusBadGateway)
+			return err
+		}
+		break
 	}
 	if n > 0 {
 		first = append(first, buf[:n]...)
 	} else if readErr != nil {
 		_ = session.Close()
 		logRemuxNoOutput(r.Context(), filePath, session)
+		if fault := remuxRecipeFault(session.stderr.String()); fault != nil {
+			writeStartError(w, opts.DeferStartError, "failed to remux", http.StatusBadGateway)
+			return fault
+		}
 		err := fmt.Errorf("%w: %w", errRemuxNoOutput, readErr)
 		writeStartError(w, opts.DeferStartError, "failed to remux", http.StatusBadGateway)
 		return err
 	}
 	setStreamHeaders()
-	w.WriteHeader(http.StatusOK)
+	// A prefix range is answered as a partial response of exactly the bytes it
+	// asked for. The complete length is unknown (the body is generated), so the
+	// Content-Range carries `*`, and the response ends when the byte count is
+	// met — a client that asked for a prefix must not receive the whole title.
+	rangeRemaining := int64(-1)
+	if byteRange.prefix {
+		rangeRemaining = byteRange.length
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes 0-%d/*", byteRange.length-1))
+		w.WriteHeader(http.StatusPartialContent)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+	if rangeRemaining >= 0 && int64(len(first)) > rangeRemaining {
+		first = first[:rangeRemaining]
+	}
+	if rangeRemaining >= 0 {
+		rangeRemaining -= int64(len(first))
+	}
 	if _, writeErr := w.Write(first); writeErr != nil {
 		return nil
 	}
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
+	if rangeRemaining == 0 {
+		return nil
+	}
 
 	// Stream subsequent ffmpeg output to the HTTP response.
 	for {
 		n, readErr := session.Read(buf)
 		if n > 0 {
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+			chunk := buf[:n]
+			if rangeRemaining >= 0 && int64(len(chunk)) > rangeRemaining {
+				chunk = chunk[:rangeRemaining]
+			}
+			if _, writeErr := w.Write(chunk); writeErr != nil {
 				return nil // Client disconnected.
+			}
+			if rangeRemaining >= 0 {
+				rangeRemaining -= int64(len(chunk))
 			}
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
+			}
+			if rangeRemaining == 0 {
+				return nil // The requested prefix is complete.
 			}
 		}
 		if readErr != nil {

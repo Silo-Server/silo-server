@@ -27,7 +27,7 @@ describe("StartupGuard", () => {
     expect(guard.hasFailed()).toBe(false);
 
     vi.advanceTimersByTime(1);
-    expect(onFailure).toHaveBeenCalledExactlyOnceWith("deadline");
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith("deadline", false);
     expect(guard.hasFailed()).toBe(true);
     guard.dispose();
   });
@@ -50,6 +50,81 @@ describe("StartupGuard", () => {
     const guard = new StartupGuard(onFailure);
 
     guard.dispose();
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS);
+
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it("fails at the first deadline when replanning adopts transports before a frame", () => {
+    const onFailure = vi.fn();
+    const guard = new StartupGuard(onFailure);
+
+    // Two plans adopted inside the window, each installing a new transport. A
+    // start that never showed a frame must not push its deadline out with them.
+    vi.advanceTimersByTime(20_000);
+    guard.armForReplacementTransport();
+    vi.advanceTimersByTime(20_000);
+    guard.armForReplacementTransport();
+
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS - 40_000 - 1);
+    expect(onFailure).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith("deadline", false);
+    expect(guard.hasFailed()).toBe(true);
+    guard.dispose();
+  });
+
+  it("gives a transport that replaces a played one its own startup window", () => {
+    const onFailure = vi.fn();
+    const guard = new StartupGuard(onFailure);
+
+    guard.markPlaybackStarted();
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS);
+    expect(onFailure).not.toHaveBeenCalled();
+
+    // A real reconnect from a working stream is a new start and may use the
+    // full window.
+    expect(guard.armForReplacementTransport()).toBe(true);
+    expect(guard.isStarting()).toBe(true);
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS - 1);
+    expect(onFailure).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    // The replacement deadline is reported as such: the stream had played, so
+    // Auto may still lower into another rung.
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith("deadline", true);
+    guard.dispose();
+  });
+
+  it("does not give the ladder another window after the deadline", () => {
+    const onFailure = vi.fn();
+    const guard = new StartupGuard(onFailure);
+
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS);
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith("deadline", false);
+
+    // The reported failure may still produce one more route, but the session's
+    // deadline has passed: the replacement must be refused so the caller
+    // surfaces the retryable error instead of spending another window. This is
+    // what used to turn 60 s into 186 s of "Loading video" under quality:auto.
+    expect(guard.armForReplacementTransport()).toBe(false);
+    expect(guard.hasFailed()).toBe(true);
+
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS);
+    expect(onFailure).toHaveBeenCalledOnce();
+    guard.dispose();
+  });
+
+  it("does not revive a disposed guard for a replacement transport", () => {
+    const onFailure = vi.fn();
+    const guard = new StartupGuard(onFailure);
+
+    guard.dispose();
+    // A disposed guard belongs to a surface that owns its own deadline (the
+    // browser engine), so the transport still loads; it just never arms a new
+    // timer here.
+    expect(guard.armForReplacementTransport()).toBe(true);
     vi.advanceTimersByTime(STARTUP_TIMEOUT_MS);
 
     expect(onFailure).not.toHaveBeenCalled();

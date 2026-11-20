@@ -1621,6 +1621,45 @@ describe("useASSSubtitles bounded retry/watchdog policy", () => {
     }
   });
 
+  it("backs off a retryable 503 by its Retry-After without reporting the track failed", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const state = vi.fn();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(null, { status: 503, headers: { "Retry-After": "20" } }))
+      .mockResolvedValue(mockFetchResponse("[Script Info]"));
+    const videoRef = makeVideoRef();
+    const { unmount } = renderHook(() =>
+      useASSSubtitles(videoRef, [germanTrack], 6, false, 0, 0, state),
+    );
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      // The server is recovering the page it refused. The script already on
+      // screen keeps rendering, the track stays selected, and the player is not
+      // told the track failed.
+      expect(state).not.toHaveBeenCalledWith("error");
+
+      // The header is honored: the local 5 s ladder does not fire, and the
+      // retry happens once the server asked for it.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(19_999);
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(state).not.toHaveBeenCalledWith("error");
+    } finally {
+      unmount();
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("stops at a definitive 4xx instead of trying the whole-track fallback", async () => {
     vi.useFakeTimers();
     const error = vi.spyOn(console, "error").mockImplementation(() => {});

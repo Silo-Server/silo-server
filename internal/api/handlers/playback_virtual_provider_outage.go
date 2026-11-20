@@ -332,18 +332,70 @@ func transportStartFailureV3(cause error, fallback *transportErrorV3) *transport
 	return fallback
 }
 
+// errVirtualSelectedReleaseCannotPlay marks a virtual start whose selected
+// release could not be resolved and for which every substitute the fallback
+// walk found would have contradicted the selection: a different runtime, or a
+// poorer audio/subtitle menu. It is deliberately not a provider-outage sentinel:
+// retrying does not make a track-losing substitute honest, so the terminal names
+// the version list instead of serving different bytes.
+var errVirtualSelectedReleaseCannotPlay = errors.New("the selected release cannot serve the selection")
+
+// errVirtualSelectedReleaseUnverified marks a virtual start whose selected
+// release was offered only bytes that did not establish its identity: the
+// served size contradicted the declaration and the candidate's row belonged to
+// a different release. It is retryable like an unavailable source, but it must
+// not be answered with a substitute the viewer did not select.
+var errVirtualSelectedReleaseUnverified = errors.New("the selected release was served by a different release")
+
+// virtualVersionFallbackSubstitutionRejectionV3 names why a substitute the
+// cold-start fallback walk resolved must not replace the selected release, or ""
+// when the substitute is safe. It is the same policy #448 applies to a rotation,
+// reused instead of a second one: a substitute must not contradict the item's
+// runtime (duration_contradiction) or offer fewer audio or subtitle tracks than
+// the selected row (track_loss). A substitute on the requested row itself, or a
+// row with no measured evidence, is not rejected by absence of evidence.
+func virtualVersionFallbackSubstitutionRejectionV3(expectedRuntimeMinutes int, selected, effective *models.MediaFile) string {
+	if selected == nil || effective == nil || effective.ID <= 0 || effective.ID == selected.ID {
+		return ""
+	}
+	switch {
+	case !virtualRuntimePlausible(effective.Duration, expectedRuntimeMinutes):
+		return "duration_contradiction"
+	case virtualRotationWouldDropTracks(selected, effective, effective):
+		return "track_loss"
+	}
+	return ""
+}
+
 // virtualStartUnresolvedTerminalV3 builds the honest terminal for a virtual
 // start whose listing failed on every version the fallback walk could try. A
 // provider request failure (the edge answered 5xx or the request timed out) is
 // the retryable provider_unavailable dependency condition; an empty provider
 // listing stays the retryable virtual_source_unavailable the start path already
-// used, with a message that names the empty answer; every other cause keeps the
-// generic resolve message so no verdict is fabricated from a failure the
-// classifier cannot name.
+// used, with a message that names the empty answer; a selected release whose
+// every substitute would have lost the selection names the version list; every
+// other cause keeps the generic resolve message so no verdict is fabricated from
+// a failure the classifier cannot name.
 func virtualStartUnresolvedTerminalV3(resolveErr error) playback.DecisionResponseV3 {
 	switch {
 	case errors.Is(resolveErr, errOfferedCandidateUnavailable):
 		return playback.NewTerminalResponseV3("offered_release_unavailable", "The offered release is no longer available; refresh the version list and choose again.", true)
+	case errors.Is(resolveErr, errVirtualSelectedReleaseCannotPlay):
+		return playback.NewTerminalResponseV3(virtualSourceUnavailableReasonV3, "The selected version cannot serve its audio and subtitle tracks. Refresh the version list and choose another version.", true)
+	case errors.Is(resolveErr, errVirtualSelectedReleaseUnverified):
+		// The served bytes contradict the row the viewer picked. Report the
+		// versions check's own vocabulary (source_mismatch) instead of the
+		// generic unavailable, so the client can say "the provider served a
+		// different release" rather than "this version is gone".
+		return playback.NewTerminalResponseV3(sourceMismatchReasonV3, "The provider served a different release's bytes for this version. Refresh the version list and choose again.", true)
+	case errors.Is(resolveErr, errEffectiveFileNotInVersionList):
+		return playback.NewTerminalResponseV3(virtualSourceUnavailableReasonV3, "The selected version resolved to a release that is not in this item's version list. Refresh the version list and choose another version.", true)
+	case errors.Is(resolveErr, errSelectedReleaseNotServableV3):
+		// The provider answered with another release's candidate. The selected
+		// version itself was never disproven, so this stays retryable and names
+		// that version: a fresh start can resolve it again, and the viewer is
+		// never told a different file's fate.
+		return playback.NewTerminalResponseV3(virtualSourceUnavailableReasonV3, "The selected version could not be prepared from its own release. Try again, or choose another version.", true)
 	case errors.Is(resolveErr, resolver.ErrProviderUnavailable):
 		return playback.NewTerminalResponseV3(providerUnavailableReasonV3, "The virtual source provider is temporarily unavailable.", true)
 	case strings.Contains(strings.ToLower(fmt.Sprint(resolveErr)), "no streams available"):

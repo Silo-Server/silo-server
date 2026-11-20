@@ -18,6 +18,7 @@ import type { CSSProperties } from "react";
 import type { ParsedCue } from "../utils/parseVTT";
 import { matchSubtitleTrackAcrossVersions, resolveSubtitleAutoSelect } from "../utils/subtitleSort";
 import type HlsType from "hls.js";
+import { Play } from "lucide-react";
 import { PlayerControls } from "./PlayerControls";
 import { PlaybackInfoOverlay } from "./PlaybackInfoOverlay";
 import { PlaybackNoticeOverlay, PlaybackNoticeStack } from "./PlaybackNoticeOverlay";
@@ -76,6 +77,14 @@ import {
 import { resolveVersionAudioLanguage } from "../utils/effectiveAudioLanguage";
 import { resolveEffectiveVersion } from "../utils/resolveEffectiveVersion";
 import { StartupGuard } from "../utils/startupGuard";
+import {
+  SegmentRetryBudget,
+  StartupSegmentBudget,
+  UNBUFFERED_FRAGMENT_LOADS,
+  UnbufferedFragmentLoads,
+  segmentRetryDelayMs,
+  type StartupSegmentVerdict,
+} from "../utils/segmentRetry";
 import { isTimeBuffered } from "../utils/bufferPolicy";
 import { isSafariBrowserV3, resolveHLSEngineV3 } from "../utils/hlsEngine";
 import { isFirefoxUserAgent } from "../utils/browser";
@@ -114,6 +123,8 @@ import type { PlayerTrickplay } from "../trickplay";
 import type { FailureV3, PlanV3, SubtitleInventoryItemV3 } from "../protocol-v3";
 import {
   mediaDurationSeconds,
+  reloadStartSeconds,
+  replacedTransportPlayheadSeconds,
   subtitleChangePositionSeconds,
   subtitleStartPositionSeconds,
   toMediaTime,
@@ -298,6 +309,17 @@ interface VideoPlayerProps {
   replanError?: string | null;
   /** Title for the replan error, used when surfacing the refusal as a toast. */
   replanErrorTitle?: string | null;
+  /**
+   * Whether the session judged that refused replan retryable (the server's own
+   * verdict on the terminal). The error overlay offers Try again only then.
+   */
+  replanErrorRetryable?: boolean;
+  /**
+   * The session's machine-readable reason for `replanError`. A stalled replan
+   * (`replan_timeout`) armed no transport guard, so it is surfaced even though
+   * the previous plan's transport never reported a failure.
+   */
+  replanErrorReason?: string | null;
   sessionId: string;
   bufferingTitleId?: string;
   selectedVersion?: PlayerFileVersion;
@@ -431,6 +453,9 @@ interface VideoPlayerProps {
 const EXIT_PROGRESS_FLUSH_TIMEOUT_MS = 1_000;
 // MediaError.MEDIA_ERR_NETWORK: the media was usable, then fetching it failed.
 const MEDIA_ERR_NETWORK = 2;
+// MediaError.MEDIA_ERR_DECODE: the bytes arrived but this device could not
+// decode them, which is a verdict on the file rather than on the transport.
+const MEDIA_ERR_DECODE = 3;
 const FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS = 8_000;
 /**
  * Firefox's copy-remux stall is media that arrived and still made no frame.
@@ -458,10 +483,19 @@ const PROGRESSIVE_REMUX_IDLE_REOPEN_MS = 60_000;
 // arrives. The budget is small so a genuinely blocked autoplay settles into a
 // paused player with working controls instead of retrying forever.
 const AUTOPLAY_RETRY_DELAY_MS = 400;
+/**
+ * The tap-to-play overlay's label. It is a module constant like the room
+ * messages below so the player's JSX carries no untranslated literal.
+ */
+const AUTOPLAY_BLOCKED_LABEL = "Tap to play";
 // Mouse clicks on the video surface wait this long for a second click
 // (fullscreen toggle) before toggling play/pause.
 const DOUBLE_CLICK_WINDOW_MS = 250;
 const MAX_AUTOPLAY_ATTEMPTS = 4;
+// How far a transport's first buffered media may begin after the playhead
+// before the player treats it as a stream that does not contain the requested
+// position at all. Smaller gaps are hls.js's own gap handling.
+const START_HOLE_SECONDS = 0.25;
 // A viewer who reports this many sustained stalls to a room within the window
 // cannot keep up at its current quality and is offered a lower one.
 const ROOM_STALLS_BEFORE_LOWER_QUALITY = 2;
@@ -517,6 +551,49 @@ function isAutoplayPolicyRejection(error: unknown): boolean {
     : typeof error === "object" &&
         error !== null &&
         (error as { name?: unknown }).name === "NotAllowedError";
+}
+
+/**
+ * Whether this page has ever seen a user gesture. Undefined where the API is
+ * missing, so callers act only on an explicit `false`.
+ */
+function hasHadUserActivation(): boolean | undefined {
+  const activation = (navigator as Navigator & { userActivation?: { hasBeenActive?: boolean } })
+    .userActivation;
+  return typeof activation?.hasBeenActive === "boolean" ? activation.hasBeenActive : undefined;
+}
+
+/**
+ * A browser that has never seen a gesture will not start an unmuted element,
+ * and waiting for readiness does not change that: `play()` is refused, or never
+ * called at all when the readiness event the player waits for has already
+ * passed. An element paused with media buffered and no gesture in its history
+ * is that dead end — the loading cover stays up over a player that would start
+ * on a tap.
+ */
+function isAutoplayBlockedByPolicy(media: HTMLMediaElement): boolean {
+  if (hasHadUserActivation() !== false) return false;
+  if (!media.paused || media.ended) return false;
+  if (media.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return false;
+  return bufferedEndSeconds(media) > 0;
+}
+
+/**
+ * The fragment an hls.js load failure belongs to, or null when it names no
+ * fragment (the playlist or manifest itself failed). The media sequence number
+ * identifies the segment across recoveries, including a `loadSource` reload
+ * that restarts the playlist from its first segment.
+ */
+function failedFragmentKey(data: {
+  frag?: { sn?: number | string; url?: string } | null;
+  url?: string;
+}): string | null {
+  const frag = data.frag;
+  // hls.js types `sn` as a number for media fragments and the literal
+  // "initSegment" for a fragment's initialization section.
+  if (frag?.sn !== undefined && frag.sn !== null) return `frag:${frag.sn}`;
+  if (frag?.url) return `frag:${frag.url}`;
+  return null;
 }
 
 function readNumericPayload(
@@ -610,6 +687,8 @@ export function VideoPlayer({
   pendingSwitchFileId = null,
   replanError = null,
   replanErrorTitle = null,
+  replanErrorRetryable = false,
+  replanErrorReason = null,
   initialSubtitleError = null,
   sessionId,
   selectedVersion,
@@ -864,6 +943,16 @@ export function VideoPlayer({
   const [duration, setDuration] = useState(propDuration ?? 0);
   const [buffered, setBuffered] = useState<TimeRanges | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Whether the error overlay's failure can be repaired by starting the same
+  // version again. Only the transient classes ask for it: a startup budget that
+  // ran out, a network failure, a request that never reached the server, or a
+  // refused replan the server itself marked retryable. A source this device
+  // cannot play keeps Go Back.
+  const [errorRetryable, setErrorRetryable] = useState(false);
+  const setPlayerError = useCallback((message: string | null, retryable = false) => {
+    setError(message);
+    setErrorRetryable(message !== null && retryable);
+  }, []);
   const [isFullscreen, setIsFullscreen] = useState(false);
   // iPhone Safari plays fullscreen in its own native view, which draws no
   // page overlays, so no pill or notice can be seen there.
@@ -880,6 +969,10 @@ export function VideoPlayer({
   const [buffering, setBuffering] = useState(false);
   const bufferingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [awaitingFirstFrame, setAwaitingFirstFrame] = useState(true);
+  // The browser refused to start playback because this page has no user
+  // gesture yet. The player cannot talk its way past that: the viewer has to
+  // tap, so it shows an overlay that starts the stream.
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   // The session whose video has been on screen. A transport a replan loads
   // into it (a seek outside the buffer, a quality or track change) waits for
   // its first frame behind the buffering spinner, with the controls usable;
@@ -1132,23 +1225,34 @@ export function VideoPlayer({
       if (reportedPlanFailureKeyRef.current === failureKey) return true;
       reportedPlanFailureKeyRef.current = failureKey;
       transportFailedForPlanRevisionRef.current = planRevision;
-      setError(null);
+      setPlayerError(null);
       // A transport that never played, in a playing room, resumes where the
-      // room is now.
+      // room is now. So does one that has played but has no playhead yet: a
+      // transport that failed while it was still at zero has no position worth
+      // rebuilding, and the room's is the one the viewer is actually missing.
       const roomReference = roomReferenceRef.current;
+      const ownPosition = replanPosition();
       const resumeAt =
-        !streamPlayedRef.current && roomReference?.playing
+        roomReference?.playing && (!streamPlayedRef.current || !(ownPosition > 0))
           ? roomPositionAt(roomReference, Date.now(), serverTimeOffsetRef.current)
-          : replanPosition();
+          : ownPosition;
       onPlanFailure(failure, resumeAt);
       return true;
     },
-    [onPlanFailure, plan.plan_attempt_key, planRevision, replanPosition, sessionId],
+    [onPlanFailure, plan.plan_attempt_key, planRevision, replanPosition, sessionId, setPlayerError],
   );
 
   useEffect(() => {
     transportFailedForPlanRevisionRef.current = null;
   }, [planRevision]);
+
+  // The transport effect reads failures through this ref so a new callback
+  // identity (the host rebuilds `onPlanFailure` from its own render inputs)
+  // cannot tear down a transport that is playing. A live transport is rebuilt
+  // only by a new plan or a new stream URL, which is what the effect's own
+  // dependency list names.
+  const reportCurrentPlanFailureRef = useRef(reportCurrentPlanFailure);
+  reportCurrentPlanFailureRef.current = reportCurrentPlanFailure;
 
   /**
    * Hands a network failure to the session's reconnect when the stream has
@@ -1240,11 +1344,12 @@ export function VideoPlayer({
   }, [connectionStatus]);
 
   const failStartup = useCallback(
-    (cause: "deadline" | "network") => {
+    (cause: "deadline" | "network", replacement = false) => {
       console.error("[player] Playback startup timed out or exhausted recovery attempts");
 
       const activeHls = hlsRef.current;
       hlsRef.current = null;
+      activeHls?.stopLoad();
       activeHls?.destroy();
 
       const video = videoRef.current;
@@ -1252,7 +1357,7 @@ export function VideoPlayer({
         video.removeAttribute("src");
         video.load();
       }
-      const fail = () => {
+      const report = () => {
         if (
           !reportCurrentPlanFailure({
             classification: "startup_timeout",
@@ -1262,25 +1367,53 @@ export function VideoPlayer({
                 : "HLS playback exhausted its startup recovery budget.",
           })
         ) {
-          setError("Playback failed. The media could not be loaded.");
+          // The startup budget ran out on a dead transport: nothing was
+          // established about the source, so starting it again is worth
+          // offering.
+          setPlayerError("Playback failed. Please try again.", true);
         }
       };
-      // When Auto lowers on its own, a start that missed its deadline lowers, as
-      // a long stall would.
-      if (cause === "deadline") startDeadlinePassedRef.current(fail);
-      else fail();
+      if (cause === "deadline" && !replacement) {
+        // The session's own start missed its deadline. That deadline is the
+        // contract: the route ladder has already had the whole window, and
+        // lowering into another transport is what stretched the promised 60 s to
+        // 186 s under quality:auto. The viewer gets the retryable card here, and
+        // its Try again starts a fresh session with a fresh budget. A
+        // *replacement* transport (a quality change or reconnect after playback
+        // started) keeps the lowering path: the stream was working, and this
+        // start is a new one.
+        setPlayerError("Playback failed. Please try again.", true);
+        return;
+      }
+      // When Auto lowers on its own, a replacement that misses its deadline
+      // lowers, as a long stall would.
+      if (cause === "deadline") startDeadlinePassedRef.current(report);
+      else report();
     },
-    [reportCurrentPlanFailure],
+    [reportCurrentPlanFailure, setPlayerError],
   );
+
+  const failStartupRef = useRef(failStartup);
+  failStartupRef.current = failStartup;
 
   // Every transport must show a frame by the startup deadline, the element's
   // own progressive loads included: a start that never plays otherwise sits
   // on its spinner with no failure path. The browser engine keeps its own
   // readiness deadline and stands this one down when it attaches.
+  //
+  // The guard belongs to the playback session, not to a plan: `planRevision`
+  // bumps on every adoption, so recreating the guard there handed a session
+  // that keeps replanning a fresh 60 s each time and it never reached its own
+  // deadline (no error, no Try again). A new transport asks for a window
+  // through `armForReplacementTransport`, which grants one only to a transport
+  // that already played: a session whose deadline has passed gets no further
+  // route, so the guard's failure surfaces instead of the ladder continuing.
   useEffect(() => {
     if (!isPlayerReady) return;
 
-    const guard = new StartupGuard(failStartup);
+    const guard = new StartupGuard((cause, replacement) =>
+      failStartupRef.current(cause, replacement),
+    );
     startupGuardRef.current = guard;
 
     return () => {
@@ -1289,7 +1422,7 @@ export function VideoPlayer({
         startupGuardRef.current = null;
       }
     };
-  }, [failStartup, isPlayerReady, planRevision]);
+  }, [isPlayerReady]);
 
   // The media's full runtime, from the plan and nowhere else: on an HLS copy
   // remux the engine reports only the length produced so far, so substituting it
@@ -1297,9 +1430,28 @@ export function VideoPlayer({
   const backendDuration = plan.source.duration_seconds ?? propDuration ?? 0;
   backendDurationRef.current = backendDuration;
   const effectiveInitialPosition = plan.timeline.player_start_seconds;
+  // The transport effect reads the start position through this ref rather than
+  // depending on it. A plan that reuses the running transport (a track change,
+  // a reconnect that lands the same route) still rewrites
+  // `player_start_seconds` to the request's live position, and reloading the
+  // element to catch up that value would throw away the stream already
+  // playing. The effect re-runs only when the transport itself changed, and it
+  // reads the position that transport starts from at that moment.
+  const effectiveInitialPositionRef = useRef(effectiveInitialPosition);
+  effectiveInitialPositionRef.current = effectiveInitialPosition;
   const canSeekAnywhere = plan.timeline.can_seek_anywhere;
   const canSeekAnywhereRef = useRef(canSeekAnywhere);
   canSeekAnywhereRef.current = canSeekAnywhere;
+  // A progressive remux is one forward-only generation anchored at the plan's
+  // start, not a byte-addressable file: the element cannot seek it, and asking
+  // it to makes Chromium re-request the stream at a byte offset the transport
+  // cannot resume. Its targets go back through the server (reanchorAt) unless
+  // the element already reports them as seekable, and the element's own error
+  // recovery reopens the stream at the playhead rather than treating a refused
+  // offset as a verdict on the file.
+  const isProgressiveRemux = plan.delivery === "server_remux_progressive";
+  const isProgressiveRemuxRef = useRef(isProgressiveRemux);
+  isProgressiveRemuxRef.current = isProgressiveRemux;
   const replanningRef = useRef(replanning);
   replanningRef.current = replanning;
   // The viewer's newest seek while a replan of this session was in flight, and
@@ -1312,11 +1464,22 @@ export function VideoPlayer({
   const replanSeekRef = useRef<{ sessionId: string; revision: number; seconds: number } | null>(
     null,
   );
+  // The session the mounted transport belongs to, so a replacement that starts a
+  // different session never inherits this one's playhead. See reloadStartSeconds.
+  const transportSessionRef = useRef<string | null>(null);
+  // A plan that settles without replacing the stream (a track change, a refused
+  // replan) has already played the seek it was made during on this transport,
+  // so the target must not aim the next one. Only a plan that installs a new
+  // transport keeps it for that transport's start.
+  const lastTransportRevisionRef = useRef(effectiveTransportRevision);
   useEffect(() => {
-    if (!replanning && replanSeekRef.current?.revision === planRevision) {
+    const previous = lastTransportRevisionRef.current;
+    lastTransportRevisionRef.current = effectiveTransportRevision;
+    if (replanning) return;
+    if (previous === effectiveTransportRevision) {
       replanSeekRef.current = null;
     }
-  }, [planRevision, replanning]);
+  }, [effectiveTransportRevision, planRevision, replanning]);
   // The menu is the plan's. The session's preference decides whether Auto is
   // lit, since `auto` names no rung; otherwise the plan names the entry it
   // delivers.
@@ -1500,6 +1663,12 @@ export function VideoPlayer({
   // room says so, not when its media is ready.
   const roomPlaybackActiveRef = useRef(roomPlaybackActive);
   roomPlaybackActiveRef.current = roomPlaybackActive;
+  // Read by the element's own listeners, which do not restart with a prop.
+  const shouldAutoPlayRef = useRef(shouldAutoPlay);
+  shouldAutoPlayRef.current = shouldAutoPlay;
+  // The transport's settle-paused path, reached from the element's listeners so
+  // an autoplay the browser quietly never ran still ends in a usable player.
+  const settlePausedRef = useRef<() => void>(() => {});
   // Read by timers that must use the newest clock estimate without restarting.
   const serverTimeOffsetRef = useRef(watchTogether.serverTimeOffsetMs);
   serverTimeOffsetRef.current = watchTogether.serverTimeOffsetMs;
@@ -1740,6 +1909,7 @@ export function VideoPlayer({
     plan.plan_attempt_key,
     replanning,
     sessionId,
+    setPlayerError,
   ]);
 
   useEffect(() => {
@@ -1753,7 +1923,7 @@ export function VideoPlayer({
     }
 
     compatibilityFallbackKeyRef.current = fallbackKey;
-    setError(null);
+    setPlayerError(null);
     setNotice({
       title: "Compatibility mode",
       message: "Firefox rejected the original stream. Retrying with encoded video.",
@@ -1772,6 +1942,7 @@ export function VideoPlayer({
     plan.plan_attempt_key,
     replanning,
     sessionId,
+    setPlayerError,
   ]);
 
   // A failed recovery leaves no transport behind. Surface the refusal for the
@@ -1792,10 +1963,24 @@ export function VideoPlayer({
     if (reportedPlanFailureKeyRef.current === failureKey) {
       reportedPlanFailureKeyRef.current = null;
     }
-    if (transportFailedForPlanRevisionRef.current === planRevision || !isPlayerReady) {
-      setError(replanError);
+    if (
+      transportFailedForPlanRevisionRef.current === planRevision ||
+      !isPlayerReady ||
+      replanErrorReason === "replan_timeout"
+    ) {
+      setPlayerError(replanError, replanErrorRetryable);
     }
-  }, [isPlayerReady, plan.plan_attempt_key, planRevision, replanError, replanning, sessionId]);
+  }, [
+    isPlayerReady,
+    plan.plan_attempt_key,
+    planRevision,
+    replanError,
+    replanErrorReason,
+    replanErrorRetryable,
+    replanning,
+    sessionId,
+    setPlayerError,
+  ]);
 
   // -- Remux seeking (callback-based) --
   // Only the progressive/direct routes take this path; HLS seeking is handled
@@ -1968,7 +2153,17 @@ export function VideoPlayer({
         video.currentTime = nativeSeconds;
         return true;
       }
-      if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
+      // A progressive remux is not byte-seekable, whatever the plan's
+      // `can_seek_anywhere` claims: it is one forward-only generation anchored
+      // where the plan started, so a native seek makes Chromium re-request the
+      // stream at a byte offset the transport has no media position for. The
+      // element's own seekable range is the honest signal that the target needs
+      // no request at all; everything else goes back through the server as a
+      // reanchor, which is the seek this transport can actually serve.
+      const canNativeSeek = isProgressiveRemux
+        ? isNativePositionInRanges(video.seekable, nativeSeconds)
+        : canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds);
+      if (canNativeSeek) {
         rememberPendingSeek(seconds);
         // The replan now in flight may already be building the stream this
         // seek will play on, from a position the seek has moved past. Hand the
@@ -1990,6 +2185,7 @@ export function VideoPlayer({
       canSeekAnywhere,
       handleSeek,
       isHlsStream,
+      isProgressiveRemux,
       reanchorAt,
       rememberPendingSeek,
       resetRoomCatchupRate,
@@ -2000,7 +2196,6 @@ export function VideoPlayer({
   // until the reopened stream replaces it. A room keeps its own transport. A
   // replan or fresh start already in flight replaces this stream when it lands
   // a plan; the reopen waits for it and runs only if it does not.
-  const isProgressiveRemux = plan.delivery === "server_remux_progressive";
   const planChangeInFlight = replanning || replacing;
   const planChangeInFlightRef = useRef(planChangeInFlight);
   planChangeInFlightRef.current = planChangeInFlight;
@@ -3047,13 +3242,36 @@ export function VideoPlayer({
 
   // -- hls.js lifecycle --
   useEffect(() => {
+    // Where the transport this one replaces had got to, on the player clock this
+    // plan uses. A replan the viewer did not seek for (a lowering, a re-offer of
+    // the same route) can land on the generation's origin while the transport it
+    // replaces has played past it; beginning there asks the live generation for
+    // segments it produced long ago, and the segment layer answers them with a
+    // 412 that ends in a terminal recovery. A transport of a new session keeps
+    // the plan's own start. See reloadStartSeconds.
+    const replacedPlayhead = replacedTransportPlayheadSeconds(
+      transportSessionRef.current === sessionIdRef.current,
+      currentTimeRef.current,
+      timelineOffsetRef.current,
+    );
+    transportSessionRef.current = sessionIdRef.current;
     // "Played" belongs to one transport. A replacement that has not shown a
     // frame yet may be a route this browser cannot reach, so its network
     // failures go through startup recovery rather than the reconnect.
     streamPlayedRef.current = false;
     transportIdleSinceRef.current = null;
     const video = videoRef.current;
-    if (!video || !isPlayerReady || startupGuardRef.current?.hasFailed()) return;
+    if (!video || !isPlayerReady) return;
+    // This effect reruns only when the transport changed, so the guard's
+    // startup window follows the transport rather than the plan (see the guard
+    // effect above). A start still waiting for its first frame keeps its
+    // deadline; one that already played gets a fresh window. A session whose
+    // deadline already passed gets none: the ladder must stop, so the retryable
+    // error surfaces here instead of another route loading behind it.
+    if (startupGuardRef.current?.armForReplacementTransport() === false) {
+      failStartupRef.current("deadline", false);
+      return;
+    }
     transportStartupPendingRef.current = true;
     // A source is loading, a replan's as well as the first: speed tests wait
     // for it as for a start.
@@ -3062,9 +3280,18 @@ export function VideoPlayer({
     let hls: HlsType | null = null;
     let engineSession: BrowserEngineSession | null = null;
     let destroyed = false;
-    // Set when startup recovery loads a failed manifest again, so the reload's
-    // own failure is not swallowed by the recovery cooldown.
-    let manifestReloadPending = false;
+    // Counts this transport's failed loads, so a segment that keeps failing
+    // stops being requested and a passing hiccup is still retried.
+    const segmentRetry = new SegmentRetryBudget();
+    // Bounds the load a start that has not drawn a frame yet can generate: a
+    // plan that never decodes must not fetch every segment the playlist lists.
+    const startupSegmentBudget = new StartupSegmentBudget();
+    // A fragment fetched again before it buffered is the transport discarding
+    // what it downloaded, which no load *error* reports. Counted against the
+    // same startup budget so a 200-but-unappendable fragment is not invisible.
+    const unbufferedLoads = new UnbufferedFragmentLoads();
+    let startHoleRecovered = false;
+    let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
     let playbackStarted = false;
     let autoplayInFlight = false;
     let autoplayAttempts = 0;
@@ -3074,6 +3301,7 @@ export function VideoPlayer({
     // The plan's meter. A transport rebuilt for the same plan measures into
     // the same one.
     const meterMedia = (segmented: boolean) => {
+      const planRevision = planRevisionRef.current;
       const meter =
         mediaMeterRef.current?.planRevision === planRevision
           ? mediaMeterRef.current.meter
@@ -3083,8 +3311,9 @@ export function VideoPlayer({
     };
 
     mediaRecoveryAttemptsRef.current = 0;
-    setError(null);
+    setPlayerError(null);
     setAwaitingFirstFrame(true);
+    setAutoplayBlocked(false);
 
     const clearAutoplayRetry = () => {
       if (autoplayRetryTimer === null) return;
@@ -3142,6 +3371,7 @@ export function VideoPlayer({
       pausedSourceLoading = true;
       endHoldOnceLoaded();
     };
+    settlePausedRef.current = settlePaused;
 
     const attemptAutoplayWhenReady = () => {
       if (destroyed || playbackStarted || autoplayInFlight) return;
@@ -3200,6 +3430,15 @@ export function VideoPlayer({
             offerRoomJoinRef.current?.();
             return;
           }
+          if (isAutoplayPolicyRejection(error)) {
+            // The browser wants a gesture, which no retry can supply. Settle
+            // the player (so no startup timeout blames the route) and offer
+            // the only thing that can start it: a tap.
+            console.warn("[player] autoplay blocked; waiting for a tap to start", error);
+            settlePaused();
+            setAutoplayBlocked(true);
+            return;
+          }
           if (autoplayAttempts < MAX_AUTOPLAY_ATTEMPTS) {
             // Deliberately keeps the readiness listeners armed: whichever
             // wakes first — a later `canplay` or this timer — retries.
@@ -3221,12 +3460,72 @@ export function VideoPlayer({
     video.addEventListener("loadeddata", attemptAutoplayWhenReady);
     video.addEventListener("canplay", attemptAutoplayWhenReady);
 
+    // A transport whose first buffered media begins after the playhead has no
+    // data at the requested position. The element stays at HAVE_METADATA, the
+    // readiness gate above never starts it, and hls.js keeps refetching the
+    // fragments that cannot land there. That shape is real: a source whose
+    // audio track starts before its first video frame leaves the lead-in
+    // audio out of the remuxed timeline, so media only exists from the first
+    // video frame onwards. Move onto it once, as any player that can show the
+    // stream does, instead of waiting for a position that will never arrive.
+    const recoverStartHole = () => {
+      if (destroyed || startHoleRecovered || playbackStarted) return;
+      if (!(startupGuardRef.current?.isStarting() ?? false)) return;
+      if (video.buffered.length === 0) return;
+      const firstBuffered = video.buffered.start(0);
+      if (firstBuffered <= video.currentTime + START_HOLE_SECONDS) return;
+      startHoleRecovered = true;
+      console.warn(
+        `[player] transport starts ${firstBuffered.toFixed(2)}s after the playhead; starting from its first buffered media`,
+      );
+      video.currentTime = firstBuffered;
+      attemptAutoplayWhenReady();
+    };
+
+    // Applies the startup budget's verdict to a fetch that produced no frame.
+    // Holding pauses the ladder so a dead plan asks for a handful of segments
+    // instead of every segment it lists; stopping ends the route instead of
+    // requesting the same bytes again.
+    const applyStartupVerdict = (
+      verdict: Exclude<StartupSegmentVerdict, { kind: "ignore" }>,
+      details: { details?: string; url?: string },
+    ) => {
+      if (verdict.kind === "stop") {
+        console.error(
+          "[hls.js] Startup produced no frame across its segment budget, giving up",
+          details,
+        );
+        hls?.stopLoad();
+        hls?.destroy();
+        hlsRef.current = null;
+        if (
+          !reportCurrentPlanFailureRef.current({
+            classification: "network_error",
+            message: "HLS could not load a segment before the start produced a frame.",
+          })
+        ) {
+          setPlayerError("Playback failed. Please try again.", true);
+        }
+        return;
+      }
+      if (recoveryTimer !== null) return;
+      console.warn(
+        `[hls.js] Startup has no frame yet, holding segment loads for ${verdict.delayMs}ms`,
+      );
+      hls?.stopLoad();
+      recoveryTimer = setTimeout(() => {
+        recoveryTimer = null;
+        if (destroyed || startupGuardRef.current?.hasFailed()) return;
+        hls?.startLoad();
+      }, verdict.delayMs);
+    };
+
     // A seek made while this plan's stream was being fetched is where the
     // stream is heading: the server built it before the viewer moved the
     // playhead, so the plan's own start is behind them. Taken by the first
     // transport of the plan that replaced the seek's plan.
     const recordedReplanSeek = replanSeekRef.current;
-    if (recordedReplanSeek && recordedReplanSeek.revision !== planRevision) {
+    if (recordedReplanSeek && recordedReplanSeek.revision !== planRevisionRef.current) {
       replanSeekRef.current = null;
       if (recordedReplanSeek.sessionId === sessionIdRef.current) {
         rememberPendingSeek(pendingSeekTimeRef.current ?? recordedReplanSeek.seconds);
@@ -3245,13 +3544,13 @@ export function VideoPlayer({
     const transportStartPosition = () => {
       const pendingSeconds = pendingSeekTimeRef.current;
       if (pendingSeconds === null || pendingSeconds === roomHeldSeekRef.current) {
-        return effectiveInitialPosition;
+        return reloadStartSeconds(effectiveInitialPositionRef.current, replacedPlayhead);
       }
       const pendingContext = pendingSeekContextRef.current;
       if (pendingContext !== null && pendingContext.sessionId !== sessionIdRef.current) {
         // A target left over from another session never aims this one.
         releasePendingSeek(pendingSeconds);
-        return effectiveInitialPosition;
+        return effectiveInitialPositionRef.current;
       }
       const playerSeconds = toPlayerTime(pendingSeconds, timelineOffsetRef.current);
       if (canSeekAnywhereRef.current) return playerSeconds;
@@ -3260,7 +3559,7 @@ export function VideoPlayer({
       // reach it: follow the plan's start instead of holding the timeline on a
       // position this stream has moved past.
       releasePendingSeek(pendingSeconds);
-      return effectiveInitialPosition;
+      return effectiveInitialPositionRef.current;
     };
 
     const attachNativeHLS = () => {
@@ -3349,6 +3648,33 @@ export function VideoPlayer({
                 mediaOutageRef.current = true;
                 outageBufferedEndRef.current = bufferedEndSeconds(video);
               }
+              // A start that has drawn no frame yet is not replaying a blip:
+              // every failed segment is another request against a plan that may
+              // never produce one. Back the ladder off inside the startup
+              // window and stop the fetches once its budget is spent, so a dead
+              // plan asks for a handful of segments instead of every segment the
+              // playlist lists. hls.js reports these below its fatal threshold
+              // (it retries the fragment and then moves on), so the fatal branch
+              // further down never saw them. Once the transport has shown a
+              // frame the budget reports `ignore` and the recovery below is
+              // untouched: a stall mid-playback is the reconnect's business.
+              if (
+                !data.fatal &&
+                !destroyed &&
+                data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+                !subtitleLoad
+              ) {
+                const verdict = startupSegmentBudget.recordFailure(
+                  !(startupGuardRef.current?.isStarting() ?? false),
+                );
+                if (verdict.kind !== "ignore") {
+                  applyStartupVerdict(verdict, {
+                    details: data.details,
+                    url: data.frag?.url ?? data.url,
+                  });
+                }
+                return;
+              }
               if (!data.fatal || destroyed) return;
 
               console.error("[hls.js] Fatal error:", {
@@ -3366,34 +3692,71 @@ export function VideoPlayer({
               }
 
               const now = Date.now();
-              // A reloaded manifest can fail again within the cooldown (a
-              // parse error does at once); that failure must still reach the
-              // startup guard, or the player waits for the startup timeout.
-              const reloadFailed = manifestReloadPending;
-              manifestReloadPending = false;
-              if (!reloadFailed && now - lastRecoveryRef.current < 3000) return;
-              lastRecoveryRef.current = now;
-
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                if (startupGuardRef.current?.handleFatalNetworkError() ?? true) {
-                  console.warn("[hls.js] Fatal network error, attempting recovery...");
+                // One reload or restart in flight at a time. hls.js stops
+                // loading after a fatal error, so anything it reports before
+                // the scheduled retry names the failure already being handled.
+                if (recoveryTimer !== null) return;
+                if (!(startupGuardRef.current?.handleFatalNetworkError() ?? true)) {
+                  console.error("[hls.js] Fatal startup network error, giving up");
+                  return;
+                }
+                // Repeated failure on one segment is not a hiccup: the budget
+                // stops the retries and lets the route fail, which replans
+                // instead of asking the segment layer for the same bytes again.
+                const segmentKey = failedFragmentKey(data);
+                const recoveryAttempt = segmentRetry.recordFailure(segmentKey);
+                if (recoveryAttempt === null) {
+                  console.error(
+                    "[hls.js] Fatal network error repeated past its retry budget, giving up",
+                    {
+                      segment: segmentKey,
+                      details: data.details,
+                    },
+                  );
+                  if (
+                    !reportCurrentPlanFailureRef.current({
+                      classification: "network_error",
+                      message: `HLS failed repeatedly on ${segmentKey ?? "its playlist"}.`,
+                    })
+                  ) {
+                    setPlayerError("Playback failed. Please try again.", true);
+                  }
+                  hls?.destroy();
+                  hlsRef.current = null;
+                  return;
+                }
+                // The retry is delayed with backoff: a source that cannot
+                // serve a segment must not be asked for it at the rate hls.js
+                // retries inside one load.
+                lastRecoveryRef.current = now;
+                const reloadManifest =
+                  data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+                  data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT ||
+                  data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR;
+                const delay = segmentRetryDelayMs(recoveryAttempt);
+                console.warn(
+                  `[hls.js] Fatal network error, retrying in ${delay}ms (attempt ${recoveryAttempt + 1})`,
+                );
+                recoveryTimer = setTimeout(() => {
+                  recoveryTimer = null;
+                  if (destroyed || startupGuardRef.current?.hasFailed()) return;
                   // startLoad() never requests a manifest that failed to load,
                   // so it would leave the player waiting for the startup
                   // timeout. Load the source again instead.
-                  if (
-                    data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
-                    data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT ||
-                    data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR
-                  ) {
-                    manifestReloadPending = !streamPlayedRef.current;
-                    hls?.loadSource(effectiveStreamUrl);
-                  } else {
-                    hls?.startLoad();
-                  }
-                } else {
-                  console.error("[hls.js] Fatal startup network error, giving up");
-                }
-              } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                  if (reloadManifest) hls?.loadSource(effectiveStreamUrl);
+                  else hls?.startLoad();
+                }, delay);
+                return;
+              }
+
+              // A reloaded manifest can fail again within the cooldown (a
+              // parse error does at once); that failure must still reach the
+              // startup guard, or the player waits for the startup timeout.
+              if (now - lastRecoveryRef.current < 3000) return;
+              lastRecoveryRef.current = now;
+
+              if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                 if (mediaRecoveryAttemptsRef.current === 0) {
                   console.warn("[hls.js] Fatal media error, attempting recovery...");
                   hls?.recoverMediaError();
@@ -3404,12 +3767,15 @@ export function VideoPlayer({
                 } else {
                   console.error("[hls.js] Fatal media error, giving up after 3 attempts");
                   if (
-                    !reportCurrentPlanFailure({
+                    !reportCurrentPlanFailureRef.current({
                       classification: "decoder_error",
                       message: "HLS media recovery failed after three attempts.",
                     })
                   ) {
-                    setError("Playback failed. Please try again.");
+                    // This device's decoder rejected the stream. Replaying the
+                    // same recipe asks for the same verdict, so the card says
+                    // what happened and leaves only Go Back.
+                    setPlayerError("Playback failed. This device couldn't decode this file.");
                   }
                   hls?.destroy();
                   hlsRef.current = null;
@@ -3418,12 +3784,12 @@ export function VideoPlayer({
               } else {
                 console.error("[hls.js] Unrecoverable error:", data);
                 if (
-                  !reportCurrentPlanFailure({
+                  !reportCurrentPlanFailureRef.current({
                     classification: "decoder_error",
                     message: `HLS reported an unrecoverable ${data.type} error.`,
                   })
                 ) {
-                  setError("Playback failed. Please try again.");
+                  setPlayerError("Playback failed. This device couldn't play this stream.");
                 }
                 hls?.destroy();
                 hlsRef.current = null;
@@ -3453,8 +3819,31 @@ export function VideoPlayer({
             });
             hls.on(Hls.Events.FRAG_LOADED, (_event, { frag }) => {
               if (destroyed || frag.type === "subtitle") return;
+              // The transport delivered a fragment, so failures since the last
+              // one were hiccups rather than a segment it cannot serve.
+              segmentRetry.reset();
               const { loaded, loading } = frag.stats;
               meter.received(frag.stats, loaded, loading.first, loading.end);
+              // A fragment fetched again before it buffered was discarded, not
+              // delivered: hls.js answers an append it cannot complete by
+              // reloading the same fragment, and every one of those loads
+              // answers 200, so the load-failure ladder never sees them. One
+              // deployment fetched `seg_00000.ts` 199 times this way. Count
+              // them against the same no-frame budget so such a plan stops
+              // instead of asking for the same bytes forever.
+              if (!playbackStarted && (startupGuardRef.current?.isStarting() ?? false)) {
+                const key = failedFragmentKey({ frag });
+                if (key !== null && unbufferedLoads.recordLoad(key) >= UNBUFFERED_FRAGMENT_LOADS) {
+                  unbufferedLoads.recordBuffered(key);
+                  const verdict = startupSegmentBudget.recordFailure(false);
+                  if (verdict.kind !== "ignore") {
+                    applyStartupVerdict(verdict, {
+                      details: `fragment ${key} loaded again without buffering`,
+                      url: frag.url,
+                    });
+                  }
+                }
+              }
             });
 
             hls.on(Hls.Events.BUFFER_APPENDED, (_event, data) => {
@@ -3468,9 +3857,17 @@ export function VideoPlayer({
               ) {
                 mediaOutageRef.current = false;
               }
+              recoverStartHole();
               attemptAutoplayWhenReady();
             });
-            hls.on(Hls.Events.FRAG_BUFFERED, endHoldOnceLoaded);
+            hls.on(Hls.Events.FRAG_BUFFERED, (_event, data) => {
+              endHoldOnceLoaded();
+              // A fragment that buffered is no longer the transport
+              // discarding bytes, so it stops counting against the start.
+              const key = failedFragmentKey({ frag: data.frag });
+              if (key !== null) unbufferedLoads.recordBuffered(key);
+              recoverStartHole();
+            });
             hls.on(Hls.Events.BUFFER_EOS, endHoldOnceLoaded);
 
             hls.loadSource(effectiveStreamUrl);
@@ -3478,24 +3875,26 @@ export function VideoPlayer({
             hlsRef.current = hls;
           } else {
             if (
-              !reportCurrentPlanFailure({
+              !reportCurrentPlanFailureRef.current({
                 classification: "unsupported_transport",
                 message: "The browser rejected the planned HLS transport.",
               })
             ) {
-              setError("HLS playback is not supported in this browser.");
+              setPlayerError("HLS playback is not supported in this browser.");
             }
           }
         } catch (error) {
           if (
             !destroyed &&
-            !reportCurrentPlanFailure({
+            !reportCurrentPlanFailureRef.current({
               classification: "player_initialization_error",
               message:
                 error instanceof Error ? error.message : "Failed to initialize HLS playback.",
             })
           ) {
-            setError("Failed to load video player.");
+            // The player never took charge of the element, so the source was
+            // not judged: retrying the start is meaningful.
+            setPlayerError("Failed to load video player.", true);
           }
         }
       } else {
@@ -3515,8 +3914,8 @@ export function VideoPlayer({
               })
             : ({ kind: "native" } as const);
         if (route.kind === "unsupported") {
-          if (!reportCurrentPlanFailure(route.failure)) {
-            setError("This browser cannot play this file.");
+          if (!reportCurrentPlanFailureRef.current(route.failure)) {
+            setPlayerError("This browser cannot play this file.");
           }
           return;
         }
@@ -3547,8 +3946,17 @@ export function VideoPlayer({
               onFailure: (failure) => {
                 if (destroyed) return;
                 const fail = () => {
-                  if (!reportCurrentPlanFailure(failure)) {
-                    setError(`Playback error: ${failure.message ?? failure.classification}`);
+                  if (!reportCurrentPlanFailureRef.current(failure)) {
+                    // A read that failed is the transport, not the source; a
+                    // classification the engine reaches while opening or
+                    // decoding the file is a verdict about this device.
+                    const retryable =
+                      failure.classification === ENGINE_READ_FAILED ||
+                      failure.classification === ENGINE_STARTUP_TIMEOUT;
+                    setPlayerError(
+                      `Playback error: ${failure.message ?? failure.classification}`,
+                      retryable,
+                    );
                   }
                 };
                 // When Auto lowers on its own, a start that missed its deadline
@@ -3574,13 +3982,13 @@ export function VideoPlayer({
           } catch (error) {
             if (
               !destroyed &&
-              !reportCurrentPlanFailure({
+              !reportCurrentPlanFailureRef.current({
                 classification: "player_initialization_error",
                 message:
                   error instanceof Error ? error.message : "Failed to load the browser engine.",
               })
             ) {
-              setError("Failed to load video player.");
+              setPlayerError("Failed to load video player.", true);
             }
           }
           return;
@@ -3608,7 +4016,8 @@ export function VideoPlayer({
             setDirectPlayOriginSeconds(origin);
             // A seek made while the origin was unknown wins over the start position.
             const mediaTarget =
-              pendingSeekTimeRef.current ?? toMediaTime(effectiveInitialPosition, planOffset);
+              pendingSeekTimeRef.current ??
+              toMediaTime(effectiveInitialPositionRef.current, planOffset);
             const target = toPlayerTime(mediaTarget, timelineOffsetRef.current);
             if (Math.abs(video.currentTime - target) > 0.01) video.currentTime = target;
             applyElementDuration(video);
@@ -3624,7 +4033,7 @@ export function VideoPlayer({
           // start stands unchanged.
           video.currentTime = isProgressiveRemux
             ? transportStartPosition()
-            : effectiveInitialPosition;
+            : effectiveInitialPositionRef.current;
           attemptAutoplayWhenReady();
         }
       }
@@ -3635,6 +4044,11 @@ export function VideoPlayer({
     return () => {
       destroyed = true;
       cleanupStartupListeners();
+      if (recoveryTimer !== null) {
+        clearTimeout(recoveryTimer);
+        recoveryTimer = null;
+      }
+      settlePausedRef.current = () => {};
       video.removeEventListener("suspend", endHoldOnceLoaded);
       video.removeEventListener("canplay", endHoldOnceLoaded);
       if (engineSession) {
@@ -3658,22 +4072,32 @@ export function VideoPlayer({
         mediaElementReleased(video);
       }
     };
-    // `planRevision` is the single signal that the transport changed: two plans
-    // can share a stream URL and still differ in protocol, timeline, or recipe.
+    // The transport itself decides when the player reloads: the A/V revision
+    // (`transportRevision`) is the session's verdict that the bytes changed,
+    // and the URL, delivery class and recipe facts below carry the same news
+    // for any host that does not publish a revision. `planRevision` is
+    // deliberately absent: it bumps on every adoption, so a track change that
+    // reuses the running stream would tear the element down and refetch the
+    // manifest. The start position is read through a ref for the same reason:
+    // a reused plan rewrites it to the live playhead. Every other input here is
+    // either the plan's own transport identity or a stable callback. In
+    // particular no host callback is listed: a host that rebuilds
+    // `onPlanFailure` from its render inputs used to reload the element on its
+    // render cadence, restarting playback at the plan's origin and leaving a
+    // paused viewer with a transport that never settled.
   }, [
     applyElementDuration,
     effectiveStreamUrl,
-    effectiveInitialPosition,
+    effectiveTransportRevision,
     isHlsStream,
     isPlayerReady,
     isProgressiveRemux,
-    planRevision,
     playsOriginalFile,
     plannedBitrateKbps,
     plannedDynamicRange,
     rememberPendingSeek,
     releasePendingSeek,
-    reportCurrentPlanFailure,
+    setPlayerError,
     shouldAutoPlay,
   ]);
 
@@ -3682,6 +4106,20 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
 
+    // A page without a gesture is not allowed to start an unmuted element, and
+    // the readiness event the transport's autoplay waits for can arrive before
+    // it is listening. This runs from the element's own listeners, which are
+    // bound for as long as the player exists, and settles a player the browser
+    // will only start on a tap.
+    const probeBlockedAutoplay = () => {
+      if (!shouldAutoPlayRef.current || roomPlaybackActiveRef.current) return;
+      if (connectionReplacedRef.current || video.error) return;
+      if (startupGuardRef.current?.hasFailed()) return;
+      if (!isAutoplayBlockedByPolicy(video)) return;
+      settlePausedRef.current();
+      setAutoplayBlocked(true);
+    };
+
     const onPlay = () => {
       // Nothing can play until the reconnect hands over a new transport.
       if (connectionReplacedRef.current || connectionStatusRef.current !== "connected") {
@@ -3689,6 +4127,7 @@ export function VideoPlayer({
         return;
       }
       setPlaying(true);
+      setAutoplayBlocked(false);
       const idleSince = transportIdleSinceRef.current;
       transportIdleSinceRef.current = null;
       if (idleSince !== null && Date.now() - idleSince >= PROGRESSIVE_REMUX_IDLE_REOPEN_MS) {
@@ -3789,6 +4228,7 @@ export function VideoPlayer({
       if (mediaOutageRef.current && bufferedEndSeconds(video) > outageBufferedEndRef.current) {
         mediaOutageRef.current = false;
       }
+      probeBlockedAutoplay();
     };
     const onVolumeChange = () => {
       // A room seek pre-roll mutes the element for a moment. That mute is not
@@ -3822,6 +4262,7 @@ export function VideoPlayer({
     };
     const onCanPlay = () => {
       clearBuffering();
+      probeBlockedAutoplay();
       if (roomReadinessPending && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportReady();
       }
@@ -3836,6 +4277,7 @@ export function VideoPlayer({
       }
     };
     const onLoadedData = () => {
+      probeBlockedAutoplay();
       if (roomReadinessPending && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportReady();
       }
@@ -3862,9 +4304,26 @@ export function VideoPlayer({
           outageBufferedEndRef.current = bufferedEndSeconds(video);
         }
         if (video.error.code === MEDIA_ERR_NETWORK && reportConnectionLost()) return;
+        // A progressive remux is a forward-only body: when the element asks it
+        // to resume at a byte offset the transport cannot map — a seek it took
+        // natively, or a read it resumed on its own — the refusal reaches the
+        // element as an unsupported source, not as a network error. Once the
+        // stream has played, that is a transport loss, not this device's
+        // verdict on the file: reopen the stream at the playhead. Failing the
+        // route instead sends the player back to the media page on every seek.
+        if (
+          isProgressiveRemuxRef.current &&
+          video.error.code !== MEDIA_ERR_DECODE &&
+          reportConnectionLost()
+        ) {
+          return;
+        }
         const message = video.error.message || "Unknown media element error";
         if (!reportCurrentPlanFailure({ classification: "decoder_error", message })) {
-          setError(`Playback error: ${message}`);
+          // A network error on a transport that never played is the transport
+          // failing; a decode or unsupported-source error is this device's
+          // verdict on the file and keeps Go Back.
+          setPlayerError(`Playback error: ${message}`, video.error.code === MEDIA_ERR_NETWORK);
         }
       }
     };
@@ -3932,6 +4391,7 @@ export function VideoPlayer({
     resetRoomCatchupRate,
     roomReadinessPending,
     sessionId,
+    setPlayerError,
     watchTogetherRoomActive,
     watchTogetherSync,
   ]);
@@ -6002,11 +6462,46 @@ export function VideoPlayer({
     });
   }, [currentTime, duration, onPlaybackStateChange, playing]);
 
+  // A stable signature of the audio inventory the host's transport publishes.
+  // The list itself is often a fresh array of equal rows (a default `[]` on a
+  // caller that passes none), so keying the transport effect on its identity
+  // would rebuild the transport on every render and dispatch it back into the
+  // provider.
+  const audioTransportSignature = useMemo(
+    () =>
+      [
+        audioTracks
+          .map(
+            (track) =>
+              `${track.track_id ?? ""}:${track.index ?? ""}:${track.language ?? ""}:${track.codec ?? ""}:${track.channels ?? ""}:${track.title ?? ""}`,
+          )
+          .join("|"),
+        activeAudioIndex,
+        audioInventoryProvisional,
+        inventoryPending,
+        inventoryFailed,
+        onAudioSelect ? 1 : 0,
+        onRetryInventory ? 1 : 0,
+      ].join("#"),
+    [
+      audioTracks,
+      activeAudioIndex,
+      audioInventoryProvisional,
+      inventoryPending,
+      inventoryFailed,
+      onAudioSelect,
+      onRetryInventory,
+    ],
+  );
+
   useEffect(() => {
     if (!onPlaybackTransportReady) {
       return;
     }
 
+    const audioSelectable =
+      onAudioSelect != null &&
+      (audioTracks.length > 0 || audioInventoryProvisional || inventoryPending || inventoryFailed);
     const transport: PlayerPlaybackTransport = {
       playPause: () => {
         handlePlayPauseRef.current();
@@ -6023,11 +6518,31 @@ export function VideoPlayer({
         handlePlayerSeekRef.current(seconds);
       },
       togglePictureInPicture: () => handleTogglePiPRef.current(),
+      // The minimised bar's audio selector reads this: the same inventory,
+      // selection and pick handler the in-player menu uses, so a language change
+      // made there applies to the live session instead of starting a new one at
+      // the stored resume position.
+      audio: audioSelectable
+        ? {
+            tracks: audioTracks,
+            activeIndex: activeAudioIndex >= 0 ? activeAudioIndex : null,
+            provisional: audioInventoryProvisional,
+            pending: inventoryPending,
+            failed: inventoryFailed,
+            select: (index: number, currentPosition: number) => {
+              onAudioSelect?.(index, currentPosition);
+            },
+            retry: () => onRetryInventory?.(),
+          }
+        : undefined,
     };
 
     onPlaybackTransportReady(transport);
     return () => onPlaybackTransportReady(null);
-  }, [onPlaybackTransportReady, skipActions]);
+    // The signature stands in for the inventory and selection fields above;
+    // see its definition.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the signature encodes every inventory field the effect reads
+  }, [onPlaybackTransportReady, skipActions, audioTransportSignature]);
 
   const executeRealtimeCommand = useCallback(
     async (command: PlaybackRealtimeCommandEnvelope) => {
@@ -6385,6 +6900,28 @@ export function VideoPlayer({
         </div>
       )}
 
+      {/* Autoplay blocked: the browser will only start this stream on a
+          gesture, so the cover would otherwise sit over a player that is
+          ready and waiting. The tap is the way in. */}
+      {!isDetached && autoplayBlocked && !error && (
+        <button
+          type="button"
+          onClick={() => {
+            setAutoplayBlocked(false);
+            void videoRef.current?.play().catch(() => setAutoplayBlocked(true));
+          }}
+          className="absolute inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-3 bg-black/60 text-white"
+        >
+          <span
+            aria-hidden="true"
+            className="flex h-16 w-16 items-center justify-center rounded-full bg-white/15 backdrop-blur transition-colors hover:bg-white/25"
+          >
+            <Play className="h-7 w-7" />
+          </span>
+          <span className="text-sm font-medium">{AUTOPLAY_BLOCKED_LABEL}</span>
+        </button>
+      )}
+
       {/* Room sync overlay */}
       {!isDetached && roomSyncShown && (
         <div
@@ -6515,16 +7052,33 @@ export function VideoPlayer({
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80">
           <div className="text-center">
             <div className="mb-4 text-sm text-white/60">{error}</div>
-            <button
-              onClick={() => {
-                void handleExit();
-              }}
-              disabled={isLeaving}
-              type="button"
-              className="rounded bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/20"
-            >
-              Go Back
-            </button>
+            <div className="flex gap-2">
+              {/* A transient failure gets the same fresh start the session's
+                  own start screen offers; a verdict about this source (an
+                  unsupported file, a decode the device rejected) does not. */}
+              {errorRetryable && onRestartPlayback && (
+                <button
+                  onClick={() => {
+                    onRestartPlayback();
+                  }}
+                  disabled={isLeaving}
+                  type="button"
+                  className="rounded bg-white px-4 py-2 text-sm font-medium text-black hover:bg-white/90"
+                >
+                  Try again
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  void handleExit();
+                }}
+                disabled={isLeaving}
+                type="button"
+                className="rounded bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/20"
+              >
+                Go Back
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -6576,6 +7130,7 @@ export function VideoPlayer({
         activeSubtitleIndex !== null &&
         subtitleSyncNotice?.tone !== "progress" &&
         (subtitleLoadState === "loading" ||
+          subtitleLoadState === "stalled" ||
           subtitleLoadState === "error" ||
           subtitleLoadState === "unavailable") && (
           <div
@@ -6585,6 +7140,26 @@ export function VideoPlayer({
             <span className="flex items-center gap-3 rounded bg-black/75 px-3 py-2 text-sm text-white">
               {subtitleLoadState === "loading" ? (
                 "Loading subtitles…"
+              ) : subtitleLoadState === "stalled" ? (
+                <>
+                  {"Subtitles aren't loading. "}
+                  {/* The fetcher keeps retrying in the background; this is the
+                      viewer's way to ask now, or to stop waiting. */}
+                  <button
+                    type="button"
+                    onClick={() => setSubtitleRefreshRevision((revision) => revision + 1)}
+                    className="pointer-events-auto rounded bg-white/10 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+                  >
+                    Retry
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSubtitleSelect(null)}
+                    className="pointer-events-auto rounded bg-white/10 px-2 py-0.5 text-sm font-medium text-white transition-colors hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+                  >
+                    Turn off
+                  </button>
+                </>
               ) : subtitleLoadState === "unavailable" ? (
                 <>
                   {"This subtitle is unavailable."}

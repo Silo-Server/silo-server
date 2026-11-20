@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/text/language"
@@ -374,7 +375,8 @@ func (h *PlaybackHandler) resolveAndProbeVirtualSource(ctx context.Context, file
 		// path. Already-probed rows skip this entirely (no probe-per-play),
 		// matching the native probe gate.
 		if file.ProbeUpdatedAt == nil && (h.VirtualSourceProber != nil || h.VirtualSourceProberWithHeaders != nil) {
-			if probed, ok := h.probeCompatVirtualSource(ctx, &transient, uri, ownerID, userID, profileID); ok {
+			probed, probeFailure := h.probeCompatVirtualSource(ctx, &transient, uri, ownerID, userID, profileID)
+			if probeFailure == nil {
 				if transient.ID > 0 {
 					probed.ID = transient.ID
 					probed.MediaFolderID = transient.MediaFolderID
@@ -388,7 +390,15 @@ func (h *PlaybackHandler) resolveAndProbeVirtualSource(ctx context.Context, file
 			}
 			// Resolution or probe failed. Fall back to the candidate-declared
 			// metadata exactly like the native path: a probe must never fail the
-			// request or block playback.
+			// request or block playback. It says so, though: the fallback serves
+			// declared values in place of a probe, which is why two clients can
+			// see different track counts for the same title while one of them
+			// reported the failure and the other did not.
+			slog.WarnContext(ctx, "jellycompat virtual source probe failed; serving declared candidate metadata",
+				"component", "jellycompat",
+				"file_id", file.ID,
+				"candidate_uri", uri,
+				"reason", probeFailure.Error())
 		}
 
 		mergeCompatCandidateTracks(&transient, candidate)
@@ -399,29 +409,48 @@ func (h *PlaybackHandler) resolveAndProbeVirtualSource(ctx context.Context, file
 
 // probeCompatVirtualSource resolves the candidate to a temporary provider URL
 // and probes that stream for real metadata. It mirrors the native path's
-// resolve-then-probe ordering (native probeVirtualSource). ok is false when the
-// URL cannot be resolved or the probe fails, so the caller falls back to the
-// candidate-declared inventory.
-func (h *PlaybackHandler) probeCompatVirtualSource(ctx context.Context, transient *models.MediaFile, uri string, ownerID, userID int, profileID string) (*models.MediaFile, bool) {
+// resolve-then-probe ordering (native probeVirtualSource). A nil error means the
+// probe established the file's real inventory; a non-nil one names why it did
+// not (resolve failed, probe failed, probe timed out) so the caller's fallback
+// to declared values can say so instead of looking like a layout disagreement.
+func (h *PlaybackHandler) probeCompatVirtualSource(ctx context.Context, transient *models.MediaFile, uri string, ownerID, userID int, profileID string) (*models.MediaFile, error) {
 	if h == nil || (h.VirtualSourceProber == nil && h.VirtualSourceProberWithHeaders == nil) || transient == nil || !isCompatVirtualPath(uri) {
-		return nil, false
+		return nil, errCompatProbeUnavailable
 	}
 	resolved, err := h.resolveVirtualTransportForIdentity(ctx, userID, profileID, PlaybackMediaSource{
 		FileID:                           transient.ID,
 		VirtualSourceURI:                 uri,
 		VirtualSourceOwnerInstallationID: ownerID,
 	}, false)
-	if err != nil || strings.TrimSpace(resolved.URL) == "" {
-		return nil, false
+	if err != nil {
+		return nil, fmt.Errorf("resolve failed: %w", err)
+	}
+	if strings.TrimSpace(resolved.URL) == "" {
+		return nil, fmt.Errorf("resolve failed: %w", errCompatProbeEmptyURL)
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, compatVirtualProbeTimeout)
 	defer cancel()
 	probed, err := h.probeVirtualSourceWithHeaders(probeCtx, resolved.URL, transient, resolved.RequestHeaders)
-	if err != nil || probed == nil {
-		return nil, false
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || probeCtx.Err() != nil {
+			return nil, fmt.Errorf("probe timed out after %s: %w", compatVirtualProbeTimeout, err)
+		}
+		return nil, fmt.Errorf("probe failed: %w", err)
 	}
-	return probed, true
+	if probed == nil {
+		return nil, fmt.Errorf("probe failed: %w", errCompatProbeNoResult)
+	}
+	return probed, nil
 }
+
+// The reasons probeCompatVirtualSource reports when it cannot establish a
+// probed inventory. They exist so the fallback log names the failure kind rather
+// than a bare "unavailable".
+var (
+	errCompatProbeUnavailable = errors.New("no virtual source prober is wired")
+	errCompatProbeEmptyURL    = errors.New("the provider resolved no stream URL")
+	errCompatProbeNoResult    = errors.New("the prober returned no file")
+)
 
 // probeVirtualSourceWithHeaders prefers the header-aware prober so a probe of a
 // provider URL that validates the caller's request headers is authenticated the
@@ -580,13 +609,13 @@ func (h *PlaybackHandler) persistCompatVirtualMetadata(ctx context.Context, file
 	args.OwnerID = target.OwnerID
 	args.LibraryID = target.LibraryID
 	if !h.acquireCompatBackgroundWork() {
-		slog.DebugContext(ctx, "compat virtual metadata persist dropped: background workers closed",
+		slog.WarnContext(ctx, "compat virtual metadata persist dropped: background workers closed",
 			"component", "jellycompat", "file_id", args.FileID)
 		return
 	}
 	if !acquireCompatEvidenceSlot() {
 		h.releaseCompatBackgroundWork()
-		slog.DebugContext(ctx, "compat virtual metadata persist dropped: all persist slots busy",
+		slog.WarnContext(ctx, "compat virtual metadata persist dropped: all persist slots busy",
 			"component", "jellycompat", "file_id", args.FileID)
 		return
 	}
@@ -1260,6 +1289,95 @@ func (h *PlaybackHandler) registerVirtualInput(ctx context.Context, session *Ses
 		return "", nil, errors.New("compat playback session is unavailable")
 	}
 	return h.registerVirtualInputForIdentity(ctx, session.StreamAppUserID, session.ProfileID, source, forceRefresh)
+}
+
+// compatLocalTranscodeInput resolves the concrete input a local compat transcode
+// process may open. A local file passes through untouched. A virtual row carries
+// a virtual:// identity as its durable path, and no FFmpeg build can open that
+// scheme: handing it over starts an encoder that exits before its first segment,
+// which leaves the master manifest answering 200 while every child segment 404s
+// and nothing is ever produced. The remote executor and session reconstruction
+// resolve virtual sources through the relay for the same reason, so the local
+// manifest path has to do it too.
+//
+// canonical is the durable identity a recipe card keeps, so a reconstructed
+// session resolves the source again instead of replaying a dead loopback URL.
+// release frees the relay registration and is safe to call more than once;
+// refresh mints a fresh provider URL for a seek restart.
+func (h *PlaybackHandler) compatLocalTranscodeInput(
+	ctx context.Context,
+	upstreamSessionID string,
+	source PlaybackMediaSource,
+	file *models.MediaFile,
+) (inputPath, canonical string, release func(), refresh func(context.Context) (string, func(), error), err error) {
+	if !isCompatVirtualSource(source) && !isCompatVirtualFile(file) {
+		if file == nil {
+			return "", "", nil, nil, errors.New("media file is unavailable")
+		}
+		return file.FilePath, "", nil, nil, nil
+	}
+	canonical = firstNonEmpty(strings.TrimSpace(source.VirtualSourceURI), strings.TrimSpace(source.Version.FilePath))
+	if canonical == "" && file != nil {
+		canonical = strings.TrimSpace(file.FilePath)
+	}
+	if !isCompatVirtualPath(canonical) {
+		// A row flagged virtual whose frozen path is already concrete (a repaired
+		// or legacy binding) needs no relay: open the file it names.
+		if file != nil && file.FilePath != "" && !isCompatVirtualPath(file.FilePath) {
+			return file.FilePath, "", nil, nil, nil
+		}
+		return "", "", nil, nil, fmt.Errorf("%w: no virtual source identity to resolve", errCompatVirtualInputUnavailable)
+	}
+	userID, profileID := 0, ""
+	if h.sessionMgr != nil {
+		if upstream, getErr := h.sessionMgr.GetSession(upstreamSessionID); getErr == nil && upstream != nil {
+			userID, profileID = upstream.UserID, upstream.ProfileID
+		}
+	}
+	bound := source
+	bound.VirtualSourceURI = canonical
+	resolve := func(resolveCtx context.Context, forceRefresh bool) (string, func(), error) {
+		relayURL, cleanup, resolveErr := h.registerVirtualInputForIdentity(resolveCtx, userID, profileID, bound, forceRefresh)
+		if resolveErr != nil {
+			return "", nil, fmt.Errorf("%w: %w", errCompatVirtualInputUnavailable, resolveErr)
+		}
+		return relayURL, cleanup, nil
+	}
+	relayURL, cleanup, resolveErr := resolve(ctx, false)
+	if resolveErr != nil {
+		return "", "", nil, nil, resolveErr
+	}
+	// The session owns the registration once it starts and releases it on close;
+	// every failed start releases it here. Both meet this once.
+	var once sync.Once
+	release = func() { once.Do(cleanup) }
+	refresh = func(refreshCtx context.Context) (string, func(), error) {
+		return resolve(refreshCtx, true)
+	}
+	return relayURL, canonical, release, refresh, nil
+}
+
+// resolveCompatTranscodeInput is the compat TranscodeManager's ResolveInput
+// hook. A rebuilt encoder is handed the recipe's durable identity, which for a
+// virtual row is a virtual:// path FFmpeg cannot open, so it resolves through
+// the relay exactly as a fresh start does.
+func (h *PlaybackHandler) resolveCompatTranscodeInput(ctx context.Context, mediaFileID, ownerInstallationID int, userID int, profileID, canonicalPath string) (string, func(), error) {
+	if !isCompatVirtualPath(canonicalPath) {
+		return canonicalPath, nil, nil
+	}
+	if h == nil || h.RemoteStreamRelay == nil {
+		return "", nil, fmt.Errorf("%w: remote stream relay is not configured", errCompatVirtualInputUnavailable)
+	}
+	source := PlaybackMediaSource{
+		FileID:                           mediaFileID,
+		VirtualSourceURI:                 canonicalPath,
+		VirtualSourceOwnerInstallationID: ownerInstallationID,
+	}
+	relayURL, cleanup, err := h.registerVirtualInputForIdentity(ctx, userID, profileID, source, false)
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: %w", errCompatVirtualInputUnavailable, err)
+	}
+	return relayURL, cleanup, nil
 }
 
 func (h *PlaybackHandler) registerVirtualInputForIdentity(ctx context.Context, userID int, profileID string, source PlaybackMediaSource, forceRefresh bool) (string, func(), error) {

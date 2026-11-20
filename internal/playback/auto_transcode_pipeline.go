@@ -24,6 +24,16 @@ const (
 // a whole readiness-gated start size their budget to it.
 const MaxAutoTranscodeStartupAttempts = int(autoTranscodeSoftware) + 1
 
+// AutoTranscodeStartupPerPathTimeout is how long one hw_accel=auto execution
+// path may wait for its first manifest. It is the frame gate's grace
+// (noVideoFramesGrace): a video encode that has muxed past it without decoding
+// a frame is already a typed failure, and a path that cannot initialize its
+// device exits in well under a second. Waiting a full ManifestStartupTimeout
+// per path would let three paths total 90 s, which is longer than any client
+// waits for a start, so a hung path must be moved past on the encode's own
+// horizon instead.
+const AutoTranscodeStartupPerPathTimeout = noVideoFramesGrace
+
 const (
 	autoTranscodePreferenceTTL  = 15 * time.Minute
 	maxAutoTranscodePreferences = 256
@@ -50,7 +60,9 @@ var sharedAutoTranscodePipelineCache = newAutoTranscodePipelineCache()
 // with GPU encode, then CPU decode and encode. A fallback that produced a
 // manifest is remembered briefly for the same file, so repeated starts skip
 // the path that just failed without permanently hiding a recovered GPU or
-// affecting unrelated media.
+// affecting unrelated media. A path that keeps muxing without decoding a frame
+// is such a failure: the decode is what has to change, which is exactly what a
+// later stage does.
 //
 // A pipeline belongs to one startup and is not safe for concurrent use; the
 // shared successful-path cache behind it is.
@@ -156,10 +168,12 @@ func (pipeline *AutoTranscodePipeline) Current() TranscodeOpts {
 	return opts
 }
 
-// AdvanceAfterFailure selects the next safer path after FFmpeg exited before
-// producing its first manifest. It must not be called for a process that is
-// still running or for a StartTranscode error. A following hardware path
-// avoids failedDevice, the concrete device the failed attempt ran on, when
+// AdvanceAfterFailure selects the next safer path after an attempt failed
+// before producing a playable first window: FFmpeg exited, or its generation
+// muxed segments without decoding a frame (ErrTranscodeNoVideoFrames), which
+// the caller must stop before advancing. It must not be called for a process
+// that is still running or for a StartTranscode error. A following hardware
+// path avoids failedDevice, the concrete device the failed attempt ran on, when
 // another configured device is available; the software path clears the hint.
 func (pipeline *AutoTranscodePipeline) AdvanceAfterFailure(failedDevice string) bool {
 	if !pipeline.Enabled() || pipeline.index+1 >= len(pipeline.stages) {

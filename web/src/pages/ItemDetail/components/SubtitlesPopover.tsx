@@ -40,11 +40,16 @@ interface SubtitlesPopoverProps {
   /** Opens the subtitle provider search for this version. */
   onSearchSubtitles?: () => void;
   /**
-   * True while the version's subtitle rows are the catalog fallback rather than
-   * probe evidence for the file. The menu withholds those rows and says it is
-   * still discovering instead of offering a pick that may not exist.
+   * True while the selected row has no subtitle rows at all and no probe
+   * evidence has landed. The menu says it is still discovering rather than
+   * presenting an unenumerated empty list as "no subtitles".
    */
   inventoryProvisional?: boolean;
+  /**
+   * True while the rows are the selected row's release listing rather than
+   * probe evidence. They are shown immediately and labelled as unverified.
+   */
+  inventoryDeclared?: boolean;
   /** Re-runs inventory discovery; shown once the provisional window lapses. */
   onRetryInventory?: () => void;
 }
@@ -214,8 +219,10 @@ export default function SubtitlesPopover({
   onResetSelection,
   onSearchSubtitles,
   inventoryProvisional = false,
+  inventoryDeclared = false,
   onRetryInventory,
 }: SubtitlesPopoverProps) {
+  const declared = inventoryDeclared && !inventoryProvisional;
   const [open, setOpen] = useState(false);
   // Downloaded subtitles normally load lazily on open, but when the saved
   // preference points at one, the closed trigger's Auto summary needs them
@@ -223,8 +230,11 @@ export default function SubtitlesPopover({
   const needsDownloaded = open || preferredSubtitleTrackSignature?.source === "downloaded";
   const downloadedQuery = useDownloadedSubtitles(needsDownloaded ? version?.file_id : undefined);
   const isInteractive = Boolean(onSelectSubtitle || onSelectSubtitleOff || onResetSelection);
-  const { expired: discoveryExpired, retry: restartDiscovery } =
-    useProvisionalInventoryExpiry(inventoryProvisional);
+  const {
+    expired: discoveryExpired,
+    slow: discoverySlow,
+    retry: restartDiscovery,
+  } = useProvisionalInventoryExpiry(inventoryProvisional);
   const handleRetryInventory = useCallback(() => {
     restartDiscovery();
     onRetryInventory?.();
@@ -285,7 +295,7 @@ export default function SubtitlesPopover({
     <DetailPopover
       open={open}
       onOpenChange={setOpen}
-      positionKey={`${downloadedQuery.isLoading}:${candidates.all.length}:${inventoryProvisional}:${discoveryExpired}`}
+      positionKey={`${downloadedQuery.isLoading}:${candidates.all.length}:${inventoryProvisional}:${discoveryExpired}:${discoverySlow}`}
       contentClassName="max-h-80 w-80 overflow-y-auto p-1.5"
       trigger={
         <Button
@@ -297,8 +307,10 @@ export default function SubtitlesPopover({
           <span className="text-muted-foreground max-w-44 truncate text-[0.6875rem] font-normal sm:max-w-64">
             {inventoryProvisional
               ? discoveryExpired
-                ? "Unavailable"
-                : "Discovering…"
+                ? "Not verified"
+                : discoverySlow
+                  ? "Still checking…"
+                  : "Discovering…"
               : isInteractive
                 ? activeSummary
                 : candidates.all.length}
@@ -332,12 +344,12 @@ export default function SubtitlesPopover({
         {inventoryProvisional && !discoveryExpired && (
           <div className="text-muted-foreground flex items-center gap-2 px-3 py-2 text-xs">
             <Loader2 className="size-3 animate-spin" />
-            Discovering subtitles…
+            {discoverySlow ? "Still checking for subtitles…" : "Discovering subtitles…"}
           </div>
         )}
         {inventoryProvisional && discoveryExpired && (
           <div className="text-muted-foreground flex items-center justify-between gap-2 px-3 py-2 text-xs">
-            <span>Subtitles unavailable.</span>
+            <span>Tracks not verified. The release listing names none.</span>
             <button
               type="button"
               onClick={handleRetryInventory}
@@ -346,6 +358,9 @@ export default function SubtitlesPopover({
               Retry
             </button>
           </div>
+        )}
+        {declared && (
+          <div className="text-muted-foreground px-3 text-[0.6875rem]">From release listing</div>
         )}
         {!inventoryProvisional && (
           <>

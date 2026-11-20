@@ -105,7 +105,7 @@ function renderTracks(initial: {
   sourceGeneration?: number;
   refreshRevision?: number;
   onLoadState?: (
-    state: "idle" | "loading" | "refreshing" | "ready" | "error" | "unavailable",
+    state: "idle" | "loading" | "refreshing" | "ready" | "stalled" | "error" | "unavailable",
   ) => void;
   onSourceChanged?: () => void;
 }) {
@@ -269,6 +269,138 @@ describe("useSubtitleTracks", () => {
 
     releaseFetch?.(vttResponse("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nburst\n\n"));
     await waitFor(() => expect(createdTracks[0]?.cues.map((c) => c.text)).toEqual(["burst"]));
+  });
+
+  it("asks for one window per grid cell across the anchor and the element clock", async () => {
+    let finish!: (value: unknown) => void;
+    fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+
+    // Before the element has media, the intended start position is 812.4 s.
+    const { videoRef } = renderTracks({
+      origin: 0,
+      durationRef: { current: 7200 },
+      anchorRef: { current: 812.4 },
+      readyState: 0,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("position=810&duration=120");
+
+    // The element then reports its own clock, 838 s. Both readings sit in the
+    // same cell, so this must not ask for a second, shifted window.
+    Object.defineProperty(videoRef.current!, "readyState", { value: 1, configurable: true });
+    videoRef.current!.currentTime = 838;
+    videoRef.current!.dispatchEvent(new Event("timeupdate"));
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![1].signal.aborted).toBe(false);
+
+    finish(vttResponse("WEBVTT\n\n14:00.000 --> 14:02.000\ncell\n\n"));
+    await waitFor(() => expect(createdTracks[0]!.cues.map((c) => c.text)).toEqual(["cell"]));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("queues the next window behind an in-flight one instead of aborting it", async () => {
+    let finish!: (value: unknown) => void;
+    fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+
+    const { videoRef } = renderTracks({ origin: 0, durationRef: { current: 7200 } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    // A timeupdate far outside the requested range is not a seek: the extract
+    // already running must finish and land in the server's window cache.
+    videoRef.current!.currentTime = 400;
+    videoRef.current!.dispatchEvent(new Event("timeupdate"));
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![1].signal.aborted).toBe(false);
+
+    finish(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nfirst\n\n"));
+    // Once it settles the playhead's own window is requested, aligned to the
+    // grid (floor((400 - 2) / 30) * 30).
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("position=390&duration=120");
+  });
+
+  it("advances past an empty first window instead of treating it as a failure", async () => {
+    const state = vi.fn();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    // A valid VTT document with no cues: a dialogue gap where the playhead
+    // starts, or a track whose first cue begins later.
+    fetchMock
+      .mockResolvedValueOnce(vttResponse("WEBVTT\n\n"))
+      .mockResolvedValueOnce(vttResponse("WEBVTT\n\n00:01:50.000 --> 00:01:52.000\nlater\n\n"));
+
+    renderTracks({ origin: 0, durationRef: { current: 7200 }, onLoadState: state });
+
+    // The next slice is asked for as soon as the empty one commits, without
+    // waiting for a timeupdate or for the prefetch lead to come due.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("position=0&duration=120");
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("position=90&duration=120");
+    await waitFor(() => expect(createdTracks[0]!.cues.map((c) => c.text)).toEqual(["later"]));
+    expect(state).not.toHaveBeenCalledWith("error");
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it("builds the track when the media element arrives after the mount", async () => {
+    fetchMock.mockResolvedValue(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nlate\n\n"));
+    // A stream reload replaces the <video> element, so the rebuilt track lands
+    // in the gap where the ref is still empty.
+    const videoRef: RefObject<HTMLVideoElement | null> = { current: null };
+
+    renderHook(() =>
+      useSubtitleTracks(videoRef, [srtTrack], 1, 0, 0, { current: 7200 }, { current: 0 }),
+    );
+
+    await act(async () => {});
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // The replacement element appears and no revision changes: the hook has to
+    // notice the element itself, or the track never fetches and never loads.
+    videoRef.current = makeVideoRef().current;
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("position=0&duration=120");
+    await waitFor(() => expect(createdTracks.at(-1)!.cues.map((c) => c.text)).toEqual(["late"]));
+  });
+
+  it("still aborts the in-flight window when the track changes", async () => {
+    let finish!: (value: unknown) => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    fetchMock.mockResolvedValue(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nother\n\n"));
+
+    const { rerender } = renderTracks({ origin: 0, durationRef: { current: 7200 } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    rerender({
+      origin: 0,
+      durationRef: { current: 7200 },
+      track: { ...srtTrack, url: "/api/v1/stream/x/subtitles/2?token=abc" },
+    });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[0]![1].signal.aborted).toBe(true);
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("subtitles/2");
+    finish(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nstale\n\n"));
+    // The rebuilt track holds the new track's cues; the aborted window's late
+    // bytes are dropped.
+    await waitFor(() => expect(createdTracks.at(-1)!.cues.map((c) => c.text)).toEqual(["other"]));
+    expect(createdTracks.flatMap((t) => t.cues.map((c) => c.text))).not.toContain("stale");
   });
 
   it("resets and refetches on a forward seek past the covered window", async () => {
@@ -586,6 +718,127 @@ describe("useSubtitleTracks", () => {
         await vi.advanceTimersByTimeAsync(10 * 60_000);
       });
       expect(fetchMock).toHaveBeenCalledTimes(4);
+    } finally {
+      unmount();
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not re-enter the fetching effect when a failed window renders its error state", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
+    const initial = { origin: 0, durationRef: { current: 7200 } };
+    const { rerender, unmount } = renderTracks(initial);
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // The failure told the player to render "error"; that render re-runs the
+      // hook with the same inputs. It must not start another extraction: the
+      // scheduled backoff is the only path forward, or a failing track turns
+      // every render into an ffmpeg spawn.
+      rerender(initial);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      rerender(initial);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      unmount();
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports stalled after a repeated retryable refusal and recovers on the retry", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    // The production shape: a 4K text window answered
+    // subtitle_window_budget_exceeded with Retry-After, twice. The first refusal
+    // promises the retry is served from the recovery extraction; the second one
+    // proves it was not, so the overlay must stop claiming a load is in
+    // progress while the ladder keeps retrying.
+    fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
+    const states: string[] = [];
+    const { unmount } = renderTracks({
+      origin: 0,
+      durationRef: { current: 7200 },
+      onLoadState: (state) => states.push(state),
+    });
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(states).toContain("loading");
+      expect(states).not.toContain("stalled");
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(states).toContain("stalled");
+      expect(states).not.toContain("error");
+
+      // A later attempt is served: the state returns to ready and the stall
+      // notice is not repeated.
+      fetchMock.mockResolvedValue(vttResponse("WEBVTT\n\n00:01:40.000 --> 00:01:44.000\nok\n\n"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(states).toContain("ready");
+      const stalledCount = states.filter((state) => state === "stalled").length;
+      expect(stalledCount).toBe(1);
+    } finally {
+      unmount();
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a retryable 503 in the background without reporting the track failed", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    // The server is recovering the page it refused; Retry-After says when.
+    fetchMock.mockResolvedValue(
+      new Response(null, { status: 503, headers: { "Retry-After": "30" } }),
+    );
+    const states: string[] = [];
+    const { videoRef, unmount } = renderTracks({
+      origin: 0,
+      durationRef: { current: 7200 },
+      onLoadState: (state) => states.push(state),
+    });
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      // A refusal the server is already recovering from is not a failed track:
+      // playback continues, the track stays selected, and the player keeps
+      // saying it is loading rather than offering a manual retry.
+      expect(states).toContain("loading");
+      expect(states).not.toContain("error");
+
+      // The header is honored: nothing fires before 30 s even though the local
+      // ladder would have retried after 5 s.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+        videoRef.current!.dispatchEvent(new Event("timeupdate"));
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(25_000);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(states).not.toContain("error");
     } finally {
       unmount();
       error.mockRestore();

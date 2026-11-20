@@ -38,6 +38,7 @@ func writePlaybackTestFFmpegFarSeek(t *testing.T) string {
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$last\"; " +
 		"case \" $* \" in *\" -start_number 452 \"*) printf 'far-seek-bytes' > \"$out/seg_00452.m4s\" ;; esac ;;\n" +
 		"esac\n" +
+		playbackTestFFmpegProgress +
 		"exec sleep 30\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
@@ -396,6 +397,7 @@ func writePlaybackTestFFmpegFarSeekDemux(t *testing.T) string {
 		"#EXTINF:2.0,\\nseg_0.m4s\\n#EXTINF:2.0,\\nseg_1.m4s\\n" +
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$last\" ;;\n" +
 		"esac\n" +
+		playbackTestFFmpegProgress +
 		"exec sleep 30\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
@@ -481,6 +483,7 @@ func writePlaybackTestFFmpegTwoRotation(t *testing.T) string {
 		"if [ -n \"$start\" ]; then printf 'far-seek-bytes' > \"$out/$(printf 'seg_%05d.m4s' \"$start\")\"; " +
 		"printf 'far-seek-bytes' > \"$out/$(printf 'seg_%05d.ts' \"$start\")\"; fi ;;\n" +
 		"esac\n" +
+		playbackTestFFmpegProgress +
 		"exec sleep 30\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)

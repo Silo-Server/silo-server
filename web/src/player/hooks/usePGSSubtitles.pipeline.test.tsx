@@ -155,6 +155,55 @@ describe("PGS pipeline", () => {
     hook.unmount();
   });
 
+  it("keeps retrying a retryable page refusal without reporting the track failed", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi
+        .fn(async (_url: string, _init?: RequestInit) => new Response(fixture, { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(null, { status: 503, headers: { "Retry-After": "1" } }),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+      const hook = renderPGS(fetchMock);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      // The refused page is covered by the fill the server started; playback
+      // continues, the track stays selected, and the overlay still says it is
+      // loading rather than failed.
+      expect(hook.onLoadState).not.toHaveBeenCalledWith("error");
+      expect(hook.onLoadState).toHaveBeenCalledWith("loading");
+
+      // The shared backoff ladder keeps its 5 s floor, so the retry lands
+      // there rather than at the 1 s header.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(hook.onLoadState).not.toHaveBeenCalledWith("error");
+
+      hook.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a page the server says does not exist instead of waiting it out", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) => new Response(null, { status: 404 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const hook = renderPGS(fetchMock);
+
+    // A 404 is not a refusal the server is recovering from: the same request
+    // can never succeed, so the overlay must say the track failed.
+    await waitFor(() => expect(hook.onLoadState).toHaveBeenCalledWith("error"));
+
+    hook.unmount();
+  });
+
   it("signals a v2 source-change 409 and refetches after a refresh revision", async () => {
     const fetchMock = vi
       .fn(async (_url: string, _init?: RequestInit) => new Response(fixture, { status: 200 }))
