@@ -428,25 +428,55 @@ func answerAsPlayer(t *testing.T, control *AdminPlaybackControlHandler, status p
 	}
 }
 
-// A message the player answers is acknowledged, and so is its replay.
+// A message the player answers is acknowledged, and so is its replay. A real
+// player answers over the network after the write returns, while the sender
+// waits with the ledger lock released, so both timings must be seen.
 func TestMessageIsAcknowledgedWhenThePlayerAnswers(t *testing.T) {
-	control, _, hub, session := newAdminPlaybackControlTestHandler(t)
-	conn := sequencedLane(t, control, hub, session)
-	conn.answer = answerAsPlayer(t, control, playback.RealtimeResultStatusCompleted)
-	message := sequencedInput(session.ID, sequencedCommandA, 1, playback.CommandDisplayMessage)
-	message.Message = "Movie night ends at nine"
+	for _, answersDuringWrite := range []bool{true, false} {
+		name := "during the wait"
+		if answersDuringWrite {
+			name = "during the write"
+		}
+		t.Run(name, func(t *testing.T) {
+			control, _, hub, session := newAdminPlaybackControlTestHandler(t)
+			conn := sequencedLane(t, control, hub, session)
+			player := answerAsPlayer(t, control, playback.RealtimeResultStatusCompleted)
+			if answersDuringWrite {
+				conn.answer = player
+			}
+			message := sequencedInput(session.ID, sequencedCommandA, 1, playback.CommandDisplayMessage)
+			message.Message = "Movie night ends at nine"
 
-	started := time.Now()
-	view, err := control.Command(context.Background(), message)
-	if err != nil || view.Outcome != AdminPlaybackCommandApplied || view.Delivery != deliveryAcknowledged {
-		t.Fatalf("message = %+v, %v", view, err)
-	}
-	if elapsed := time.Since(started); elapsed >= documentedMessageWait {
-		t.Fatalf("an answered message took %v", elapsed)
-	}
-	replay, err := control.Command(context.Background(), message)
-	if err != nil || replay.Outcome != AdminPlaybackCommandReplayed || replay.Delivery != deliveryAcknowledged {
-		t.Fatalf("replay = %+v, %v", replay, err)
+			type outcome struct {
+				view AdminPlaybackCommandView
+				err  error
+			}
+			done := make(chan outcome, 1)
+			started := time.Now()
+			go func() {
+				view, err := control.Command(context.Background(), message)
+				done <- outcome{view, err}
+			}()
+			if !answersDuringWrite {
+				waitForPendingMessages(t, control, session.ID)
+				env, ok := conn.messages[len(conn.messages)-1].(playback.CommandEnvelope)
+				if !ok {
+					t.Fatalf("last frame = %#v", conn.messages[len(conn.messages)-1])
+				}
+				player(env)
+			}
+			got := <-done
+			if got.err != nil || got.view.Outcome != AdminPlaybackCommandApplied || got.view.Delivery != deliveryAcknowledged {
+				t.Fatalf("message = %+v, %v", got.view, got.err)
+			}
+			if elapsed := time.Since(started); elapsed >= documentedMessageWait {
+				t.Fatalf("an answered message took %v", elapsed)
+			}
+			replay, err := control.Command(context.Background(), message)
+			if err != nil || replay.Outcome != AdminPlaybackCommandReplayed || replay.Delivery != deliveryAcknowledged {
+				t.Fatalf("replay = %+v, %v", replay, err)
+			}
+		})
 	}
 }
 

@@ -2580,9 +2580,10 @@ by any other route. It answers deterministically:
   otherwise). Stop without a lane answers `delivery: "fallback_scheduled"` and
   the server ends the session after the deadline.
 - `delivery: "dispatched"` means the command was written to the session's
-  realtime connection and the player has not confirmed it. A connection whose
-  player went away without closing it still takes the write until the server's
-  ping times out (about 30 seconds).
+  realtime connection. The receipt does not say whether the player confirmed
+  it: a pause, resume or stop the player confirms later still reads
+  `dispatched`, and a connection whose player went away without closing it
+  still takes the write until the server's ping times out (about 30 seconds).
 - A message waits up to 3 seconds for the player's result before answering.
   `delivery: "acknowledged"` means the player answered that it received the
   message; Android answers before it shows the notice. With no answer in time,

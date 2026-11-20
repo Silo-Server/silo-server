@@ -53,8 +53,9 @@ const (
 	AdminPlaybackCommandReplayed = "replayed"
 
 	// AdminPlaybackDeliveryDispatched means the command was written to the
-	// session's realtime connection and the player has not confirmed it. A
-	// connection whose peer died without closing still takes the write.
+	// session's realtime connection. It does not say whether the player
+	// confirmed it; a connection whose peer died without closing still takes
+	// the write.
 	AdminPlaybackDeliveryDispatched        = "dispatched"
 	AdminPlaybackDeliveryFallbackScheduled = "fallback_scheduled"
 	// AdminPlaybackDeliveryAcknowledged means the player answered a message
