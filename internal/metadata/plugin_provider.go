@@ -624,28 +624,6 @@ func (p *PluginProvider) ResolveImageURLs(ctx context.Context, paths []string, v
 	return response.GetUrls(), nil
 }
 
-func mergePluginProviderIDs(capabilityID, providerID string, ids *structpb.Struct) map[string]string {
-	merged := stringMapFromStruct(ids)
-	if providerID != "" {
-		merged[capabilityID] = providerID
-	}
-	return merged
-}
-
-func stringMapFromStruct(value *structpb.Struct) map[string]string {
-	result := make(map[string]string)
-	if value == nil {
-		return result
-	}
-	for key, raw := range value.AsMap() {
-		text, ok := raw.(string)
-		if ok && text != "" {
-			result[key] = text
-		}
-	}
-	return result
-}
-
 // ratingsFromStruct reads the four flat ratings a plugin sends. IMDb and TMDB
 // are Silo's own and always kept. The Rotten Tomatoes scores are kept only
 // when the plugin declared rt_critic or rt_audience, the same rule
@@ -864,24 +842,6 @@ func keywordsFromPluginMetadata(value *structpb.Struct) []string {
 		keywords = append(keywords, text)
 	}
 	return keywords
-}
-
-func structFromStringMap(value map[string]string) (*structpb.Struct, error) {
-	if len(value) == 0 {
-		return nil, nil
-	}
-
-	converted := make(map[string]any, len(value))
-	for key, entry := range value {
-		if entry == "" {
-			continue
-		}
-		converted[key] = entry
-	}
-	if len(converted) == 0 {
-		return nil, nil
-	}
-	return structpb.NewStruct(converted)
 }
 
 // videosFromRecords maps SDK VideoRecords into domain RemoteVideos, stamping

@@ -235,7 +235,7 @@ func normalizeDurableProviderIDs(providerIDs map[string]string) []models.MediaIt
 		}
 		entries = append(entries, models.MediaItemProviderID{
 			Provider:   provider,
-			ProviderID: providerID,
+			ProviderID: bookid.CanonicalProviderID(provider, providerID),
 		})
 	}
 

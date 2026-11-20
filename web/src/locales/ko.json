@@ -57420,136 +57420,10 @@
       "value": "알림 설정을 불러올 수 없어요"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "새 콘텐츠를 기록하지 않고 있어서 아무것도 보낼 수 없어요. 처리에서 다시 켜세요."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "전송이 일시중지됐어요. 새 콘텐츠는 대기열에서 기다려요. 처리에서 다시 켜세요."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "끄면 대신 일일 요약을 보내요."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Silo가 새 콘텐츠를 감지하고 메시지로 묶는 방식과 메시지를 보관하는 기간이에요."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "받을 사용자 찾기"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "각 항목을 모든 사용자의 알림 설정과 대조해요."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "묶음 및 과다 전송 방지"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "처리"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "최대 콘텐츠 기간"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "이보다 오래된 항목은 지난 소식으로 전달되지 않고 버려져요."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "시리즈당 최대 메시지 수"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "이 수를 넘는 항목은 해당 묶음에서 건너뛰어요."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "새 콘텐츠 감지"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "라이브러리 스캔 중에 새 항목을 기록해요."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "파이프라인"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "읽은 알림"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "보관"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "전송 기록"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Silo가 이미 알린 항목의 기록이에요."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "대기 시간"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "함께 스캔이 끝난 항목은 하나의 알림으로 전달돼요."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "읽지 않은 알림"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -58422,18 +58296,6 @@
     {
       "type": 0,
       "value": "알림"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "일"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "시간"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -64996,7 +64858,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "전송 채널, 서버 채널, 새 콘텐츠를 알림으로 만드는 방식을 설정해요."
+      "value": "전송 채널과 서버 채널을 설정해요."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -65095,12 +64957,6 @@
       "value": "이메일"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "그룹화 및 과다 전송 방지"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -65119,28 +64975,10 @@
       "value": "에피소드별 이메일 선택 허용"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "최대 콘텐츠 경과 기간"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "시리즈당 최대 메시지 수"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Discord에서 요청자 멘션"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "새 콘텐츠 감지"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -65149,46 +64987,16 @@
       "value": "개인 웹훅"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "처리"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "읽은 알림"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "릴레이 URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "보존"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "전송 기록"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "서버 채널"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "안정화 대기 시간"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -65203,12 +65011,6 @@
       "value": "Silo 푸시 릴레이"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "읽지 않은 알림"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -65219,12 +65021,6 @@
     {
       "type": 0,
       "value": "사용자당 웹훅 수"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "받을 사용자 결정"
     }
   ],
   "web.admin.settings.search.playback.description": [

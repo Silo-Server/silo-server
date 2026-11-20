@@ -69716,136 +69716,10 @@
       "value": "לא ניתן היה לטעון את הגדרות ההתראות"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "תוכן חדש לא נרשם, ולכן אי אפשר לשלוח דבר. אפשר להפעיל את הרישום מחדש בקטע ”עיבוד”."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "השליחה מושהית; תוכן חדש ממתין בתור. אפשר להפעיל אותה מחדש בקטע ”עיבוד”."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "כשהאפשרות כבויה, נשלח במקומה הסיכום היומי."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "האופן שבו Silo מזהה תוכן חדש ומקבץ אותו להודעות, וכמה זמן הוא שומר אותן."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "זיהוי מי מעוניין בתוכן"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "התאמה של כל פריט להעדפות של כל המשתמשים."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "קיבוץ ובקרת הצפה"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "עיבוד"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "גיל מרבי של תוכן"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "פריטים ישנים יותר מושמטים במקום להגיע כחדשות לא עדכניות."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "מספר הודעות מרבי לסדרה"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "כל מה שמעבר לזה מדולג באצווה הזו."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "זיהוי תוכן חדש"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "רישום פריטים חדשים במהלך סריקות של הספרייה."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "צינור עיבוד"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "התראות שנקראו"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "שמירת נתונים"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "היסטוריית שליחה"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "רישום של מה ש-Silo כבר שלח עליו התראות."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "חלון התייצבות"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "פריטים שהסריקה שלהם מסתיימת יחד מגיעים כהתראה אחת."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "התראות שלא נקראו"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -70774,18 +70648,6 @@
     {
       "type": 0,
       "value": "התראות"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "ימים"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "שעות"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -77526,7 +77388,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "ערוצי מסירה, ערוצי שרת, ואיך תוכן חדש הופך להתראות."
+      "value": "ערוצי מסירה וערוצי שרת."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -77625,12 +77487,6 @@
       "value": "אימייל"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "קיבוץ ובקרת הצפה"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -77649,28 +77505,10 @@
       "value": "אפשרות לבחור אימייל לכל פרק"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "גיל מרבי של התוכן"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "מספר מרבי של הודעות לכל סדרה"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "תיוג מגיש הבקשה ב-Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "זיהוי תוכן חדש"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -77679,46 +77517,16 @@
       "value": "webhooks אישיים"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "עיבוד"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "התראות שנקראו"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "כתובת URL של הממסר"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "שמירה"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "היסטוריית השליחה"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "ערוצי שרת"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "חלון התייצבות"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -77733,12 +77541,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "התראות שלא נקראו"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -77749,12 +77551,6 @@
     {
       "type": 0,
       "value": "webhooks לכל משתמש"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "זיהוי מי מעוניין בתוכן"
     }
   ],
   "web.admin.settings.search.playback.description": [

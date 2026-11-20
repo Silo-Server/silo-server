@@ -57988,136 +57988,10 @@
       "value": "โหลดการตั้งค่าการแจ้งเตือนไม่ได้"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "ไม่ได้บันทึกเนื้อหาใหม่ จึงส่งการแจ้งเตือนไม่ได้ เปิดอีกครั้งได้ในส่วนการประมวลผล"
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "หยุดการส่งชั่วคราวแล้ว เนื้อหาใหม่จะรออยู่ในคิว เปิดอีกครั้งได้ในส่วนการประมวลผล"
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "เมื่อปิด ผู้ใช้จะได้รับสรุปรายวันแทน"
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "วิธีที่ Silo ตรวจพบเนื้อหาใหม่ จัดกลุ่มเป็นข้อความ และระยะเวลาที่เก็บข้อความไว้"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "ระบุผู้ที่ต้องการรับ"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "จับคู่แต่ละรายการกับค่ากำหนดของทุกคน"
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "การจัดกลุ่มและการควบคุมปริมาณ"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "การประมวลผล"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "อายุเนื้อหาสูงสุด"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "รายการที่เก่ากว่านี้จะถูกข้ามแทนที่จะส่งเป็นข่าวที่ล้าสมัย"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "จำนวนข้อความสูงสุดต่อซีรีส์"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "ส่วนที่เกินจะถูกข้ามในชุดนั้น"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "ตรวจจับเนื้อหาใหม่"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "บันทึกรายการใหม่ระหว่างการสแกนคลัง"
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "ไปป์ไลน์"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "การแจ้งเตือนที่อ่านแล้ว"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "การเก็บรักษา"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "ประวัติการส่ง"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "บันทึกสิ่งที่ Silo แจ้งเตือนไปแล้ว"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "ช่วงเวลารอรวม"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "รายการที่สแกนเสร็จพร้อมกันจะส่งเป็นการแจ้งเตือนเดียว"
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "การแจ้งเตือนที่ยังไม่ได้อ่าน"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -59006,18 +58880,6 @@
     {
       "type": 0,
       "value": "การแจ้งเตือน"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "วัน"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "ชั่วโมง"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -65520,7 +65382,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "ช่องทางการส่ง ช่องทางของเซิร์ฟเวอร์ และวิธีที่เนื้อหาใหม่กลายเป็นการแจ้งเตือน"
+      "value": "ช่องทางการส่งและช่องทางของเซิร์ฟเวอร์"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -65619,12 +65481,6 @@
       "value": "อีเมล"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "การจัดกลุ่มและการควบคุมการส่งจำนวนมาก"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -65643,28 +65499,10 @@
       "value": "ให้ผู้ใช้เลือกรับอีเมลทีละตอน"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "อายุเนื้อหาสูงสุด"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "จำนวนข้อความสูงสุดต่อซีรีส์"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "กล่าวถึงผู้ขอบน Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "ตรวจพบเนื้อหาใหม่"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -65673,46 +65511,16 @@
       "value": "เว็บฮุกส่วนตัว"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "การประมวลผล"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "การแจ้งเตือนที่อ่านแล้ว"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL ของรีเลย์"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "การเก็บรักษา"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "ประวัติการส่ง"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "ช่องทางของเซิร์ฟเวอร์"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "ช่วงเวลารอให้คงที่"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -65727,12 +65535,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "การแจ้งเตือนที่ยังไม่ได้อ่าน"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -65743,12 +65545,6 @@
     {
       "type": 0,
       "value": "จำนวนเว็บฮุกต่อคน"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "ระบุผู้ที่ต้องการ"
     }
   ],
   "web.admin.settings.search.playback.description": [
