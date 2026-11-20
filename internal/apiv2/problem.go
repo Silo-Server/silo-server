@@ -406,8 +406,7 @@ const (
 	codeUnknownParameter = "unknown_parameter"
 	codeMalformedJSON    = "malformed_json"
 	codeMalformedForm    = "malformed_form"
-	// codeManagedByEnvironment refuses a change to a field a stream node
-	// declares from its own environment (env_managed on an admin node).
+	// codeManagedByEnvironment refuses a change owned by an environment declaration.
 	codeManagedByEnvironment = "managed_by_environment"
 
 	locationBody     = "body"

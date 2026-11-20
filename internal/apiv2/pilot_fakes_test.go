@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	mediacatalog "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -1443,8 +1444,8 @@ const fixtureCompletionCookie = "browser-binding"
 // completionCookie is the Cookie header of that browser.
 var completionCookie = map[string]string{"Cookie": auth.OAuthCompletionCookieName + "=" + fixtureCompletionCookie}
 
-func (fakeOAuth) CallbackURL(prefix string, installID int) string {
-	return "https://silo.example.test" + prefix + "/auth/oauth/" + strconv.Itoa(installID) + "/callback"
+func (fakeOAuth) CallbackURL(prefix string, installID int, mode string) string {
+	return plugins.OAuthCallbackURL("https://silo.example.test", prefix, installID, mode)
 }
 
 func (fakeOAuth) PublicURL(path string, query url.Values) string {

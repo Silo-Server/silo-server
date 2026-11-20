@@ -3825,16 +3825,25 @@ whole binding row keyed by installation and capability. The auth binding answers
 `X-Silo-Restart-Required: false`: sign-in providers rebuild on every node without a
 restart. An omitted `auto_provision` is true, and enabling an auth binding while another
 is enabled is 409 `provider_already_enabled`
-([external-sign-in.md](architecture/external-sign-in.md)). The task binding applies on
-every API server without a restart and answers 200 with `restart_required` false: a disabled
-binding removes the task from the task manager and cancels a run in progress, an enabled one registers it while its
-installation is enabled, and a changed trigger becomes the task's default schedule. Each
-server applies it at its next successful plugin task sync; this server attempts one before
-answering and retries a failed one. `restart_required` is true only on a server with
-no task manager, where the binding applies at the next start. An omitted task trigger stores an empty object. A runnable binding
-trigger outranks the manifest's `scheduled_task.default_trigger`; a schedule saved on the task
-page outranks both ([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)). Both
-are naturally idempotent upserts.
+([external-sign-in.md](architecture/external-sign-in.md)). For an OAuth binding,
+`callback_mode` can be `installation` or `stable`. Omitting it keeps the stored mode
+or uses `installation` for a new binding. An explicit mode on a password or network
+binding is 422. The installation view and staged connection test report the redirect
+URI to register at the provider. An enabled OAuth binding on an enabled installation
+reports `callback_pending: true` while there is no public URL.
+
+A server with a task manager applies the task binding live and answers 200 with
+`restart_required` false. Disabling a binding removes the task and cancels a run in
+progress. Enabling one registers the task if its installation is enabled. A changed
+trigger becomes the task's default schedule. The server handling the request attempts
+a sync before answering and retries a failed sync. Other API servers apply the change
+at their next successful sync. A server without a task manager stores the binding and returns
+`restart_required` true. A task manager on any API server can apply it at its next sync.
+
+An omitted task trigger stores an empty object. A runnable binding trigger outranks the
+manifest's `scheduled_task.default_trigger`. A schedule saved on the task page outranks
+both ([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)). Both
+binding operations are idempotent upserts.
 
 All four require an acting administrator, restrict demo access, answer 404 for an unknown
 installation, 409 for the reserved built-in host row, 422 for a blank key or capability, and

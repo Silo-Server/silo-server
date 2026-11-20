@@ -10,6 +10,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mail"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
 )
@@ -28,7 +29,7 @@ func settingRegistry() []string {
 	}
 	// Settings the server writes with no admin default, by the constants
 	// that name them where there is one.
-	keys = append(keys, serveridentity.Key, settingJWTSecret, settingABSJWTSecret,
+	keys = append(keys, serveridentity.Key, plugins.ProvisionRestoreHoldKey, settingJWTSecret, settingABSJWTSecret,
 		catalog.SearchSettingProvider, catalog.SearchSettingMeilisearchURL, catalog.SearchSettingMeilisearchAPIKey,
 		catalog.SearchSettingMeilisearchIndex, catalog.SearchSettingMeilisearchIndexTypes,
 		config.AITextProviderSettingKey, config.AISpeechProviderSettingKey, config.EmbeddingProviderSettingKey,

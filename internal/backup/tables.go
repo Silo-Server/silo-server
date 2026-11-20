@@ -35,7 +35,10 @@ var liveTables = []string{"policy_documents", "policy_document_versions"}
 // unless backup.include_intro_fingerprints (excludedTableData).
 var loggedTables = []string{"activity_log", "operational_logs", "policy_decisions", "catalog_search_index_events", tableIntroFingerprints,
 	// Upload sessions: their parts live outside the backup.
-	"backup_uploads", "backup_upload_parts", "backup_upload_attempts"}
+	"backup_uploads", "backup_upload_parts", "backup_upload_attempts",
+	// Provisioning status and placement from the current deployment must not
+	// be replayed by a restored backup.
+	tablePluginProvisionStatus, "plugin_provision_placement"}
 
 const tableIntroFingerprints = "media_intro_fingerprints"
 

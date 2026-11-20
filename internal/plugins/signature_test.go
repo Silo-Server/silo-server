@@ -89,6 +89,22 @@ func installSignedRelease(t *testing.T, sigstore *pluginsigtest.Sigstore, rel si
 	return store, fileExists(marker), err
 }
 
+func TestProvisioningRequiresVerifiedPluginBeforeReadingManifest(t *testing.T) {
+	sigstore, err := pluginsigtest.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, installer, marker := serveSignedRelease(t, sigstore, signedRelease{
+		pluginID: tmdbID, version: "1.2.3", repoURL: tmdbRepoURL,
+	}, nil, false)
+	req.requireVerified = true
+	_, err = installer.downloadBinary(t.Context(), req)
+	requirePackageError(t, err, "no release signature")
+	if fileExists(marker) {
+		t.Fatal("plugin ran before its signature was verified")
+	}
+}
+
 // A catalog install checks the release signature after the SHA-256 and
 // before the binary runs. With enforcement on, a first-party plugin ID whose
 // signature is missing or fails the required policy is refused and its
@@ -257,7 +273,7 @@ func TestAutoUpdateRefusesUnprovenFirstPartyRelease(t *testing.T) {
 	}
 	service := NewAutoUpdateService(
 		&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, URL: DefaultRepositoryURL, Enabled: true}}},
-		installations, catalog, installer, &fakeAutoUpdateHost{}, nil, nil,
+		installations, catalog, installer, nil, nil,
 	)
 	summary, err := service.Check(context.Background(), AutoUpdateOptions{})
 	if err != nil {

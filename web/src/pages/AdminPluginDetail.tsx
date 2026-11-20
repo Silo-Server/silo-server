@@ -21,6 +21,7 @@ import {
   PluginDetailRail,
   PluginSettingsPanels,
 } from "@/components/admin/plugins/PluginDetailSections";
+import { PluginProvisioningStatus } from "@/components/admin/plugins/PluginProvisioningStatus";
 import type { PluginPageLinkState } from "@/components/admin/plugins/PluginTile";
 import { PluginMonogram, PluginStatusLabel } from "@/components/admin/plugins/PluginVisuals";
 import {
@@ -52,6 +53,8 @@ import { Switch } from "@/components/ui/switch";
 import {
   useAdminPluginCatalog,
   useAdminPluginInstallations,
+  useAdminPluginProvisioningStatus,
+  type PluginProvisionStatus,
   useApplyPluginUpdate,
   useDeletePluginInstallation,
   useInstallPlugin,
@@ -107,6 +110,10 @@ export default function AdminPluginDetail() {
   const selectedRepository = searchParams.get("repository");
   const selectedVersion = searchParams.get("version");
   const installationsQuery = useAdminPluginInstallations();
+  const provisioningQuery = useAdminPluginProvisioningStatus();
+  const provisioning = provisioningQuery.data?.find(
+    (record) => record.plugin_id === pluginId && record.state !== "applied",
+  );
   // The service keeps one installation per plugin ID (install replaces in place).
   const installation = installationsQuery.data?.find((entry) => entry.plugin_id === pluginId);
   // The catalog is a live fetch of every repository index, so only ask for it
@@ -130,6 +137,7 @@ export default function AdminPluginDetail() {
         key={installation.id}
         installation={installation}
         catalogEntry={catalogEntry}
+        provisioning={provisioning}
       />
     );
   }
@@ -147,8 +155,18 @@ export default function AdminPluginDetail() {
     );
   }
 
-  if (catalogQuery.isLoading) return <PageLoading />;
-  if (catalogEntry) return <CatalogPluginPreview entry={catalogEntry} />;
+  if (catalogEntry)
+    return <CatalogPluginPreview entry={catalogEntry} provisioning={provisioning} />;
+  if (provisioning) {
+    return (
+      <div className="space-y-5">
+        <BackLink fallback="/admin/plugins" />
+        <PluginProvisioningStatus items={[provisioning]} />
+      </div>
+    );
+  }
+
+  if (catalogQuery.isLoading || provisioningQuery.isLoading) return <PageLoading />;
 
   if (catalogQuery.isError) {
     return (
@@ -157,6 +175,19 @@ export default function AdminPluginDetail() {
         description={t("web.admin.plugins.detail.catalogErrorDescription")}
         onRetry={() => void catalogQuery.refetch()}
         retrying={catalogQuery.isFetching}
+      >
+        <AllPluginsLink />
+      </PageUnavailable>
+    );
+  }
+
+  if (provisioningQuery.isError) {
+    return (
+      <PageUnavailable
+        title={t("web.admin.plugins.provisioning.title")}
+        description={t("web.admin.plugins.provisioning.loadError")}
+        onRetry={() => void provisioningQuery.refetch()}
+        retrying={provisioningQuery.isFetching}
       >
         <AllPluginsLink />
       </PageUnavailable>
@@ -286,9 +317,11 @@ function UpdatesState({ children }: { children: ReactNode }) {
 function InstalledPluginPage({
   installation,
   catalogEntry,
+  provisioning,
 }: {
   installation: PluginInstallation;
   catalogEntry?: PluginCatalogEntry;
+  provisioning?: PluginProvisionStatus;
 }) {
   const t = useT();
   const navigate = useNavigate();
@@ -311,6 +344,7 @@ function InstalledPluginPage({
   const restartDisabled = restartInstallation.isPending || runtime.state === "starting";
   const tier = installationTier(installation);
   const updateVersion = pendingUpdateVersion(installation);
+  const ownership = installation.env_managed;
   // Updates pause when the plugin's repository is disabled; the approved
   // community catalog is disabled by hiding it.
   const pausedKey: MessageKey =
@@ -367,7 +401,13 @@ function InstalledPluginPage({
                 repository disabled or the approved community catalog hidden,
                 checks are paused. Either way the stored policy does nothing,
                 so it is not offered. */}
-            {tier === "unverified" ? (
+            {ownership?.version_pin ? (
+              <UpdatesState>
+                {t("web.admin.plugins.provisioning.versionPinned", {
+                  version: ownership.version_pin,
+                })}
+              </UpdatesState>
+            ) : tier === "unverified" ? (
               <UpdatesState>{t("web.admin.plugins.detail.updatedByUpload")}</UpdatesState>
             ) : installation.updates_paused ? (
               <UpdatesState>{t("web.admin.plugins.detail.updatesPaused")}</UpdatesState>
@@ -452,7 +492,11 @@ function InstalledPluginPage({
                   </DropdownMenuItem>
                 ))}
                 {hasMenuActions ? <DropdownMenuSeparator /> : null}
-                <DropdownMenuItem variant="destructive" onSelect={() => setConfirmUninstall(true)}>
+                <DropdownMenuItem
+                  variant="destructive"
+                  disabled={ownership !== undefined}
+                  onSelect={() => setConfirmUninstall(true)}
+                >
                   <Trash2 aria-hidden="true" />
                   {t("web.admin.plugins.detail.uninstallMenu")}
                 </DropdownMenuItem>
@@ -461,6 +505,14 @@ function InstalledPluginPage({
           </>
         }
       />
+
+      {ownership ? (
+        <Banner tone="info" icon={<Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}>
+          <p className="font-medium">{t("web.admin.plugins.provisioning.managed")}</p>
+          <p>{t("web.admin.plugins.provisioning.sourceManaged")}</p>
+        </Banner>
+      ) : null}
+      <PluginProvisioningStatus items={provisioning ? [provisioning] : undefined} />
 
       {runtimeProblem ? (
         <Banner
@@ -628,7 +680,7 @@ function InstalledPluginPage({
                   onSuccess: () => navigate("/admin/plugins", { replace: true }),
                 })
               }
-              disabled={deleteInstallation.isPending}
+              disabled={deleteInstallation.isPending || ownership !== undefined}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {deleteInstallation.isPending
@@ -642,7 +694,13 @@ function InstalledPluginPage({
   );
 }
 
-function CatalogPluginPreview({ entry }: { entry: PluginCatalogEntry }) {
+function CatalogPluginPreview({
+  entry,
+  provisioning,
+}: {
+  entry: PluginCatalogEntry;
+  provisioning?: PluginProvisionStatus;
+}) {
   const t = useT();
   const installPlugin = useInstallPlugin();
   const name = pluginDisplayName(entry.plugin_id, entry.presentation);
@@ -686,6 +744,7 @@ function CatalogPluginPreview({ entry }: { entry: PluginCatalogEntry }) {
           </Button>
         }
       />
+      <PluginProvisioningStatus items={provisioning ? [provisioning] : undefined} />
       <TierNotice tier={entry.source_kind} />
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start">
         <div className="flex min-w-0 flex-col gap-3.5">
