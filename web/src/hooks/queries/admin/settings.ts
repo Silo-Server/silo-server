@@ -307,13 +307,9 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
       );
       // A validation refusal can mean a restart left one of these keys set by
       // the environment. Read the list again so the form drops that draft and
-      // the next save can go through. A failed read keeps the last list: an
-      // errored query would make some pages trade their editor, drafts and
-      // all, for a reload notice.
+      // the next save can go through.
       if (err instanceof V2ProblemError && err.problemType === "validation_failed") {
-        void ADMIN_SENSITIVE_STATUS_QUERY.queryFn()
-          .then((status) => queryClient.setQueryData(ADMIN_SENSITIVE_STATUS_QUERY.queryKey, status))
-          .catch(() => {});
+        void queryClient.invalidateQueries({ queryKey: ADMIN_SENSITIVE_STATUS_QUERY.queryKey });
       }
     },
   });

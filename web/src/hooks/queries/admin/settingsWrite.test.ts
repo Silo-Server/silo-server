@@ -210,6 +210,56 @@ it("keeps the environment list when its refresh after a refused save fails", asy
   expect(result.current.dirtyKeys).toEqual(["artwork.local_path"]);
 });
 
+it("keeps a staged clear of the Redis database number when REDIS_URL takes over", async () => {
+  let envManaged = false;
+  const writes: Array<Record<string, string>> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        const values = JSON.parse(String(init.body)).values as Record<string, string>;
+        writes.push(values);
+        return response({ values, restart_required: true });
+      }
+      if (url.endsWith("/sensitive-status"))
+        return response({
+          configured: [],
+          managed_by_env: envManaged ? ["redis.db", "redis.url"] : [],
+          managed_by_env_vars: envManaged
+            ? { "redis.db": "REDIS_URL", "redis.url": "REDIS_URL" }
+            : {},
+        });
+      return response({ "redis.db": "3", "branding.login_subtitle": "" });
+    }),
+  );
+  const { client, wrapper } = fixture();
+  const { result } = renderHook(
+    () => useSettingsForm({ keys: ["redis.db", "branding.login_subtitle"] }),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.getValue("redis.db")).toBe("3"));
+  act(() => {
+    result.current.setValue("redis.db", "");
+    result.current.setValue("branding.login_subtitle", "Welcome home");
+  });
+
+  // The server restarted with REDIS_URL set, and the page read the list again.
+  // The server still accepts clearing redis.db then: it removes the saved number.
+  envManaged = true;
+  await act(async () => {
+    await client.invalidateQueries({
+      predicate: (query) => query.queryKey.includes("sensitive-status"),
+    });
+  });
+  await waitFor(() => expect(result.current.envVar("redis.db")).toBe("REDIS_URL"));
+  expect([...result.current.dirtyKeys].sort()).toEqual(["branding.login_subtitle", "redis.db"]);
+
+  await act(async () => {
+    await result.current.save();
+  });
+  expect(writes.at(-1)).toEqual({ "redis.db": "", "branding.login_subtitle": "Welcome home" });
+});
+
 it("rejects a decoded completion after the acting profile changes", async () => {
   let release: ((value: unknown) => void) | undefined;
   const decoded = new Promise((resolve) => {

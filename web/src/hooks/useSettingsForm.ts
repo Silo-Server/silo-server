@@ -22,7 +22,9 @@ interface UseSettingsFormOptions {
 
 export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   const { data: settings, isLoading, isError: loadError, refetch } = useAdminServerSettings();
-  const { data: sensitiveData, isError: sensitiveStatusError } = useAdminSensitiveStatus();
+  // Only a list that never loaded leaves the status unknown. A failed re-read
+  // keeps the last list, so a page keeps its editor and the drafts in it.
+  const { data: sensitiveData, isLoadingError: sensitiveStatusError } = useAdminSensitiveStatus();
   const editBaseline = useRef<Record<string, string> | undefined>(undefined);
   const [, setBaselineRevision] = useState(0);
   const saveEpoch = useRef(0);
@@ -57,10 +59,16 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   // The server refuses a whole save that writes a key the environment sets,
   // and that key's field is disabled. A server can restart with the variable
   // set while the page holds a draft for the key, so drop that draft: it can
-  // be neither saved nor undone, and the rest of the page has to save.
+  // be neither saved nor undone, and the rest of the page has to save. The
+  // server still accepts one such write, clearing redis.db under REDIS_URL,
+  // which is how a saved number is removed, so that draft stays.
   const envVars = sensitiveData?.managed_by_env_vars;
   const envLockedDrafts = envVars
-    ? Array.from(dirty).filter((key) => Object.hasOwn(envVars, key))
+    ? Array.from(dirty).filter(
+        (key) =>
+          Object.hasOwn(envVars, key) &&
+          !(key === "redis.db" && (localValues[key] ?? "").trim() === ""),
+      )
     : [];
   if (envLockedDrafts.length > 0) {
     setDirty((prev) => {
