@@ -13038,6 +13038,28 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個無法還原——不同的設定項目或其連線的一部分由此伺服器的環境設定"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13392,6 +13414,28 @@
     {
       "type": 0,
       "value": "某項服務的位址已變更，但備份中沒有其憑證，因此還原時會清除此處的憑證並關閉該服務，直到重新輸入為止。"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個設定項目保留目前的值，因為這些項目或其連線的一部分由此伺服器的環境設定。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15764,6 +15808,12 @@
       "value": "此處已有其他帳號使用其使用者名稱或電子郵件登入。"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "不同的設定項目或其連線的一部分由此伺服器的環境設定，因此此伺服器保留目前的值。"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16722,6 +16772,16 @@
     {
       "type": 0,
       "value": "（保留：較嚴格）"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "（保留：環境）"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -47738,6 +47798,98 @@
       "value": "已停止產生推薦。在伺服器重新啟動之前，已儲存的推薦仍會顯示在探索中。"
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "正在為個人檔案排名（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "正在擷取 TMDB 清單（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "正在查詢並嵌入作品（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "已清除 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 部過期作品"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -47762,6 +47914,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "建立探索推薦之前，請先解決下方的嵌入鎖定衝突。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "請先執行嵌入向量作業，讓 Silo 有媒體庫向量可供比對。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "建立探索推薦之前，請先在 AI 服務中連接嵌入提供者。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "目前還沒有任何個人檔案擁有品味檔案。有人觀看或評分作品後，請執行品味檔案作業。"
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -49260,6 +49436,32 @@
       "value": "在「管理 → 推薦」中開啟探索推薦之前，此列會保持空白。"
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "管理 → 推薦"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中開啟探索推薦之前，推薦列會保持空白。"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "已在推薦中關閉"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -50637,6 +50839,12 @@
       "value": "新列會加入探索頁面底部"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "開啟推薦設定"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -50649,6 +50857,12 @@
       "value": "MDBList 的資料來源不包含清單頁面上儲存的排序方式。請選擇清單頁面顯示的排序。"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "你的個人檔案還沒有探索推薦。請執行探索推薦作業，或觀看並評分幾部作品，即可預覽此列。"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -50659,6 +50873,12 @@
     {
       "type": 0,
       "value": "選擇清單或貼上清單連結，以查看其中的作品。"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "請在「管理 → 推薦」中開啟探索推薦，即可預覽此列。"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -60154,6 +60374,24 @@
       "value": "改用其他模型需要重設嵌入，這會刪除所有嵌入。若改由其他提供者提供相同模型，則會在重新啟動後套用。"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "新增至探索"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "無法將推薦列新增至探索頁面。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "已將推薦列新增至探索頁面。"
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -60176,6 +60414,44 @@
     {
       "type": 0,
       "value": "伺服器保留多少部不在媒體庫中的作品以供推薦。每部作品都會在 TMDB 上查詢並建立嵌入。建立嵌入通常成本不高，但數量越多，視你的嵌入提供者而定，可能花費更多或耗時更久，也會占用更多儲存空間。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "你的探索頁面目前尚未顯示任何推薦列。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "請開啟上方的「啟用推薦」並重新啟動伺服器，探索推薦才能執行。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "請求功能目前已關閉。請在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "請求設定"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中開啟，讓觀眾能看到探索頁面。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "開啟探索頁面"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -70352,6 +70628,26 @@
     {
       "type": 0,
       "value": " 次"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "此排程來自備份設定。請在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "伺服器 › 備份"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中變更。"
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

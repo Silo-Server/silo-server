@@ -1,6 +1,6 @@
 # Recommendation administration API
 
-Recommendation administration uses acting-administrator authorization. All six
+Recommendation administration uses acting-administrator authorization. All seven
 routes remain registered when the recommendation worker is absent and return
 `503` until it is available.
 
@@ -11,6 +11,7 @@ routes remain registered when the recommendation worker is absent and return
 | `POST /api/v2/admin/recommendations/trigger/taste-profiles` | `200` with `status: "started"` |
 | `POST /api/v2/admin/recommendations/trigger/cowatch` | `200` with `status: "started"` |
 | `POST /api/v2/admin/recommendations/trigger/recommendations` | `200` with `status: "started"` |
+| `POST /api/v2/admin/recommendations/trigger/external` | `200` with `status: "started"` |
 | `POST /api/v2/admin/recommendations/embeddings/reset` | `200` with the number of rows deleted |
 
 ## Status
@@ -31,6 +32,36 @@ busy job skipped are not recorded. `embeddings` and `recommendations` can also
 carry `last_partial_run`, in the same shape: the newest embedding catch-up
 pass, or the newest startup build of the global rows. Partial runs are
 recorded apart, so one that runs after a failed full run does not hide it.
+
+`external` reports the Discover recommendations job, which recommends titles the
+library does not have (outside titles; see Discover recommendations in
+[recommendations.md](architecture/recommendations.md)): `enabled` (recommendations
+are enabled and `recommendations.external.enabled` is set), `running`, `count`
+(outside titles stored), `rows` (stored outside rows, one per profile and
+media type), optional live progress while running (`phase` in `sources`,
+`titles`, or `rows`, plus `progress_done` and `progress_total`), and `last_run`
+in the job run shape. Its `result` holds
+`enabled`, the retention counts (`pruned_titles`, `pruned_sources`,
+`pruned_links`, and `prune_failed`, present and true when retention failed),
+the pool counts (`profiles`, `seeds` (distinct seed titles across profiles),
+`titles_stored`, `pool_titles`, `titles_deleted` (stored titles deleted for the
+cap or because the library now has them), `sources_fetched`,
+`sources_failed`, `sources_left`, `details_fetched`, `details_not_found`,
+`details_failed`, `details_left`, `details_owned` (fetched titles the library
+has under their IMDb or TVDB ID), `text_unchanged` (refetched titles whose
+vector was kept), `refused_skipped` (titles whose text the provider refused
+before), `tmdb_requests`, `embeddings` with the embedding job's counts,
+`budget_exhausted`, `vectors_skipped` (the English reason no vectors could be
+stored), and `vectors_skipped_reason` (stable code: `no_provider`, `no_lock`,
+`lock_conflict`, or `no_taste_profiles`)), and the row counts (`row_profiles`, `rows_built`, `rows_deleted`,
+`rows_refused`, `row_failures`, `rows_busy`, `rows_remaining` (profiles not
+reached when the run stopped)). A run with the feature off only applies
+retention; scheduled idle off-runs that prune nothing are not recorded in run
+history. Saving either switch as off cancels active generation when the
+worker receives the change; enabling `recommendations.external.enabled` while
+recommendations are running kicks off an initial build automatically if no
+outside rows exist yet. If only the main recommendations switch is turned
+off, Discover can still serve stored rows until restart.
 
 `stale_sweep` reports the sweep that rebuilds profiles after their signals or
 access change: `pending` counts the profiles waiting for a rebuild, and
@@ -76,17 +107,19 @@ and releases any lock the process held.
 ## Embeddings reset
 
 The reset deletes the embedding lock, every item embedding, every taste
-cluster and every profile's cached rows, and clears every taste profile's
-vector, in one transaction. It answers with the counts (`embeddings`,
-`taste_clusters` and `cached_rows` deleted, `taste_profiles` cleared). Taste
+cluster, every profile's cached rows, every outside-title vector and every
+outside row, and clears every taste profile's vector, in one transaction. It
+answers with the counts (`embeddings`, `taste_clusters`, `cached_rows`,
+`external_embeddings` and `external_rows` deleted, `taste_profiles` cleared).
+Outside titles stay and are embedded again by the next outside-title run. Taste
 profile rows keep their signal counts, so they are rebuilt once the
 embedding job stores their titles' vectors again. It is the recovery path
 for a server whose lock pins a model it can no longer use, and the way to
 switch embedding models. Global rows (popular, recently added, top rated,
 genre samplers) and co-watch pairs do not use embeddings and stay.
 
-The reset runs synchronously while holding the embeddings, taste profile and
-recommendation jobs' claims and the stale profile sweep's lock, so none of
+The reset runs synchronously while holding the embeddings, taste profile,
+recommendation and outside-title jobs' claims and the stale profile sweep's lock, so none of
 them runs beside it on any server. It returns `409` while any of them is
 running, while a catalog import with embeddings runs, or while a saved
 embedding model or embedding base URL differs from the one the server runs
@@ -98,7 +131,8 @@ before the commit leaves every row in place. A failed commit can also answer
 retrying.
 A profile refresh that was already running when the reset committed can still
 write one taste profile from the old embeddings; the profile's next refresh
-after re-embedding replaces it.
+after re-embedding replaces it. It cannot write outside rows: those are written
+only while the embedding lock they were built under is stored.
 
 Every item that lost its embedding gets a catalog search index update, so the
 next index syncs replace its stored vector with none. Semantic search stays
@@ -108,7 +142,7 @@ after the reset; the next embedding writes a new lock for the configured model.
 
 ## Clients
 
-The four triggers and the reset are non-retryable. The web disables both
+The five triggers and the reset are non-retryable. The web disables both
 TanStack mutation retries and authentication refresh/replay for these actions,
 including after `401`. After an uncertain result, inspect status before
 deciding whether to trigger again. The status query continues to poll every

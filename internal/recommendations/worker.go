@@ -27,6 +27,8 @@ const (
 	JobTasteProfiles   JobName = "taste_profiles"
 	JobCowatch         JobName = "cowatch"
 	JobRecommendations JobName = "recommendations"
+	// JobExternal fetches, embeds and ranks outside titles.
+	JobExternal JobName = "external"
 )
 
 const (
@@ -97,6 +99,12 @@ type Worker struct {
 	readRefreshes        refreshThrottle
 	cancelFunc           context.CancelFunc
 	embeddingsJobTimeout time.Duration
+	// liveConfig reads the settings outside titles follow; nil keeps the
+	// engine's.
+	liveConfig        LiveConfig
+	cancelExternal    context.CancelCauseFunc // guarded by mu
+	externalProgress  ExternalProgress        // guarded by mu
+	externalBootstrap refreshThrottle
 }
 
 const tasteProfileRefreshSubjectsQuery = `
@@ -125,7 +133,7 @@ const postgresStoreTasteProfileSubjectsQuery = `
 	   OR  NOT EXISTS (SELECT 1 FROM user_profiles p WHERE p.user_id = s.user_id)`
 
 // NewWorker creates a new recommendation Worker.
-func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, recommendationsCron string, embeddingsJobTimeout time.Duration) (*Worker, error) {
+func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, recommendationsCron, externalCron string, embeddingsJobTimeout time.Duration) (*Worker, error) {
 	if embeddingsJobTimeout <= 0 {
 		embeddingsJobTimeout = 24 * time.Hour
 	}
@@ -149,6 +157,7 @@ func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, r
 		{tasteProfilesCron, JobTasteProfiles},
 		{cowatchCron, JobCowatch},
 		{recommendationsCron, JobRecommendations},
+		{externalCron, JobExternal},
 	} {
 		if _, err := w.cron.AddFunc(schedule.spec, func() { w.runScheduled(schedule.name) }); err != nil {
 			return nil, err
@@ -168,6 +177,7 @@ func (w *Worker) Start() {
 	go w.stalenessLoop(ctx)
 	go w.embedMissingLoop(ctx)
 	go w.ensureGlobalRows(ctx, w.engine.repo)
+	go w.ensureExternalRows(ctx)
 
 	slog.Info("recommendation worker started")
 }
@@ -215,6 +225,8 @@ func (w *Worker) jobFor(name JobName) job {
 		return job{name: name, timeout: tasteProfilesJobTimeout, run: func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doTasteProfiles(ctx, held) }}
 	case JobCowatch:
 		return job{name: name, timeout: cowatchJobTimeout, run: func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doCowatch(ctx, held) }}
+	case JobExternal:
+		return job{name: name, timeout: externalJobTimeout, run: func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doExternal(ctx, held) }}
 	default:
 		return job{name: JobRecommendations, timeout: cacheJobTimeout, run: func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doRecommendations(ctx, held) }}
 	}
@@ -625,7 +637,7 @@ func (w *Worker) doTasteProfiles(ctx context.Context, held clusterLock) (tastePr
 		}
 		// A refresh that started reading after this job could otherwise be
 		// overwritten by it with older signals.
-		unlock, acquired, err := w.tryProfileLock(ctx, held, s.UserID, s.ProfileID)
+		_, unlock, acquired, err := w.tryProfileLock(ctx, held, s.UserID, s.ProfileID)
 		if errors.Is(err, errJobLockLost) {
 			res.Remaining = len(subjects) - i
 			return res, err
@@ -652,6 +664,9 @@ func (w *Worker) doTasteProfiles(ctx context.Context, held clusterLock) (tastePr
 	}
 	if res.Refreshed == 0 && res.NoOp > 0 {
 		slog.WarnContext(ctx, "taste profile job stored no taste vectors; their titles may have no embeddings yet", "component", "recommendations", "profiles", res.Profiles, "no_op", res.NoOp)
+	}
+	if res.Refreshed > 0 {
+		w.maybeBootstrapExternal()
 	}
 	return res, nil
 }
@@ -838,7 +853,7 @@ func (w *Worker) doRecommendations(ctx context.Context, held clusterLock) (cache
 			slog.WarnContext(ctx, "recommendation cache job ran out of time", "component", "recommendations", "processed", i, "remaining", res.Remaining)
 			return res, fmt.Errorf("cache refresh stopped after %d of %d profiles: %w", i, len(profiles), err)
 		}
-		unlock, acquired, err := w.tryProfileLock(ctx, held, p.UserID, p.ProfileID)
+		_, unlock, acquired, err := w.tryProfileLock(ctx, held, p.UserID, p.ProfileID)
 		if errors.Is(err, errJobLockLost) {
 			res.Remaining = len(profiles) - i
 			return res, err
@@ -1291,7 +1306,17 @@ func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID
 		err := refresh(ctx, held, userID, profileID)
 		switch {
 		case errors.Is(err, errProfileRefreshElsewhere):
+			// The outside job can ask again after releasing the lock while
+			// this run is still recording the stale mark.
+			if run < profileRefreshMaxRuns {
+				if w.finishProfileRefresh(key) {
+					continue
+				}
+			} else {
+				w.clearProfileRefreshPending(key)
+			}
 			slog.InfoContext(ctx, "profile is refreshing on another server; left for the stale sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID)
+			return err
 		case errors.Is(err, errPolicyNotLoaded):
 			slog.InfoContext(ctx, "this server has not loaded the latest access policy; profile left for the stale sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID)
 		case err != nil:
@@ -1318,23 +1343,23 @@ func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID
 // a cluster lock (a job, the stale sweep) passes it as held, and the profile
 // lock shares its connection; otherwise held is nil and the profile lock
 // takes its own.
-func (w *Worker) tryProfileLock(ctx context.Context, held clusterLock, userID int, profileID string) (unlock func(), acquired bool, err error) {
+func (w *Worker) tryProfileLock(ctx context.Context, held clusterLock, userID int, profileID string) (lock clusterLock, unlock func(), acquired bool, err error) {
 	lockCtx, cancel := context.WithTimeout(ctx, jobLockTimeout)
 	defer cancel()
 	key := profileRefreshLock(userID, profileID)
 	if held != nil {
+		lock = held
 		unlock, acquired, err = held.TryAlso(lockCtx, key)
 	} else {
-		var lock clusterLock
 		lock, acquired, err = w.locker.TryLock(lockCtx, key)
 		if acquired {
 			unlock = lock.Release
 		}
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("take profile refresh lock: %w", err)
+		return nil, nil, false, fmt.Errorf("take profile refresh lock: %w", err)
 	}
-	return unlock, acquired, nil
+	return lock, unlock, acquired, nil
 }
 
 // markBusyProfileStale marks stale a profile a scheduled job skipped because
@@ -1391,7 +1416,7 @@ func (w *Worker) refreshProfile(ctx context.Context, held clusterLock, userID in
 	refreshCtx, cancel := context.WithTimeout(ctx, profileRefreshTimeout)
 	defer cancel()
 
-	unlock, acquired, err := w.tryProfileLock(refreshCtx, held, userID, profileID)
+	lock, unlock, acquired, err := w.tryProfileLock(refreshCtx, held, userID, profileID)
 	if err != nil {
 		return err
 	}
@@ -1418,17 +1443,48 @@ func (w *Worker) refreshProfile(ctx context.Context, held clusterLock, userID in
 			return errPolicyNotLoaded
 		}
 	}
-	if _, err := w.engine.rebuildTasteProfile(refreshCtx, userID, profileID, started); err != nil {
+	signals, err := w.engine.rebuildTasteProfile(refreshCtx, userID, profileID, started)
+	if err != nil {
 		return fmt.Errorf("refresh taste profile: %w", err)
 	}
 	if built := w.cacheUserRows(refreshCtx, repo, userID, profileID, cacheExpiry(started)); built.failed > 0 {
 		return fmt.Errorf("rebuild recommendation cache: %d steps failed", built.failed)
 	}
-	if err := w.engine.purgeIfProfileDeleted(refreshCtx, userID, profileID); err != nil {
+	// Outside rows come from stored titles and vectors; new seeds' lists
+	// wait for the next outside-title run.
+	if w.ExternalEnabled() {
+		if err := w.refreshExternalRows(refreshCtx, lock, userID, profileID, signals); err != nil {
+			return err
+		}
+	} else if err := w.engine.purgeIfProfileDeleted(refreshCtx, userID, profileID); err != nil {
 		return fmt.Errorf("check profile still exists: %w", err)
 	}
-	if err := repo.ClearStaleAt(refreshCtx, userID, profileID, started); err != nil {
+	// Library rows are already stored. Clear their mark even if the optional
+	// outside row rebuild used the rest of the refresh deadline.
+	clearCtx, cancelClear := context.WithTimeout(context.WithoutCancel(refreshCtx), staleMarkTimeout)
+	defer cancelClear()
+	if err := repo.ClearStaleAt(clearCtx, userID, profileID, started); err != nil {
 		slog.WarnContext(ctx, "failed to clear stale profile marker", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+	}
+	return nil
+}
+
+// refreshExternalRows rebuilds a refreshed profile's outside rows. Only a
+// failed deleted-profile check fails the refresh. A failed rebuild leaves the
+// profile fresh: its library rows are written, and the outside-title job
+// rebuilds the rows on its next run, where keeping the profile stale would
+// redo its whole refresh on every sweep while the failure lasts.
+func (w *Worker) refreshExternalRows(ctx context.Context, lock clusterLock, userID int, profileID string, signals *tasteSignals) error {
+	built, err := w.rebuildProfileExternalRows(ctx, lock, userID, profileID, signals)
+	if errors.Is(err, errProfilePurgeCheck) || errors.Is(err, errJobLockLost) {
+		return fmt.Errorf("rebuild outside rows: %w", err)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "rebuilding a profile's outside rows failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+		return nil
+	}
+	if built.Written == 0 && signals != nil {
+		w.maybeBootstrapExternal()
 	}
 	return nil
 }

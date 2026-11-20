@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/requests/discoverrows"
@@ -50,20 +51,21 @@ type RequestDownload struct {
 
 // RequestMediaResult is one discovery or search card.
 type RequestMediaResult struct {
-	MediaType        string            `json:"media_type" doc:"movie or series" example:"movie"`
-	TMDBID           int               `json:"tmdb_id" doc:"TMDB identifier (external, not a Silo ID)" example:"949"`
-	Title            string            `json:"title" example:"Heat"`
-	Year             int               `json:"year,omitempty" example:"1995"`
-	Overview         string            `json:"overview,omitempty"`
-	PosterPath       string            `json:"poster_path,omitempty" doc:"TMDB image path" example:"/abc.jpg"`
-	BackdropPath     string            `json:"backdrop_path,omitempty" doc:"TMDB image path"`
-	ReleaseDate      string            `json:"release_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD" example:"1995-12-15"`
-	Popularity       float64           `json:"popularity,omitempty"`
-	VoteAverage      float64           `json:"vote_average,omitempty"`
-	Availability     string            `json:"availability" doc:"missing or available in this server's catalog" example:"missing"`
-	LibraryContentID string            `json:"library_content_id,omitempty" doc:"The catalog item when the media is available" example:"movie:heat-1995"`
-	Request          RequestMediaState `json:"request"`
-	InWatchlist      bool              `json:"in_watchlist" doc:"Whether the title is on the viewing profile's watchlist, as a watchlist title or through its catalog item" example:"false"`
+	MediaType        string               `json:"media_type" doc:"movie or series" example:"movie"`
+	TMDBID           int                  `json:"tmdb_id" doc:"TMDB identifier (external, not a Silo ID)" example:"949"`
+	Title            string               `json:"title" example:"Heat"`
+	Year             int                  `json:"year,omitempty" example:"1995"`
+	Overview         string               `json:"overview,omitempty"`
+	PosterPath       string               `json:"poster_path,omitempty" doc:"TMDB image path" example:"/abc.jpg"`
+	BackdropPath     string               `json:"backdrop_path,omitempty" doc:"TMDB image path"`
+	ReleaseDate      string               `json:"release_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD" example:"1995-12-15"`
+	Popularity       float64              `json:"popularity,omitempty"`
+	VoteAverage      float64              `json:"vote_average,omitempty"`
+	Availability     string               `json:"availability" doc:"missing or available in this server's catalog" example:"missing"`
+	LibraryContentID string               `json:"library_content_id,omitempty" doc:"The catalog item when the media is available" example:"movie:heat-1995"`
+	Request          RequestMediaState    `json:"request"`
+	InWatchlist      bool                 `json:"in_watchlist" doc:"Whether the title is on the viewing profile's watchlist, as a watchlist title or through its catalog item" example:"false"`
+	Reasons          []RequestMediaReason `json:"reasons,omitempty" maxItems:"2" doc:"On a recommended Discover row only: the library titles that led to recommending this title, best first, at most two. Absent elsewhere, and absent or empty when none of them is one the viewer can see"`
 }
 
 // RequestMediaCastMember is one cast credit on a detail document.
@@ -142,7 +144,7 @@ type RequestMediaPage struct {
 
 // DiscoverSection is one discovery row.
 type DiscoverSection struct {
-	Key   string `json:"key" doc:"The row's stable ID. The six built-in rows keep trending_movies, trending_series, popular_movies, popular_series, upcoming_movies and on_air_series; a row an admin adds has an opaque ID" example:"trending_movies"`
+	Key   string `json:"key" doc:"The row's stable ID. The six built-in rows keep trending_movies, trending_series, popular_movies, popular_series, upcoming_movies and on_air_series; the default recommended rows are recommended_movies and recommended_series; a row an admin adds has an opaque ID" example:"trending_movies"`
 	Title string `json:"title" example:"Trending Movies"`
 	SectionTitleKey
 	Page         int                  `json:"page" example:"1"`
@@ -508,7 +510,8 @@ func (reg *Registry) requestViewer(ctx context.Context) (MediaRequestService, me
 	if err != nil {
 		return nil, mediarequests.Viewer{}, serviceProblem(err)
 	}
-	return reg.deps.Requests, mediarequests.Viewer{UserID: claims.UserID, ProfileID: profileID, IsAdmin: isAdmin}, nil
+	library := handlers.AccessFilterFromContext(ctx, "")
+	return reg.deps.Requests, mediarequests.Viewer{UserID: claims.UserID, ProfileID: profileID, IsAdmin: isAdmin, Library: &library}, nil
 }
 
 // createRequest has no durable client request identity. An uncertain retry after
@@ -682,7 +685,7 @@ func (reg *Registry) listDiscoverSections(ctx context.Context, _ *struct{}) (*Di
 	reg.markInWatchlist(ctx, marks)
 	order := make([]DiscoverRowRef, 0, len(page.Order))
 	for _, r := range page.Order {
-		order = append(order, DiscoverRowRef{Key: r.Key, Type: string(r.Type), Title: r.Title, SectionTitleKey: sectionTitleKeyOf(discoverrows.TitleKey(r.Key, r.Title), nil)})
+		order = append(order, DiscoverRowRef{Key: r.Key, Type: string(r.Type), Title: r.Title, SectionTitleKey: sectionTitleKeyOf(discoverrows.TitleKey(r.Key, r.Title, r.Type), nil)})
 	}
 	return &DiscoverSectionCollectionOutput{Body: DiscoverSectionCollection{Collection: NewCollection(items), RowOrder: order}}, nil
 }
@@ -937,19 +940,6 @@ func requestMediaStateOf(s mediarequests.RequestState) RequestMediaState {
 	return RequestMediaState{Status: string(s.Status), Requestable: s.Requestable, Reason: s.Reason, RequestID: ID(s.RequestID), Following: s.Following, RequestedByViewer: s.RequestedByViewer, State: string(s.State), Download: requestDownloadOf(s.Download)}
 }
 
-func requestMediaResultsOf(results []mediarequests.MediaResult) []RequestMediaResult {
-	out := make([]RequestMediaResult, 0, len(results))
-	for _, r := range results {
-		out = append(out, RequestMediaResult{
-			MediaType: string(r.MediaType), TMDBID: r.TMDBID, Title: r.Title, Year: r.Year, Overview: r.Overview,
-			PosterPath: r.PosterPath, BackdropPath: r.BackdropPath, ReleaseDate: calendarDate(r.ReleaseDate),
-			Popularity: r.Popularity, VoteAverage: r.VoteAverage, Availability: string(r.Availability),
-			LibraryContentID: r.LibraryContentID, Request: requestMediaStateOf(r.Request),
-		})
-	}
-	return out
-}
-
 func requestMediaPageOf(p *mediarequests.MediaPage) RequestMediaPage {
 	return RequestMediaPage{Page: p.Page, TotalPages: p.TotalPages, TotalResults: p.TotalResults, Results: requestMediaResultsOf(p.Results)}
 }
@@ -987,7 +977,7 @@ func requestMediaSeasonsOf(seasons []mediarequests.RequestSeason) []RequestMedia
 
 func discoverSectionOf(s *mediarequests.DiscoverySection) DiscoverSection {
 	return DiscoverSection{
-		Key: s.Key, Title: s.Title, SectionTitleKey: sectionTitleKeyOf(discoverrows.TitleKey(s.Key, s.Title), nil), Page: s.Page, TotalPages: s.TotalPages, TotalResults: s.TotalResults,
+		Key: s.Key, Title: s.Title, SectionTitleKey: sectionTitleKeyOf(discoverrows.TitleKey(s.Key, s.Title, s.Type), nil), Page: s.Page, TotalPages: s.TotalPages, TotalResults: s.TotalResults,
 		Results: requestMediaResultsOf(s.Results), NextPage: s.NextPage,
 	}
 }

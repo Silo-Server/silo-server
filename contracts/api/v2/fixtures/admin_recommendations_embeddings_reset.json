@@ -2,5 +2,7 @@
   "embeddings": 120,
   "taste_profiles": 3,
   "taste_clusters": 9,
-  "cached_rows": 41
+  "cached_rows": 41,
+  "external_embeddings": 1200,
+  "external_rows": 6
 }

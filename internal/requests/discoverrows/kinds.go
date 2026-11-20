@@ -12,9 +12,10 @@ import (
 )
 
 // Kind is the behavior of one row type. Adding a row type means adding a
-// Kind to kinds below (and, for a list type, its fetch to Refresher);
-// nothing outside this package switches on Type except for brand rows, which
-// the clients draw themselves.
+// Kind to kinds below (and, for a list type, its fetch to Refresher; for a
+// type read per viewer from stored data, a source that implements
+// PersonalSource); nothing outside this package switches on Type except for
+// brand rows, which the clients draw themselves.
 type Kind interface {
 	// Normalize checks the row's spec, refuses a spec member of another
 	// type, and rewrites the spec to canonical form. Field paths are
@@ -31,6 +32,7 @@ var kinds = map[Type]Kind{
 	TypeTMDBDiscover: discoverKind{},
 	TypeTMDBList:     tmdbListKind{},
 	TypeMDBList:      mdbListKind{},
+	TypeRecommended:  recommendedKind{},
 	TypeStudios:      brandKind{},
 	TypeNetworks:     brandKind{},
 	TypeGenres:       brandKind{},
@@ -55,7 +57,10 @@ func SourceKey(row Row) string {
 // onlySpec refuses the spec members a row type does not use.
 func onlySpec(row *Row, keep string) FieldErrors {
 	errs := FieldErrors{}
-	set := map[string]bool{"chart": row.Chart != nil, "discover": row.Discover != nil, "list": row.List != nil}
+	set := map[string]bool{
+		"chart": row.Chart != nil, "discover": row.Discover != nil, "list": row.List != nil,
+		"recommended": row.Recommended != nil,
+	}
 	for name, isSet := range set {
 		if isSet && name != keep {
 			errs[name] = fmt.Sprintf("not used by a %s row", row.Type)
@@ -327,6 +332,31 @@ func normalizeList(row *Row, canonical func(string) (string, error)) FieldErrors
 	row.List = &ListSpec{URL: canonicalURL, Order: row.List.Order}
 	return nil
 }
+
+// recommendedKind is the viewer's own ranked titles the server lacks. Its
+// source is personal (see PersonalSource): read from stored data for one
+// viewer, never from TMDB.
+type recommendedKind struct{}
+
+func (recommendedKind) Normalize(row *Row) FieldErrors {
+	if errs := onlySpec(row, "recommended"); len(errs) > 0 {
+		return errs
+	}
+	spec := RecommendedSpec{MediaType: strings.TrimSpace(row.Recommended.MediaType)}
+	row.Recommended = &spec
+	// A title the library has never shows here, so the switch is fixed on.
+	row.HideAvailable = true
+	if spec.MediaType != MediaMovie && spec.MediaType != MediaSeries {
+		return FieldErrors{"recommended.media_type": "movie or series"}
+	}
+	return nil
+}
+
+func (recommendedKind) Source(env Env, row Row) Source {
+	return recommendedSource{env: env, mediaType: row.Recommended.MediaType}
+}
+
+func (recommendedKind) SourceKey(Row) string { return "" }
 
 // brandKind is a carousel of fixed brand cards the clients draw themselves.
 type brandKind struct{}

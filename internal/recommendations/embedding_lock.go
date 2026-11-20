@@ -13,6 +13,9 @@ const CanonicalEmbeddingDimensions = embeddingvectors.CanonicalDimensions
 // EmbeddingLock records the embedding space currently locked for an
 // installation.
 type EmbeddingLock struct {
+	// rowVersion identifies the observed Postgres tuple for in-memory refusal
+	// caches. A reset can recreate byte-identical lock JSON on another node.
+	rowVersion        string
 	BaseURL           string `json:"base_url"`
 	Model             string `json:"model"`
 	SourceDimensions  int    `json:"source_dimensions"`

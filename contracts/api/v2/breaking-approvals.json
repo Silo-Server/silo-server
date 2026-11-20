@@ -1,3 +1,18 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "getRequestDiscoverLayout",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "de75c3a7c772c18d5f52d8ebea147a20801975b9a1098b182c14492c09f6e6df",
+      "reason": "Adds the `recommended` Discover row type to the admin layout row's `type` enum. Only the web admin's Discover Page editor reads this response, and it ships in the same pull request; no native client calls the admin layout operations.",
+      "approved_in": "#4549"
+    },
+    {
+      "operation_id": "updateRequestDiscoverLayout",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "71cfe3432615f49b7ee160c5f3c0d7d2b57c1de52cfafa6b5415ceb25b55c6d7",
+      "reason": "Adds the `recommended` Discover row type to the admin layout row's `type` enum. Only the web admin's Discover Page editor reads this response, and it ships in the same pull request; no native client calls the admin layout operations.",
+      "approved_in": "#4549"
+    }
+  ]
 }

@@ -11,6 +11,7 @@ import {
   ListFilter,
   ListVideo,
   Shapes,
+  Sparkles,
   Tv,
   type LucideIcon,
 } from "lucide-react";
@@ -54,6 +55,15 @@ export const BUILT_IN_ROWS: readonly DiscoverRowBody[] = [
   builtIn("on_air_series", "On Air Series", { preset: "on_the_air", media_type: "series" }),
 ];
 
+/**
+ * The recommended rows the default page starts with. They keep their type and
+ * media type; their title, size and switch can change.
+ */
+export const RECOMMENDED_ROWS: readonly DiscoverRowBody[] = [
+  recommended("recommended_movies", "Recommended movies for you", "movie"),
+  recommended("recommended_series", "Recommended series for you", "series"),
+];
+
 export const BRAND_ROWS: readonly DiscoverRowBody[] = [
   { id: "studios", type: "studios", title: "Studios", enabled: true },
   { id: "networks", type: "networks", title: "Networks", enabled: true },
@@ -66,6 +76,8 @@ export const BRAND_ROWS: readonly DiscoverRowBody[] = [
  * stored, so the server has sent no key for it.
  */
 const STOCK_TITLE_KEYS: Readonly<Record<string, MessageKey>> = {
+  recommended_movies: "home.section.discoverRecommendedMovies",
+  recommended_series: "home.section.discoverRecommendedSeries",
   trending_movies: "home.section.discoverTrendingMovies",
   trending_series: "home.section.discoverTrendingSeries",
   popular_movies: "home.section.discoverPopularMovies",
@@ -78,14 +90,35 @@ const STOCK_TITLE_KEYS: Readonly<Record<string, MessageKey>> = {
 };
 
 /** The key of a stock row that still holds its default title; none for any other row. */
-function stockTitleKey(row: Pick<DiscoverRowBody, "id" | "title">): MessageKey | undefined {
-  const stock = [...BUILT_IN_ROWS, ...BRAND_ROWS].find((entry) => entry.id === row.id);
+function stockTitleKey(
+  row: Pick<DiscoverRowBody, "id" | "title" | "type">,
+): MessageKey | undefined {
+  const stock = STOCK_ROWS.find((entry) => entry.id === row.id && entry.type === row.type);
   return stock && stock.title === row.title ? STOCK_TITLE_KEYS[stock.id ?? ""] : undefined;
 }
 
 function builtIn(id: string, title: string, chart: DiscoverChart): DiscoverRowBody {
   return { id, type: "tmdb_chart", title, enabled: true, limit: 20, chart };
 }
+
+function recommended(id: string, title: string, mediaType: RequestMediaType): DiscoverRowBody {
+  return {
+    id,
+    type: "recommended",
+    title,
+    enabled: true,
+    limit: 20,
+    hide_available: true,
+    recommended: { media_type: mediaType },
+  };
+}
+
+/** The rows Discover starts with, which Add row can bring back once removed. */
+const STOCK_ROWS: readonly DiscoverRowBody[] = [
+  ...RECOMMENDED_ROWS,
+  ...BUILT_IN_ROWS,
+  ...BRAND_ROWS,
+];
 
 /**
  * Each row type as the picker, the row list and the dialog show it. `label` and
@@ -114,6 +147,12 @@ export const ROW_KINDS: Readonly<
     sentence: "web.admin.requests.discover.kind.mdblist.sentence",
     icon: ListVideo,
     group: "new",
+  },
+  recommended: {
+    label: "web.admin.requests.discover.kind.recommended.label",
+    sentence: "web.admin.requests.discover.kind.recommended.sentence",
+    icon: Sparkles,
+    group: "picked",
   },
   tmdb_list: {
     label: "web.admin.requests.discover.kind.tmdbList.label",
@@ -159,7 +198,10 @@ export function rowKindSentence(type: DiscoverRowType): string {
   return t(ROW_KINDS[type].sentence);
 }
 
-/** The types Add row starts a new row from; brand rows come back from "Bring back". */
+/**
+ * The types Add row starts a new row from; brand rows and the stock recommended
+ * rows come back from "Bring back" so they keep their IDs and localized titles.
+ */
 export const NEW_ROW_TYPES: readonly DiscoverRowType[] = [
   "tmdb_chart",
   "tmdb_discover",
@@ -176,6 +218,16 @@ export function isBrandRow(row: Pick<DiscoverRowBody, "type">): boolean {
 
 export function isBuiltInRow(row: Pick<DiscoverRowBody, "id">): boolean {
   return BUILT_IN_ROWS.some((builtInRow) => builtInRow.id === row.id);
+}
+
+/** One of the rows Discover starts with: built-in, recommended or brand. */
+export function isStockRow(row: Pick<DiscoverRowBody, "id" | "type">): boolean {
+  return STOCK_ROWS.some((stock) => stock.id === row.id && stock.type === row.type);
+}
+
+/** A default recommended row, which keeps its media type. */
+export function isStockRecommendedRow(row: Pick<DiscoverRowBody, "id">): boolean {
+  return RECOMMENDED_ROWS.some((stock) => stock.id === row.id);
 }
 
 /**
@@ -231,15 +283,36 @@ export function newRow(type: DiscoverRowType): DiscoverRowBody {
     case "tmdb_list":
     case "mdblist":
       return { ...base, list: { url: "" } };
+    case "recommended":
+      // The server keeps a recommended row's hide_available on.
+      return { ...base, hide_available: true, recommended: { media_type: "movie" } };
     default:
       return { ...BRAND_ROWS.find((row) => row.type === type)! };
   }
 }
 
-/** The built-in and brand rows the layout no longer has, which Add row can bring back. */
+/** The stock rows the layout no longer has, which Add row can bring back. */
 export function missingStockRows(rows: readonly Pick<DiscoverRowBody, "id">[]): DiscoverRowBody[] {
   const ids = new Set(rows.map((row) => row.id));
-  return [...BUILT_IN_ROWS, ...BRAND_ROWS].filter((row) => !ids.has(row.id));
+  return STOCK_ROWS.filter((row) => !ids.has(row.id));
+}
+
+/**
+ * Returns a layout body list with enabled recommended rows: re-enables any
+ * existing disabled recommended rows, or prepends the stock recommended rows
+ * when the layout has none. Returns null if adding the stock rows would exceed
+ * `layout.max_rows`.
+ */
+export function withRecommendedDiscoverRows(layout: DiscoverLayout): DiscoverRowBody[] | null {
+  const existing = layoutBodies(layout);
+  if (existing.some((row) => row.type === "recommended")) {
+    return existing.map((row) => (row.type === "recommended" ? { ...row, enabled: true } : row));
+  }
+  const toAdd = RECOMMENDED_ROWS.map((row) => ({ ...row }));
+  if (existing.length + toAdd.length > layout.max_rows) {
+    return null;
+  }
+  return [...toAdd, ...existing];
 }
 
 // The collection charts name series "tv"; the request API says series.
@@ -262,19 +335,31 @@ export function fromTMDBChart(chart: TMDBChart): DiscoverChart {
 /** The name a row shows when none is typed, in the interface language; empty when it needs one. */
 export function defaultTitle(row: DiscoverRowBody): string {
   if (row.chart) return chartName(toTMDBChart(row.chart), t);
+  if (row.recommended) {
+    return row.recommended.media_type === "series"
+      ? t("home.section.discoverRecommendedSeries")
+      : t("home.section.discoverRecommendedMovies");
+  }
   if (isBrandRow(row)) return rowKindLabel(row.type);
   return "";
 }
 
 /**
  * The name the row is saved with. It is stored data, so an untyped chart row keeps its
- * English chart name and an untyped brand row the server's English default ("Studios")
+ * English chart name and an untyped brand or recommended row the server's English default
  * in every interface language.
  */
 export function savedTitle(row: DiscoverRowBody): string {
   const typed = row.title.trim();
   if (typed) return typed;
   if (row.chart) return chartName(toTMDBChart(row.chart));
+  if (row.recommended) {
+    return (
+      RECOMMENDED_ROWS.find(
+        (stock) => stock.recommended?.media_type === row.recommended?.media_type,
+      )?.title ?? ""
+    );
+  }
   if (isBrandRow(row)) return BRAND_ROWS.find((brand) => brand.type === row.type)?.title ?? "";
   return defaultTitle(row);
 }
@@ -463,9 +548,22 @@ function orderPart(order: MDBListOrder): DescriptionPart[] {
   return [` · ${label ? t(label) : ""}`];
 }
 
-/** What a row shows, in the line under its name in the row list. */
-export function describeDiscoverRow(row: DiscoverRow): DescriptionPart[] {
+/**
+ * What a row shows, in the line under its name in the row list.
+ * `personalRowsOff`: the server serves no recommended rows yet, so they stay empty.
+ */
+export function describeDiscoverRow(row: DiscoverRow, personalRowsOff = false): DescriptionPart[] {
   const parts: DescriptionPart[] = [];
+  if (row.recommended) {
+    parts.push(
+      t("web.admin.requests.discover.describe.recommended", { media: row.recommended.media_type }),
+    );
+    if (personalRowsOff) {
+      parts.push(` · ${t("web.admin.requests.discover.recommendedOffShort")}`);
+    }
+    // A recommended row never shows titles the library has, so "Missing titles only" says nothing.
+    return parts;
+  }
   if (row.chart) {
     parts.push(
       t("web.admin.requests.discover.describe.chart", {

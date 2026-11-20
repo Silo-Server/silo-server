@@ -47,6 +47,12 @@ func rotationSeedKey(userID int, profileID, rowKey string) string {
 // the weighted-sampling key u^(1/w), with u taken from
 // sha256(seedKey|date|itemID); the log keeps tiny values of u apart.
 func rotateTail(items []ScoredItem, limit int, seedKey string, date time.Time) []ScoredItem {
+	return rotateTailBy(items, limit, seedKey, date, func(item ScoredItem) string { return item.MediaItemID })
+}
+
+// rotateTailBy is rotateTail for any slice whose elements have a stable item
+// key (such as a content ID or TMDB ID).
+func rotateTailBy[T any](items []T, limit int, seedKey string, date time.Time, itemID func(T) string) []T {
 	if len(items) <= limit || limit <= rotationMaxPinned {
 		return items
 	}
@@ -59,7 +65,7 @@ func rotateTail(items []ScoredItem, limit int, seedKey string, date time.Time) [
 	order := make([]int, end-pin)
 	for i := range order {
 		order[i] = i
-		keys[i] = math.Log(rotationUniform(seedKey, day, items[pin+i].MediaItemID)) * float64(i+rotationRankOffset)
+		keys[i] = math.Log(rotationUniform(seedKey, day, itemID(items[pin+i]))) * float64(i+rotationRankOffset)
 	}
 	slices.SortStableFunc(order, func(a, b int) int { return cmp.Compare(keys[b], keys[a]) })
 	drawn := make([]bool, end-pin)
@@ -67,7 +73,7 @@ func rotateTail(items []ScoredItem, limit int, seedKey string, date time.Time) [
 		drawn[i] = true
 	}
 
-	out := make([]ScoredItem, 0, len(items))
+	out := make([]T, 0, len(items))
 	out = append(out, items[:pin]...)
 	for _, keep := range []bool{true, false} {
 		for i, item := range items[pin:end] {

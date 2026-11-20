@@ -27,8 +27,8 @@ a Postgres advisory lock for its kind before it starts, so one node runs it at
 a time across the cluster; a busy job is skipped by cron and answered with
 `409` by a manual trigger. Each finished run is recorded in `task_executions`
 under `recommendations.embeddings`, `recommendations.taste_profiles`,
-`recommendations.cowatch` and `recommendations.cache`, with its counts as
-`result_data`. Partial runs, the embedding catch-up and the startup global-row
+`recommendations.cowatch`, `recommendations.cache` and
+`recommendations.external`, with its counts as `result_data`. Partial runs, the embedding catch-up and the startup global-row
 build, are recorded under `recommendations.embeddings.catch_up` and
 `recommendations.cache.global_rows`, so admin status shows them beside the
 last full run instead of in its place. A run that hit partial failures is `completed` and counts them.
@@ -45,6 +45,7 @@ connection for its locks.
 | Taste profiles | `recommendations.taste_profiles_cron` (04:00) | Rebuild every profile with signals or a taste row |
 | Co-watch | `recommendations.cowatch_cron` (04:30) | Rebuild `item_cowatch`, pruning pairs the run did not rewrite |
 | Cache | `recommendations.recommendations_cron` (05:00) | Global rows, then the rows of every profile with a taste-profile row, oldest For You row first (profiles without one first) |
+| Discover recommendations | `recommendations.external_cron` (06:00) | Retention, then, when the feature is on, the outside-title pool and every profile's outside rows (see Discover recommendations) |
 | Stale sweep | every 5 minutes, own lock | Refresh up to 50 stale profiles, oldest mark first; a sweep that refreshed or failed one is recorded under `recommendations.stale_sweep` |
 
 At startup the worker also builds the global rows when none are cached, so
@@ -548,3 +549,124 @@ dropped when the viewer cannot see the anchor, and the taste-cluster rows
 under their genre label (see [jellycompat-api.md](../jellycompat-api.md)). A
 per-section items request that fails to load answers `500`; the v2 aggregate
 sections endpoints leave that row out.
+
+## Discover recommendations
+
+Discover recommendations are the personal rows on the Requests Discover page:
+titles the library does not have, recommended per profile from the same taste
+vector as library rows. The admin pages call the feature Discover
+Recommendations. The code and this document call such a title an outside
+title: a movie or series the library does not have, keyed by media type and
+TMDB ID. The code is `external_*.go`; the feature is on when
+recommendations are enabled and `recommendations.external.enabled` is set.
+The worker and reads follow `recommendations.external.enabled` without a
+restart. `recommendations.enabled` applies to outside rows as to the library's
+personal rows: reads take it at startup, and a running worker stops outside
+generation as soon as it observes either switch turn off, including an active
+run. Turning off the main switch leaves stored rows visible until restart.
+
+- **Stored data.** `external_title_sources` and `external_title_links` hold
+  what the pool is built from: each seed title's TMDB recommendations and
+  similar lists, and shared sets of recent and per-language titles from TMDB
+  discover. `external_titles` holds card fields (title, overview, artwork
+  paths, release date, language, popularity, votes, US certification) and
+  the IMDb and TVDB IDs the title's TMDB detail gives,
+  `external_title_embeddings` their vectors, and
+  `external_recommendation_rows` one ranked row per profile and media type.
+- **Pool.** A profile's seeds are its positively weighted movies and series
+  with a TMDB ID, heaviest first, at most 100. Its pool is the 500 list
+  titles named by the most of its seeds plus the shared sets it uses: the
+  recent sets always, even with no seeds, and a language's sets when that
+  language is at least 5% of its seeds. The server keeps at most
+  `recommendations.external.max_titles` (default 5000), and sets fill at most
+  half of it: the recent sets first, then the language sets share what is
+  left of that half, each keeping its best-ranked titles, the room divided in
+  proportion to their sizes; room that titles two sets share leave unused
+  goes to the language sets' next titles. List titles named by the most profiles fill the
+  rest, including whatever the sets left. Titles the library has are left
+  out: by TMDB ID and the stored IMDb and TVDB IDs when the pool is chosen,
+  and by every ID a fetched detail gives, so a title the library has under
+  another ID is not stored and loses the links that named it. Seed lists are refetched after 30 days, sets after 7,
+  details after 120. A title TMDB does not find at the detail stage loses the
+  links that named it, so it is asked for again only when a refetched source
+  names it.
+- **Vectors.** Details are fetched in the metadata language of the enabled
+  library holding the most movies and series, and the text is built with
+  `embeddings.BuildEmbeddingText` from the detail adapted to a media item, as
+  the TMDB metadata plugin stores library titles. Vectors use the existing
+  embedding lock's model and never create the lock: before library vectors
+  lock a model, or when no embedding provider is configured, the lock
+  conflicts, or no profiles have a taste vector yet, a run skips TMDB source
+  and detail fetches up front and records a structured `vectors_skipped_reason`
+  rather than burning TMDB requests without vectors. A title
+  whose text the provider refuses at every length is remembered in memory
+  for this server, apart from library refusals: until its stored detail is
+  due it is neither fetched nor embedded, and a refetch with the same text is
+  not sent again. Restarting clears refusals. Each node checks the version of
+  the lock row in PostgreSQL so it also retries refusals after a reset that
+  recreates the same model and dimensions. A title
+  whose text changed loses its old vector before the new one is asked for,
+  so a failed embedding leaves it for the next run, not ranked by the old
+  text until its detail is due.
+  A movie's content rating in the text is the US one the plugin stores (the
+  theatrical certification, else the first US one), not the strictest one
+  the rating guard uses.
+- **Job.** The job takes the in-process flag and its cluster lock like the
+  others and runs: retention always; then, with the feature on, the pool
+  (lists, sets, details and vectors, within per-run budgets of 10000 TMDB
+  client calls, each of which the client may retry or answer from its cache,
+  and 10000 embeddings; seed lists take at most half of the calls left, so
+  details are fetched in the same run) and every profile's rows. While running,
+  the worker reports its current phase (`sources`, `titles`, or `rows`) and
+  progress counts in status. A run cut short by
+  a budget, a node dying or TMDB failing leaves stored state for the next run
+  to continue from. With the feature off it calls neither TMDB nor the
+  embedding provider, and scheduled runs that prune nothing are left out of
+  run history. Enabling `recommendations.external.enabled`, starting the worker
+  with it enabled, or completing initial taste profiles bootstraps a first run
+  automatically whenever no outside rows exist yet (throttled to avoid repeat
+  checks).
+- **Ranking.** Per profile and media type, candidates are first filtered by the
+  profile's content-rating ceiling (failing closed on missing or unrecognized
+  US certifications) so restricted profiles still get a full row. Over the
+  remaining stored titles with a vector for the locked model:
+  `score = z(similarity) + z(log(1 + votes))` plus a gentle scale-free quality
+  prior on `vote_average` (for titles with at least 25 votes, when enough rated
+  candidates qualify). The top shortlist (180 titles) then passes through the
+  profile's library aversion and MMR diversity (using the configured
+  `diversity_lambda`, with z-scores min-max shifted to `[0, 1]` before MMR).
+  The best 60 are kept, each with up to two reasons: the
+  library titles whose lists named it, best rank first. Only a title the
+  profile watched, rated or favorited is named; one that is only on its
+  watchlist seeds the pool and is never a reason. A profile with no
+  taste vector, or fewer than 10 candidates of a media type, gets no row of
+  it, and a stale row is deleted.
+- **Rebuilds.** The job rebuilds every profile with a taste vector or a
+  stored row, under each profile's refresh lock; a profile another server
+  holds is marked stale. A profile refresh (signal change, `RefreshProfileNow`,
+  the stale sweep) rebuilds the profile's outside rows from stored data when
+  the feature is on; new seeds' lists wait for the next run.
+- **Races.** A row is written in one statement, so a read sees the old row
+  or the new one. The statement writes only while the stored embedding lock
+  is the one the row was built under, and share-locks it, so a row built
+  across an embeddings reset is refused rather than left from the old model.
+  After writing, a rebuild checks that the user store still lists the
+  profile and purges its rows when it does not, as cached rows are handled.
+- **Retention.** A title is deleted 150 days after its last successful
+  detail fetch, and a title or source nothing referenced for 30 days; this
+  runs whether or not the feature is on. A server started with
+  recommendations off has no worker, so it runs `RunExternalRetention`, which
+  applies the same rule at startup and daily.
+- **Reset.** The embeddings reset claims this job with the others and, in its
+  transaction, deletes every outside vector and outside row. Outside titles,
+  sources and links stay, and the next run embeds them again.
+- **Reads.** `Reader.ExternalRecommendations` serves a profile's row with
+  card data in two indexed queries and calls neither TMDB nor the embedding
+  provider. It serves nothing while recommendations or the feature are off,
+  and applies daily tail rotation (pinning the top 10 and rotating positions
+  11–20 by UTC date, like library personal rows) so idle profiles see fresh
+  titles each day.
+  A reason naming a library title the viewer cannot see is dropped; the
+  title stays. The caller applies the viewer's rating ceiling to the stored
+  US certification as defense in depth and drops titles the library has gained
+  since, matching the stored TMDB, TVDB and IMDb IDs in the catalog.

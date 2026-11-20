@@ -9,7 +9,7 @@ export interface RecFieldDef {
 }
 
 /** A stable id for each section; compare this rather than the title. */
-export type RecSectionId = "general" | "embedding" | "schedule" | "advanced";
+export type RecSectionId = "general" | "external" | "embedding" | "schedule" | "advanced";
 
 export interface RecSectionDef {
   id: RecSectionId;
@@ -46,6 +46,27 @@ const RECOMMENDATIONS_GENERAL_SECTION: RecSectionSpec = {
       key: "recommendations.enabled",
       label: "web.admin.settings.recommendations.general.enabled",
       type: "toggle",
+    },
+  ],
+};
+
+// Recommendations of titles the library doesn't have, on each profile's Discover page.
+const RECOMMENDATIONS_EXTERNAL_SECTION: RecSectionSpec = {
+  id: "external",
+  title: "web.admin.settings.recommendations.external.title",
+  fields: [
+    {
+      key: "recommendations.external.enabled",
+      label: "web.admin.settings.recommendations.external.enabled",
+      type: "toggle",
+      hint: "web.admin.settings.recommendations.external.enabledHint",
+    },
+    {
+      key: "recommendations.external.max_titles",
+      label: "web.admin.settings.recommendations.external.maxTitles",
+      type: "number",
+      hint: "web.admin.settings.recommendations.external.maxTitlesHint",
+      defaultValue: "5000",
     },
   ],
 };
@@ -96,6 +117,13 @@ const RECOMMENDATIONS_SCHEDULE_SECTION: RecSectionSpec = {
       hint: "web.admin.settings.recommendations.schedule.cronHint",
       defaultValue: "0 5 * * *",
     },
+    {
+      key: "recommendations.external_cron",
+      label: "web.admin.settings.recommendations.schedule.externalCron",
+      type: "text",
+      hint: "web.admin.settings.recommendations.schedule.cronHint",
+      defaultValue: "0 6 * * *",
+    },
   ],
 };
 
@@ -122,6 +150,7 @@ const RECOMMENDATIONS_ADVANCED_SECTION: RecSectionSpec = {
 
 const RECOMMENDATIONS_SECTIONS: RecSectionSpec[] = [
   RECOMMENDATIONS_GENERAL_SECTION,
+  RECOMMENDATIONS_EXTERNAL_SECTION,
   RECOMMENDATIONS_EMBEDDING_SECTION,
   RECOMMENDATIONS_SCHEDULE_SECTION,
   RECOMMENDATIONS_ADVANCED_SECTION,

@@ -603,6 +603,7 @@
 ./internal/requests TestIntegrationKeyStaysWithItsAddressDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
 ./internal/requests TestDiscoverLayoutDatabase
+./internal/requests TestRecommendedDiscoverRowDatabase
 ./internal/requests TestRoutingFactsMergeDatabase
 ./internal/requests/discoverrows TestDiscoverListSnapshotLeaseDatabase
 
@@ -918,7 +919,11 @@
 ./internal/chapterthumbs TestMarkerThumbnailLifecycleEdgesDB
 
 # Recommendations: job locks, refresh marks, signal triggers, embedding lock and
-# reset, build-time access, exclusion set, profile purge, and section fill.
+# reset, build-time access, exclusion set, profile purge, section fill, the
+# outside-title store (fetch due, link replacement, pool, similarity, retention),
+# the outside-title pool build (fetch once, owned titles, no lock, unchanged
+# text, budgets, titles TMDB lacks), and outside rows (rebuild, lock and
+# deleted-profile refusals, reset, job with the feature off, reads).
 ./internal/api/handlers TestLibrarySectionItemsAnswersAnErrorWhenTheFetchFailsDB
 ./internal/api/handlers TestRecentlyAddedItemsKeepsTheViewersLibrariesDB
 ./internal/api/handlers TestWatchedFilterDoesNotFallBackToPostgres
@@ -934,6 +939,27 @@
 ./internal/recommendations TestDeletingAProfilePurgesItsRecommendationRowsPostgres
 ./internal/recommendations TestEmbeddingLockConflictUsesTheRunningConfigPostgres
 ./internal/recommendations TestEmbeddingTextSQLMatchesGoForTiedPeoplePostgres
+./internal/recommendations TestBuildExternalPoolDB
+./internal/recommendations TestBuildExternalPoolBudgetDB
+./internal/recommendations TestExternalSourcesToFetchDB
+./internal/recommendations TestExternalSourceLinksReplacedDB
+./internal/recommendations TestExternalPoolDB
+./internal/recommendations TestExternalSimilaritiesDB
+./internal/recommendations TestExternalRetentionDB
+./internal/recommendations TestBuildExternalPoolForgetsTitlesTMDBLacksDB
+./internal/recommendations TestBuildExternalPoolDropsTitlesOwnedByOtherIDsDB
+./internal/recommendations TestBuildExternalPoolRemembersRefusedTitlesDB
+./internal/recommendations TestBuildExternalPoolReembedsChangedTextAfterFailureDB
+./internal/recommendations TestRebuildExternalRowsDB
+./internal/recommendations TestExternalRowsStopWhenProfileLockSessionClosesDB
+./internal/recommendations TestExternalJobQueuesStaleProfileAfterRebuildDB
+./internal/recommendations TestExternalPoolContinuesPastUnreadableProfileDB
+./internal/recommendations TestRunExternalRetentionPrunesWithoutAWorkerDB
+./internal/recommendations TestExternalRowRefusalsDB
+./internal/recommendations TestResetEmbeddingsClearsOutsideVectorsAndRowsDB
+./internal/recommendations TestExternalJobWithFeatureOffOnlyPrunesDB
+./internal/recommendations TestExternalJobStopsDuringFetchDB
+./internal/recommendations TestExternalRecommendationsReadDB
 ./internal/recommendations TestExtendGlobalRecommendationCachePostgres
 ./internal/recommendations TestFailedRefreshLeavesTheProfilePendingPostgres
 ./internal/recommendations TestFilterAccessibleItemIDsAppliesExcludedMediaTypesPostgres

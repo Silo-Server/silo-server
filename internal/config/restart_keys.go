@@ -120,11 +120,28 @@ var restartRequiredPrefixes = []string{
 	"recommendations.",
 }
 
+const (
+	// ExternalRecommendationsEnabledKey is the live switch for Discover recommendations.
+	ExternalRecommendationsEnabledKey   = "recommendations.external.enabled"
+	externalRecommendationsMaxTitlesKey = "recommendations.external.max_titles"
+)
+
+// liveKeysUnderRestartPrefixes are keys inside a restart-bound namespace that
+// are read at each use instead: the recommendations worker and reader take the
+// outside-title switch and its title cap from the live config.
+var liveKeysUnderRestartPrefixes = map[string]bool{
+	ExternalRecommendationsEnabledKey:   true,
+	externalRecommendationsMaxTitlesKey: true,
+}
+
 // RestartRequired reports whether changing the given server_settings key
 // requires a server restart to take effect.
 func RestartRequired(key string) bool {
 	if restartRequiredKeys[key] {
 		return true
+	}
+	if liveKeysUnderRestartPrefixes[key] {
+		return false
 	}
 	for _, prefix := range restartRequiredPrefixes {
 		if strings.HasPrefix(key, prefix) {
@@ -149,9 +166,21 @@ func RestartRequiredKeys() []string {
 	return keys
 }
 
+// LiveKeysUnderRestartPrefixes returns the sorted keys that apply without a
+// restart although one of RestartRequiredPrefixes covers them. A reader of
+// the prefixes must leave these out.
+func LiveKeysUnderRestartPrefixes() []string {
+	keys := make([]string, 0, len(liveKeysUnderRestartPrefixes))
+	for key := range liveKeysUnderRestartPrefixes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // RestartRequiredPrefixes returns the sorted list of key prefixes whose whole
 // namespace requires a restart. Pair it with RestartRequiredKeys: a key needs a
-// restart when it is listed exactly or carries one of these prefixes.
+// restart when listed exactly, or when a prefix covers it and LiveKeysUnderRestartPrefixes omits it.
 func RestartRequiredPrefixes() []string {
 	prefixes := make([]string, len(restartRequiredPrefixes))
 	copy(prefixes, restartRequiredPrefixes)

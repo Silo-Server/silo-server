@@ -750,6 +750,7 @@ export const v2Operations = {
   "POST /api/v2/admin/recommendations/embeddings/reset": "resetAdminRecommendationEmbeddings",
   "POST /api/v2/admin/recommendations/trigger/cowatch": "triggerAdminRecommendationCowatch",
   "POST /api/v2/admin/recommendations/trigger/embeddings": "triggerAdminRecommendationEmbeddings",
+  "POST /api/v2/admin/recommendations/trigger/external": "triggerAdminRecommendationExternal",
   "POST /api/v2/admin/recommendations/trigger/recommendations": "triggerAdminRecommendationRefresh",
   "POST /api/v2/admin/recommendations/trigger/taste-profiles":
     "triggerAdminRecommendationTasteProfiles",

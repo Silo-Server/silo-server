@@ -212,6 +212,7 @@ func interleaveByGenre(ranked []tasteSeedCandidate) []string {
 
 // Repo provides database operations for the recommendation system.
 type Repo struct {
+	externalPoolWriter
 	pool        *pgxpool.Pool
 	titleCounts *titleCountCache
 	topGenre    topGenreCache
@@ -219,7 +220,7 @@ type Repo struct {
 
 // NewRepo creates a new Repo with the given connection pool.
 func NewRepo(pool *pgxpool.Pool) *Repo {
-	return &Repo{pool: pool, titleCounts: newTitleCountCache()}
+	return &Repo{externalPoolWriter: externalPoolWriter{db: pool}, pool: pool, titleCounts: newTitleCountCache()}
 }
 
 func (r *Repo) withHNSWCandidateScan(ctx context.Context, fn func(pgx.Tx) error) error {
@@ -317,15 +318,19 @@ type RowQuerier interface {
 // ReadEmbeddingLock reads the embedding lock through q, which may be a
 // transaction. It returns nil when no lock is set.
 func ReadEmbeddingLock(ctx context.Context, q RowQuerier) (*EmbeddingLock, error) {
-	var raw string
-	err := q.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, embeddingLockSettingKey).Scan(&raw)
+	var raw, version string
+	err := q.QueryRow(ctx, `SELECT value, xmin::text || ':' || ctid::text FROM server_settings WHERE key = $1`, embeddingLockSettingKey).Scan(&raw, &version)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get embedding lock: %w", err)
 	}
-	return ParseEmbeddingLock(raw)
+	lock, err := ParseEmbeddingLock(raw)
+	if lock != nil {
+		lock.rowVersion = version
+	}
+	return lock, err
 }
 
 // SetEmbeddingLock stores the embedding lock metadata in server_settings.
@@ -1083,6 +1088,14 @@ func (r *Repo) ClearTasteProfile(ctx context.Context, userID int, profileID stri
 		userID, profileID); err != nil {
 		return fmt.Errorf("delete cached rows for user %d profile %s: %w", userID, profileID, err)
 	}
+	// Outside rows were ranked against the cleared vector too. A refresh
+	// with outside recommendations off does not rebuild them, so they would
+	// be served again when the feature is turned back on.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM external_recommendation_rows WHERE user_id = $1 AND profile_id = $2`,
+		userID, profileID); err != nil {
+		return fmt.Errorf("delete outside rows for user %d profile %s: %w", userID, profileID, err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit cleared taste profile for user %d profile %s: %w", userID, profileID, err)
 	}
@@ -1573,10 +1586,11 @@ var purgeProfileStatements = []string{
 	`DELETE FROM user_taste_profiles WHERE user_id = $1 AND profile_id = $2`,
 	`DELETE FROM user_taste_clusters WHERE user_id = $1 AND profile_id = $2`,
 	`DELETE FROM recommendation_cache WHERE user_id = $1 AND profile_id = $2`,
+	`DELETE FROM external_recommendation_rows WHERE user_id = $1 AND profile_id = $2`,
 }
 
 // PurgeProfile deletes a deleted profile's ratings, taste profile, taste
-// clusters and cached rows in one transaction. The Postgres user store does
+// clusters, cached rows and outside-title rows in one transaction. The Postgres user store does
 // this as it deletes the profile; with a user store outside Postgres the
 // profile handler calls this after the delete.
 func (r *Repo) PurgeProfile(ctx context.Context, userID int, profileID string) error {
@@ -2498,38 +2512,14 @@ func (r *Repo) FilterRecommendableItemIDs(ctx context.Context, itemIDs []string,
 // maturity limits and the surface's excluded media types) and, when
 // mediaTypes is not nil, whose media type is one of mediaTypes.
 func (r *Repo) filterItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter, mediaTypes []string) (map[string]struct{}, error) {
-	if len(itemIDs) == 0 {
+	where, args, ok := itemAccessConditions(itemIDs, filter, mediaTypes)
+	if !ok {
 		return map[string]struct{}{}, nil
 	}
-
-	conditions := []string{"mi.content_id = ANY($1)"}
-	args := []any{itemIDs}
-	argIdx := 2
-
-	if mediaTypes != nil {
-		conditions = append(conditions, fmt.Sprintf("mi.type = ANY($%d)", argIdx))
-		args = append(args, mediaTypes)
-		argIdx++
-	}
-
-	// The content allow-list and name prefix, as every catalog read applies
-	// them.
-	catalog.AppendContentScope(&conditions, &args, &argIdx, filter)
-
-	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
-		return map[string]struct{}{}, nil
-	}
-	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
-
-	// The maturity limits and ExcludedMediaTypes, which a surface such as
-	// Jellyfin compatibility sets to keep types it does not serve out of
-	// the rows it reads.
-	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
-
-	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
+	rows, err := r.pool.Query(ctx, `
 		SELECT mi.content_id
 		FROM   media_items mi
-		WHERE  %s`, strings.Join(conditions, " AND ")), args...)
+		WHERE  `+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("filter accessible item IDs: %w", err)
 	}
@@ -2544,6 +2534,40 @@ func (r *Repo) filterItemIDs(ctx context.Context, itemIDs []string, filter catal
 		result[id] = struct{}{}
 	}
 	return result, rows.Err()
+}
+
+// itemAccessConditions returns the WHERE clause over media_items mi, and its
+// arguments, that admits the IDs in itemIDs filterItemIDs admits. ok is false
+// when it admits none, without a query.
+func itemAccessConditions(itemIDs []string, filter catalog.AccessFilter, mediaTypes []string) (where string, args []any, ok bool) {
+	if len(itemIDs) == 0 {
+		return "", nil, false
+	}
+
+	conditions := []string{"mi.content_id = ANY($1)"}
+	args = []any{itemIDs}
+	argIdx := 2
+
+	if mediaTypes != nil {
+		conditions = append(conditions, fmt.Sprintf("mi.type = ANY($%d)", argIdx))
+		args = append(args, mediaTypes)
+		argIdx++
+	}
+
+	// The content allow-list and name prefix, as every catalog read applies
+	// them.
+	catalog.AppendContentScope(&conditions, &args, &argIdx, filter)
+
+	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
+		return "", nil, false
+	}
+	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
+
+	// The maturity limits and ExcludedMediaTypes, which a surface such as
+	// Jellyfin compatibility sets to keep types it does not serve out of
+	// the rows it reads.
+	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
+	return strings.Join(conditions, " AND "), args, true
 }
 
 // GetItemAddedDates returns the created_at dates for a set of items.

@@ -15471,6 +15471,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elemento negalima atkurti – besiskiriančius jo nustatymus arba dalį jo ryšio nustato šio serverio aplinka"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementų negalima atkurti – besiskiriančius jų nustatymus arba dalį jų ryšio nustato šio serverio aplinka"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elemento negalima atkurti – besiskiriančius jo nustatymus arba dalį jo ryšio nustato šio serverio aplinka"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementų negalima atkurti – besiskiriančius jų nustatymus arba dalį jų ryšio nustato šio serverio aplinka"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -16329,6 +16387,64 @@
     {
       "type": 0,
       "value": "Paslaugos adresas keičiasi, o atsarginėje kopijoje nėra jos prisijungimo duomenų, todėl atkuriant jie čia išvalomi, o paslauga išjungiama, kol jie bus įvesti iš naujo."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nustatymas išlaiko dabartinę reikšmę, nes jį arba dalį jo ryšio nustato šio serverio aplinka."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nustatymai išlaiko dabartines reikšmes, nes juos arba dalį jų ryšio nustato šio serverio aplinka."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nustatymo išlaiko dabartines reikšmes, nes juos arba dalį jų ryšio nustato šio serverio aplinka."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nustatymų išlaiko dabartines reikšmes, nes juos arba dalį jų ryšio nustato šio serverio aplinka."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -20477,6 +20593,12 @@
       "value": "Šiame serveryje kita paskyra jau prisijungia jo naudotojo vardu arba el. paštu."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Besiskiriančius nustatymus arba dalį jų ryšio nustato šio serverio aplinka, todėl šis serveris palieka dabartines reikšmes."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -21903,6 +22025,16 @@
     {
       "type": 0,
       "value": " (palikta kaip griežtesnė reikšmė)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (palikta: aplinka)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -65824,6 +65956,146 @@
       "value": "Generavimas sustabdytas. Išsaugotos rekomendacijos lieka matomos skiltyje „Atrasti“, kol serveris bus paleistas iš naujo."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Reitinguojami profiliai ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Gaunami „TMDB“ sąrašai ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Gaunama kūrinių informacija ir kuriami įterpiniai ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Išvalytas "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nebegaliojantis kūrinys"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Išvalyti "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nebegaliojantys kūriniai"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Išvalyta "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nebegaliojančio kūrinio"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Išvalyta "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nebegaliojančių kūrinių"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -65896,6 +66168,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Prieš kurdami skilties „Atrasti“ rekomendacijas, išspręskite toliau nurodytą įterpinių užrakto konfliktą."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Pirmiausia paleiskite darbą „Įterpiniai“, kad „Silo“ turėtų bibliotekos vektorių palyginimui."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Prieš kurdami skilties „Atrasti“ rekomendacijas, skiltyje „DI paslaugos“ prijunkite įterpinių teikėją."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Dar jokie profiliai neturi skonio profilių. Paleiskite darbą „Skonio profiliai“, kai kas nors peržiūrės ar įvertins kūrinių."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -68538,6 +68834,32 @@
       "value": "Liks tuščia, kol skiltyje „Administravimas → Rekomendacijos“ nebus įjungtos skilties „Atrasti“ rekomendacijos."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Rekomendacijų eilutės liks tuščios, kol skiltyje "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„Administravimas → Rekomendacijos“"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " nebus įjungtos skilties „Atrasti“ rekomendacijos."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Išjungta skiltyje „Rekomendacijos“"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -70274,6 +70596,12 @@
       "value": "Naujos eilutės pridedamos puslapio „Atrasti“ apačioje"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Atidaryti rekomendacijų nustatymus"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -70286,6 +70614,12 @@
       "value": "„MDBList“ sklaidos kanale nėra rikiavimo, išsaugoto sąrašo puslapyje. Pasirinkite tą, kurį rodo sąrašas."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Jūsų profilis dar neturi skilties „Atrasti“ rekomendacijų. Paleiskite darbą „Skilties „Atrasti“ rekomendacijos“ arba peržiūrėkite ir įvertinkite kelis kūrinius, kad pamatytumėte šios eilutės peržiūrą."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -70296,6 +70630,12 @@
     {
       "type": 0,
       "value": "Pasirinkite sąrašą arba įklijuokite jo nuorodą, kad pamatytumėte jo kūrinius."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Įjunkite skilties „Atrasti“ rekomendacijas skiltyje „Administravimas → Rekomendacijos“, kad pamatytumėte šios eilutės peržiūrą."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -80584,6 +80924,24 @@
       "value": "Norint pereiti prie kito modelio, reikia iš naujo nustatyti įterpinius, o tai juos visus ištrina. Kitas teikėjas, teikiantis tą patį modelį, pradedamas naudoti po paleidimo iš naujo."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Pridėti prie „Atrasti“"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko pridėti rekomendacijų eilučių prie puslapio „Atrasti“."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Rekomendacijų eilutės pridėtos prie puslapio „Atrasti“."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -80606,6 +80964,44 @@
     {
       "type": 0,
       "value": "Kiek bibliotekoje nesančių kūrinių serveris laiko rekomendacijoms. Kiekvieno kūrinio informacija gaunama iš „TMDB“ ir jam sukuriama įterptis. Įterpčių kūrimas paprastai nebrangus, bet, priklausomai nuo jūsų įterpčių teikėjo, didesnis skaičius gali kainuoti daugiau ar užtrukti ilgiau, be to, užima daugiau vietos saugykloje."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Jūsų puslapyje „Atrasti“ dar nerodoma jokių rekomendacijų eilučių."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Kad skilties „Atrasti“ rekomendacijos galėtų veikti, įjunkite aukščiau esančią parinktį „Įjungti rekomendacijas“ ir paleiskite serverį iš naujo."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Užklausos šiuo metu išjungtos. Įjunkite jas skiltyje "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„Užklausų nustatymai“"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", kad žiūrovai matytų puslapį „Atrasti“."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Atidaryti puslapį „Atrasti“"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -91350,6 +91746,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Šis tvarkaraštis nustatomas atsarginių kopijų nustatymuose. Pakeiskite jį skiltyje "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Serveris › Atsarginės kopijos"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

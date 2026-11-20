@@ -66,19 +66,26 @@ type AdminDiscoverList struct {
 	Order string `json:"order,omitempty" enum:"list,newest_added,newest_released" doc:"mdblist only: list keeps the list's rank order (the default, stored as absent), newest_added puts the latest additions to the list first, newest_released the newest release dates first. A tmdb_list row keeps the list's order"`
 }
 
+// AdminDiscoverRecommended names which of each viewer's recommendations a
+// recommended row shows.
+type AdminDiscoverRecommended struct {
+	MediaType string `json:"media_type" enum:"movie,series" example:"movie"`
+}
+
 // AdminDiscoverRowBody is one row of the Discover layout as an admin edits
-// it. Exactly the spec that matches type is set: chart, discover, or list
-// (tmdb_list and mdblist); a brand row sets none.
+// it. Exactly the spec that matches type is set: chart, discover, list
+// (tmdb_list and mdblist), or recommended; a brand row sets none.
 type AdminDiscoverRowBody struct {
-	ID            string               `json:"id,omitempty" maxLength:"40" doc:"The row's ID; empty on a new row, which gets one. The six built-in rows keep their IDs and charts; a brand row's ID is its type" example:"trending_movies"`
-	Type          string               `json:"type" enum:"tmdb_chart,tmdb_discover,tmdb_list,mdblist,studios,networks,genres" example:"tmdb_chart"`
-	Title         string               `json:"title" maxLength:"80" example:"Trending Movies"`
-	Enabled       bool                 `json:"enabled"`
-	Limit         int                  `json:"limit,omitempty" minimum:"0" maximum:"100" doc:"How many titles the row shows on the page; its see all page keeps paging. 0 means 20 on a title row; always 0 on a brand row" example:"20"`
-	HideAvailable bool                 `json:"hide_available,omitempty" doc:"Leave out titles the library already has"`
-	Chart         *AdminDiscoverChart  `json:"chart,omitempty"`
-	Discover      *AdminDiscoverFilter `json:"discover,omitempty"`
-	List          *AdminDiscoverList   `json:"list,omitempty"`
+	ID            string                    `json:"id,omitempty" maxLength:"40" doc:"The row's ID; empty on a new row, which gets one. The six built-in rows keep their IDs and charts, and recommended_movies and recommended_series keep their type and media type; a brand row's ID is its type" example:"trending_movies"`
+	Type          string                    `json:"type" enum:"tmdb_chart,tmdb_discover,tmdb_list,mdblist,recommended,studios,networks,genres" doc:"A recommended row shows each viewer's own recommendations of titles the library does not have, read from what the recommendations engine stored" example:"tmdb_chart"`
+	Title         string                    `json:"title" maxLength:"80" example:"Trending Movies"`
+	Enabled       bool                      `json:"enabled"`
+	Limit         int                       `json:"limit,omitempty" minimum:"0" maximum:"100" doc:"How many titles the row shows on the page; its see all page keeps paging. 0 means 20 on a title row; always 0 on a brand row" example:"20"`
+	HideAvailable bool                      `json:"hide_available,omitempty" doc:"Leave out titles the library already has. Always true on a recommended row, which never shows them"`
+	Chart         *AdminDiscoverChart       `json:"chart,omitempty"`
+	Discover      *AdminDiscoverFilter      `json:"discover,omitempty"`
+	List          *AdminDiscoverList        `json:"list,omitempty"`
+	Recommended   *AdminDiscoverRecommended `json:"recommended,omitempty"`
 }
 
 // AdminDiscoverSource is how a list row's stored copy stands.
@@ -182,7 +189,7 @@ func discoverLayoutTag(ctx context.Context, l *mediarequests.DiscoverLayoutAdmin
 func adminDiscoverLayoutOutput(ctx context.Context, l *mediarequests.DiscoverLayoutAdmin) *AdminDiscoverLayoutOutput {
 	out := AdminDiscoverLayout{Customized: l.Customized, Rows: make([]AdminDiscoverRow, 0, len(l.Rows)), UpdatedAt: adminSyncInstant(l.UpdatedAt), MaxRows: discoverrows.MaxRows}
 	for _, row := range l.Rows {
-		wire := AdminDiscoverRow{AdminDiscoverRowBody: adminDiscoverRowOf(row), SectionTitleKey: sectionTitleKeyOf(discoverrows.TitleKey(row.ID, row.Title), nil)}
+		wire := AdminDiscoverRow{AdminDiscoverRowBody: adminDiscoverRowOf(row), SectionTitleKey: sectionTitleKeyOf(discoverrows.TitleKey(row.ID, row.Title, row.Type), nil)}
 		if status, ok := l.Sources[row.ID]; ok {
 			wire.Source = &AdminDiscoverSource{State: status.State, Entries: status.Entries, RefreshedAt: adminSyncInstant(status.RefreshedAt), Error: status.Error}
 		}
@@ -204,6 +211,9 @@ func adminDiscoverRowOf(r discoverrows.Row) AdminDiscoverRowBody {
 	if r.List != nil {
 		out.List = new(AdminDiscoverList(*r.List))
 	}
+	if r.Recommended != nil {
+		out.Recommended = new(AdminDiscoverRecommended(*r.Recommended))
+	}
 	return out
 }
 
@@ -217,6 +227,9 @@ func (b AdminDiscoverRowBody) domain() discoverrows.Row {
 	}
 	if b.List != nil {
 		out.List = new(discoverrows.ListSpec(*b.List))
+	}
+	if b.Recommended != nil {
+		out.Recommended = new(discoverrows.RecommendedSpec(*b.Recommended))
 	}
 	return out
 }

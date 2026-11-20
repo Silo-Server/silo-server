@@ -359,9 +359,12 @@ func TestDeletingAProfilePurgesItsRecommendationRowsPostgres(t *testing.T) {
 		if err := repo.UpsertRecommendationCache(ctx, userID, profile, RecTypeForYouMain, "", []ScoredItem{{MediaItemID: prefix + "movie"}}, expires); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := pool.Exec(ctx, `INSERT INTO external_recommendation_rows(user_id, profile_id, media_type, items, embedding_model, built_at) VALUES($1, $2, 'movie', '[]', 'm', $3)`, userID, profile, now); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// The tables PurgeProfile clears, one row each per seeded profile.
-	tables := []string{"user_ratings", "user_taste_profiles", "user_taste_clusters", "recommendation_cache"}
+	tables := []string{"user_ratings", "user_taste_profiles", "user_taste_clusters", "recommendation_cache", "external_recommendation_rows"}
 	rowsOf := func(profile string) int {
 		t.Helper()
 		total := 0

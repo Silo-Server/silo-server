@@ -116,11 +116,11 @@ comma-separated genre names, `home.section.pickedFromYourHistory`,
 `home.section.profilesLikeYouEnjoyed`). A home row that still
 holds the older default "Trending on Server" carries `home.section.trendingOnServer`. A seasonal
 row's in-season title carries `home.section.seasonal.<theme>.<vibe>` while it is a built-in
-vibe's own title; a title an admin set for the theme or a custom holiday has none. The built-in
+vibe's own title; a title an admin set for the theme or a custom holiday has none. The default
 rows of the Requests Discover page (`row_order` and the rows of `listDiscoverSections`,
 `getDiscoverSection` and `getDiscoverRow`, and each row of `getRequestDiscoverLayout`) carry
-`title_key` (`home.section.discoverTrendingMovies` and the like) while the row still holds its
-default title. The key names a message in the shared translation
+`title_key` (`home.section.discoverRecommendedMovies`, `home.section.discoverTrendingMovies`
+and the like) while the row still holds its default title. The key names a message in the shared translation
 catalog, and `title_args` fills its placeholders by name. A client that has the key shows
 its translation; otherwise, and whenever the fields are absent, it shows `title`.
 `title_args` and `default_title_args` are left out when the message has no placeholders,

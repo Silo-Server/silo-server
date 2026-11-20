@@ -13749,6 +13749,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan ikke gendannes — denne servers miljø angiver de indstillinger, der er forskellige, eller en del af deres forbindelse"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan ikke gendannes — denne servers miljø angiver de indstillinger, der er forskellige, eller en del af deres forbindelse"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14271,6 +14305,40 @@
     {
       "type": 0,
       "value": "En tjenestes adresse ændres uden dens loginoplysninger i backuppen, så gendannelsen rydder dem her og slår tjenesten fra, indtil de indtastes igen."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " indstilling beholder sin nuværende værdi, fordi denne servers miljø angiver den eller en del af dens forbindelse."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " indstillinger beholder deres nuværende værdier, fordi denne servers miljø angiver dem eller en del af deres forbindelse."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -17087,6 +17155,12 @@
       "value": "En anden konto her logger ind med samme brugernavn eller e-mail."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Denne servers miljø angiver de indstillinger, der er forskellige, eller en del af deres forbindelse, så denne server beholder sine nuværende værdier."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18161,6 +18235,16 @@
     {
       "type": 0,
       "value": " (beholdt: strengere)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (beholdt: miljø)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -53049,6 +53133,114 @@
       "value": "Genereringen er stoppet. Gemte anbefalinger forbliver synlige i Opdag, indtil serveren genstartes."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Rangerer profiler ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Henter TMDB-lister ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Slår titler op og gemmer embeddings ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ryddede "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " udløbet titel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ryddede "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " udløbne titler"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53081,6 +53273,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Løs konflikten med embedding-låsen nedenfor, før du opbygger Opdag-anbefalinger."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Kør jobbet Embeddings først, så Silo har biblioteksvektorer at sammenligne med."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Forbind en embedding-udbyder under AI-tjenester, før du opbygger Opdag-anbefalinger."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Ingen profiler har smagsprofiler endnu. Kør Smagsprofiler, når nogen har set eller bedømt titler."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54923,6 +55139,32 @@
       "value": "Forbliver tom, indtil Opdag-anbefalinger er slået til under Admin → Anbefalinger."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Anbefalede rækker forbliver tomme, indtil Opdag-anbefalinger er slået til under "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Admin → Anbefalinger"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Fra i Anbefalinger"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56401,6 +56643,12 @@
       "value": "Nye rækker placeres nederst i Opdag"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Åbn indstillinger for Anbefalinger"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56413,6 +56661,12 @@
       "value": "MDBLists feed indeholder ikke den sortering, der er gemt på listens side. Vælg den, som siden viser."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Din profil har ingen Opdag-anbefalinger endnu. Kør Opdag-anbefalinger, eller se og bedøm nogle titler for at forhåndsvise denne række."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56423,6 +56677,12 @@
     {
       "type": 0,
       "value": "Vælg en liste, eller indsæt dens link for at se dens titler."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Slå Opdag-anbefalinger til under Admin → Anbefalinger for at forhåndsvise denne række."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -66097,6 +66357,24 @@
       "value": "Skift til en anden model kræver, at embeddings nulstilles, hvilket sletter dem alle. En anden udbyder, der leverer samme model, træder i kraft efter en genstart."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Tilføj til Opdag"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke tilføje anbefalede rækker til Opdag-siden."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Anbefalede rækker er tilføjet til Opdag-siden."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66119,6 +66397,44 @@
     {
       "type": 0,
       "value": "Hvor mange titler, der ikke er i biblioteket, serveren gemmer at anbefale fra. Hver titel slås op på TMDB og får en embedding. Embedding er normalt billigt, men et højere antal kan koste mere eller tage længere tid afhængigt af din embedding-udbyder og bruger mere lagerplads."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Din Opdag-side viser endnu ingen anbefalingsrækker."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Slå Aktivér anbefalinger til ovenfor, og genstart serveren, før Opdag-anbefalinger kan køre."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Anmodninger er slået fra lige nu. Slå dem til under "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Anmodningsindstillinger"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", så seerne kan se Opdag-siden."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Åbn Opdag-siden"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -76371,6 +76687,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Denne tidsplan kommer fra backupindstillingerne. Rediger den under "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Backups"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [

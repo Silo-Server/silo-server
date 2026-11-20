@@ -249,6 +249,32 @@ func (r *Repository) ListRequestedTMDB(ctx context.Context, viewer Viewer, media
 	return out, nil
 }
 
+// ListDeclinedByViewerTMDB reports which of tmdbIDs have a declined request
+// submitted by viewer's profile.
+func (r *Repository) ListDeclinedByViewerTMDB(ctx context.Context, viewer Viewer, mediaType MediaType, tmdbIDs []int) (map[int]bool, error) {
+	out := map[int]bool{}
+	if len(tmdbIDs) == 0 || viewer.UserID == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT tmdb_id FROM media_requests
+		WHERE media_type = $1 AND provider = 'tmdb' AND tmdb_id = ANY($2)
+		  AND requested_by_user_id = $3 AND requested_by_profile_id = $4
+		  AND outcome = 'declined'
+	`, mediaType, tmdbIDs, viewer.UserID, viewer.ProfileID)
+	if err != nil {
+		return nil, fmt.Errorf("list declined tmdb ids: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int])
+	if err != nil {
+		return nil, fmt.Errorf("list declined tmdb ids: %w", err)
+	}
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, nil
+}
+
 func (r *Repository) ListProfileWatchlistRequests(ctx context.Context, userID int, profileID string) ([]*Request, error) {
 	rows, err := r.pool.Query(ctx, requestSelectSQL()+`
 		WHERE requested_by_user_id = $1

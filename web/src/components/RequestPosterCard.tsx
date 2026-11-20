@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
 import { Bookmark, BookmarkCheck, Loader2, Plus } from "lucide-react";
-import type { MediaRequest, RequestMediaResult, RequestMediaType } from "@/api/types";
+import type {
+  MediaRequest,
+  RequestMediaReason,
+  RequestMediaResult,
+  RequestMediaType,
+} from "@/api/types";
 import { cn } from "@/lib/utils";
 import {
   formatMediaType,
@@ -26,11 +31,14 @@ import {
   mediaItemMenuIconClassName,
   mediaItemMenuTriggerClassName,
 } from "@/components/mediaItemMenuTrigger";
-import { useT } from "@/i18n";
+import { useT, type Translate } from "@/i18n";
 
 // The badge takes the top-right corner and truncates when the card is narrow.
 const BADGE_CLASS = "ms-auto max-w-full shrink-0";
 const DETAIL_CLASS = "text-muted-foreground mt-1 truncate text-[0.75rem] font-medium";
+// The reason names one or two titles, so it wraps to a second line before it is cut.
+const REASON_CLASS =
+  "text-muted-foreground mt-1 line-clamp-2 text-[0.75rem] leading-snug font-medium";
 
 type DiscoverProps = {
   variant: "discover";
@@ -84,12 +92,22 @@ export default function RequestPosterCard(props: RequestPosterCardProps) {
   );
 }
 
+/** "Similar to Heat": the library titles a recommended title is related to; null without reasons. */
+function reasonLine(t: Translate, reasons: RequestMediaReason[] | undefined): string | null {
+  const [first, second] = reasons ?? [];
+  if (!first) return null;
+  return second
+    ? t("web.requests.card.similarToTwo", { first: first.title, second: second.title })
+    : t("web.requests.card.similarTo", { title: first.title });
+}
+
 function DiscoverCard({
   item,
   onToggleWatchlist,
   isWatchlistPending,
   fluid,
 }: Omit<DiscoverProps, "variant">) {
+  const t = useT();
   const requestable = item.request.requestable;
   const availableInLibrary = item.availability === "available" && !item.request.status;
   const state: RequestDisplayState | undefined = item.request.status
@@ -97,6 +115,7 @@ function DiscoverCard({
     : availableInLibrary
       ? "available"
       : undefined;
+  const reason = reasonLine(t, item.reasons);
 
   return (
     <ExternalTitleCard
@@ -124,7 +143,13 @@ function DiscoverCard({
           />
         ) : null
       }
-    />
+    >
+      {reason ? (
+        <p className={REASON_CLASS} title={reason}>
+          {reason}
+        </p>
+      ) : null}
+    </ExternalTitleCard>
   );
 }
 

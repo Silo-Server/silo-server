@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
+	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/requests/discoverrows"
 )
 
@@ -32,11 +35,15 @@ func (s *layoutStore) ResetDiscoverLayoutConditional(context.Context, int64) err
 type rowsTMDB struct {
 	certTMDBClient
 	charts      map[string]*tmdb.MediaPage
+	chartErr    error
 	discoverErr error
 	discovered  []tmdb.DiscoverParams
 }
 
 func (f *rowsTMDB) ChartPage(_ context.Context, params tmdb.ChartParams, _ int) (*tmdb.MediaPage, error) {
+	if f.chartErr != nil {
+		return nil, f.chartErr
+	}
 	if page, ok := f.charts[params.Preset+"/"+params.MediaType]; ok {
 		return page, nil
 	}
@@ -148,6 +155,42 @@ func TestDiscoverRowHidesAvailableTitlesAndResumes(t *testing.T) {
 	}
 }
 
+// The default layout leads with personal rows, which never fail; a TMDB
+// outage must still fail the page so clients offer a retry.
+func TestDiscoverRowsFailWhenEveryTMDBRowFails(t *testing.T) {
+	outage := errors.New("tmdb down")
+	service := newLayoutService(t, discoverrows.DefaultRows(), &rowsTMDB{chartErr: outage}, nil, "")
+	if _, err := service.DiscoverRows(t.Context(), testViewer(1)); !errors.Is(err, outage) {
+		t.Fatalf("err = %v, want the TMDB error", err)
+	}
+}
+
+// failingRecommendations is a recommendations reader whose reads fail.
+type failingRecommendations struct{ err error }
+
+func (failingRecommendations) ExternalRecommendationsEnabled() bool { return true }
+
+func (f failingRecommendations) ExternalRecommendations(context.Context, int, string, string, catalog.AccessFilter) ([]recommendations.ExternalRecommendation, error) {
+	return nil, f.err
+}
+
+// A layout of recommended rows only must not answer an outage with an
+// empty page.
+func TestDiscoverRowsFailWhenEveryPersonalRowFails(t *testing.T) {
+	outage := errors.New("database down")
+	var rows []discoverrows.Row
+	for _, row := range discoverrows.DefaultRows() {
+		if row.Type == discoverrows.TypeRecommended {
+			rows = append(rows, row)
+		}
+	}
+	service := newLayoutService(t, rows, &rowsTMDB{}, nil, "")
+	service.SetRecommendations(failingRecommendations{err: outage})
+	if _, err := service.DiscoverRows(t.Context(), testViewer(1)); !errors.Is(err, outage) {
+		t.Fatalf("err = %v, want the read error", err)
+	}
+}
+
 func TestDiscoverRowSendsTheStricterCertification(t *testing.T) {
 	for _, tt := range []struct {
 		rowCeiling, viewerCeiling, want string
@@ -188,7 +231,7 @@ func TestDiscoverLayoutDatabase(t *testing.T) {
 		return err
 	}, 1)
 	saved, err := repo.GetDiscoverLayout(ctx)
-	if err != nil || !saved.Customized || saved.Revision == 0 || len(saved.Rows) != 2 || saved.Rows[1].ID != "trending_series" {
+	if err != nil || !saved.Customized || saved.Revision == 0 || len(saved.Rows) != 2 || saved.Rows[1].ID != rows[1].ID {
 		t.Fatalf("saved = %+v %v", saved, err)
 	}
 	raceEditorWrites(t, func() error {
@@ -210,5 +253,81 @@ func TestDiscoverLayoutDatabase(t *testing.T) {
 	}
 	if reset, err := repo.GetDiscoverLayout(ctx); err != nil || reset.Customized || reset.Revision != 0 {
 		t.Fatalf("after reset = %+v %v, want the default layout", reset, err)
+	}
+}
+
+type declinedLayoutStore struct {
+	*layoutStore
+	declined map[int]bool
+}
+
+func (s *declinedLayoutStore) ListDeclinedByViewerTMDB(_ context.Context, _ Viewer, _ MediaType, tmdbIDs []int) (map[int]bool, error) {
+	out := map[int]bool{}
+	for _, id := range tmdbIDs {
+		if s.declined[id] {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
+type staticRecommendations struct {
+	titles []recommendations.ExternalRecommendation
+}
+
+func (r staticRecommendations) ExternalRecommendationsEnabled() bool { return true }
+
+func (r staticRecommendations) ExternalRecommendations(context.Context, int, string, string, catalog.AccessFilter) ([]recommendations.ExternalRecommendation, error) {
+	return r.titles, nil
+}
+
+func TestPersonalRowDropsDeclinedAndDemotesActiveRequests(t *testing.T) {
+	row := discoverrows.Row{
+		ID:            "recommended_movies",
+		Type:          discoverrows.TypeRecommended,
+		Title:         "Recommended movies for you",
+		Enabled:       true,
+		Limit:         20,
+		HideAvailable: true,
+		Recommended:   &discoverrows.RecommendedSpec{MediaType: "movie"},
+	}
+	normalized, errs := discoverrows.NormalizeLayout([]discoverrows.Row{row})
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	base := &layoutStore{fakeStore: newFakeStore(), rows: normalized}
+	base.settings.RequestsEnabled = true
+	// Title 101 has an active request; title 102 was declined only; title 103
+	// has both an earlier declined request and an active request (active wins);
+	// titles 104 and 105 are fresh.
+	req101 := &Request{ID: "req-101", MediaType: MediaTypeMovie, TMDBID: 101, Status: StatusPending, Outcome: OutcomeActive}
+	req103 := &Request{ID: "req-103", MediaType: MediaTypeMovie, TMDBID: 103, Status: StatusApproved, Outcome: OutcomeActive}
+	base.requests[req101.ID] = req101
+	base.requests[req103.ID] = req103
+	base.active[MediaTypeMovie][101] = req101
+	base.active[MediaTypeMovie][103] = req103
+	store := &declinedLayoutStore{
+		layoutStore: base,
+		declined:    map[int]bool{102: true, 103: true},
+	}
+	svc := NewService(store, &rowsTMDB{}, &fakePresence{})
+	svc.SetUserRepository(requestUserRepo{})
+	var recs []recommendations.ExternalRecommendation
+	for _, id := range []int{101, 102, 103, 104, 105} {
+		recs = append(recs, recommendations.ExternalRecommendation{
+			Key:   recommendations.ExternalTitleKey{MediaType: recommendations.ExternalMediaMovie, TMDBID: id},
+			Title: fmt.Sprintf("Movie %d", id),
+		})
+	}
+	svc.SetRecommendations(staticRecommendations{titles: recs})
+
+	section, err := svc.DiscoverRow(t.Context(), testViewer(1), "recommended_movies", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fresh titles (104, 105) lead in original order, active requests (101, 103)
+	// follow in original order, and declined-only title 102 is dropped.
+	if got := resultIDs(section.Results); !slices.Equal(got, []int{104, 105, 101, 103}) {
+		t.Fatalf("ordered personal IDs = %v, want [104 105 101 103]", got)
 	}
 }

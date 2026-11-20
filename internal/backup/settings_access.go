@@ -88,6 +88,7 @@ var accessSettings = func() map[string]widerFunc {
 		"subtitle_ai.enabled":                         on,
 		"subtitle_ai.transcribe_enabled":              on,
 		"recommendations.enabled":                     on,
+		"recommendations.external.enabled":            on,
 		"catalog.search.meilisearch.semantic_enabled": on,
 		markers.SettingShareByDefault: func(restored, live string) bool {
 			return markers.ShareByDefaultEnabled(restored) && !markers.ShareByDefaultEnabled(live)

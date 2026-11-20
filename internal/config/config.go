@@ -326,7 +326,22 @@ type RecommendationsConfig struct {
 	// CPU embedder over a large catalog needs hours, so this defaults to 24h
 	// (replacing a hardcoded 30m that truncated large first-run backfills).
 	EmbeddingsJobTimeout time.Duration `yaml:"-"`
+	// ExternalEnabled turns on recommendations of titles the library does
+	// not have; ExternalMaxTitles caps the outside titles stored, and
+	// ExternalCron schedules the job that fetches, embeds and ranks them.
+	ExternalEnabled   bool   `yaml:"-"`
+	ExternalMaxTitles int    `yaml:"-"`
+	ExternalCron      string `yaml:"-"`
 }
+
+// Bounds of recommendations.external.max_titles. The default holds the
+// shared sets plus about eight profiles' lists; the upper bound keeps one
+// run's TMDB and embedding work within a few nights of budget.
+const (
+	DefaultExternalRecommendationsMaxTitles = 5000
+	MinExternalRecommendationsMaxTitles     = 500
+	MaxExternalRecommendationsMaxTitles     = 50000
+)
 
 // AIConfig holds the shared connection settings for Silo's AI features
 // (subtitle translation, metadata translation, Whisper ASR): one

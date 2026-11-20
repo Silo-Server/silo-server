@@ -19,10 +19,13 @@ has). Its type decides where its titles come from:
 | `tmdb_discover` | A TMDB `/discover` query: genres (all of), excluded genres, keywords, companies, networks (series), countries of origin, streaming services in a region (each any of), original language, year range, lowest score and vote count, runtime, highest US rating, sort | `discover` |
 | `tmdb_list` | A public themoviedb.org list | `list` |
 | `mdblist` | A public mdblist.com list, in list order or newest added or released first | `list` |
+| `recommended` | The viewer's own recommendations of titles the server lacks (see [Recommended rows](#recommended-rows)) | `recommended` (`media_type`: `movie` or `series`) |
 | `studios`, `networks`, `genres` | The fixed brand cards; each opens a browse page | none |
 
 Each type is a `discoverrows.Kind`: it checks and canonicalizes its spec,
-names its source, and, for a list type, names the stored copy it reads. A row
+names its source, and, for a list type, names the stored copy it reads. A
+`recommended` row's source is personal (`discoverrows.PersonalSource`): it is
+read per viewer from stored data, not page by page from TMDB. A row
 of a type this server does not know (stored by a newer server) is skipped on
 read and dropped by the next save.
 
@@ -44,6 +47,8 @@ Checks (`discoverrows.NormalizeLayout`):
   page, and it does not report that saved sort, so the admin picks it. The
   refresher sends `sort=added` or `sort=released` with `sortorder=asc`,
   because MDBList inverts `sortorder` for date sorts.
+- A `recommended` row always has `hide_available` on: it never shows a title
+  the library has.
 - Stored layouts are not checked again on read: tightening a rule changes what
   the next save accepts.
 
@@ -56,6 +61,10 @@ Checks (`discoverrows.NormalizeLayout`):
   into their two carousels (trending, popular), so a built-in row keeps its type and
   chart; its title, limit, switch and `hide_available` can change, and it can be
   removed.
+- **Recommended rows.** The default `recommended_movies` and `recommended_series`
+  rows keep their media types. A saved custom row that already used either ID
+  can still be edited and saved. Clients read these rows through `row_order` and
+  `getDiscoverRow`.
 - **Brand rows.** A brand row's ID is its type, so each appears at most once.
 - **Custom rows.** A new row gets an opaque `r_` ID. `rows` and `browse` are
   reserved.
@@ -64,8 +73,8 @@ Checks (`discoverrows.NormalizeLayout`):
 
 The layout is one row of `request_discover_layout`: the rows as a JSON array
 and a revision from `request_editor_revision_seq`, like the other request
-editors. With no row stored the default layout applies: the six built-in rows,
-then studios, networks, genres. That default is code, so a server whose admin
+editors. With no row stored the default layout applies: the two recommended
+rows, the six built-in rows, then studios, networks, genres. That default is code, so a server whose admin
 never changed the page follows future defaults; it reads as revision zero.
 Saving replaces the whole layout (`If-Match` on the revision); resetting deletes
 the row. A first save over the default races safely: the upsert's revision
@@ -74,8 +83,8 @@ predicate turns the loser into a stale write.
 ## Each viewer's page
 
 `DiscoverRows` renders the page; `DiscoverRow` serves one title row's see all
-page. Both read the layout, skip turned-off rows, and fill each title row from
-its source page by page (`fillRowPage`):
+page. Both read the layout, skip turned-off rows, and fill each title row other
+than a recommended one from its source page by page (`fillRowPage`):
 
 - The viewer's rating ceiling filters every title, failing closed on unrated
   ones, whatever the row's source. For a discover row the stricter of the
@@ -94,14 +103,61 @@ its source page by page (`fillRowPage`):
 - The Discover page shows at most a row's limit. A row it trims loses its
   cursor; its see all page starts again at page 1.
 - A title row that fails (TMDB refused a filter, a list is unreadable) is left
-  out and logged; the page fails only when every title row did. A title row
+  out and logged; the page fails only when every title row that reads TMDB or a
+  stored list failed and no recommended row has titles to show. A page with only
+  recommended rows fails when every one of them failed to read, and otherwise
+  can succeed with an empty result. A title row
   with no titles is left out of `items` and stays in `row_order`, since shipped
   clients cannot draw an empty row.
 
-Cost: every title row costs TMDB and database work on each Discover load
+Cost: every title row but a recommended one costs TMDB and database work on each Discover load
 (rows run four at a time). A rating-restricted viewer on a cold certification
 cache costs up to 20 certification lookups per source page read; certifications
 are cached for seven days and shared by every profile.
+
+## Recommended rows
+
+A `recommended` row shows the viewer's own ranked titles of one media type that
+the server does not have, as the recommendations engine stored them for the
+viewer's profile (see [Recommendations](recommendations.md)). Each profile reads
+its own row, so two profiles on one account see different titles. The request
+service reads it through `discoverrows.Recommendations`, which the
+recommendations reader implements; without one, the row has no titles.
+
+A read makes no outbound call, on a cold cache too: it calls neither TMDB nor
+the embedding provider. `internal/requests/discover_personal.go` reads the whole
+row (at most 60 titles), then:
+
+- applies the viewer's rating ceiling to each title's stored US certification
+  with the rule the rest of Requests uses, `access.RatingAllowed`: a title with
+  no US certification, or one it does not recognize, is left out;
+- leaves out titles the library has, matched in the catalog by the TMDB, TVDB
+  and IMDb IDs stored with each title, without the TMDB external-ID lookups
+  other rows make;
+- lays the viewer's request state and follows over the titles shown, as on other
+  rows, and the API adds `in_watchlist` the same way. A title stays `missing`.
+
+Each title carries up to two `reasons`: the library titles that led to it, best
+first, and only ones the profile watched, rated or favorited. A reason the viewer cannot see is left out; the title stays.
+
+Filtering comes before paging, so totals are exact: `total_results` counts the
+titles the viewer gets and `total_pages` is that over 20. Titles whose request
+by the viewer's profile was declined (with no active request) are dropped, and
+titles that already have an active request are stably moved behind fresh
+unrequested titles so leading slots stay actionable. Daily tail rotation
+(pinning the top 10 and rotating positions 11–20 by UTC date) keeps rows fresh
+between rebuilds. The Discover page
+shows up to the row's limit. Its see all page serves 20 titles a page with no
+`next_page`; page+1 follows. A row the Discover page trims has no cursor, as on
+other rows; a row it shows whole over several pages points past its last page.
+
+The row has no titles, so it is left out of `items` and kept in `row_order`,
+when the profile has no stored row yet, when the server has Discover
+recommendations off (`recommendations.external.enabled`) or recommendations off.
+A profile blocked from requests gets no
+Discover page at all. `GET /requests/status` reports
+`personal_discover_rows_supported`. A server whose admin saved a layout before
+these rows existed shows them once the admin adds them.
 
 ## List rows
 
@@ -153,6 +209,7 @@ The contract is in [api-contract.md](api-contract.md#personal-requests):
 `listDiscoverSections` follows the layout and adds `row_order`, `getDiscoverRow`
 pages any title row, `getDiscoverSection` answers 404 for a built-in row the
 admin turned off, and `GET /requests/status` advertises
-`discover_rows_supported`. The admin operations are under
+`discover_rows_supported` and `personal_discover_rows_supported`. Results on a
+recommended row carry `reasons`. The admin operations are under
 `/admin/request-discover` ([Request administration](api-contract.md#request-administration)).
 They work while requests are turned off, so an admin can set the page up first.

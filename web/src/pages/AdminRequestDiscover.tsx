@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { ExternalLink, Pencil, RotateCcw, Rows3, Trash2, type LucideIcon } from "lucide-react";
 
 import type { DiscoverRow, DiscoverRowType } from "@/api/v2/adminRequests";
@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useAdminRequestCapabilities } from "@/hooks/queries/admin/requests";
+import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { useDiscoverRows } from "@/hooks/queries/admin/useDiscoverRows";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useT, type MessageKey } from "@/i18n";
@@ -28,8 +29,7 @@ import { EmptyPanel, RowsSkeleton } from "@/pages/admin-requests/queueParts";
 import { DiscoverRowDialog } from "@/pages/admin-requests/DiscoverRowDialog";
 import {
   describeDiscoverRow,
-  isBrandRow,
-  isBuiltInRow,
+  isStockRow,
   ROW_KINDS,
   toHomeRow,
 } from "@/pages/admin-requests/discoverLayoutModel";
@@ -129,6 +129,11 @@ function DiscoverLayoutEditor() {
   const [restoreBusy, setRestoreBusy] = useState(false);
   const byId = useMemo(() => new Map(discoverRows.map((row) => [row.id, row])), [discoverRows]);
   const full = layout !== undefined && discoverRows.length >= layout.max_rows;
+  const requestStatus = useRequestFeatureStatus().data;
+  const personalRowsOff =
+    requestStatus?.requests_enabled === true &&
+    requestStatus.personal_discover_rows_supported === false;
+  const hasEnabledRecommended = discoverRows.some((row) => row.recommended && row.enabled);
 
   function openDialog(row: DiscoverRow | null) {
     setRowDialog({ key: ++dialogCount.current, row });
@@ -198,7 +203,7 @@ function DiscoverLayoutEditor() {
     ];
   }
 
-  const stockRow = deleting !== null && (isBuiltInRow(deleting) || isBrandRow(deleting));
+  const stockRow = deleting !== null && isStockRow(deleting);
 
   return (
     <HomeRowsPage
@@ -209,7 +214,7 @@ function DiscoverLayoutEditor() {
       pageSwitcher={false}
       describe={(row) => {
         const stored = byId.get(row.id);
-        return stored ? describeDiscoverRow(stored) : [];
+        return stored ? describeDiscoverRow(stored, personalRowsOff) : [];
       }}
       rowIcon={(row) => ROW_KINDS[row.sectionType as DiscoverRowType].icon}
       onOpenRow={openRow}
@@ -219,19 +224,35 @@ function DiscoverLayoutEditor() {
       addRow={{ onClick: () => openDialog(null), disabled: !adapter.canEdit || full }}
       notices={
         layout ? (
-          <p className="text-muted-foreground max-w-3xl text-sm">
-            {[
-              layout.customized
-                ? t("web.admin.requests.discoverPage.notice.customized")
-                : t("web.admin.requests.discoverPage.notice.default"),
-              t("web.admin.requests.discoverPage.notice.olderApps"),
-              full
-                ? t("web.admin.requests.discoverPage.notice.full", { count: layout.max_rows })
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" ")}
-          </p>
+          <div className="max-w-3xl space-y-2 text-sm">
+            <p className="text-muted-foreground">
+              {[
+                layout.customized
+                  ? t("web.admin.requests.discoverPage.notice.customized")
+                  : t("web.admin.requests.discoverPage.notice.default"),
+                t("web.admin.requests.discoverPage.notice.olderApps"),
+                full
+                  ? t("web.admin.requests.discoverPage.notice.full", { count: layout.max_rows })
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            </p>
+            {personalRowsOff && hasEnabledRecommended ? (
+              <p className="text-muted-foreground">
+                {t("web.admin.requests.discover.recommendedOffBanner", {
+                  link: (chunks) => (
+                    <Link
+                      to="/admin/recommendations"
+                      className="text-foreground font-medium underline underline-offset-2"
+                    >
+                      {chunks}
+                    </Link>
+                  ),
+                })}
+              </p>
+            ) : null}
+          </div>
         ) : null
       }
     >
@@ -269,6 +290,7 @@ function DiscoverLayoutEditor() {
           key={rowDialog.key}
           adapter={adapter}
           editRow={rowDialog.row}
+          personalRowsOff={personalRowsOff}
           onClose={() => setRowDialog(null)}
           onSaved={(newId) => setHighlightId(newId ?? null)}
           onDelete={(row) => {

@@ -45,6 +45,31 @@
       }
     }
   },
+  "external": {
+    "enabled": true,
+    "running": false,
+    "count": 1200,
+    "rows": 6,
+    "last_run": {
+      "status": "completed",
+      "started_at": "2026-10-03T06:00:00.000Z",
+      "completed_at": "2026-10-03T06:04:00.000Z",
+      "result": {
+        "budget_exhausted": false,
+        "details_fetched": 300,
+        "embeddings": {
+          "embedded": 298,
+          "failed": 0,
+          "skipped": 2,
+          "truncated": 0
+        },
+        "enabled": true,
+        "rows_built": 6,
+        "titles_stored": 1200,
+        "tmdb_requests": 420
+      }
+    }
+  },
   "lock_conflict": "",
   "stale_sweep": {
     "pending": 7,

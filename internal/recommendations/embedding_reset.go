@@ -80,25 +80,31 @@ type EmbeddingsReset struct {
 	TasteProfiles int64
 	TasteClusters int64
 	CachedRows    int64
+	// ExternalEmbeddings and ExternalRows count the outside-title vectors
+	// and profile rows deleted. Outside titles themselves stay.
+	ExternalEmbeddings int64
+	ExternalRows       int64
 }
 
 // ResetEmbeddings deletes the embedding lock, every item embedding, every
-// taste cluster and every profile's cached rows, and clears every taste
-// profile's vector, in one transaction, so the next embedding run starts a new embedding space with
+// taste cluster, every profile's cached rows, every outside-title vector and
+// every profile's outside rows, and clears every taste profile's vector, in
+// one transaction, so the next embedding run starts a new embedding space with
 // whatever model the server is configured for. Global rows (popular, recently
 // added, top rated, genre samplers) do not use embeddings and stay.
 //
 // The reset holds the claims of every job that reads or writes those rows
-// (embeddings, taste profiles, the cache) and the stale sweep's lock, so none
-// of them interleaves with it on any server; co-watch pairs do not depend on
-// embeddings. A busy job or sweep refuses the reset with ErrJobRunning,
+// (embeddings, taste profiles, the cache, outside titles) and the stale
+// sweep's lock, so none of them interleaves with it on any server; co-watch
+// pairs do not depend on embeddings. A busy job or sweep refuses the reset with ErrJobRunning,
 // ErrJobRunningElsewhere or ErrStaleSweepRunning, a catalog import carrying
 // embeddings refuses it with ErrCatalogImportRunning, and saved embedding
 // settings that wait for a restart refuse it with
 // ErrEmbeddingSettingsPendingRestart. A profile refresh already
 // running when the reset commits can still write one taste profile built from
 // the old embeddings; the profile's next refresh after re-embedding replaces
-// it.
+// it. Its outside rows are refused: they are written only while the lock they
+// were built under is stored (writeExternalRowUnderLock).
 //
 // Every item that lost its embedding gets a search index upsert, so its
 // search document drops the old vector on the next index sync.
@@ -107,7 +113,7 @@ func (w *Worker) ResetEmbeddings(ctx context.Context) (EmbeddingsReset, error) {
 		return EmbeddingsReset{}, err
 	}
 	// One connection holds every claim's cluster lock and the sweep's.
-	held, release, err := w.claimJobs(JobEmbeddings, JobTasteProfiles, JobRecommendations)
+	held, release, err := w.claimJobs(JobEmbeddings, JobTasteProfiles, JobRecommendations, JobExternal)
 	if err != nil {
 		return EmbeddingsReset{}, err
 	}
@@ -130,14 +136,16 @@ func (w *Worker) ResetEmbeddings(ctx context.Context) (EmbeddingsReset, error) {
 	if err != nil {
 		return EmbeddingsReset{}, err
 	}
+	w.engine.externalRefusedEmbeds.reset()
 	slog.InfoContext(ctx, "recommendation embeddings reset", "component", "recommendations",
-		"embeddings", res.Embeddings, "taste_profiles", res.TasteProfiles, "taste_clusters", res.TasteClusters, "cached_rows", res.CachedRows)
+		"embeddings", res.Embeddings, "taste_profiles", res.TasteProfiles, "taste_clusters", res.TasteClusters, "cached_rows", res.CachedRows,
+		"external_embeddings", res.ExternalEmbeddings, "external_rows", res.ExternalRows)
 	return res, nil
 }
 
 // ResetEmbeddings deletes the embedding lock, every item embedding, taste
-// cluster and per-profile cache row, and clears every taste profile's vector,
-// in one transaction, and queues a search index upsert for every item that had an embedding.
+// cluster, per-profile cache row, outside-title vector and outside row, and
+// clears every taste profile's vector, in one transaction, and queues a search index upsert for every item that had an embedding.
 func (r *Repo) ResetEmbeddings(ctx context.Context) (EmbeddingsReset, error) {
 	var res EmbeddingsReset
 	tx, err := r.pool.Begin(ctx)
@@ -187,6 +195,12 @@ func (r *Repo) ResetEmbeddings(ctx context.Context) (EmbeddingsReset, error) {
 		}
 		*step.count = tag.RowsAffected()
 	}
+
+	external, err := resetExternalEmbeddings(ctx, tx)
+	if err != nil {
+		return res, err
+	}
+	res.ExternalEmbeddings, res.ExternalRows = external.Embeddings, external.Rows
 
 	if err := catalog.EnqueueSearchIndexUpserts(ctx, tx, itemIDs); err != nil {
 		return res, fmt.Errorf("queue search index updates: %w", err)

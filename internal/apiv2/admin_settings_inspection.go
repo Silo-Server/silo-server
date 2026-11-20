@@ -28,6 +28,7 @@ type AdminSettingValuesOutput struct {
 type AdminRestartKeys struct {
 	Keys     []string `json:"keys"`
 	Prefixes []string `json:"prefixes"`
+	LiveKeys []string `json:"live_keys" doc:"Keys that apply without a restart although one of prefixes covers them."`
 }
 type AdminRestartKeysOutput struct{ Body AdminRestartKeys }
 type AdminSensitiveStatus struct {
@@ -50,7 +51,7 @@ func registerAdminSettingsInspection(reg *Registry) {
 		return reg.inspectAdminSettings(ctx, true)
 	})
 	Register(reg, op("/restart-keys", "getAdminRestartKeys", "Read the compiled keys and prefixes requiring a restart.", false), func(context.Context, *struct{}) (*AdminRestartKeysOutput, error) {
-		return &AdminRestartKeysOutput{Body: AdminRestartKeys{Keys: NonNil(config.RestartRequiredKeys()), Prefixes: NonNil(config.RestartRequiredPrefixes())}}, nil
+		return &AdminRestartKeysOutput{Body: AdminRestartKeys{Keys: NonNil(config.RestartRequiredKeys()), Prefixes: NonNil(config.RestartRequiredPrefixes()), LiveKeys: NonNil(config.LiveKeysUnderRestartPrefixes())}}, nil
 	})
 	Register(reg, op("/sensitive-status", "getAdminSensitiveSettingsStatus", "Read configured secret key names without returning secret values.", true), reg.inspectAdminSensitiveSettings)
 }
