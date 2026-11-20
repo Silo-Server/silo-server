@@ -1,6 +1,7 @@
 package transcodenode
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -26,10 +28,13 @@ func newCapabilityTestServer(t *testing.T) (*Server, string) {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}
 
+	watcher := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
 	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = testSecret
 	cfg.Playback.TranscodeDir = t.TempDir()
 	cfg.Playback.FFmpegPath = ffmpegPath
-	return &Server{watcher: newTestRuntime(cfg), nodeKey: testNodeKey, sessions: make(map[string]*playback.TranscodeSession)}, logPath
+	watcher.SetConfigForTest(cfg)
+	return &Server{watcher: watcher, sessions: make(map[string]*playback.TranscodeSession)}, logPath
 }
 
 // newProbingTestServer builds a node whose configured ffmpeg answers every
@@ -82,11 +87,54 @@ func TestHealthPublishesStoredCapabilityHashWithoutProbing(t *testing.T) {
 	}
 }
 
+// The capability endpoint and the background snapshot must agree, so a served
+// report carries its hash and health starts advertising it immediately —
+// otherwise the API would refetch a report it already has.
+func TestHWCapabilitiesPublishesCapabilityHash(t *testing.T) {
+	server := newProbingTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 42, true }
+
+	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
+	nodeauthtest.Sign(t, request, testSecret)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+
+	if recorder.Code == http.StatusServiceUnavailable {
+		t.Skip("this host's ffmpeg cannot answer a capability probe")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var info playback.HWAccelInfo
+	if err := json.Unmarshal(recorder.Body.Bytes(), &info); err != nil {
+		t.Fatalf("decode capabilities: %v", err)
+	}
+	if info.CapabilityHash == "" {
+		t.Fatal("served capability report carries no capability_hash")
+	}
+	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
+		t.Fatalf("transport features = %v, want progressive remux execution", info.TransportFeatures)
+	}
+	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureHLSSubtitleRenditionV1) ||
+		!slices.Contains(info.TransportFeatures, playback.TransportFeatureHLSRemuxSubtitleRenditionV1) {
+		t.Fatalf("transport features = %v, want the HLS subtitle renditions", info.TransportFeatures)
+	}
+	// The hash must describe this payload, not some earlier one.
+	served := info
+	served.CapabilityHash = ""
+	if want := playback.ComputeCapabilityHash(served); want != info.CapabilityHash {
+		t.Fatalf("capability_hash = %s, want %s for the served payload", info.CapabilityHash, want)
+	}
+	if got := decodeHealth(t, server).CapabilitiesHash; got != info.CapabilityHash {
+		t.Fatalf("health capabilities_hash = %q, want the just-served %q", got, info.CapabilityHash)
+	}
+}
+
 func TestHWCapabilitiesWithholdsProgressiveRemuxWithoutNodeIdentity(t *testing.T) {
 	server := newProbingTestServer(t)
 
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	nodeauthtest.Sign(t, request, testNodeKey)
+	nodeauthtest.Sign(t, request, testSecret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 
@@ -102,5 +150,18 @@ func TestHWCapabilitiesWithholdsProgressiveRemuxWithoutNodeIdentity(t *testing.T
 	}
 	if slices.Contains(info.TransportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
 		t.Fatalf("transport features = %v, want progressive remux withheld without a resolved node row", info.TransportFeatures)
+	}
+}
+
+// A failed probe is not evidence the hardware changed, so the previously
+// published hash must survive it.
+func TestRefreshCapabilitySnapshotKeepsHashOnProbeFailure(t *testing.T) {
+	server, _ := newCapabilityTestServer(t)
+	server.storeCapabilityHash("sha256:previous")
+
+	server.refreshCapabilitySnapshot(context.Background())
+
+	if got := server.storedCapabilityHash(); got != "sha256:previous" {
+		t.Fatalf("stored hash = %q, want the previous hash kept after a failed probe", got)
 	}
 }

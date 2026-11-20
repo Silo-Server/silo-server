@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
