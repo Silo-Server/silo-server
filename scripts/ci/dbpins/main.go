@@ -103,18 +103,17 @@ func runMain() int {
 	args := goTestArgs(pins, *shared)
 	env := os.Environ()
 	template := os.Getenv("SILO_TEST_DATABASE_URL")
-	ctx := context.Background()
+	// Keep SIGINT/SIGTERM trapped across every mode (including -shared and
+	// unset-URL, because runGoTest isolates go test in its own process group)
+	// and through dropRunClones so an interrupt reaches active wrappers and
+	// lets them exit before sweeping any leftover database copies.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	switch {
 	case template == "":
 		fmt.Println("dbpins: SILO_TEST_DATABASE_URL is not set, so every pin will skip")
 	case !*shared:
-		// Keep SIGINT/SIGTERM trapped through dropRunClones so an interrupt
-		// signals the entire go test process group and waits for active
-		// wrappers to exit before sweeping any leftover database copies.
-		var stop context.CancelFunc
-		ctx, stop = signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-
 		execPath, run, setupErr := setUpClones(ctx, template)
 		if run != "" {
 			defer func() {
@@ -165,6 +164,25 @@ func runGoTest(ctx context.Context, args, env []string) (*results, error, error)
 	if err := cmd.Start(); err != nil {
 		return nil, nil, err
 	}
+	// If a descendant ignores SIGINT and holds stdout open, readEvents would
+	// block before cmd.Wait; force-kill the process group once the grace period
+	// expires so stdout reaches EOF and cleanup runs.
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-done:
+			return
+		case <-ctx.Done():
+			timer := time.NewTimer(cmd.WaitDelay)
+			defer timer.Stop()
+			select {
+			case <-done:
+				return
+			case <-timer.C:
+				killProcessGroup(cmd)
+			}
+		}
+	}()
 	res, readErr := readEvents(stdout, func(line string) { fmt.Print(line) })
 	if readErr != nil {
 		// Keep draining, or a go test still writing blocks on the full pipe
@@ -172,6 +190,7 @@ func runGoTest(ctx context.Context, args, env []string) (*results, error, error)
 		_, _ = io.Copy(io.Discard, stdout)
 	}
 	waitErr := cmd.Wait()
+	close(done)
 	if ctx.Err() != nil {
 		// Ensure no wrapper or test binary outlives WaitDelay into dropRunClones.
 		killProcessGroup(cmd)
