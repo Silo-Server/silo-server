@@ -2,6 +2,7 @@ package planstore
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -127,4 +128,46 @@ func newLifecycleAttemptDB(t *testing.T) (context.Context, *pgxpool.Pool, *Postg
 		t.Fatal(err)
 	}
 	return ctx, pool, store, session
+}
+
+// TestSampleAcceptedAtDB: the attempt dates its latest sample to when it was
+// accepted, and only accepting a sample moves that time. A replan commit and
+// a stop without a newer sample move updated_at but not the sample's time, so
+// a stop finalized later still judges the sample against when it arrived.
+func TestSampleAcceptedAtDB(t *testing.T) {
+	ctx, _, store, session := newLifecycleAttemptDB(t)
+	read := func() *playback.AttemptRecordV3 {
+		t.Helper()
+		record, err := store.GetAttempt(ctx, session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return record
+	}
+	if _, err := store.ApplyProgress(ctx, session, playback.ProgressSampleV3{Sequence: 1, Position: 400}); err != nil {
+		t.Fatal(err)
+	}
+	record := read()
+	accepted, updated := record.SampleAcceptedAt, record.LastSampleAt
+	if accepted.IsZero() {
+		t.Fatal("an accepted sample has no time")
+	}
+	lease, err := store.BeginReplan(ctx, session, "replan-1", "digest", record.CurrentReplanRequestID, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := record.CurrentReplanRequestID
+	record.CurrentReplanRequestID = "replan-1"
+	if err := store.CompleteReplan(ctx, session, "replan-1", lease.LeaseToken, base, json.RawMessage(`{}`), *record); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); !got.SampleAcceptedAt.Equal(accepted) || !got.LastSampleAt.After(updated) {
+		t.Fatalf("after a replan: sample at %v, updated %v; want the sample at %v and an update after %v", got.SampleAcceptedAt, got.LastSampleAt, accepted, updated)
+	}
+	if _, _, err := store.StopAttempt(ctx, session, uuid.NewString(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); !got.SampleAcceptedAt.Equal(accepted) {
+		t.Fatalf("after a stop without a sample: sample at %v, want %v", got.SampleAcceptedAt, accepted)
+	}
 }

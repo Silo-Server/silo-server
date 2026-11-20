@@ -658,13 +658,17 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 	session.Watch = carried
 	h.fillDetachedSession(ctx, session, record.CreatedAt)
 	fromRemovedCopy := carried.Measured && session.Watch.Until.Equal(carried.Until)
-	if accepted != nil && (accepted.Sequence > record.LastSequence || !fromRemovedCopy) {
-		// The latest accepted sample: the stop's own, or, when the
-		// measurement was restored from the last save rather than handed
-		// over by the copy this end removed, progress accepted since that
-		// save. Progress does not trigger a save, so the saved measurement
-		// can predate it. A sample it already holds credits nothing.
-		observeEndSample(session, time.Now())
+	if !fromRemovedCopy && record.LastSample != nil {
+		// The measurement was restored from the last save rather than handed
+		// over by the copy this end removed. Progress does not trigger a
+		// save, so the row's latest sample can be newer than it. Judge that
+		// sample at the time the row accepted it, not now, so a seek before
+		// the stop is not credited as watch time.
+		observeEndSample(session, record.LastSample.Position, record.LastSample.IsPaused, record.SampleAcceptedAt)
+	}
+	if accepted != nil && accepted.Sequence > record.LastSequence {
+		// The stop's own final sample, which arrived just now.
+		observeEndSample(session, accepted.Position, accepted.IsPaused, time.Now())
 	}
 	if record.CurrentPlanID != "" {
 		// The attempt holds the plan the last replan committed. The live row
