@@ -174,8 +174,10 @@ export const AccountRow = memo(function AccountRow({
           name: account.local_username || account.username,
         })
       : t("web.admin.backups.restore.users.newAccount");
+  // Laid out like ItemRow (RestoreRows.tsx): a narrow row wraps the name above the
+  // contact line.
   return (
-    <li className="border-border/60 border-b last:border-b-0">
+    <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
         <Checkbox
           id={controlId}
@@ -183,12 +185,12 @@ export const AccountRow = memo(function AccountRow({
           disabled={!item.selectable}
           onCheckedChange={(value) => onToggle(toggleKeys("users", item), value === true)}
         />
-        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @md:flex-row @md:items-baseline">
           <Label
             htmlFor={controlId}
             title={item.label}
             className={cn(
-              "max-w-[45%] shrink-0 truncate text-sm font-medium",
+              "block shrink-0 text-sm font-medium @max-md:wrap-anywhere @md:max-w-[45%] @md:truncate",
               !item.selectable && "text-muted-foreground",
             )}
           >

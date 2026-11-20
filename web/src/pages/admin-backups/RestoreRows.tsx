@@ -265,8 +265,11 @@ export const ItemRow = memo(function ItemRow({
   const details = open ? itemDetails(t, item) : null;
   const hasDetails = hasItemDetails(item);
   const label = displayLabel(item);
+  // The row is its own container: in a narrow row (a phone, or the list beside the
+  // admin sidebar and restore summary) the name wraps above the status instead of
+  // sharing one line with it, so names that differ only at the end stay apart.
   return (
-    <li className="border-border/60 border-b last:border-b-0">
+    <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
         <Checkbox
           id={controlId}
@@ -274,12 +277,13 @@ export const ItemRow = memo(function ItemRow({
           disabled={!item.selectable}
           onCheckedChange={(value) => onToggle(toggleKeys(sectionId, item), value === true)}
         />
-        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @md:flex-row @md:items-baseline">
+          {/* block: Label is a flex box, which would clip the name without an ellipsis. */}
           <Label
             htmlFor={controlId}
             title={label}
             className={cn(
-              "max-w-[60%] shrink-0 truncate text-sm font-medium",
+              "block shrink-0 text-sm font-medium @max-md:wrap-anywhere @md:max-w-[60%] @md:truncate",
               !item.selectable && "text-muted-foreground",
             )}
           >
