@@ -41,8 +41,13 @@ func TestNotifyPluginUpdateDropsAnOfferForAReplacedReleaseDB(t *testing.T) {
 	}
 
 	service := &AutoUpdateService{installations: store, logger: slog.Default()}
-	if err := service.notifyPluginUpdate(ctx, read, CatalogEntry{Manifest: packageErrorTestManifest(pluginID, "1.1.0")}); err != nil {
-		t.Fatalf("notifyPluginUpdate: %v", err)
+	outcome, err := service.handleExistingPlugin(ctx, read, CatalogEntry{Manifest: packageErrorTestManifest(pluginID, "1.1.0")})
+	if err != nil {
+		t.Fatalf("handleExistingPlugin: %v", err)
+	}
+	// A dropped offer is not an update the check found.
+	if outcome != autoUpdateOutcomeNone {
+		t.Fatalf("outcome = %v, want none for a dropped offer", outcome)
 	}
 	got, err := store.GetByID(ctx, id)
 	if err != nil {

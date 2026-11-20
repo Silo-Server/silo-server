@@ -530,7 +530,8 @@ func (s *AutoUpdateService) handleExistingPlugin(ctx context.Context, existing *
 		return autoUpdateOutcomeUpdated, err
 	case "notify":
 		err := s.notifyPluginUpdate(ctx, existing, entry)
-		if isVersionManaged(err) || errors.Is(err, errProvisionRestoreHeld) {
+		// A dropped stale offer recorded nothing, so it is no update found.
+		if isVersionManaged(err) || errors.Is(err, errProvisionRestoreHeld) || errors.Is(err, ErrInstallationChanged) {
 			return autoUpdateOutcomeNone, nil
 		}
 		return autoUpdateOutcomeNotified, err
@@ -597,7 +598,7 @@ func (s *AutoUpdateService) notifyPluginUpdate(ctx context.Context, existing *In
 	if errors.Is(err, ErrInstallationChanged) {
 		s.logger.InfoContext(ctx, "dropped stale plugin update offer: the plugin was replaced meanwhile",
 			"plugin_id", existing.PluginID, "available_version", newVersion)
-		return nil
+		return err
 	}
 	if err != nil {
 		return fmt.Errorf("record available version for plugin %s: %w", existing.PluginID, err)
