@@ -237,11 +237,13 @@ never sends them to a plugin. A `GetMetadata` answer becomes
 result carries none. `catalog.ApplyWorkClaimsTx` writes them in the
 transaction that writes the item's provider IDs, from the audiobook enricher,
 the ebook enricher, and the metadata service. An answer replaces the claims of
-the capability that gave it and the claims with no capability (`source` empty,
-the rows the migration moved): keys it holds are upserted, and those claims'
-other keys are deleted unless the catalog behind them could not be asked.
-Claims from other capabilities stay. An item holds one claim per key, so when
-two capabilities answer for the same key, the last answer wins. In the metadata service, an
+the capability that gave it: keys it holds are upserted, and its other keys are
+deleted unless the catalog behind them could not be asked. An answer that holds
+a work id or names a failed catalog also replaces, under the same rule, the
+claims with no capability (`source` empty, the rows the migration moved); an
+answer that says nothing about works leaves those alone. Claims from other
+capabilities stay. An item holds one claim per key, so when two capabilities
+answer for the same key, the last answer wins. In the metadata service, an
 answer whose edition ids contradict the item's (same key, different value)
 names another edition: its claims are dropped, and it neither stores nor
 deletes any. A reset, an Identify (the admin naming the book; the answers it

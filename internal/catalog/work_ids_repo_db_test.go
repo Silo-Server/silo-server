@@ -99,20 +99,28 @@ func TestWorkClaimsReplacePerSourceDB(t *testing.T) {
 	})
 
 	// A claim with no source (moved by the migration) is replaced by an answer
-	// from any source: deleted when the answer omits its key, kept while the
-	// answer reports its catalog as failed. A named source's claim stays.
+	// that holds a work id or names a failed catalog: deleted when the answer
+	// omits its key, kept while the answer reports its catalog as failed. An
+	// answer that says nothing about works leaves it. A named source's claim
+	// stays.
 	batchEquivExec(t, pool, `DELETE FROM media_item_work_ids WHERE content_id = $1`, audiobook)
 	batchEquivExec(t, pool, `
 		INSERT INTO media_item_work_ids (content_id, provider, provider_id, evidence, source) VALUES
 			($1, 'openlibrary_work', 'OL1W', 'unknown', ''),
 			($1, 'hardcover', '7', 'unknown', '')`, audiobook)
+	applyWorkClaims(t, pool, audiobook, "audiobook", answer("audiobook-metadata", nil))
+	assertWorkClaims(t, pool, audiobook, map[string]string{"openlibrary_work": "OL1W/unknown/", "hardcover": "7/unknown/"})
 	applyWorkClaims(t, pool, audiobook, "audiobook", answer("books-metadata", []string{"hardcover"}))
 	assertWorkClaims(t, pool, audiobook, map[string]string{"hardcover": "7/unknown/"})
 	batchEquivExec(t, pool, `
 		INSERT INTO media_item_work_ids (content_id, provider, provider_id, evidence, source)
 		VALUES ($1, 'openlibrary_work', 'OL1W', 'unknown', 'audiobook-metadata')`, audiobook)
-	applyWorkClaims(t, pool, audiobook, "audiobook", answer("books-metadata", nil))
-	assertWorkClaims(t, pool, audiobook, map[string]string{"openlibrary_work": "OL1W/unknown/audiobook-metadata"})
+	applyWorkClaims(t, pool, audiobook, "audiobook",
+		answer("books-metadata", nil, bookid.WorkClaim{Provider: "hardcover", ProviderID: "9"}))
+	assertWorkClaims(t, pool, audiobook, map[string]string{
+		"openlibrary_work": "OL1W/unknown/audiobook-metadata",
+		"hardcover":        "9/unknown/books-metadata",
+	})
 }
 
 // TestSeparateBookWorkIDsMigrationDB replays the migration in a scratch
