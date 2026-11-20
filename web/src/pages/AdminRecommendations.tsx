@@ -184,7 +184,6 @@ function RecSettingField({
           </div>
         )}
         {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
-        {envNote}
       </div>
     );
   }
@@ -210,7 +209,6 @@ function RecSettingField({
           className="w-40"
         />
         {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
-        {envNote}
       </div>
     );
   }
@@ -236,7 +234,6 @@ function RecSettingField({
         placeholder={hint}
       />
       {hint && type === "duration" && <p className="text-muted-foreground text-xs">{hint}</p>}
-      {envNote}
     </div>
   );
 }
@@ -679,10 +676,7 @@ export default function AdminRecommendations() {
                         managedByEnv={envVars[EMBEDDING_MODEL_KEY]}
                         onChange={(next) => handleLocalChange(EMBEDDING_MODEL_KEY, next)}
                         onCommit={(next) => {
-                          if (
-                            !envVars[EMBEDDING_MODEL_KEY] &&
-                            next !== (serverSettings[EMBEDDING_MODEL_KEY] ?? "")
-                          ) {
+                          if (next !== (serverSettings[EMBEDDING_MODEL_KEY] ?? "")) {
                             void handleCommit(EMBEDDING_MODEL_KEY, next);
                           }
                         }}

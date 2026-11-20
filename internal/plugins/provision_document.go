@@ -35,6 +35,9 @@ type ProvisionDocument struct {
 	Plugins     map[string]ProvisionPlugin     `json:"plugins"`
 	AIProviders map[string]ProvisionAIProvider `json:"ai_providers"`
 	secrets     map[provisionReference]string
+	// secretBytes counts every secret the document's references read, plugin
+	// and AI keys alike, against the one 1 MiB limit.
+	secretBytes int
 	variable    string
 }
 
@@ -147,10 +150,9 @@ func (d *ProvisionDocument) DeclaredAIProviders() ([]config.AIProvider, bool, er
 		return nil, false, nil
 	}
 	providers := make([]config.AIProvider, 0, len(d.AIProviders))
-	var keyBytes int
 	for _, id := range slices.Sorted(maps.Keys(d.AIProviders)) {
 		declared := d.AIProviders[id]
-		apiKey, err := d.resolveAIProviderKey(declared.APIKey, &keyBytes)
+		apiKey, err := d.resolveAIProviderKey(declared.APIKey)
 		if err != nil {
 			return nil, true, fmt.Errorf("ai_providers.%s.api_key: %w", id, err)
 		}
@@ -167,25 +169,22 @@ func (d *ProvisionDocument) DeclaredAIProviders() ([]config.AIProvider, bool, er
 	return providers, true, nil
 }
 
-// resolveAIProviderKey reads a declared provider's key, adding a file or
-// variable it names to the document's secret budget. The key is read here
-// rather than with the document, so a server that applies no providers, such
-// as a frontend, needs no AI keys.
-func (d *ProvisionDocument) resolveAIProviderKey(value map[string]any, keyBytes *int) (string, error) {
+// resolveAIProviderKey reads a declared provider's key, which the schema
+// allows only as a fromFile or fromEnv reference, within the document's secret
+// budget. The key is read here rather than with the document, so a server
+// that applies no providers, such as a frontend, needs no AI keys.
+func (d *ProvisionDocument) resolveAIProviderKey(value map[string]any) (string, error) {
 	if value == nil {
 		return "", nil
 	}
-	if ref, ok := referenceFrom(value); ok {
-		if err := d.captureSecret(ref, keyBytes); err != nil {
-			return "", err
-		}
+	ref, ok := referenceFrom(value)
+	if !ok {
+		return "", errors.New("expected a fromFile or fromEnv reference")
 	}
-	key, err := d.resolveField(value, nil, true)
-	if err != nil {
+	if err := d.captureSecret(ref, &d.secretBytes); err != nil {
 		return "", err
 	}
-	apiKey, _ := key.(string)
-	return apiKey, nil
+	return d.secrets[ref], nil
 }
 
 func readProvisionFile(path string) ([]byte, error) {
@@ -257,7 +256,6 @@ func parseProvisionDocument(data []byte, allowYAML bool) (*ProvisionDocument, er
 	if err := decoder.Decode(&document); err != nil {
 		return nil, errors.New("invalid deployment declaration")
 	}
-	var secretBytes int
 	document.secrets = make(map[provisionReference]string)
 	for _, id := range slices.Sorted(maps.Keys(document.Plugins)) {
 		plugin := document.Plugins[id]
@@ -270,7 +268,7 @@ func parseProvisionDocument(data []byte, allowYAML bool) (*ProvisionDocument, er
 		}
 		for entry, fields := range plugin.Config {
 			for field, value := range fields {
-				if err := document.captureReferences(value, &secretBytes); err != nil {
+				if err := document.captureReferences(value, &document.secretBytes); err != nil {
 					return nil, fmt.Errorf("plugins.%s.config.%s.%s: %w", id, entry, field, err)
 				}
 			}

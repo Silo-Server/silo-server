@@ -94,7 +94,7 @@ export function ModelField({
           disabled={managedByEnv != null}
           className="font-mono text-[13px]"
         />
-        {suggestions.length > 0 && managedByEnv == null && (
+        {suggestions.length > 0 && (
           <Select
             value={suggestions.some((model) => model.id === value) ? value : ""}
             onOpenChange={(open) => {

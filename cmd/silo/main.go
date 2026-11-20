@@ -2082,7 +2082,7 @@ func main() {
 		)
 		// A frontend server provisions plugins but stores no settings from
 		// its environment, so it reads the document here.
-		if bc.Mode == "frontend" && !*migrateOnly {
+		if bc.Mode == "frontend" {
 			if deploymentDocument, err = plugins.ReadProvisionDocument(); err != nil {
 				log.Fatalf("read deployment configuration: %v", err)
 			}
