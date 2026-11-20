@@ -761,6 +761,10 @@
 # Stored content-rating ages take what access.Normalize resolves now.
 ./internal/database TestPostgresContentRatingAgeRederive
 
+# Stored ISBNs and ebook ISBN group keys become ISBN-13, one owner per item type.
+./internal/database TestPostgresISBN13Backfill
+./internal/database TestPostgresISBN13BackfillRetriesUniqueViolation
+
 # The Postgres auto-tuning restart warning lists only settings a restart would change.
 ./internal/database TestPostgresSettingsPendingRestartPostgres
 
