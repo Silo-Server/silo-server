@@ -97,7 +97,10 @@ func TestVirtualProviderLinkLatencyKeepsSlowestRecentObservation(t *testing.T) {
 
 // slowLinkAnchorFixture builds the virtual seek-anchor path for a pinned
 // release owned by one provider link, with the probe seam installed so a test
-// observes the budget each attempt grants instead of reading bytes.
+// observes the budget each attempt grants instead of reading bytes. It uses the
+// segmented delivery: an unresolved anchor degrades to the requested position
+// there, while a progressive remux refuses the start that would produce no
+// bytes (see TestPrepareTransportTimelineSlowAnchorIndexRefusesAProgressiveRemuxStart).
 func slowLinkAnchorFixture(t *testing.T, ownerInstallationID int) (*PlaybackHandler, *models.MediaFile, *playback.Session, *playback.PlanV3) {
 	t.Helper()
 	const (
@@ -121,7 +124,7 @@ func slowLinkAnchorFixture(t *testing.T, ownerInstallationID int) (*PlaybackHand
 	session := &playback.Session{ID: "session-slow-link", UserID: 1, ProfileID: "profile-1"}
 	plan := &playback.PlanV3{
 		PlanID:   "plan:slow-link",
-		Delivery: playback.DeliveryRemuxProgressiveV3,
+		Delivery: playback.DeliveryRemuxHLSV3,
 		Timeline: playback.TimelineV3{SourceStartSeconds: 30, PlayerStartSeconds: 30},
 	}
 	return handler, file, session, plan

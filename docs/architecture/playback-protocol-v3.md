@@ -1199,6 +1199,34 @@ partway, or FFmpeg fails, the server aborts the response instead (no final chunk
 on HTTP/1.1, a stream reset on HTTP/2). A client must treat an incomplete
 response as a transport failure, never as the end of the title.
 
+### Copy-video seek anchor
+
+A copy-video transport copies the source's compressed video, so FFmpeg can only
+start it at a source keyframe. `stream_origin_seconds` is the keyframe FFmpeg's
+input seek actually uses: the last keyframe at or before
+`source_start_seconds`. The distance between them is the copied pre-roll, and it
+is bounded by the GOP that contains the requested position — at most one GOP,
+not a fixed number of seconds.
+
+A progressive copy remux is one forward-only response, so the client starts at
+`stream_origin_seconds` and plays the pre-roll before reaching the requested
+position. A non-seek replan that rebuilds onto that route — an audio switch, for
+example — inherits the same origin: the switch lands at the preceding keyframe,
+up to one GOP behind the position that was playing. That offset is intended. A
+client must not try to correct it by seeking `video.currentTime`: a seek on this
+stream restarts it at its origin (or is answered by a server reanchor) and
+cannot remove the copied pre-roll.
+
+Segmented HLS does not carry the same offset. Its player starts at the target
+segment rather than at the transport's first frame, because the segment layer
+waits for, or restarts FFmpeg at, that segment.
+
+Re-encoding the leading GOP to remove the pre-roll was considered and rejected:
+it changes the delivery and play method — a CPU-cost and route decision, not a
+seek fix. Starting at the next keyframe instead would skip past the requested
+position, which is worse for the viewer than a short rewind. The pre-roll is
+therefore kept.
+
 ### `source.duration_seconds`
 
 The media's full runtime, and nothing else. Specifically:

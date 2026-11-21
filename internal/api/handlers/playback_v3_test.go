@@ -5994,6 +5994,98 @@ func TestHandleReplanPlaybackV3SeekReanchorReusesCopyHLSTransport(t *testing.T) 
 	}
 }
 
+// TestHandleReplanPlaybackV3SeekReanchorRebuildsBeforeTheRestartedWindow pins
+// the fix for a seek that restarts the generation in place: the restarted
+// generation begins at the forward target, so a later backward seek names a
+// position its playlist cannot produce. The plan still carries the window from
+// before the restart. Reusing that generation would hand the client a playlist
+// whose first segment is past the requested position, which is what clamped a
+// production playhead from 328 s forward to 931 s. The backward target is a new
+// window, so the transport must be rebuilt at it.
+func TestHandleReplanPlaybackV3SeekReanchorRebuildsBeforeTheRestartedWindow(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	file.Container = "mkv"
+	file.FilePath = writePlaybackTestMediaFile(t, "movie.mkv")
+	file.ExternalSubtitles = []models.ExternalSubtitle{
+		{Path: writePlaybackTestMediaFile(t, "movie.de.srt"), Language: "de", Format: "srt"},
+	}
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3(nil))
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	stubCopySeekAnchorV3(handler)
+
+	startRequest := v3HandlerStartRequest()
+	startRequest.Capabilities.Containers = []string{"m3u8"}
+	startRequest.ClientPlaybackContext.Deliveries = map[string]playback.DeliveryCapabilityV3{
+		playback.DeliveryClassHLSV3: {
+			Enabled: true, SupportedOnDevice: true,
+			Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true},
+		},
+	}
+	german := 0
+	startRequest.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", german)
+	startRequest.SubtitleTrackIndex = &german
+	startRR := httptest.NewRecorder()
+	handler.HandleStartPlayback(startRR, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
+	var started playback.DecisionResponseV3
+	if startRR.Code != http.StatusCreated || json.Unmarshal(startRR.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start status=%d body=%s", startRR.Code, startRR.Body.String())
+	}
+	if started.PlaybackPlan.Delivery != playback.DeliveryRemuxHLSV3 {
+		t.Fatalf("start plan = %#v, want copy HLS", started.PlaybackPlan)
+	}
+	before := handler.tm.GetTranscodeSession(started.SessionID)
+	if before == nil {
+		t.Fatal("start created no local HLS transport")
+	}
+	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
+
+	// The forward seek the segment handler served: restart in place at segment
+	// 459 (source 918 s). The plan the client still holds keeps its old window.
+	if err := before.RestartWithCopySeekAnchor(context.Background(), 918, 459, 918); err != nil {
+		t.Fatalf("restart at the forward target: %v", err)
+	}
+	if got := before.SegmentProgress(time.Now()).StartSegmentNumber; got != 459 {
+		t.Fatalf("restarted generation starts at segment %d, want 459", got)
+	}
+
+	replanned := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion:       playback.ProtocolV3,
+		Operation:             playback.ReplanOperationSeekReanchorV3,
+		PlaybackAttemptID:     startRequest.PlaybackAttemptID,
+		ReplanRequestID:       "seek-reanchor-before-restart-0001",
+		FailedPlanID:          started.PlaybackPlan.PlanID,
+		PlanAttemptID:         "seek-reanchor-before-restart-attempt-0001",
+		PlanAttemptKey:        started.PlaybackPlan.PlanAttemptKey,
+		AttemptCount:          1,
+		QualityPreference:     startRequest.QualityPreference,
+		PositionSeconds:       328.1,
+		SelectedTracks:        started.PlaybackPlan.SelectedTracks,
+		Capabilities:          startRequest.Capabilities,
+		ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	})
+	if replanned.PlaybackPlan == nil {
+		t.Fatalf("seek reanchor returned no plan: outcome=%s terminal=%+v", replanned.Outcome, replanned.Terminal)
+	}
+	after := handler.tm.GetTranscodeSession(started.SessionID)
+	if after == before {
+		t.Fatal("seek reanchor reused the generation restarted at 918 s for a 328 s target")
+	}
+	if got := after.SegmentProgress(time.Now()).StartSegmentNumber; got != 164 {
+		t.Fatalf("rebuilt generation starts at segment %d, want 164 for 328.1 s", got)
+	}
+	timeline := replanned.PlaybackPlan.Timeline
+	if timeline.SeekWindowStartSeconds == nil {
+		t.Fatalf("rebuilt plan timeline = %#v, want a seek window at the target", timeline)
+	}
+	if got := *timeline.SeekWindowStartSeconds; got < 327 || got > 329 {
+		t.Fatalf("rebuilt plan seek window starts at %v, want the requested ~328.1 s", got)
+	}
+}
+
 // TestHandleReplanPlaybackV3SeekReanchorRebuildsProgressiveTransport pins the
 // fix for the in-place-seek regression: a server_remux_progressive response is
 // one continuous byte stream, not a segment-addressable manifest, so a
@@ -10977,4 +11069,43 @@ func TestHandleReplanPlaybackV3VersionSwitchWhilePausedKeepsPlayheadAndPause(t *
 		}
 		assertPausedPlayheadV3(t, f.handler, started.SessionID, pausedAt)
 	})
+}
+
+func TestNonSeekReplanPositionV3KeepsTheClientPlayheadFreshV3(t *testing.T) {
+	sessionMgr := playback.NewSessionManager(0, 0)
+	session, err := sessionMgr.StartSession(1, "profile-1", 7, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	// Progress posts arrive about every 10s. The viewer switches audio at
+	// 67.45s just after a report at 59.57s; the session position is the older
+	// sample, and preferring it rewound the replacement by ~10s.
+	if err := sessionMgr.UpdateProgress(session.ID, 59.56841, false); err != nil {
+		t.Fatalf("UpdateProgress: %v", err)
+	}
+	h := NewPlaybackHandler(sessionMgr)
+
+	cases := []struct {
+		name      string
+		requested float64
+		want      float64
+	}{
+		{name: "fresh client playhead wins over the last progress sample", requested: 67.449944, want: 67.449944},
+		{name: "a value behind the session is treated as stale", requested: 45, want: 59.56841},
+		{name: "a zero snapshot falls back to the session", requested: 0, want: 59.56841},
+		{name: "a rebuilt element at the route start falls back to the session", requested: 10, want: 59.56841},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := h.nonSeekReplanPositionV3(session.ID, tc.requested)
+			if got == nil || math.Abs(*got-tc.want) > 1e-6 {
+				t.Fatalf("position = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	// A session the client no longer names leaves the reported position intact.
+	if got := h.nonSeekReplanPositionV3("missing-session", 42.5); got == nil || *got != 42.5 {
+		t.Fatalf("missing session position = %v, want 42.5", got)
+	}
 }

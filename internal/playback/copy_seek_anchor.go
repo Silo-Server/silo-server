@@ -521,6 +521,11 @@ func (c *copySeekAnchorCache) probeRunner() anchorProbeRunner {
 // so callers need both timestamps: requestedSeekSeconds remains the -ss input,
 // while the returned anchor defines the stream's real timeline origin.
 //
+// The gap between the requested position and this anchor is a transport
+// invariant, not an unresolved bug. Callers start the copy stream at the anchor
+// and clients must not seek it away. See
+// docs/architecture/playback-protocol-v3.md#copy-video-seek-anchor.
+//
 // The one-packet framecrc output is intentional. ffprobe read intervals discard
 // Matroska pre-roll at an exact keyframe boundary, while FFmpeg stream copy
 // emits that preceding packet. Running FFmpeg with the transport's real seek
