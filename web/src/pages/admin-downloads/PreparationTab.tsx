@@ -1056,7 +1056,7 @@ function PreparationDetails({
                 key={`${r.user_id}-${r.device_id ?? "web"}-${i}`}
                 className="grid min-w-0 grid-cols-[1fr_auto] items-baseline gap-x-2"
               >
-                <span className="min-w-0 truncate font-medium text-[var(--terminal-fg)]">
+                <span className="min-w-0 font-medium wrap-anywhere text-[var(--terminal-fg)]">
                   {r.profile_name
                     ? t(`${K}.details.requesterProfile`, {
                         name: requesterName(r),
@@ -1067,7 +1067,7 @@ function PreparationDetails({
                 <span className="text-[10px] text-[var(--terminal-muted)]">
                   {downloadEntryStatus(r.status).label}
                 </span>
-                {/* Full width: a long translated status only competes with the name line. */}
+                {/* Full width: a long translated status only shares a line with the name, which wraps. */}
                 <span className="col-span-2 truncate text-[10px] text-[var(--terminal-muted)]">
                   {requesterDevice(r)}
                 </span>
