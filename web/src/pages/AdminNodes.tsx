@@ -1176,6 +1176,7 @@ function NodeForm({
         <div className="space-y-2">
           <Label>{t("web.admin.nodes.form.url")}</Label>
           <Input
+            dir="ltr"
             value={url}
             disabled={isLocked("url")}
             onChange={(e) => setUrl(e.target.value)}
@@ -1198,6 +1199,8 @@ function NodeForm({
           <div className="space-y-2">
             <Label>{t("web.admin.nodes.form.publicUrl")}</Label>
             <Input
+              // The URL reads left to right; the translated placeholder keeps the page's direction.
+              dir={publicUrl ? "ltr" : undefined}
               value={publicUrl}
               disabled={isLocked("public_url")}
               onChange={(e) => setPublicUrl(e.target.value)}
