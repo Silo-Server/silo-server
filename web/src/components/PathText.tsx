@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 
-// Only the first folders show before a path is cut, so at most this many are
-// isolated and the rest stays one text node. An audit row can hold any request
-// path, and one with thousands of separators must not become thousands of
-// elements.
-const MAX_FOLDERS = 32;
+// Only the first folders show before a path is cut, so only the folders before
+// the first this-many separators are isolated, and the rest stays one text
+// node. An audit row can hold any request path, and one with thousands of
+// separators must not become thousands of elements.
+const MAX_SEPARATORS = 32;
 
 /**
  * A file path, or a URL's path, that reads left to right, folder by folder, in
@@ -19,7 +19,7 @@ export function PathText({ path }: { path: string }) {
   const separator = path.includes("/") ? "/" : "\\";
   const nodes: ReactNode[] = [];
   let start = 0;
-  for (let folders = 0; folders < MAX_FOLDERS; folders++) {
+  for (let separators = 0; separators < MAX_SEPARATORS; separators++) {
     const end = path.indexOf(separator, start);
     if (end < 0) break;
     if (end > start) nodes.push(<bdi key={start}>{path.slice(start, end)}</bdi>);

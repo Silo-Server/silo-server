@@ -4,10 +4,10 @@ import { describe, expect, it } from "vitest";
 import { PathText } from "./PathText";
 
 describe("PathText", () => {
-  it("isolates only the first folders of a path with many separators", () => {
+  it("isolates only the folders before the first 32 separators", () => {
     // An audit row can hold any request path, so a hostile one must not
     // become one element per folder.
-    const path = "/a".repeat(100_000);
+    const path = "/a".repeat(33);
     const html = renderToStaticMarkup(
       <span>
         <PathText path={path} />
