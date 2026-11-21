@@ -94,6 +94,10 @@ const (
 	meilisearchKeywordProximityShare = 0.6
 )
 
+// meilisearchNamePrefixFallbackReason explains in search diagnostics why a
+// name_prefix search ran on PostgreSQL.
+const meilisearchNamePrefixFallbackReason = "name_prefix searches run on PostgreSQL"
+
 // meilisearchTwoTermSearchAttributes are the attributes a two-term search's
 // keyword query matches; genres and keywords are left out. Studios and
 // networks are included so a name such as "studio ghibli" finds that studio's
@@ -238,6 +242,18 @@ func NewMeilisearchSearchProvider(
 }
 
 func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearchRequest) (*CatalogSearchResult, error) {
+	if p != nil && p.fallback != nil && strings.TrimSpace(req.Access.NamePrefix) != "" {
+		// The index has no sort-title key to filter on, and its ranking window
+		// is capped, so a prefix applied afterwards would drop matches ranked
+		// past the window. PostgreSQL applies it before ranking and limits.
+		// This is routing, not an outage, so it leaves the provider's health
+		// alone and only tells the response why PostgreSQL answered.
+		result, err := p.fallback.Search(ctx, req)
+		if result != nil {
+			result.FallbackReason = meilisearchNamePrefixFallbackReason
+		}
+		return result, err
+	}
 	if req.CursorPaging {
 		return p.searchCursorPage(ctx, req)
 	}
