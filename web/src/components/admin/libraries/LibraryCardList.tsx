@@ -167,11 +167,12 @@ function LibraryCardPaths({ paths }: { paths: string[] }) {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
   // Each path reads left to right in any language, and each of its lines, wrapped
-  // or not, sits on the page's start side.
+  // or not, sits on the page's start side. w-fit lets a folder name that can't
+  // wrap widen its line toward the card's end side instead of past its start edge.
   const pathList = (
     <ul className="text-muted-foreground space-y-1 font-mono text-xs break-all">
       {paths.map((path) => (
-        <li key={path} dir="ltr" className="align-with-page">
+        <li key={path} dir="ltr" className="align-with-page w-fit">
           {path}
         </li>
       ))}
