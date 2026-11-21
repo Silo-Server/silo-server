@@ -986,12 +986,16 @@ function MediaCell({ session }: { session: AdminSession }) {
   );
 }
 
-/** Position through the title, with a bar, and whether the viewer paused. */
+/**
+ * Position through the title, with a bar, and whether the viewer paused. It
+ * wraps, so a narrow Stream column puts the pause label on a second line
+ * rather than over the User column.
+ */
 function ProgressLine({ session }: { session: AdminSession }) {
   const t = useT();
   const progress = getPlaybackProgress(session);
   return (
-    <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-[11px]">
+    <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
       {progress !== null ? (
         <span
           aria-hidden="true"
