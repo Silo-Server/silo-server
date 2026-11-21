@@ -101,10 +101,11 @@ function settingValues(t: Translate, setting: RestoreSetting): { now: string; ba
  * A setting key or dotted name that may break after its dots and underscores,
  * so a narrow column wraps "playback.watched_threshold" or "silo.tmdb 1.2.3"
  * between words, not inside one. A dot before a digit, another dot or a space
- * stays, keeping a version number and an ellipsis whole.
+ * stays, keeping a version number and an ellipsis whole, and so does a dot or
+ * underscore before "*", so a prefix like "s3.*" keeps its "*".
  */
 export function BreakableKey({ value }: { value: string }) {
-  const parts = value.replace(/(_|\.(?=[^\d.\s]))/g, "$1\u0000").split("\u0000");
+  const parts = value.replace(/(_(?!\*)|\.(?=[^\d.\s*]))/g, "$1\u0000").split("\u0000");
   return (
     <>
       {parts.map((part, position) => (
