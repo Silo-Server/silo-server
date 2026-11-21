@@ -2421,7 +2421,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
   }
 
-  @media (max-width: 639px) {
+  /* The admin page header's phone layout uses Tailwind's `sm` breakpoint, so
+     the `sm:` and `max-sm:` classes pages put in their header actions switch
+     at the same width. Rem in a media query follows the browser's default
+     font size, not the in-app text scale, so a px width here would disagree
+     with those classes whenever the browser's font size isn't 16px. */
+  @variant max-sm {
     .admin-shell .page-header {
       align-items: stretch;
     }
