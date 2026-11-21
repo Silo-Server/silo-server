@@ -84,12 +84,17 @@ describe("DashboardGrid pointer resize", () => {
     const resizeWidget = vi.fn();
     const { rerender } = render(<Grid layout={layoutWith(resized, resizeWidget)} />);
     const handle = pressHandle();
+    vi.spyOn(handle, "hasPointerCapture").mockReturnValue(true);
+    const release = vi.spyOn(handle, "releasePointerCapture");
     // Remove on the widget before it, activated from the keyboard while the
     // mouse holds the handle: Playback keeps its size but moves. Reset and a
     // server layout change the same order and sizes.
     rerender(
       <Grid layout={layoutWith([{ id: "playback-24h", span: 9, rows: 2 }], resizeWidget)} />,
     );
+    // The handle lets go of the pointer as the resize ends.
+    expect(release).toHaveBeenCalledWith(1);
+    fireEvent.lostPointerCapture(handle, { pointerId: 1 });
     fireEvent.pointerMove(handle, { pointerId: 1, clientX: 400 });
     fireEvent.pointerUp(handle, { pointerId: 1, clientX: 400 });
     expect(resizeWidget).not.toHaveBeenCalled();

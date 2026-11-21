@@ -401,6 +401,11 @@ export function DashboardGrid({
     if (session && session.geometry !== layoutGeometry(entries)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- the session lives in a ref, which a render cannot clear; ending it before paint keeps the release from saving
       endResize();
+      // Released after the session ends, so the lost-capture event it fires
+      // finds no session and saves nothing.
+      if (session.handle.hasPointerCapture(session.pointerId)) {
+        session.handle.releasePointerCapture(session.pointerId);
+      }
     }
   }, [endResize, entries]);
 
