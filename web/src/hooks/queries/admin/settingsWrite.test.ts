@@ -502,6 +502,68 @@ it("lets a refused settings save through after a reload, keeping the edits only 
   expect(result.current.getValue("email.smtp_host")).toBe("");
   expect(result.current.getValue("email.smtp_password")).toBe("");
 });
+it("keeps every edit when a reload after a refused save can't read which secrets are set", async () => {
+  const stored = { "branding.server_name": "Silo", "server.log_level": "info" };
+  let tag = '"tagA"';
+  let statusFails = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT")
+        return response(
+          {
+            type: "https://siloserver.org/docs/api/v2/problems/precondition_failed",
+            title: "Precondition failed",
+            status: 412,
+          },
+          412,
+        );
+      if (url.endsWith("/sensitive-status"))
+        return statusFails
+          ? response(
+              {
+                type: "https://siloserver.org/docs/api/v2/problems/internal_error",
+                title: "Internal error",
+                status: 500,
+              },
+              500,
+            )
+          : response({ configured: [], managed_by_env: [] });
+      return response(stored, 200, tag);
+    }),
+  );
+  const { result } = renderHook(
+    () =>
+      useSettingsForm({
+        keys: ["branding.server_name", "server.log_level", "download.artifact_dir"],
+      }),
+    fixture(),
+  );
+  await waitFor(() => expect(result.current.sensitiveStatusReady).toBe(true));
+  await waitFor(() => expect(result.current.getValue("branding.server_name")).toBe("Silo"));
+  act(() => result.current.setValue("branding.server_name", "Casa"));
+  // Unset, so no snapshot carries it: only the status tells it from a secret.
+  act(() => result.current.setValue("download.artifact_dir", "/srv/artifacts"));
+  tag = '"tagB"';
+  statusFails = true;
+  await act(async () => {
+    await expect(result.current.save()).rejects.toBeInstanceOf(Error);
+  });
+  const action = vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.action as
+    | { onClick: (event: { preventDefault: () => void }) => void }
+    | undefined;
+  const failures = vi.mocked(toast.error).mock.calls.length;
+  act(() => action?.onClick({ preventDefault() {} }));
+  await waitFor(() => expect(vi.mocked(toast.error).mock.calls.length).toBeGreaterThan(failures));
+
+  expect([...result.current.dirtyKeys].sort()).toEqual([
+    "branding.server_name",
+    "download.artifact_dir",
+  ]);
+  expect(result.current.getValue("download.artifact_dir")).toBe("/srv/artifacts");
+  expect(toast.dismiss).not.toHaveBeenCalled();
+});
+
 it("refreshes the link capabilities when the public URL changes", async () => {
   const fetchMock = vi
     .fn()

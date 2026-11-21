@@ -337,9 +337,10 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         return;
       }
       const fresh = settingsResult.isError ? undefined : settingsResult.data;
-      // Unknown when the status can't be read: then a secret may be set.
       const configured = statusResult.isError ? undefined : statusResult.data?.configured;
-      if (!fresh || !validatorOf(fresh)) {
+      // Without the status, unset settings and secrets look alike, and a
+      // passing read error shouldn't cost every edit: keep them and retry.
+      if (!fresh || !validatorOf(fresh) || !configured) {
         toast.error(t("web.admin.settings.hooks.settings.conflict.reloadFailed"));
         return;
       }
@@ -347,11 +348,11 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         const was = editedOver.current.get(key);
         const now = Object.hasOwn(fresh, key) ? fresh[key] : undefined;
         if (!was || was.value !== now) return true;
-        return now === undefined && (was.secretSet || (configured?.includes(key) ?? true));
+        return now === undefined && (was.secretSet || configured.includes(key));
       };
       // The Redis database number is read from a saved URL no snapshot shows.
       const unverifiable = (key: string) =>
-        changed(key) || (REDIS_KEYS.includes(key) && (configured?.includes("redis.url") ?? true));
+        changed(key) || (REDIS_KEYS.includes(key) && configured.includes("redis.url"));
       const drafts = [...dirtyRef.current];
       const replaced = drafts.some(unverifiable) ? drafts : [];
       // Retire a ChatGPT sign-in callback that started before this reload.
@@ -360,9 +361,12 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         editVersions.current.set(key, (editVersions.current.get(key) ?? 0) + 1);
         editedOver.current.delete(key);
       }
+      // Without a draft the field shows the settings cache, which a background
+      // read may have moved past `fresh`; the next edit's baseline comes from
+      // the same cache.
       setLocalValues((previous) => {
         const next = { ...previous };
-        for (const key of replaced) next[key] = fresh[key] ?? "";
+        for (const key of replaced) delete next[key];
         return next;
       });
       setDirty((previous) => new Set([...previous].filter((key) => !replaced.includes(key))));
