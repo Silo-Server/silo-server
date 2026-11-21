@@ -442,16 +442,20 @@ export default function PlaybackSettings() {
                       checked={selectedDevices.includes(row.path)}
                       aria-label={row.description}
                       disabled={deviceSwitchLocked(row.path)}
-                      onCheckedChange={() =>
-                        form.setValue(
-                          "playback.hw_device",
-                          toggleHWDevice(
-                            form.getValue("playback.hw_device"),
-                            row.path,
-                            deviceOrder,
-                          ),
-                        )
-                      }
+                      onCheckedChange={() => {
+                        const next = toggleHWDevice(
+                          form.getValue("playback.hw_device"),
+                          row.path,
+                          deviceOrder,
+                        );
+                        // Back to the saved devices, however the saved value
+                        // is spaced, is no change.
+                        if (next === savedDevices.join(",")) {
+                          form.resetValue("playback.hw_device");
+                        } else {
+                          form.setValue("playback.hw_device", next);
+                        }
+                      }}
                     />
                   </SettingFieldRow>
                 ))}
