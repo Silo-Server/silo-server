@@ -371,7 +371,7 @@ export function buildSchemaValues(
     const fieldType = ownValue(fieldTypes, field.key);
     const coerced = coerceFieldValue(field, rawSource, fieldType);
     if (coerced === undefined) {
-      if (options?.explicitClears && !field.secret && field.control !== "PASSWORD") {
+      if (options?.explicitClears && !isSecretField(field)) {
         out[field.key] = clearedFieldValue(field, fieldType);
       }
       continue;
