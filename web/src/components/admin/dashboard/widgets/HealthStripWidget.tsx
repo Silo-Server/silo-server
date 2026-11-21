@@ -197,15 +197,17 @@ function HealthCell({
   tone?: "warn" | "error";
   to?: string;
 }) {
+  // Text sizes are rem, like the dashboard row and the cell padding: a smaller
+  // browser font shrinks those, and px text would then outgrow the row.
   const body = (
     <>
-      <div className="text-muted-foreground flex items-center gap-1.5 text-[11px] font-medium">
+      <div className="text-muted-foreground flex items-center gap-1.5 text-[0.6875rem] font-medium">
         <Icon className="h-3.5 w-3.5" />
         {label}
       </div>
       <div
         className={cn(
-          "mt-1 truncate text-[15px] leading-tight font-bold tabular-nums",
+          "mt-1 truncate text-[0.9375rem] leading-tight font-bold tabular-nums",
           tone === "error" && "text-destructive",
           tone === "warn" && "text-amber-500",
         )}
@@ -214,7 +216,7 @@ function HealthCell({
         {value}
       </div>
       {detail ? (
-        <div className="text-muted-foreground mt-1 truncate text-[10px]">{detail}</div>
+        <div className="text-muted-foreground mt-1 truncate text-[0.625rem]">{detail}</div>
       ) : null}
     </>
   );
