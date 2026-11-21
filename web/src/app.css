@@ -57,6 +57,7 @@
   /* ── Interactive ─────────────────────────────────────────── */
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
   /* Text in the primary color. An admin accent sets --primary-text to a
      variant that reads on Cinema Dark's surfaces (lib/accentColor.ts); fills,
      borders, and rings keep the accent itself. */
@@ -558,6 +559,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      --surface-raised   Elevated surface (modals, floating panels)
      --card             Card background (usually = surface)
      --primary          Primary accent/action color
+     --primary-hover    Hovered solid primary fill under --primary-foreground
      --secondary        Secondary element backgrounds
      --muted            Muted backgrounds
      --accent           Active/highlighted element backgrounds
@@ -641,6 +643,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     /* Primary: white — for play buttons, key CTAs, active indicators */
     --primary: #e8e8ec;
     --primary-foreground: #141417;
+    /* The solid primary fill on hover: the primary faded a tenth toward the
+       page. An admin accent sets its own (web/src/lib/accentColor.ts), which
+       lightens instead when this fade would take its label below 4.5:1. */
+    --primary-hover: color-mix(in srgb, var(--primary) 90%, var(--background));
 
     /* Secondary & Muted: subtle surface variations */
     --secondary: #232328;
@@ -1806,8 +1812,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     box-shadow: 0 16px 36px -20px color-mix(in srgb, var(--primary) 60%, transparent);
   }
   .pill-primary:hover {
-    filter: brightness(0.96);
     transform: translateY(-1px);
+  }
+  /* Mouse only, like the `hover:` variant: a tap leaves :hover stuck on touch. */
+  :where(:root[data-fine-pointer="true"]) .pill-primary:hover {
+    background-color: var(--primary-hover);
   }
   .pill-secondary {
     background-color: var(--secondary);
