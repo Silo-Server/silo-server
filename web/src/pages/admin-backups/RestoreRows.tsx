@@ -288,14 +288,17 @@ export const ItemRow = memo(function ItemRow({
         />
         <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
           {/* block: Label is a flex box, which would clip the name without an ellipsis.
-              Chromium breaks at <wbr> even under nowrap, so a one-line row hides them.
-              The name caps its width only when a detail sits beside it. */}
+              Beside a detail, a one-line row stops the name at 60% and ends it in "…";
+              Chromium breaks at <wbr> even under nowrap, so that row hides them. A name
+              with nothing beside it wraps instead, so it is never cut short. */}
           <Label
             htmlFor={controlId}
             title={label}
             className={cn(
-              "block shrink-0 text-sm font-medium @max-2xl:wrap-anywhere @2xl:truncate @2xl:[&_wbr]:hidden",
-              secondary ? "@2xl:max-w-[60%]" : "@2xl:max-w-full",
+              "block max-w-full shrink-0 text-sm font-medium",
+              secondary
+                ? "@max-2xl:wrap-anywhere @2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden"
+                : "wrap-anywhere",
               !item.selectable && "text-muted-foreground",
             )}
           >
