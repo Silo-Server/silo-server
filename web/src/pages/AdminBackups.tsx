@@ -40,6 +40,7 @@ import {
   BACKUP_KEEP_KEY,
   BACKUP_ROWS_SHOWN,
   BACKUP_SETTING_KEYS,
+  BACKUP_TIME_KEY,
   backupRowId,
   backUpNowBlocker,
   backupErrorMessage,
@@ -73,6 +74,41 @@ function useMinuteClock() {
     return () => window.clearInterval(timer);
   }, []);
   return now;
+}
+
+/**
+ * Whether the backup task's daily trigger (`scheduledTime`) is still catching
+ * up with a Start time saved in the last 30 s. Each server moves the trigger a
+ * moment after the save, and until the server answering has, the task's next
+ * run belongs to the old schedule. Meanwhile the task is read again every 2 s,
+ * since a realtime update can come late or not at all. After 30 s the task's
+ * next run is shown anyway: a server that still hasn't moved the trigger runs
+ * the old schedule.
+ */
+function useScheduleSettling(scheduledTime: string | undefined) {
+  const queryClient = useQueryClient();
+  // A new object for each save, so saving again restarts the 30 s.
+  const [saved, setSaved] = useState<{ time: string } | null>(null);
+  const settling = saved !== null && saved.time !== scheduledTime;
+  useEffect(() => {
+    if (saved === null) return;
+    const expire = window.setTimeout(() => setSaved(null), 30_000);
+    return () => window.clearTimeout(expire);
+  }, [saved]);
+  useEffect(() => {
+    if (!settling) return;
+    const poll = window.setInterval(
+      () =>
+        // A read slower than the interval finishes instead of restarting.
+        void queryClient.invalidateQueries(
+          { queryKey: adminKeys.task("backup") },
+          { cancelRefetch: false },
+        ),
+      2_000,
+    );
+    return () => window.clearInterval(poll);
+  }, [queryClient, settling]);
+  return { settling, timeSaved: (time: string) => setSaved({ time }) };
 }
 
 function asDestination(value: string): AdminBackupDestination {
@@ -170,9 +206,12 @@ export default function AdminBackups() {
   const keep = list?.keep ?? (Number(form.getPersistedValue(BACKUP_KEEP_KEY)) || 7);
   const enabled = list?.enabled ?? form.getPersistedValue(BACKUP_ENABLED_KEY) !== "false";
   const taskNextRunAt = backupTask.data?.next_run_at;
+  const schedule = useScheduleSettling(
+    backupTask.data?.triggers.find((trigger) => trigger.type === "daily")?.time_of_day,
+  );
   const paused = backupsPaused(configured, warnings);
   // A paused server's next run fails, so neither line names it.
-  const next = enabled && !paused ? nextBackupRun(now, taskNextRunAt) : null;
+  const next = enabled && !paused && !schedule.settling ? nextBackupRun(now, taskNextRunAt) : null;
   // Once the scheduled time passes, read the schedule again instead of
   // showing the next run as unknown until something else refreshes it.
   useEffect(() => {
@@ -249,7 +288,9 @@ export default function AdminBackups() {
     });
 
   const save = async () => {
+    const time = form.isDirty(BACKUP_TIME_KEY) ? form.getValue(BACKUP_TIME_KEY) : null;
     await form.save();
+    if (time !== null) schedule.timeSaved(time);
     void queryClient.invalidateQueries({ queryKey: adminKeys.backups() });
     void queryClient.invalidateQueries({ queryKey: adminKeys.task("backup") });
   };
