@@ -56,7 +56,9 @@ const REMOTE_URL_EXAMPLE = "https://example.com/catalog-seeds/export.json.gz";
 const REWRITE_FROM_EXAMPLE = "/srv/media";
 const REWRITE_TO_EXAMPLE = "/media";
 
-const monospace = (chunks: ReactNode[]) => <span className="font-mono">{chunks}</span>;
+// A <code> element, not a span: inline code takes its own text's direction
+// (app.css), so "/srv/media" keeps its slash in front in a right-to-left language.
+const monospace = (chunks: ReactNode[]) => <code className="font-mono">{chunks}</code>;
 
 export default function AdminCatalogMaintenance() {
   const t = useT();

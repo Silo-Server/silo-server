@@ -65,6 +65,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-fill: var(--destructive-fill);
 
   /* ── Status ────────────────────────────────────────────────── */
   --color-success: var(--success);
@@ -557,7 +558,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      --secondary        Secondary element backgrounds
      --muted            Muted backgrounds
      --accent           Active/highlighted element backgrounds
-     --destructive      Danger/error color
+     --destructive      Danger/error text, icons, borders
+     --destructive-fill Solid danger fill under --destructive-foreground
      --border           Default border color
      --sidebar          Sidebar background (often darkest surface)
    ================================================================ */
@@ -636,9 +638,15 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --accent-base: #232328;
     --accent-foreground: #e8e8ec;
 
-    /* Destructive: warm red for danger actions */
+    /* Destructive: warm red for danger actions. No single red works for both
+       of its jobs on this background. --destructive is red text, icons and
+       borders on the dark surfaces (4.89:1 on --background, 4.51:1 on --card),
+       but white on it is only 3.76:1. Solid fills under a label (the
+       destructive button and badge) use --destructive-fill, and their label is
+       --destructive-foreground: 4.83:1. */
     --destructive: #ef4444;
     --destructive-foreground: #ffffff;
+    --destructive-fill: #dc2626;
 
     /* Borders: barely visible, just enough structure */
     --border-base: #28282e;

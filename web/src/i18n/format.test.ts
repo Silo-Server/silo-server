@@ -128,6 +128,39 @@ describe("formatWith", () => {
       expect(formatWith(arabic, "web.detail.episodeCode", { season, episode })).toBe(expected);
     },
   );
+
+  it("leaves a code tag's value bare in a right-to-left language, so it copies as shown", () => {
+    // The <code> element isolates its own text (app.css); isolate characters
+    // inside it would only end up in a copy.
+    const arabic = createAppIntl("ar-XB", {});
+    const tag = (name: string) => (chunks: unknown[]) => `<${name}>${chunks.join("")}</${name}>`;
+    expect(
+      formatWith(arabic, "web.admin.users.deleteDialog.confirmLabel", {
+        username: "rtl-copy-check",
+        code: tag("code"),
+      }),
+    ).toBe("Type <code>rtl-copy-check</code> to confirm");
+    // Elsewhere, inside a tag too, the value keeps its isolates.
+    expect(
+      formatWith(arabic, "web.admin.plugins.detail.missingConfig", {
+        name: "TMDB",
+        fields: "API key",
+        b: tag("b"),
+      }),
+    ).toBe(
+      `<b>Finish setting up ${FSI}TMDB${PDI}.</b> Add ${FSI}API key${PDI}. Until then it can't do its job.`,
+    );
+    // A code tag that holds more than the value doesn't isolate it alone.
+    const mixed = createAppIntl("ar", {
+      "home.section.recentlyAddedIn": [
+        text("في "),
+        { type: 8, value: "code", children: [text("cd "), arg("library")] },
+      ],
+    });
+    expect(
+      formatWith(mixed, "home.section.recentlyAddedIn", { library: "/srv", code: tag("code") }),
+    ).toBe(`في <code>cd ${FSI}/srv${PDI}</code>`);
+  });
 });
 
 describe("Arabic digits follow the format locale", () => {
