@@ -17844,6 +17844,20 @@
       "value": "ตามเขตเวลาของเซิร์ฟเวอร์"
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "ตามเขตเวลาของเซิร์ฟเวอร์ ซึ่งตรงกับ "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " ในเขตเวลาของคุณ"
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -18740,20 +18754,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "ซ่อนบัญชี"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนบัญชี"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนบัญชี"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนบัญชี"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "ซ่อนไฟล์"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนไฟล์"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนไฟล์"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนไฟล์"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "ซ่อนไฟล์"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนไฟล์"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนไฟล์"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนไฟล์"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -19026,8 +19118,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "แสดงบัญชี"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงบัญชี"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงบัญชี"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงบัญชี"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -19058,14 +19176,66 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "แสดงไฟล์"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงไฟล์"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงไฟล์"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงไฟล์"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "แสดงไฟล์"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงไฟล์"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงไฟล์"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงไฟล์"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -26194,6 +26364,12 @@
     {
       "type": 0,
       "value": "ล้มเหลว"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "งานล้มเหลว ดูรายละเอียดได้ในข้อมูลการวินิจฉัยสำหรับผู้ดูแลระบบ"
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -55373,7 +55549,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "โหลดซ้ำเพื่อดูค่าปัจจุบัน ระบบจะยกเลิกการแก้ไขการตั้งค่าที่มีการเปลี่ยนแปลง และการแก้ไขรหัสผ่านและคีย์ที่บันทึกไว้ ส่วนการแก้ไขอื่นจะยังคงอยู่"
+      "value": "โหลดซ้ำเพื่อดูค่าปัจจุบัน หากมีสิ่งใดในหน้านี้เปลี่ยนแปลง หรือคุณแก้ไขรหัสผ่านหรือคีย์ที่บันทึกไว้ ระบบจะยกเลิกการแก้ไขทั้งหมด ไม่เช่นนั้นการแก้ไขจะยังคงอยู่"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -71282,10 +71458,66 @@
       "value": "ข้อผิดพลาดล่าสุด"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "การรีเฟรชล้มเหลว ดูรายละเอียดได้ในข้อมูลการวินิจฉัยสำหรับผู้ดูแลระบบ"
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "ตรวจสอบกำหนดการปัจจุบัน"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -71730,6 +71962,18 @@
     {
       "type": 0,
       "value": "ลองเว็บฮุก Autoscan อีกครั้ง"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "อ่านส่วนหัวของไฟล์ MKV ที่มีคำบรรยาย ASS อีกครั้ง สำหรับไฟล์ที่สแกนไว้ก่อนที่ Silo จะเลิกนับฟอนต์ที่ฝังอยู่รวมในบิตเรต เพื่อไม่ให้ต้องแปลงรหัสไฟล์เหล่านี้เพราะบิตเรตที่ไม่ได้ใช้สตรีมจริง"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "แก้ไขบิตเรตของไฟล์ที่มีฟอนต์ฝังอยู่"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -100811,6 +101055,12 @@
       "value": "แสดง"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "เซิร์ฟเวอร์นี้เป็นผู้จัดการแถวนี้ เปลี่ยนสิ่งที่แถวนี้แสดงที่นี่ไม่ได้ เพิ่มแถวของคุณเองเพื่อเลือกสิ่งที่จะแสดง"
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -104294,6 +104544,12 @@
     {
       "type": 0,
       "value": "แบนเนอร์หลัก · เว็บเท่านั้น"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "เซิร์ฟเวอร์"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

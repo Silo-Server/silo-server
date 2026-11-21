@@ -242,9 +242,16 @@ function LibraryGroupRows({
         controls={listId}
         className="text-foreground gap-1.5 text-[13px] font-medium"
       >
-        {name}
-        <span className="text-muted-foreground font-normal tabular-nums">
-          {stateCountsText(countStates(items))}
+        {/* One run of text, so the count follows the name's last word. A name
+            with no spaces still breaks to fit. The name keeps its own direction,
+            so a name in another script can't pull the count across it. The count
+            is an inline block, so it moves to the next line whole. */}
+        <span className="wrap-anywhere">
+          {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
+          <span className="bidi-text me-1">{name}</span>{" "}
+          <span className="text-muted-foreground inline-block font-normal tabular-nums">
+            {stateCountsText(countStates(items))}
+          </span>
         </span>
       </Disclosure>
       {open ? (
@@ -419,7 +426,7 @@ function SectionBlock({
     ) : null;
 
   return (
-    <div id={sectionAnchor(section.id)} className="scroll-mt-6">
+    <div id={sectionAnchor(section.id)} className="scroll-mt-24 lg:scroll-mt-6">
       <SettingsGroup
         title={t(SECTION_TITLES[section.id])}
         description={

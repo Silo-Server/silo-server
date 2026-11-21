@@ -11,7 +11,7 @@ import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 
 import { RowDisclosure } from "./Disclosure";
 import { itemState } from "./restoreGroups";
-import { StateTag, type ToggleKeys } from "./RestoreRows";
+import { BreakableKey, StateTag, type ToggleKeys } from "./RestoreRows";
 import {
   REASON_SENTENCES,
   policyDifferenceSentence,
@@ -86,10 +86,12 @@ function ProfileRow({
         onCheckedChange={(value) => onToggle(keys(value === true), value === true)}
       />
       <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-baseline gap-2">
+        {/* When the name and detail don't fit on one line, the detail moves under the
+            name, and a name wider than the row wraps. */}
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <Label
             htmlFor={controlId}
-            className={cn("shrink-0 text-sm", !selectable && "text-muted-foreground")}
+            className={cn("text-sm wrap-anywhere", !selectable && "text-muted-foreground")}
           >
             {profile.name}
           </Label>
@@ -174,40 +176,53 @@ export const AccountRow = memo(function AccountRow({
           name: account.local_username || account.username,
         })
       : t("web.admin.backups.restore.users.newAccount");
+  // Laid out like ItemRow (RestoreRows.tsx): a narrow row wraps the name above the
+  // contact line and leaves out the admin badge, profile count and merge status, so
+  // they never squeeze the name. Its details show the merge status, the admin role
+  // and the profiles.
   return (
-    <li className="border-border/60 border-b last:border-b-0">
+    <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
+        {/* Named from the plain label: Chromium reads a <wbr> in it as a space. */}
         <Checkbox
           id={controlId}
+          aria-label={item.label}
           checked={checked}
           disabled={!item.selectable}
           onCheckedChange={(value) => onToggle(toggleKeys("users", item), value === true)}
         />
-        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
           <Label
             htmlFor={controlId}
             title={item.label}
             className={cn(
-              "max-w-[45%] shrink-0 truncate text-sm font-medium",
+              "block shrink-0 text-sm font-medium @max-2xl:wrap-anywhere @2xl:max-w-[45%] @2xl:truncate @2xl:[&_wbr]:hidden",
               !item.selectable && "text-muted-foreground",
             )}
           >
-            {item.label}
+            <BreakableKey value={item.label} />
           </Label>
           {contact ? (
-            <span title={contact} className="text-muted-foreground min-w-0 truncate text-xs">
+            // Without the pending summary the line is the email (the label is the
+            // username), which reads left to right in any language and so keeps its
+            // start when cut short. With the summary first, the line follows the page.
+            <span
+              title={contact}
+              dir={pending ? undefined : "ltr"}
+              className="text-muted-foreground min-w-0 truncate text-xs"
+            >
               {contact}
             </span>
           ) : null}
         </div>
         {account.admin ? (
-          <span className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[11px] sm:inline-flex">
+          <span className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[11px] @2xl:inline-flex">
             <ShieldCheck aria-hidden="true" className="size-3.5" />
             {t("web.admin.backups.restore.users.administrator")}
           </span>
         ) : null}
         {account.profiles.length > 0 ? (
-          <span className="text-muted-foreground hidden shrink-0 text-[11px] whitespace-nowrap md:inline">
+          <span className="text-muted-foreground hidden shrink-0 text-[11px] whitespace-nowrap @2xl:inline">
             {t("web.admin.backups.restore.users.profileCount", {
               count: account.profiles.length,
               count_text: account.profiles.length,
@@ -215,7 +230,7 @@ export const AccountRow = memo(function AccountRow({
           </span>
         ) : null}
         {status ? (
-          <span title={status} className="hidden max-w-40 shrink-0 truncate text-xs md:inline">
+          <span title={status} className="hidden max-w-40 shrink-0 truncate text-xs @2xl:inline">
             {status}
           </span>
         ) : null}
@@ -234,9 +249,9 @@ export const AccountRow = memo(function AccountRow({
       </div>
       {open ? (
         <div id={detailsId} className="space-y-1 ps-7 pb-3">
-          {status ? <p className="text-[13px] md:hidden">{status}</p> : null}
+          {status ? <p className="text-[13px] wrap-anywhere @2xl:hidden">{status}</p> : null}
           {account.admin ? (
-            <p className="text-muted-foreground text-xs sm:hidden">
+            <p className="text-muted-foreground text-xs @2xl:hidden">
               {t("web.admin.backups.restore.users.administrator")}
             </p>
           ) : null}
@@ -313,19 +328,30 @@ export function DataTypesPanel({
           {DATA_TYPE_IDS.map((id) => {
             const controlId = `${baseId}-${id}`;
             const count = counts.get(id) ?? 0;
+            // The checkbox's box is one line tall. The label's text size replaces Label's
+            // leading-none, so it inherits the row's unitless line height. The text is in rem
+            // like the checkbox, so a larger browser font grows both and the line stays
+            // taller than the checkbox, and a minimum font size still spaces wrapped lines.
+            // The label is a block so its count wraps with its text, and text-pretty keeps
+            // the count off a last line of its own where the browser supports it.
             return (
-              <div key={id} className="flex items-center gap-2">
-                <Checkbox
-                  id={controlId}
-                  checked={dataTypes.has(id)}
-                  onCheckedChange={(value) => {
-                    const next = new Set(dataTypes);
-                    if (value === true) next.add(id);
-                    else next.delete(id);
-                    onChange(next);
-                  }}
-                />
-                <Label htmlFor={controlId} className="text-[13px] font-normal">
+              <div key={id} className="flex items-start gap-2 text-[0.8125rem] leading-normal">
+                <span className="flex min-h-lh shrink-0 items-center">
+                  <Checkbox
+                    id={controlId}
+                    checked={dataTypes.has(id)}
+                    onCheckedChange={(value) => {
+                      const next = new Set(dataTypes);
+                      if (value === true) next.add(id);
+                      else next.delete(id);
+                      onChange(next);
+                    }}
+                  />
+                </span>
+                <Label
+                  htmlFor={controlId}
+                  className="block text-[0.8125rem] font-normal text-pretty"
+                >
                   {count > 0
                     ? t("web.admin.backups.restore.users.dataTypeCount", {
                         label: DATA_TYPE_LABELS[id],

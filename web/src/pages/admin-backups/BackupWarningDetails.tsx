@@ -22,6 +22,18 @@ import {
   type OmissionGroup,
 } from "./warningDetails";
 
+/**
+ * Picks a toggle label's wording for the number of items it reveals. The label
+ * prints no number, so its catalog `select` matches exact counts: CLDR's `one`
+ * also covers 21, 31, and 101 in Russian or Latvian, and `exactlyTwo` keeps
+ * the dual that Arabic and Slovenian use for two.
+ */
+function amount(count: number): "exactlyOne" | "exactlyTwo" | "other" {
+  if (count === 1) return "exactlyOne";
+  if (count === 2) return "exactlyTwo";
+  return "other";
+}
+
 /** A list long enough to need its own scroll: names or keys, selectable to copy. */
 const LONG_LIST =
   "bg-background/60 max-h-48 overflow-y-auto rounded-md border px-3 py-2 text-xs select-text";
@@ -106,8 +118,8 @@ export function OmittedAccounts({
       <Headline>{headline}</Headline>
       <Disclosure open={open} onOpenChange={setOpen} controls={bodyId}>
         {open
-          ? t("web.admin.backups.warnings.hideAccounts")
-          : t("web.admin.backups.warnings.showAccounts")}
+          ? t("web.admin.backups.warnings.hideAccounts", { amount: amount(omitted.length) })
+          : t("web.admin.backups.warnings.showAccounts", { amount: amount(omitted.length) })}
       </Disclosure>
       {open ? (
         <ul id={bodyId} className="space-y-3 pt-1">
@@ -133,8 +145,8 @@ function MissingGroupRow({ group }: { group: MissingFileGroup }) {
         <span className="text-[13px]">{missingGroupTitle(group)}</span>
         <Disclosure open={open} onOpenChange={setOpen} controls={listId}>
           {open
-            ? t("web.admin.backups.warnings.hideGroupFiles")
-            : t("web.admin.backups.warnings.showGroupFiles")}
+            ? t("web.admin.backups.warnings.hideGroupFiles", { amount: amount(group.keys.length) })
+            : t("web.admin.backups.warnings.showGroupFiles", { amount: amount(group.keys.length) })}
         </Disclosure>
       </div>
       {open ? (
@@ -161,8 +173,8 @@ function MissingFiles({ blobs, total }: { blobs: AdminBackup["missing_blobs"]; t
       <Headline>{missingHeadline(blobs.length, total)}</Headline>
       <Disclosure open={open} onOpenChange={setOpen} controls={bodyId}>
         {open
-          ? t("web.admin.backups.warnings.hideFiles")
-          : t("web.admin.backups.warnings.showFiles")}
+          ? t("web.admin.backups.warnings.hideFiles", { amount: amount(blobs.length) })
+          : t("web.admin.backups.warnings.showFiles", { amount: amount(blobs.length) })}
       </Disclosure>
       {open ? (
         <div id={bodyId} className="space-y-2 pt-1">

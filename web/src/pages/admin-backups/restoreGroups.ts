@@ -5,6 +5,7 @@ import type {
   RestoreSet,
 } from "@/api/v2/adminBackupRestore";
 import { t, type MessageKey } from "@/i18n";
+import { rowKindLabel } from "@/lib/homeRows/catalog";
 
 import { differingSettings, itemKey, type SelectionKeys } from "./restoreModel";
 
@@ -288,11 +289,6 @@ export function sectionProgress(section: RestoreSection, selection: SelectionKey
   });
 }
 
-function sectionTypeName(type: string): string {
-  const name = type.replaceAll("_", " ");
-  return name.charAt(0).toUpperCase() + name.slice(1);
-}
-
 /**
  * The short muted text after a row's label: what the item is here. With
  * `withLibrary`, collections and sections name their library too, for lists
@@ -313,7 +309,9 @@ export function rowSecondary(
       if (itemState(item) === "same") {
         return t("web.admin.backups.restore.row.sameFolders", { name: local ?? item.label });
       }
-      return item.library?.paths.join(", ") ?? null;
+      // Each path is its own left-to-right run (U+2066 … U+2069), so two folders
+      // with Arabic names side by side keep their order on the row.
+      return item.library?.paths.map((path) => "\u2066" + path + "\u2069").join(", ") ?? null;
     }
     case "plugin":
       return item.plugin?.installed_version
@@ -347,7 +345,7 @@ export function rowSecondary(
     case "home_section":
       return join(
         library,
-        item.home_section ? sectionTypeName(item.home_section.section_type) : null,
+        item.home_section ? rowKindLabel(item.home_section.section_type) : null,
         item.home_section?.local_id
           ? t("web.admin.backups.restore.row.sectionReplaces")
           : t("web.admin.backups.restore.row.sectionAdded"),

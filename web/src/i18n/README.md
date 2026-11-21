@@ -72,7 +72,10 @@ function Dialog({ row }: { row: HomeRow }) {
   it by a data attribute instead.
 - **Right to left:** in an RTL language every printed string placeholder is
   wrapped in Unicode isolates, so a left-to-right title keeps its punctuation in
-  place. `select` and `plural` arguments are not. English bytes never change.
+  place. `select` and `plural` arguments are not, and neither is a placeholder
+  printed only as the whole content of a `code` tag (`<code>{command}</code>`), so
+  it copies without invisible characters. Render a `code` tag as a `<code>`
+  element, which app.css isolates. English bytes never change.
 - **Web-only keys** may use `select` and rich-text tags:
   `"Read the <link>guide</link>"` with
   `t(id, { link: (chunks) => <a href={url}>{chunks}</a> })`, which returns React nodes.
@@ -114,7 +117,8 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   `env(safe-area-inset-*)` edges. Those files are in `PHYSICAL_DIRECTION` in
   `web/eslint.config.js`; a single line takes an `eslint-disable-next-line` with its
   reason; a `dir="ltr"` box keeps flex order and text there left to right. `pre` is
-  always left to right; inline `code`, `kbd` and `samp` take their text's direction.
+  always left to right; inline `code`, `kbd` and `samp` take their text's direction
+  unless they carry a `dir`.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also

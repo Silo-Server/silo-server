@@ -157,24 +157,24 @@ function AccountReport({
             const outcome = OUTCOME[profile.outcome];
             return (
               <li key={profile.id}>
-                <p className="flex items-start gap-1.5 text-[13px]">
-                  <outcome.Icon
-                    aria-hidden="true"
-                    className={cn("mt-[calc((1lh-0.875rem)/2)] size-3.5 shrink-0", outcome.tone)}
-                  />
+                {/* rem text with a unitless line height keeps the line taller than the
+                    rem-sized icon at any browser font size, so the icon stays centered on it. */}
+                <p className="flex items-start gap-1.5 text-[0.8125rem] leading-normal">
+                  <span className="flex min-h-lh shrink-0 items-center">
+                    <outcome.Icon aria-hidden="true" className={cn("size-3.5", outcome.tone)} />
+                  </span>
                   <span className="min-w-0 wrap-anywhere">
-                    {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
-                    <bdi className="font-medium">{profile.label}</bdi>{" "}
-                    <span className="text-muted-foreground">
-                      {keepSeparatorsWithNext(
-                        t("web.admin.backups.restore.run.profileOutcome", {
-                          outcome: nonBreaking(
-                            profile.created
-                              ? t("web.admin.backups.restore.outcome.created")
-                              : t(outcome.label),
-                          ),
-                        }),
-                      )}
+                    {/* The outcome moves to the next line as a unit, so its "·" stays with the
+                        word it introduces, and wraps inside itself only when it can't fit on a
+                        line. The gap is the name's margin, left behind at the end of the line. */}
+                    <bdi className="me-1.5 font-medium">{profile.label}</bdi>
+                    <wbr />
+                    <span className="text-muted-foreground inline-block">
+                      {t("web.admin.backups.restore.run.profileOutcome", {
+                        outcome: profile.created
+                          ? t("web.admin.backups.restore.outcome.created")
+                          : t(outcome.label),
+                      })}
                     </span>
                   </span>
                 </p>
