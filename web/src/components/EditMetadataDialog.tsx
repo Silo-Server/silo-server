@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { MetadataTranslatePanel } from "@/components/MetadataTranslatePanel";
 import { TagInput } from "@/components/TagInput";
@@ -355,11 +356,11 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                     label={t("web.item.editMetadata.overview")}
                     lockIcon={renderLockIcon("overview")}
                   >
-                    <textarea
+                    <Textarea
                       value={form.overview}
                       onChange={(e) => setField("overview", e.target.value)}
                       rows={4}
-                      className="border-input bg-background text-foreground focus:border-ring focus:ring-ring/50 w-full resize-y rounded-md px-3 py-2.5 text-sm shadow-xs transition-[color,box-shadow] outline-none focus:ring-[3px]"
+                      className="resize-y"
                     />
                   </FieldRow>
 
