@@ -84,10 +84,12 @@ export function CollectionPosterCard({
             >
               {isUserCollection && <User className="h-5 w-5 opacity-60" />}
               {/* The spacers keep the title below the pin (top-2 plus a 36 px chip)
-                  and above the count. The title never shrinks, so on a card too
-                  short for all of it the spacers give way and it centres as before. */}
+                  and above the count. With them the title never shrinks, so on a
+                  card too short for all of it the spacers give way first. */}
               {showPin ? <div className="h-7 shrink" /> : null}
-              <span className="line-clamp-3 shrink-0 font-medium">{collection.title}</span>
+              <span className={`line-clamp-3 font-medium ${showPin ? "shrink-0" : ""}`}>
+                {collection.title}
+              </span>
               {showPin && meta === undefined ? <div className="h-3 shrink" /> : null}
             </div>
           )}
