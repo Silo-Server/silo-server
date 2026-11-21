@@ -25,6 +25,10 @@ type SegmentRecoveryOptions struct {
 	Component string
 	// PlaySession, when non-empty, sets the slog "play_session" attribute.
 	PlaySession string
+	// SegmentNumberName overrides segmentName when parsing the requested
+	// segment number (e.g. Jellyfin passes segmentId separately from the
+	// container extension, which can contain additional dots).
+	SegmentNumberName string
 	// Restart resolves and restarts one missing numbered segment under the
 	// caller's per-session lifecycle lock.
 	Restart func(ctx context.Context, segNum int, seenGeneration time.Time) (SegmentRecoveryTarget, bool, error)
@@ -49,7 +53,11 @@ func OpenSegmentWithRecovery(
 		return lease, err
 	}
 
-	segNum, parseErr := ParseSegmentNumber(segmentName)
+	parseName := opts.SegmentNumberName
+	if parseName == "" {
+		parseName = segmentName
+	}
+	segNum, parseErr := ParseSegmentNumber(parseName)
 	if parseErr != nil {
 		if session.IsRunning() {
 			// Non-numbered segment (e.g., init.mp4 for fMP4 HLS).

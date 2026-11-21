@@ -124,23 +124,26 @@ func TestOpenSegmentWithRecovery_WaitTimeoutRestartAndPostRestartOpen(t *testing
 		var gotSeenGen time.Time
 		start := time.Now()
 		var restartedAt time.Time
-		var lookaheadWritten atomic.Bool
+		const (
+			targetDelay    = 30 * time.Millisecond
+			lookaheadDelay = 40 * time.Millisecond
+			lookaheadLimit = 1200 * time.Millisecond
+		)
 
 		lease, err := OpenSegmentWithRecovery(context.Background(), session, "seg_00002.m4s", SegmentRecoveryOptions{
 			SessionID:            "sess-restart",
 			Component:            "api",
-			CopyLookaheadTimeout: 1200 * time.Millisecond,
+			CopyLookaheadTimeout: lookaheadLimit,
 			Restart: func(_ context.Context, segNum int, seenGeneration time.Time) (SegmentRecoveryTarget, bool, error) {
 				restartCalls.Add(1)
 				gotSegNum = segNum
 				gotSeenGen = seenGeneration
 				restartedAt = time.Now()
 				go func() {
-					time.Sleep(30 * time.Millisecond) //nolint:forbidigo // synctest advances virtual time to simulate post-restart segment production
+					time.Sleep(targetDelay) //nolint:forbidigo // synctest advances virtual time to simulate post-restart segment production
 					writeRecoverySegmentFile(t, dir, "seg_00002.m4s", "restarted-segment-2")
-					time.Sleep(40 * time.Millisecond) //nolint:forbidigo // synctest advances virtual time to simulate copy-video lookahead segment
+					time.Sleep(lookaheadDelay) //nolint:forbidigo // synctest advances virtual time to simulate copy-video lookahead segment
 					writeRecoverySegmentFile(t, dir, "seg_00003.m4s", "lookahead-segment-3")
-					lookaheadWritten.Store(true)
 				}()
 				return SegmentRecoveryTarget{
 					SeekSeconds:         4.0,
@@ -149,6 +152,7 @@ func TestOpenSegmentWithRecovery_WaitTimeoutRestartAndPostRestartOpen(t *testing
 				}, true, nil
 			},
 		})
+		returnedAt := time.Now()
 		if err != nil {
 			t.Fatalf("OpenSegmentWithRecovery: %v", err)
 		}
@@ -167,8 +171,12 @@ func TestOpenSegmentWithRecovery_WaitTimeoutRestartAndPostRestartOpen(t *testing
 		if restartedAt.Sub(start) < activeSegmentWait {
 			t.Fatalf("restart happened after %v, want wait timeout >= %v", restartedAt.Sub(start), activeSegmentWait)
 		}
-		if !lookaheadWritten.Load() {
-			t.Fatal("expected copy-video lookahead to wait for seg_00003.m4s")
+		postRestartElapsed := returnedAt.Sub(restartedAt)
+		if postRestartElapsed < targetDelay+lookaheadDelay {
+			t.Fatalf("returned %v after restart, want >= %v so lookahead waited for seg_00003.m4s", postRestartElapsed, targetDelay+lookaheadDelay)
+		}
+		if postRestartElapsed >= lookaheadLimit {
+			t.Fatalf("returned %v after restart, want < %v (lookahead timed out instead of opening seg_00003.m4s)", postRestartElapsed, lookaheadLimit)
 		}
 	})
 }
@@ -430,6 +438,39 @@ func TestOpenSegmentWithRecovery_LogSurfaceAttributesAndMessages(t *testing.T) {
 		}
 		if !sawNodeRestart || !sawNodeErr {
 			t.Fatalf("expected node seek restart (%v) and node restart error (%v) logs", sawNodeRestart, sawNodeErr)
+		}
+	})
+}
+
+func TestOpenSegmentWithRecovery_SegmentNumberNameOverride(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		dir := t.TempDir()
+		session := &TranscodeSession{
+			outputDir: dir,
+			running:   true,
+			copyPlan:  &copySegmentPlan{durations: make([]float64, 5)},
+			opts: TranscodeOpts{
+				SessionID:          "sess-multidot",
+				OutputDir:          dir,
+				TargetCodecVideo:   "copy",
+				StartSegmentNumber: 0,
+				SegmentDuration:    2,
+			},
+		}
+
+		// Segment 40 is past the 5-segment copy plan, so recovery returns
+		// ErrSegmentNotFound immediately instead of waiting 10s as an init segment.
+		start := time.Now()
+		_, err := OpenSegmentWithRecovery(context.Background(), session, "seg_00040.m4s.extra", SegmentRecoveryOptions{
+			SessionID:         "sess-multidot",
+			Component:         "jellycompat",
+			SegmentNumberName: "seg_00040",
+		})
+		if !errors.Is(err, ErrSegmentNotFound) {
+			t.Fatalf("err = %v, want ErrSegmentNotFound", err)
+		}
+		if elapsed := time.Since(start); elapsed >= time.Second {
+			t.Fatalf("elapsed = %v, want immediate out-of-range ErrSegmentNotFound without init-segment wait", elapsed)
 		}
 	})
 }

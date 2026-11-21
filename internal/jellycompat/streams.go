@@ -1269,9 +1269,10 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	const compatLogComponent = "jellycompat"
 	segmentName := name + "." + ext
 	segmentLease, err := playback.OpenSegmentWithRecovery(r.Context(), transcodeSession, segmentName, playback.SegmentRecoveryOptions{
-		SessionID:   playSession.UpstreamSessionID,
-		Component:   compatLogComponent,
-		PlaySession: playSessionFingerprint(playSessionID),
+		SessionID:         playSession.UpstreamSessionID,
+		Component:         compatLogComponent,
+		PlaySession:       playSessionFingerprint(playSessionID),
+		SegmentNumberName: name,
 		Restart: func(ctx context.Context, segNum int, seenGeneration time.Time) (playback.SegmentRecoveryTarget, bool, error) {
 			return h.tm.RestartSegmentLocked(ctx, playSession.UpstreamSessionID, transcodeSession, segNum, seenGeneration)
 		},
