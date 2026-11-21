@@ -170,7 +170,6 @@ export default function HeroBanner({
     [slides],
   );
   const [activeIndex, setActiveIndex] = useState(0);
-  const [paused, setPaused] = useState(false);
   const { isVisible: pageVisible } = usePageActivity();
   const sectionRef = useRef<HTMLElement>(null);
   // Unknown until the observer first reports, so a hero mounted below the
@@ -196,33 +195,34 @@ export default function HeroBanner({
     setActiveIndex((current) => (current - 1 + slides.length) % slides.length);
   }, [slides.length]);
 
-  // Pause/play helpers. Unpausing bumps playCycle so the rail animation
-  // restarts at scaleX(0) in sync with the fresh 8s interval started below.
-  const pause = useCallback(() => setPaused(true), []);
-  const resume = useCallback(() => {
-    setPaused((prev) => {
-      if (prev) setPlayCycle((c) => c + 1);
-      return false;
-    });
-  }, []);
+  // Two separate reasons stop the slideshow. Hovering or focusing the hero
+  // holds it only while the pointer or focus stays inside; the Pause/Play
+  // button records the user's choice, which hover and focus never change.
   // Under reduced motion the slideshow starts stopped and runs only after the
-  // user presses Play. `autoplaying` is what actually happens, so the button
-  // label, icon, and progress rail never claim a slideshow that isn't running.
+  // user presses Play.
   const reduceMotion = usePrefersReducedMotion();
-  const [playRequested, setPlayRequested] = useState(false);
-  const autoplaying = !paused && (!reduceMotion || playRequested);
+  const [held, setHeld] = useState(false);
+  const [choice, setChoice] = useState<"play" | "pause" | null>(null);
+  const wantsPlay = choice === "play" || (choice === null && !reduceMotion);
+  // What actually happens: drives the timer and the progress rail.
+  const autoplaying = wantsPlay && !held;
+  const hold = useCallback(() => setHeld(true), []);
+  // Starting to play bumps playCycle so the rail animation restarts at
+  // scaleX(0) in sync with the fresh 8s interval started below.
+  const release = useCallback(() => {
+    if (held && wantsPlay) setPlayCycle((c) => c + 1);
+    setHeld(false);
+  }, [held, wantsPlay]);
   const togglePause = useCallback(() => {
-    if (autoplaying) {
-      // Dropping the Play request keeps a hover or focus `resume` from
-      // restarting a reduced-motion slideshow the user just paused.
-      setPlayRequested(false);
-      setPaused(true);
+    if (wantsPlay) {
+      setChoice("pause");
       return;
     }
-    setPlayRequested(true);
-    setPaused(false);
+    // Pressing Play starts the slideshow now, even under the pointer.
+    setChoice("play");
+    setHeld(false);
     setPlayCycle((c) => c + 1);
-  }, [autoplaying]);
+  }, [wantsPlay]);
 
   // `activeIndex` is in the dep list so that manual navigation (prev/next
   // chevrons) also resets the 8s countdown — otherwise after clicking next at
@@ -314,11 +314,11 @@ export default function HeroBanner({
       )}
       aria-roledescription="carousel"
       aria-label={t("web.home.hero.carouselLabel")}
-      onMouseEnter={pause}
-      onMouseLeave={resume}
-      onFocus={pause}
+      onMouseEnter={hold}
+      onMouseLeave={release}
+      onFocus={hold}
       onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget)) resume();
+        if (!e.currentTarget.contains(e.relatedTarget)) release();
       }}
     >
       {/* Preload the slide that comes next while the hero is shown; retain
@@ -477,11 +477,11 @@ export default function HeroBanner({
               type="button"
               onClick={togglePause}
               aria-label={
-                autoplaying ? t("web.home.hero.pauseSlideshow") : t("web.home.hero.playSlideshow")
+                wantsPlay ? t("web.home.hero.pauseSlideshow") : t("web.home.hero.playSlideshow")
               }
               className={slideButtonClass}
             >
-              {autoplaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+              {wantsPlay ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
             </button>
             <button
               type="button"
