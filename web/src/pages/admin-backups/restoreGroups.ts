@@ -313,7 +313,9 @@ export function rowSecondary(
       if (itemState(item) === "same") {
         return t("web.admin.backups.restore.row.sameFolders", { name: local ?? item.label });
       }
-      return item.library?.paths.join(", ") ?? null;
+      // Each path is its own left-to-right run (U+2066 … U+2069), so two folders
+      // with Arabic names side by side keep their order on the row.
+      return item.library?.paths.map((path) => "\u2066" + path + "\u2069").join(", ") ?? null;
     }
     case "plugin":
       return item.plugin?.installed_version

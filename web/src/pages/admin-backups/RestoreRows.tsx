@@ -203,11 +203,7 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
     paths.length > 0 ? (
       // Paths read left to right in any language; w-fit keeps the list on the
       // page's start side.
-      <ul
-        key="paths"
-        dir="ltr"
-        className="text-muted-foreground w-fit max-w-full font-mono text-xs break-all"
-      >
+      <ul key="paths" dir="ltr" className="text-muted-foreground w-fit font-mono text-xs break-all">
         {paths.map((path) => (
           <li key={path}>{path}</li>
         ))}
