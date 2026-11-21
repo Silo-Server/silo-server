@@ -452,3 +452,37 @@ func TestClassifyReleasesFileWhenStorageIsFull(t *testing.T) {
 		t.Fatalf("a full store classifies as %v after %v, want Released after %v", outcome, delay, releaseDelay)
 	}
 }
+
+// After a sheet write finds the store full, the service claims no more files
+// for a while: each would be decoded only for its first write to be refused.
+func TestDispatchPausesAfterStorageIsFull(t *testing.T) {
+	q := newFakeQueue(testJob(1, 600), testJob(2, 600))
+	extractor := &fakeExtractor{}
+	s := testService(q, &fakeStore{err: fmt.Errorf("blobstore: %w", syscall.ENOSPC)}, extractor, fakeSettings{})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.dispatch(ctx)
+	}()
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		q.mu.Lock()
+		_, finished := q.finished[1]
+		q.mu.Unlock()
+		if finished {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the first file was never released")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-done
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.claims != 1 || q.finished[1] != (finishCall{Released, releaseDelay}) {
+		t.Fatalf("claims = %d, file 1 %+v; want one claim, released for %v", q.claims, q.finished[1], releaseDelay)
+	}
+}
