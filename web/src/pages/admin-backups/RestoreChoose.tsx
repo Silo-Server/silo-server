@@ -681,13 +681,14 @@ export function RestoreChoose({
         </div>
         {/* Outside the scrolling box, so the notice shows beside Review however
             far the summary is scrolled. The rule marks where the summary ends.
-            In a window too short for both, a long notice scrolls on its own and
-            Review keeps its row. */}
+            A long notice scrolls within 8rem, so the summary keeps its room; in
+            a window too short for both, it shrinks further and Review keeps
+            its row. */}
         <div className="lg:border-border/60 space-y-4 lg:flex lg:min-h-0 lg:flex-col lg:border-t lg:pt-4">
           {notice ? (
             <p
               role="status"
-              className="overlay-scroll text-[13px] text-amber-600 lg:min-h-0 lg:overflow-y-auto dark:text-amber-400"
+              className="overlay-scroll text-[13px] text-amber-600 lg:max-h-32 lg:min-h-0 lg:overflow-y-auto dark:text-amber-400"
             >
               {notice}
             </p>

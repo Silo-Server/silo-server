@@ -126,6 +126,15 @@ interface TableLayout {
   panel: string;
   /** Classes that rule off the second and third details columns. */
   panelColumn: string;
+  /**
+   * Classes for the rows' container. In the table layout a control focused
+   * while under the pinned header (Shift+Tab back up the table) scrolls to
+   * 4rem, clear of the header and of the shell's activity control beside it.
+   * `[data-row-scroller]` marks boxes that scroll on their own, which
+   * Chromium and Firefox let the keyboard focus. A root scroll-padding would
+   * also scroll the page when the header's own buttons take focus.
+   */
+  rows: string;
 }
 
 const TABLE_LAYOUT: TableLayout = {
@@ -135,6 +144,7 @@ const TABLE_LAYOUT: TableLayout = {
   stacked: "@min-[62rem]:hidden",
   panel: "@min-[62rem]:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,1fr)]",
   panelColumn: "@min-[62rem]:border-border/40 @min-[62rem]:border-s @min-[62rem]:ps-5",
+  rows: "@min-[62rem]:[&_:is(a,button,[tabindex],[data-row-scroller])]:scroll-mt-16",
 };
 
 const TABLE_LAYOUT_WITH_ROUTE: TableLayout = {
@@ -144,6 +154,7 @@ const TABLE_LAYOUT_WITH_ROUTE: TableLayout = {
   stacked: "@min-[70rem]:hidden",
   panel: "@min-[70rem]:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,1fr)]",
   panelColumn: "@min-[70rem]:border-border/40 @min-[70rem]:border-s @min-[70rem]:ps-5",
+  rows: "@min-[70rem]:[&_:is(a,button,[tabindex],[data-row-scroller])]:scroll-mt-16",
 };
 
 const STACKED_SORT_FIELDS: [SortField, MessageKey][] = [
@@ -662,12 +673,8 @@ export default function AdminActivity() {
             <span className="sr-only">{t("web.admin.activity.column.actions")}</span>
           </div>
 
-          {/* Rows. A control focused while under the pinned header (Shift+Tab
-              back up the table) scrolls to 4rem, clear of the header and of
-              the shell's activity control beside it. A root scroll-padding
-              would also scroll the page when the header's own buttons take
-              focus. */}
-          <div className="lg:[&_:is(a,button,[tabindex])]:scroll-mt-16">
+          {/* Rows */}
+          <div className={layout.rows}>
             {filtered.map((session) => (
               <StreamRow
                 key={session.session_id}
@@ -1574,7 +1581,7 @@ function FFmpegConsole({
             {t("web.admin.activity.panel.noFfmpegRows")}
           </div>
         ) : (
-          <div className="max-h-64 overflow-y-auto">
+          <div data-row-scroller className="max-h-64 overflow-y-auto">
             {rows.map((row) => (
               <div
                 key={row.id}
