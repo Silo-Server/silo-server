@@ -166,7 +166,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
         )}
 
         {trigger.type === "weekly" && (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <Select
               value={String(trigger.day_of_week ?? 0)}
               onValueChange={(v) => onChange({ ...trigger, day_of_week: parseInt(v, 10) })}
