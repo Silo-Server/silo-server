@@ -116,8 +116,8 @@ export default function HistoryTab() {
             <SelectItem value={ALL}>{t(`${H}.allLocations`)}</SelectItem>
             {locations.map((l) => (
               <SelectItem key={l.key} value={l.key} className="*:last:min-w-0">
-                {/* Cut with "…" in the trigger; the open menu wraps it. */}
-                <span dir="auto" className="in-data-[slot=select-trigger]:truncate">
+                {/* Cut with "…" in the trigger; the open menu wraps it, even mid-word. */}
+                <span dir="auto" className="wrap-anywhere in-data-[slot=select-trigger]:truncate">
                   {l.name}
                 </span>
               </SelectItem>
