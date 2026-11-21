@@ -44,6 +44,7 @@ import { useRequestSettings } from "@/hooks/queries/admin/requests";
 import { useRequestGroupLimits } from "@/hooks/queries/admin/requestGroupLimits";
 import { adminUsersKey, useAdminUsers } from "@/hooks/queries/admin/users";
 import { useT } from "@/i18n";
+import { emailDir } from "@/lib/direction";
 import { TOUCH_TARGETS } from "@/lib/touchTargets";
 import {
   NO_GROUP_POLICY,
@@ -339,8 +340,15 @@ export function AccessGroupMembers({
                 <span dir="auto" className="w-fit max-w-full truncate font-medium">
                   {member.username}
                 </span>
+                {/* Left to right unless it starts in a right-to-left script, so a cut
+                    email keeps its start; w-fit keeps it on the page's start side. */}
                 {member.email ? (
-                  <span className="text-muted-foreground truncate text-xs">{member.email}</span>
+                  <span
+                    dir={emailDir(member.email)}
+                    className="text-muted-foreground w-fit max-w-full truncate text-xs"
+                  >
+                    {member.email}
+                  </span>
                 ) : null}
               </Link>
             </li>

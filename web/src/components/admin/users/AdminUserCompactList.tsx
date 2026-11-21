@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useT } from "@/i18n";
+import { emailDir } from "@/lib/direction";
 
 import { AdminUserRoleBadge, AdminUserStatusBadge } from "./AdminUserRowParts";
 import type { AdminUserRow } from "./useAdminUserRows";
@@ -64,8 +65,15 @@ function AdminUserCompactRow({ row }: { row: AdminUserRow }) {
           <AdminUserRoleBadge user={user} />
           <AdminUserStatusBadge user={user} />
         </span>
+        {/* Left to right unless it starts in a right-to-left script, so a cut email
+            keeps its start; w-fit keeps it on the page's start side. */}
         {user.email ? (
-          <span className="text-muted-foreground block truncate text-sm">{user.email}</span>
+          <span
+            dir={emailDir(user.email)}
+            className="text-muted-foreground block w-fit max-w-full truncate text-sm"
+          >
+            {user.email}
+          </span>
         ) : null}
         {/* The group name gives way first, so the last-active time stays whole. */}
         <span className="text-muted-foreground flex gap-1 text-xs">

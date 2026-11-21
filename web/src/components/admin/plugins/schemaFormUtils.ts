@@ -1,5 +1,6 @@
 import type { PluginAdminForm, PluginAdminFormCondition, PluginAdminFormField } from "@/api/types";
 import { t as appT, type MessageKey, type TextValues } from "@/i18n";
+import { startsRightToLeft } from "@/lib/direction";
 
 export type SchemaOption = { value: string; label: string };
 
@@ -316,6 +317,29 @@ export function isSecretField(field: PluginAdminFormField): boolean {
  */
 export function rendersMultiline(field: PluginAdminFormField): boolean {
   return !isSecretField(field) && (field.control === "TEXTAREA" || field.multiline);
+}
+
+/**
+ * The `dir` of a plugin form's text control on a right-to-left page. Typed
+ * values are mostly machine strings (paths, URLs, LDAP filters, client IDs)
+ * that would draw backwards there (`/mnt/media` as `mnt/media/`). "auto" takes
+ * the direction from the value's first letter, so those read left to right
+ * while text typed in Arabic or Hebrew stays right to left. A masked value
+ * keeps one edge whatever its text, and a known path field reads left to right
+ * like the other path inputs. "auto" ignores the placeholder, so an empty field
+ * takes its placeholder's direction: usually an untranslated path or URL from
+ * the schema, sometimes translated text such as a saved secret's hint. A
+ * left-to-right page already draws these values in order and is left alone.
+ */
+export function textDirection(
+  pageDir: "ltr" | "rtl",
+  text: string,
+  placeholder: string | undefined,
+  alwaysLeftToRight: boolean,
+): "auto" | "ltr" | "rtl" | undefined {
+  if (pageDir !== "rtl") return undefined;
+  if (!text) return startsRightToLeft(placeholder ?? "") ? "rtl" : "ltr";
+  return alwaysLeftToRight ? "ltr" : "auto";
 }
 
 export function fieldIsVisible(
