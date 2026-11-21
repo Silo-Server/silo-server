@@ -709,7 +709,7 @@ function StateBadge({ state }: { state: DiagnosticReportState }) {
     state === "ready"
       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
       : state === "failed"
-        ? "border-destructive/30 bg-destructive/10 text-destructive"
+        ? "border-destructive/30 bg-destructive/10 text-destructive-label"
         : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400";
   return (
     <Badge variant="outline" className={className}>

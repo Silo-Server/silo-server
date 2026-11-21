@@ -206,7 +206,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
         {/* At large text sizes the label wraps above the box instead of widening the
             row past its panel; the box and its unit stay together. */}
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-          <label className="text-muted-foreground text-xs whitespace-nowrap">
+          <label className="text-muted-foreground text-xs text-balance">
             {t("web.admin.tasks.detail.maxRuntimeLabel")}
           </label>
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">

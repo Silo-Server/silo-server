@@ -64,18 +64,28 @@ export function ViewerPreview({
   libraryName,
   shelves,
   isVisible,
+  focusable = false,
   className,
 }: {
   libraryName: string;
   shelves: readonly Shelf[];
   isVisible: (collection: LibraryCollection) => boolean;
+  /**
+   * Lets a keyboard focus the preview, for a caller that caps its height so it
+   * scrolls: nothing inside it can take focus to scroll it.
+   */
+  focusable?: boolean;
   className?: string;
 }) {
   const t = useT();
   return (
     <aside
       aria-label={viewerPreviewLabel()}
-      className={cn("surface-panel grid content-start gap-4 rounded-[22px] p-4", className)}
+      tabIndex={focusable ? 0 : undefined}
+      className={cn(
+        "surface-panel focus-visible:outline-ring grid content-start gap-4 rounded-[22px] p-4 focus-visible:outline-2 focus-visible:outline-offset-2",
+        className,
+      )}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <b className="text-[14px] font-semibold">
