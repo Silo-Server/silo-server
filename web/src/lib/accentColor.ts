@@ -1,6 +1,10 @@
 /** Cinema Dark's label color on primary surfaces (--primary-foreground). */
 const DARK_LABEL = "#141417";
 const WHITE_LABEL = "#ffffff";
+/** White falls short of 4.5:1 only above relative luminance 0.183, where black reads at 4.66:1 or more. */
+const BLACK_LABEL = "#000000";
+/** WCAG AA for normal text: the labels on primary surfaces are short body text. */
+const MIN_LABEL_CONTRAST = 4.5;
 
 /**
  * Returns the stored accent as lowercase "#rrggbb" when it is a "#rgb" or
@@ -62,6 +66,17 @@ function labelOn(hex: string): string {
 }
 
 /**
+ * The label on the accent's primary surfaces (buttons, pills): white or the
+ * dark label, whichever reads better, or black when neither reaches 4.5:1, so
+ * the accent itself is drawn as the admin stored it. Email buttons make the
+ * same choice (internal/mail).
+ */
+function primaryLabelOn(hex: string): string {
+  const label = labelOn(hex);
+  return contrastRatio(hex, label) >= MIN_LABEL_CONTRAST ? label : BLACK_LABEL;
+}
+
+/**
  * The accent as the video player draws it on its dark panels: unchanged when
  * it already reads there, otherwise lightened just enough that a selected
  * row's check and the focus ring stay visible, and the label on it (the speed
@@ -84,8 +99,9 @@ function accentOnDark(hex: string): string {
  * The CSS custom properties the admin's accent sets, or null when the stored
  * value is not a hex color, which is then ignored as email ignores it. The
  * accent recolors the primary action color, the focus ring, and the sidebar's
- * primary accent. When white reads better on it, the labels drawn on those
- * surfaces turn white too; a light accent keeps Cinema Dark's own dark labels.
+ * primary accent. The labels drawn on those surfaces turn white when white
+ * reads better on it, or black on a mid-tone accent where neither white nor
+ * Cinema Dark's dark label reaches 4.5:1; otherwise they keep the theme's own.
  */
 export function accentDeclarations(accent: string): Record<string, string> | null {
   const hex = normalizeHex(accent);
@@ -98,9 +114,10 @@ export function accentDeclarations(accent: string): Record<string, string> | nul
     "accent-on-dark": onDark,
     "accent-on-dark-foreground": labelOn(onDark),
   };
-  if (prefersWhiteLabel(hex)) {
-    declarations["primary-foreground"] = WHITE_LABEL;
-    declarations["sidebar-primary-foreground"] = WHITE_LABEL;
+  const label = primaryLabelOn(hex);
+  if (label !== DARK_LABEL) {
+    declarations["primary-foreground"] = label;
+    declarations["sidebar-primary-foreground"] = label;
   }
   return declarations;
 }
