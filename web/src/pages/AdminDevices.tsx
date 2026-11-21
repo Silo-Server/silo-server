@@ -704,7 +704,7 @@ function SettingsScopeControl({
   return (
     <div
       className={cn(
-        "border-border/70 bg-background/40 inline-flex overflow-hidden rounded-md border whitespace-nowrap",
+        "border-border/70 bg-background/40 inline-flex overflow-hidden rounded-md border",
         disabled && "opacity-40",
       )}
       title={
