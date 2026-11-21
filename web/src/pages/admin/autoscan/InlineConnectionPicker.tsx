@@ -306,6 +306,7 @@ export function InlineConnectionPicker({
                   {t("web.admin.autoscan.connections.form.baseURL")}
                 </Label>
                 <Input
+                  dir="ltr"
                   id={`${idPrefix}-url`}
                   placeholder={BASE_URL_EXAMPLE}
                   value={baseUrl}

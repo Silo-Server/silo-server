@@ -882,6 +882,7 @@ export function RequestServerEditor({
           status={<FieldError>{urlError}</FieldError>}
         >
           <Input
+            dir="ltr"
             id={urlId}
             value={form.base_url}
             onChange={(event) => patch({ base_url: event.target.value })}

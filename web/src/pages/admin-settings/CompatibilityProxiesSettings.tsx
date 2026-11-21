@@ -267,6 +267,7 @@ export default function CompatibilityProxiesSettings() {
           <SettingField
             label={t("web.admin.settings.compatibilityProxies.jellyfin.address")}
             hint={PUBLIC_URL_HINT}
+            dir="ltr"
             value={publicURL}
             onChange={(v) => form.setValue("jellyfin_compat.public_url", v)}
             status={
