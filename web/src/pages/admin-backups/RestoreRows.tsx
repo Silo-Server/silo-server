@@ -255,7 +255,7 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
       </ul>
     ) : null,
     missingPaths.length > 0 ? (
-      <p key="missing-paths" className="text-xs text-amber-600 dark:text-amber-400">
+      <p key="missing-paths" className="text-xs wrap-anywhere text-amber-600 dark:text-amber-400">
         {t("web.admin.backups.restore.rows.cantOpen", { paths: missingPaths.join(", ") })}
       </p>
     ) : null,
@@ -334,16 +334,19 @@ export const ItemRow = memo(function ItemRow({
         />
         <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
           {/* block: Label is a flex box, which would clip the name without an ellipsis.
-              Chromium breaks at <wbr> even under nowrap, so a one-line row hides them.
-              A narrow row clips a name sideways only while part of it can't wrap to
-              fit, such as one long run of joined emoji. */}
+              Beside a detail, a one-line row stops the name at 60% and ends it in "…";
+              Chromium breaks at <wbr> even under nowrap, so that row hides them. A name
+              with nothing beside it wraps instead, so it is never cut short. A name
+              clips sideways only while part of it can't wrap to fit, such as one long
+              run of joined emoji; a one-line row with a detail truncates instead. */}
           <Label
             ref={nameRef}
             htmlFor={controlId}
             title={label}
             className={cn(
-              "block shrink-0 text-sm font-medium @max-2xl:wrap-anywhere @2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden",
-              nameOverflows && "@max-2xl:overflow-x-clip",
+              "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
+              secondary && "@2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden",
+              nameOverflows && (secondary ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
               !item.selectable && "text-muted-foreground",
             )}
           >
@@ -391,7 +394,11 @@ export const ItemRow = memo(function ItemRow({
   );
 });
 
-/** A row of the "match this server" list: no choice to make, so just the name. */
+/**
+ * A row of the "match this server" list: no choice to make, so just the name.
+ * The name is never cut short, so names that differ only at the end stay apart;
+ * the detail moves under it when the two don't fit on one line.
+ */
 export const SameRow = memo(function SameRow({
   item,
   secondary,
@@ -402,9 +409,9 @@ export const SameRow = memo(function SameRow({
   useT();
   const label = displayLabel(item);
   return (
-    <li className="flex min-w-0 items-baseline gap-2 py-1 text-[13px]">
-      <span title={label} className="max-w-[60%] shrink-0 truncate">
-        {label}
+    <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-[13px]">
+      <span className="text-pretty wrap-anywhere">
+        <BreakableKey value={label} />
       </span>
       {secondary ? (
         <span title={secondary} className="text-muted-foreground min-w-0 truncate text-xs">
