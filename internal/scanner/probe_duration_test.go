@@ -61,6 +61,7 @@ func TestDurationFromProbeMetadataIgnoresSubtitleStretch(t *testing.T) {
 		{"a partial last second stays listed", "154.390000", "00:02:30.900000000", "00:02:34.390000000", 151},
 		{"subtitle ends before the video", "152.000000", "00:02:30.000000000", "00:02:28.000000000", 152},
 		{"nothing accounts for the stretch", "154.390000", "00:02:30.000000000", "00:02:00.000000000", 154},
+		{"a subtitle ending well before a long container", "7200.000000", "01:59:20.000000000", "01:59:21.000000000", 7200},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			raw := &ffprobeOutput{

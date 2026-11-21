@@ -737,7 +737,15 @@ func audioVideoSpan(raw *ffprobeOutput, formatDuration float64) (float64, bool) 
 			accountedEnd = max(accountedEnd, end)
 		}
 	}
-	if !hasVideo || accountedEnd <= audioVideo || !durationIsPositiveFinite(audioVideo) || formatDuration-audioVideo <= trackSpanShortfallSeconds {
+	shortfall := formatDuration - audioVideo
+	if !hasVideo || accountedEnd <= audioVideo || !durationIsPositiveFinite(audioVideo) || shortfall <= trackSpanShortfallSeconds {
+		return 0, false
+	}
+	// A shortfall inside the tolerance needs a track that ends with the
+	// container, not just within the relative tolerance (72 s on a two-hour
+	// file): otherwise video and audio tags that understate a long file by
+	// seconds would shorten it whenever a subtitle ends a little after them.
+	if shortfall <= tolerance && formatDuration-accountedEnd > trackSpanToleranceSeconds {
 		return 0, false
 	}
 	return audioVideo, true
