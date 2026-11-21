@@ -962,10 +962,8 @@ function NodeDevicePicker({
               <p className={cn("truncate text-sm", !row.reported && "text-muted-foreground")}>
                 {row.description}
               </p>
-              <p className="text-muted-foreground truncate text-xs">
-                <span dir="ltr" className="font-mono">
-                  {row.path}
-                </span>
+              <p className="text-muted-foreground truncate font-mono text-xs">
+                <span dir="ltr">{row.path}</span>
               </p>
             </div>
             <Switch

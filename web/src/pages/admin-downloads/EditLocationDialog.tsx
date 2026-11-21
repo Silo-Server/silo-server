@@ -83,10 +83,8 @@ function ServerLocationInfo({
           <dt className="text-muted-foreground text-xs">
             {t("web.admin.downloads.location.directory")}
           </dt>
-          <dd className="text-xs break-all">
-            <span dir="ltr" className="font-mono">
-              {location.dir}
-            </span>
+          <dd className="font-mono text-xs break-all">
+            <span dir="ltr">{location.dir}</span>
           </dd>
         </div>
         <div>
