@@ -94,6 +94,7 @@ function ProfileRow({
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <Label
             htmlFor={controlId}
+            title={profile.name}
             className={cn(
               "-mx-px block min-w-0 overflow-x-clip px-px text-sm wrap-anywhere",
               !selectable && "text-muted-foreground",
