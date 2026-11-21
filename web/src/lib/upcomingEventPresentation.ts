@@ -1,4 +1,6 @@
-import { codeNumber, t } from "@/i18n";
+import { createElement, type ReactNode } from "react";
+import { LineTitle } from "@/components/TitleLine";
+import { codeNumber, t, type Translate } from "@/i18n";
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
 
 interface UpcomingPresentationEvent {
@@ -48,13 +50,17 @@ export function upcomingBadgeClass(badge: string): string {
   }
 }
 
-export function formatUpcomingSubtitle(event: UpcomingPresentationEvent): string {
+/**
+ * The episode or season line under an upcoming title. Its episode title is a
+ * `LineTitle`; render it with `TitleLineParts`.
+ */
+export function formatUpcomingSubtitle(event: UpcomingPresentationEvent, t: Translate): ReactNode {
   if (
     (event.type === "episode" || event.type === "season_premiere") &&
     event.season_number != null
   ) {
     const season = event.season_number;
-    const title = event.episode_title;
+    const title = event.episode_title ? createElement(LineTitle, null, event.episode_title) : null;
     if (event.episode_number != null) {
       const code = { season: codeNumber(season), episode: codeNumber(event.episode_number) };
       return title

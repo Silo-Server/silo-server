@@ -1,6 +1,7 @@
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import type { RequestMediaDetail, RequestMediaSeason } from "@/api/types";
+import { LineTitle, TitleLineParts } from "@/components/TitleLine";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -184,8 +185,8 @@ export function RequestSeasonsDialog({
                           aria-describedby={`${metaID} ${statusID}`}
                         />
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium">
-                            {seasonName(t, season)}
+                          <span className="flex flex-wrap overflow-hidden font-medium">
+                            <TitleLineParts>{seasonName(t, season)}</TitleLineParts>
                           </span>
                           <span id={metaID} className="text-muted-foreground block text-xs">
                             {formatRequestSeasonMeta(season)}
@@ -240,12 +241,16 @@ export function RequestSeasonsDialog({
   );
 }
 
-function seasonName(t: Translate, season: RequestMediaSeason): string {
+/** "Season 2", or "Season 2: Name" with the name in a `LineTitle`. */
+function seasonName(t: Translate, season: RequestMediaSeason): ReactNode {
   const numberText = String(season.season_number);
   const number = t("web.requests.seasons.season", { number: season.season_number });
   // TMDB's generic name is English ("Season 2"); compare with that, not the translation.
   return season.name && season.name !== `Season ${numberText}` && season.name !== number
-    ? t("web.requests.seasons.seasonNamed", { number: season.season_number, name: season.name })
+    ? t("web.requests.seasons.seasonNamed", {
+        number: season.season_number,
+        name: <LineTitle>{season.name}</LineTitle>,
+      })
     : number;
 }
 
