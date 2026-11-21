@@ -242,9 +242,10 @@ export default function MediaCarousel({
   const headerPadX = edgePadding ? " px-4 sm:px-6 lg:px-10 xl:px-12" : "";
   const viewportPadX = edgePadding ? " pe-4 sm:pe-6 lg:pe-10 xl:pe-12" : "";
   const containerPadX = edgePadding ? " ps-4 sm:ps-6 lg:ps-10 xl:ps-12" : "";
-  const titleClass = compact
-    ? "text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase"
-    : "text-foreground text-xl font-semibold tracking-tight";
+  const titleSize = compact ? "text-[0.6875rem]" : "text-xl";
+  const titleClass = `inline whitespace-normal font-semibold ${headerActions ? "me-2" : ""} ${
+    compact ? "text-muted-foreground tracking-[0.18em] uppercase" : "text-foreground tracking-tight"
+  }`;
   const hasExploreAll = Boolean(viewAllHref || onViewAll);
   const headerGap = compact ? "mb-2" : "mb-5";
   const slideGap = compact ? "gap-3" : "gap-4 lg:gap-5";
@@ -278,7 +279,13 @@ export default function MediaCarousel({
       }
     >
       <div className={`${headerGap} flex items-end justify-between gap-4${headerPadX}`}>
-        <div className="flex min-w-0 items-center gap-2">
+        {/* Inline flow keeps the actions beside the heading's text when it
+            wraps; a flex row leaves them at the far edge of the heading's box.
+            Regular rows carry icons, badges, and counts, which nowrap here keeps
+            with the heading's last word. Compact rows carry sentence-long hints,
+            which move to their own line instead when they don't fit. The heading
+            inherits the size here, so min-h-lh is one heading line. */}
+        <div className={`min-w-0 ${titleSize} ${compact ? "" : "whitespace-nowrap"}`}>
           {titleHref ? (
             <Link to={titleHref} className="group/title">
               {/* The heading and "View" set their own colors, so without "View"
@@ -302,7 +309,11 @@ export default function MediaCarousel({
           ) : (
             <h2 className={titleClass}>{title}</h2>
           )}
-          {headerActions}
+          {headerActions ? (
+            <span className="inline-flex min-h-lh items-center align-top whitespace-normal">
+              {headerActions}
+            </span>
+          ) : null}
         </div>
         {viewAllHref ? (
           <Link
