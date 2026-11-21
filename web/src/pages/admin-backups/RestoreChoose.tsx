@@ -22,7 +22,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
-import { useAppLanguage, useT } from "@/i18n";
+import { exactAmount, useAppLanguage, useT } from "@/i18n";
 import { pendingCount } from "@/lib/profileDataTypes";
 import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
@@ -276,7 +276,7 @@ function BlockedGroupRows({ group, ...rows }: Omit<RowsProps, "items"> & { group
             open
               ? "web.admin.backups.restore.choose.hideThem"
               : "web.admin.backups.restore.choose.showThem",
-            { count: group.items.length },
+            { amount: exactAmount(group.items.length) },
           )}
         </Disclosure>
       </div>
@@ -339,7 +339,7 @@ function NeverRestored({ keys }: { keys: readonly string[] }) {
             open
               ? "web.admin.backups.restore.choose.hideThem"
               : "web.admin.backups.restore.choose.showThem",
-            { count: keys.length },
+            { amount: exactAmount(keys.length) },
           )}
         </Disclosure>
       </div>
@@ -459,7 +459,7 @@ function SectionBlock({
                   showAll
                     ? "web.admin.backups.restore.choose.hideThem"
                     : "web.admin.backups.restore.choose.showThem",
-                  { count: section.items.length },
+                  { amount: exactAmount(section.items.length) },
                 )}
               </Disclosure>
             </div>

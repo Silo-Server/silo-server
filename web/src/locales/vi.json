@@ -14837,14 +14837,22 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Ẩn mục này"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn các mục này"
             }
           ]
         },
@@ -14856,9 +14864,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -15007,14 +15013,22 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Hiển thị mục này"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị các mục này"
             }
           ]
         },
@@ -15026,9 +15040,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -15745,10 +15757,10 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -15761,6 +15773,22 @@
             {
               "type": 0,
               "value": ", vì những gì bạn chọn cần đến mục này."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Cũng đã chọn "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", vì những gì bạn chọn cần đến các mục này."
             }
           ]
         },
@@ -15780,17 +15808,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -15803,6 +15829,22 @@
             {
               "type": 0,
               "value": ", vì mục này cần những gì bạn đã bỏ chọn."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Cũng đã bỏ chọn "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", vì các mục này cần những gì bạn đã bỏ chọn."
             }
           ]
         },
@@ -15822,9 +15864,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -20359,14 +20399,22 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "không thể đọc dữ liệu"
+              "value": "không thể đọc dữ liệu của tài khoản này"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "không thể đọc dữ liệu của các tài khoản này"
             }
           ]
         },
@@ -20374,13 +20422,11 @@
           "value": [
             {
               "type": 0,
-              "value": "không thể đọc dữ liệu"
+              "value": "không thể đọc dữ liệu của các tài khoản này"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -20805,10 +20851,10 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -20817,6 +20863,26 @@
             {
               "type": 1,
               "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " của tài khoản này"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "không thể đọc "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " của các tài khoản này"
             }
           ]
         },
@@ -20829,12 +20895,14 @@
             {
               "type": 1,
               "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " của các tài khoản này"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -20961,14 +21029,22 @@
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "dữ liệu quá lớn đối với bộ khôi phục"
+              "value": "dữ liệu của tài khoản này quá lớn đối với bộ khôi phục"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "dữ liệu của các tài khoản này quá lớn đối với bộ khôi phục"
             }
           ]
         },
@@ -20976,13 +21052,11 @@
           "value": [
             {
               "type": 0,
-              "value": "dữ liệu quá lớn đối với bộ khôi phục"
+              "value": "dữ liệu của các tài khoản này quá lớn đối với bộ khôi phục"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -61354,7 +61428,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Tải lại để xem các giá trị hiện tại. Các chỉnh sửa của bạn đối với những cài đặt đã thay đổi, cũng như đối với mật khẩu và khóa đã lưu cùng các cài đặt liên quan, sẽ bị hoàn tác; các chỉnh sửa khác của bạn vẫn được giữ."
+      "value": "Tải lại để xem các giá trị hiện tại. Nếu bạn đã chỉnh sửa một cài đặt vừa thay đổi, hoặc một mật khẩu hay khóa đã lưu, tất cả chỉnh sửa của bạn sẽ bị hoàn tác; nếu không, các chỉnh sửa vẫn được giữ."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -77632,6 +77706,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

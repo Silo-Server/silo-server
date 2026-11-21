@@ -16396,22 +16396,22 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Paslēpt tos"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Paslēpt to"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt tos"
             }
           ]
         },
@@ -16423,9 +16423,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16610,22 +16608,22 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Rādīt tos"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Rādīt to"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt tos"
             }
           ]
         },
@@ -16637,9 +16635,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17500,26 +17496,10 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Silo izvēlējās arī: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ". Tie ir nepieciešami tam, ko izvēlējāties."
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -17535,6 +17515,22 @@
             }
           ]
         },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Silo izvēlējās arī: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ". Tie ir nepieciešami tam, ko izvēlējāties."
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -17551,33 +17547,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Silo noņēma atlasi arī: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ". Tiem ir nepieciešams tas, kam noņēmāt atlasi."
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -17590,6 +17568,22 @@
             {
               "type": 0,
               "value": ". Tam ir nepieciešams tas, kam noņēmāt atlasi."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Silo noņēma atlasi arī: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ". Tiem ir nepieciešams tas, kam noņēmāt atlasi."
             }
           ]
         },
@@ -17609,9 +17603,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -22836,22 +22828,22 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "neizdevās nolasīt to datus"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "neizdevās nolasīt tā datus"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "neizdevās nolasīt to datus"
             }
           ]
         },
@@ -22863,9 +22855,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -23462,14 +23452,14 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "neizdevās nolasīt to datus: "
+              "value": "neizdevās nolasīt tā datus: "
             },
             {
               "type": 1,
@@ -23477,11 +23467,11 @@
             }
           ]
         },
-        "one": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "neizdevās nolasīt tā datus: "
+              "value": "neizdevās nolasīt to datus: "
             },
             {
               "type": 1,
@@ -23501,9 +23491,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -23678,22 +23666,22 @@
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "to dati ir pārāk lieli atjaunošanas kopai"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "tā dati ir pārāk lieli atjaunošanas kopai"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "to dati ir pārāk lieli atjaunošanas kopai"
             }
           ]
         },
@@ -23705,9 +23693,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -68985,7 +68971,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Ielādējiet iestatījumus vēlreiz, lai redzētu pašreizējās vērtības. Jūsu labojumi iestatījumos, kas ir mainījušies, kā arī saglabātajās parolēs un atslēgās un ar tām saistītajos iestatījumos tiks atsaukti; pārējie jūsu labojumi tiks saglabāti."
+      "value": "Ielādējiet iestatījumus vēlreiz, lai redzētu pašreizējās vērtības. Ja kāds no jūsu labojumiem attiecas uz iestatījumu, kas ir mainījies, vai uz saglabātu paroli vai atslēgu, visi jūsu labojumi tiks atsaukti; pretējā gadījumā tie tiks saglabāti."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -85547,6 +85533,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"

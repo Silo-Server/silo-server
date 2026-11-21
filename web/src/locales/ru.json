@@ -17643,10 +17643,10 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -17654,15 +17654,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Скрыть"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -17678,9 +17670,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17901,10 +17891,10 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -17912,15 +17902,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Показать"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -17936,9 +17918,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -18891,14 +18871,14 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Также выбрано: "
+              "value": "Также выбран элемент, который нужен для вашего выбора: "
             },
             {
               "type": 1,
@@ -18906,15 +18886,15 @@
             },
             {
               "type": 0,
-              "value": ". Это нужно для того, что вы выбрали."
+              "value": "."
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Также выбрано: "
+              "value": "Также выбраны элементы, которые нужны для вашего выбора: "
             },
             {
               "type": 1,
@@ -18922,23 +18902,7 @@
             },
             {
               "type": 0,
-              "value": ". Это нужно для того, что вы выбрали."
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Также выбрано: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ". Это нужно для того, что вы выбрали."
+              "value": "."
             }
           ]
         },
@@ -18946,7 +18910,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Также выбрано: "
+              "value": "Также выбраны элементы, которые нужны для вашего выбора: "
             },
             {
               "type": 1,
@@ -18954,25 +18918,23 @@
             },
             {
               "type": 0,
-              "value": ". Это нужно для того, что вы выбрали."
+              "value": "."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Выбор также снят: "
+              "value": "Выбор также снят с элемента, которому нужно то, с чего вы сняли выбор: "
             },
             {
               "type": 1,
@@ -18980,15 +18942,15 @@
             },
             {
               "type": 0,
-              "value": ", так как этому нужно то, с чего вы сняли выбор."
+              "value": "."
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Выбор также снят: "
+              "value": "Выбор также снят с элементов, которым нужно то, с чего вы сняли выбор: "
             },
             {
               "type": 1,
@@ -18996,23 +18958,7 @@
             },
             {
               "type": 0,
-              "value": ", так как им нужно то, с чего вы сняли выбор."
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Выбор также снят: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ", так как им нужно то, с чего вы сняли выбор."
+              "value": "."
             }
           ]
         },
@@ -19020,7 +18966,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Выбор также снят: "
+              "value": "Выбор также снят с элементов, которым нужно то, с чего вы сняли выбор: "
             },
             {
               "type": 1,
@@ -19028,13 +18974,11 @@
             },
             {
               "type": 0,
-              "value": ", так как им нужно то, с чего вы сняли выбор."
+              "value": "."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -24797,10 +24741,10 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -24808,15 +24752,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "не удалось прочитать их данные"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -24832,9 +24768,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -25551,10 +25485,10 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -25566,19 +25500,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "не удалось прочитать их данные: "
-            },
-            {
-              "type": 1,
-              "value": "part"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -25602,9 +25524,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -25819,10 +25739,10 @@
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -25830,15 +25750,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "их данные слишком велики для набора для восстановления"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -25854,9 +25766,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -75711,7 +75621,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Перезагрузите настройки, чтобы увидеть текущие значения. Ваши правки изменившихся настроек, сохранённых паролей и ключей, а также связанных с ними настроек будут отменены; остальные правки сохранятся."
+      "value": "Перезагрузите, чтобы увидеть текущие значения. Если хотя бы одна из ваших правок касается изменившейся настройки или сохранённого пароля либо ключа, будут отменены все правки; в остальных случаях они сохранятся."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -92601,6 +92511,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " — "
+    },
     {
       "type": 1,
       "value": "code"

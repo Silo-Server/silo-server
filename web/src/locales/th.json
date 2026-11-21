@@ -13954,9 +13954,25 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อน"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อน"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -13965,9 +13981,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14088,9 +14102,25 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดง"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดง"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14099,9 +14129,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -14698,9 +14726,41 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "เลือก "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": " ด้วย เนื่องจากสิ่งที่คุณเลือกต้องใช้รายการนี้"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "เลือก "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": " ด้วย เนื่องจากสิ่งที่คุณเลือกต้องใช้รายการเหล่านี้"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14713,20 +14773,50 @@
             },
             {
               "type": 0,
-              "value": " ด้วย เนื่องจากสิ่งที่คุณเลือกต้องใช้"
+              "value": " ด้วย เนื่องจากสิ่งที่คุณเลือกต้องใช้รายการเหล่านี้"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ยกเลิกการเลือก "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": " ด้วย เนื่องจากรายการนี้ต้องใช้สิ่งที่คุณยกเลิกการเลือก"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ยกเลิกการเลือก "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": " ด้วย เนื่องจากรายการเหล่านี้ต้องใช้สิ่งที่คุณยกเลิกการเลือก"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14739,13 +14829,11 @@
             },
             {
               "type": 0,
-              "value": " ด้วย เนื่องจากต้องใช้สิ่งที่คุณยกเลิกการเลือก"
+              "value": " ด้วย เนื่องจากรายการเหล่านี้ต้องใช้สิ่งที่คุณยกเลิกการเลือก"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -18706,20 +18794,34 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "อ่านข้อมูลของบัญชีนี้ไม่ได้"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "อ่านข้อมูลของบัญชีเหล่านี้ไม่ได้"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
               "type": 0,
-              "value": "อ่านข้อมูลของบัญชีไม่ได้"
+              "value": "อ่านข้อมูลของบัญชีเหล่านี้ไม่ได้"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -19040,9 +19142,41 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "อ่าน "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " ของบัญชีนี้ไม่ได้"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "อ่าน "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " ของบัญชีเหล่านี้ไม่ได้"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -19055,13 +19189,11 @@
             },
             {
               "type": 0,
-              "value": " ของบัญชีไม่ได้"
+              "value": " ของบัญชีเหล่านี้ไม่ได้"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -19156,20 +19288,34 @@
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ข้อมูลของบัญชีนี้มีขนาดใหญ่เกินกว่าที่ชุดกู้คืนรองรับ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ข้อมูลของบัญชีเหล่านี้มีขนาดใหญ่เกินกว่าที่ชุดกู้คืนรองรับ"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
               "type": 0,
-              "value": "ข้อมูลของบัญชีมีขนาดใหญ่เกินกว่าที่ชุดกู้คืนรองรับ"
+              "value": "ข้อมูลของบัญชีเหล่านี้มีขนาดใหญ่เกินกว่าที่ชุดกู้คืนรองรับ"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -55465,7 +55611,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "โหลดซ้ำเพื่อดูค่าปัจจุบัน ระบบจะยกเลิกการแก้ไขการตั้งค่าที่มีการเปลี่ยนแปลง และการแก้ไขรหัสผ่านและคีย์ที่บันทึกไว้พร้อมการตั้งค่าที่เกี่ยวข้อง ส่วนการแก้ไขอื่นจะยังคงอยู่"
+      "value": "โหลดซ้ำเพื่อดูค่าปัจจุบัน หากการแก้ไขรายการใดเป็นการแก้ไขการตั้งค่าที่มีการเปลี่ยนแปลง หรือรหัสผ่านหรือคีย์ที่บันทึกไว้ ระบบจะยกเลิกการแก้ไขทั้งหมด ไม่เช่นนั้นการแก้ไขจะยังคงอยู่"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -71387,6 +71533,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

@@ -17039,10 +17039,10 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -17050,19 +17050,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Skrij"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Skrij jih"
+              "value": "Skrij ju"
             }
           ]
         },
@@ -17074,9 +17066,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17297,10 +17287,10 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -17308,19 +17298,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Prikaži"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Prikaži jih"
+              "value": "Prikaži ju"
             }
           ]
         },
@@ -17332,9 +17314,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -18271,10 +18251,10 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -18286,11 +18266,11 @@
             },
             {
               "type": 0,
-              "value": ", saj to potrebuje vaša izbira."
+              "value": ", ker to potrebuje vaša izbira."
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -18302,23 +18282,7 @@
             },
             {
               "type": 0,
-              "value": ", saj to potrebuje vaša izbira."
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Izbrano je tudi: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ", saj to potrebuje vaša izbira."
+              "value": ", ker ju potrebuje vaša izbira."
             }
           ]
         },
@@ -18334,21 +18298,19 @@
             },
             {
               "type": 0,
-              "value": ", saj to potrebuje vaša izbira."
+              "value": ", ker jih potrebuje vaša izbira."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -18360,11 +18322,11 @@
             },
             {
               "type": 0,
-              "value": ", saj je to odvisno od tega, kar ste odznačili."
+              "value": ", ker potrebuje to, kar ste odznačili."
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -18376,23 +18338,7 @@
             },
             {
               "type": 0,
-              "value": ", saj je to odvisno od tega, kar ste odznačili."
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Odznačeno je tudi: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ", saj je to odvisno od tega, kar ste odznačili."
+              "value": ", ker potrebujeta to, kar ste odznačili."
             }
           ]
         },
@@ -18408,13 +18354,11 @@
             },
             {
               "type": 0,
-              "value": ", saj je to odvisno od tega, kar ste odznačili."
+              "value": ", ker potrebujejo to, kar ste odznačili."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -24109,10 +24053,10 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -24120,19 +24064,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "njunih podatkov ni bilo mogoče prebrati"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "njihovih podatkov ni bilo mogoče prebrati"
             }
           ]
         },
@@ -24144,9 +24080,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -24947,10 +24881,10 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -24962,23 +24896,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "njunega dela ni bilo mogoče prebrati: "
-            },
-            {
-              "type": 1,
-              "value": "part"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "njihovega dela ni bilo mogoče prebrati: "
             },
             {
               "type": 1,
@@ -24998,9 +24920,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -25299,10 +25219,10 @@
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -25310,19 +25230,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "njuni podatki so preveliki za nabor za obnovitev"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "njihovi podatki so preveliki za nabor za obnovitev"
             }
           ]
         },
@@ -25334,9 +25246,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -74797,7 +74707,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Znova naložite, da vidite trenutne vrednosti. Vaše spremembe nastavitev, ki so se medtem spremenile, ter spremembe shranjenih gesel in ključev skupaj z njihovimi povezanimi nastavitvami so razveljavljene; druge spremembe so ohranjene."
+      "value": "Znova naložite, da vidite trenutne vrednosti. Če se katera od vaših sprememb nanaša na nastavitev, ki se je medtem spremenila, ali na shranjeno geslo ali ključ, bodo razveljavljene vse vaše spremembe; sicer bodo ohranjene."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -91639,6 +91549,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"
