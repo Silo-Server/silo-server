@@ -121,7 +121,8 @@ const PATH_SEPARATOR = ", ";
 /**
  * Folder paths, each in its own `dir="ltr"` span, so two folders with Arabic
  * names keep their order beside each other. The spans isolate each path in the
- * layout, not with Unicode marks, so a copied path is the plain path.
+ * layout, not with Unicode marks, and keep its spaces, so a copied path is the
+ * folder's own path.
  */
 function FolderPaths({ paths }: { paths: readonly string[] }) {
   return (
@@ -129,7 +130,9 @@ function FolderPaths({ paths }: { paths: readonly string[] }) {
       {paths.map((path, position) => (
         <Fragment key={position}>
           {position > 0 ? PATH_SEPARATOR : null}
-          <span dir="ltr">{path}</span>
+          <span dir="ltr" className="[white-space-collapse:preserve]">
+            {path}
+          </span>
         </Fragment>
       ))}
     </>
