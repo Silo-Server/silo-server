@@ -580,10 +580,13 @@ The stop drains before it boots the job out. `launchctl bootout` returns at
 once and launchd kills the job a minute after it, whatever `ExitTimeOut` asks,
 so the installer sends SIGTERM itself (`launchctl kill SIGTERM`), polls
 `launchctl print` until the signaled pid is gone, and only then boots the job
-out and waits for launchd to let it go. A job an older plist keeps alive
+out and waits for launchd to let it go. A `launchctl print` error while it
+waits is retried, not taken for the exit. A job an older plist keeps alive
 unconditionally restarts under a new pid; the signaled pid's exit still ends
-the drain. Each wait is bounded by the stopped install's drain timeout plus
-two minutes. A node still running at that deadline is booted out anyway, and
+the drain. Each wait is bounded by the running node's drain timeout plus two
+minutes: the longer of the one `node.env` sets and the one the installed
+plist's `ExitTimeOut` recorded, since the node read `node.env` when it started
+and the file may have changed since. A node still running at that deadline is booted out anyway, and
 the installer says it is stopping a node that is still finishing streams, so a
 stop never leaves the job stopped without the install's restart or rollback
 running. Uninstall stops the job the same way.

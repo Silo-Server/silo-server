@@ -393,3 +393,68 @@ func TestDropStaleBackupsFollowsTheSwapMarker(t *testing.T) {
 		t.Fatalf("without the marker, %d backups left; want none", got)
 	}
 }
+
+// A launchctl print error while the node drains doesn't end the wait: the
+// bootout comes only once the signaled process is gone.
+func TestStopKeepsDrainingThroughAPrintError(t *testing.T) {
+	dir := t.TempDir()
+	script := `#!/bin/sh
+dir='` + dir + `'
+echo "$*" >> "$dir/calls"
+case "$1" in
+print)
+	[ -e "$dir/gone" ] && exit 113
+	[ -e "$dir/booted" ] && { touch "$dir/gone"; exit 0; }
+	if [ -e "$dir/killed" ]; then
+		n=$(cat "$dir/polls" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$dir/polls"
+		case $n in
+		1) echo "Could not find service" >&2; exit 5 ;;
+		2) printf 'state = running\n\tpid = 100\n' ;;
+		*) printf 'state = not running\n' ;;
+		esac
+	else
+		printf 'state = running\n\tpid = 100\n'
+	fi
+	exit 0 ;;
+kill) touch "$dir/killed" ;;
+bootout) touch "$dir/booted" ;;
+esac
+exit 0
+`
+	path := filepath.Join(dir, "launchctl")
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	previous := launchctlPath
+	launchctlPath = path
+	t.Cleanup(func() { launchctlPath = previous })
+
+	if sent, err := fakeInstaller(t).stop(context.Background(), io.Discard); !sent || err != nil {
+		t.Fatalf("stop = %v, %v; want sent and no error", sent, err)
+	}
+	calls := strings.Split(strings.TrimSpace(launchctlCalls(t, dir)), "\n")
+	want := []string{"print", "kill SIGTERM", "print", "print", "print", "bootout"}
+	for i := range want {
+		if i >= len(calls) || !strings.HasPrefix(calls[i], want[i]) {
+			t.Fatalf("launchctl calls %q; want them to start %q", calls, want)
+		}
+	}
+}
+
+// The installed plist records the drain the running node started with, which
+// bounds its stop even when node.env now asks for less.
+func TestInstalledPlistDrain(t *testing.T) {
+	n := fakeInstaller(t)
+	if got := n.installedPlistDrain(); got != 0 {
+		t.Fatalf("no plist: drain %v; want 0", got)
+	}
+	if err := os.MkdirAll(filepath.Dir(n.paths.plist), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(n.paths.plist, renderNodePlist(n.paths, 20*time.Minute), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := n.installedPlistDrain(); got != 20*time.Minute {
+		t.Fatalf("drain %v; want 20m from the plist's ExitTimeOut", got)
+	}
+}

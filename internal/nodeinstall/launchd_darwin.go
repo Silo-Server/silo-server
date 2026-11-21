@@ -142,9 +142,10 @@ func (n nodeInstaller) stop(ctx context.Context, out io.Writer) (sent bool, err 
 // drainJob sends the node running as pid SIGTERM through launchd and waits,
 // until deadline, for that process to exit. A job an older plist keeps alive
 // may start again under a new pid; the signaled pid's exit still ends the
-// drain. killed reports that the signal went out. Once it has, every way out
-// (the exit, the deadline, an interrupt, a launchctl error) leads to the
-// bootout, so the job is never left stopped by a drained node alone; an
+// drain. killed reports that the signal went out. A launchctl error while
+// polling is retried until the deadline, since bootout would cut the drain
+// short. Once the signal went out, every way out (the exit, the deadline, an
+// interrupt) leads to the bootout, so the job is never left stopped by a drained node alone; an
 // error means ctx ended before anything was sent.
 func (n nodeInstaller) drainJob(ctx context.Context, out io.Writer, pid int, deadline time.Time) (killed bool, err error) {
 	if err := ctx.Err(); err != nil {
@@ -165,7 +166,7 @@ func (n nodeInstaller) drainJob(ctx context.Context, out io.Writer, pid int, dea
 		}
 		loaded, running, err := n.status(ctx)
 		switch {
-		case err != nil, !loaded, running != pid:
+		case err == nil && (!loaded || running != pid):
 			return true, nil
 		case !time.Now().Before(deadline):
 			_, _ = fmt.Fprintf(out, "The node is still finishing streams after %s and is being stopped now.\n", minutes(nodeStopWait(n.drain)))

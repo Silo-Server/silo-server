@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -51,9 +52,14 @@ type nodeInstaller struct {
 	service string // gui/<uid>/org.siloserver.node
 	domain  string // gui/<uid>
 	out     io.Writer
-	// drain is how long the installed node drains on SIGTERM, from its
-	// node.env, which bounds every wait for it to stop.
+	// drain is how long the running node may drain on SIGTERM, which bounds
+	// every wait for it to stop: the longer of node.env's drain and the one its
+	// plist recorded when it was installed, since the node read node.env when
+	// it started and the file may have changed since.
 	drain time.Duration
+	// newDrain is the drain the node.env being installed sets, which the new
+	// plist records.
+	newDrain time.Duration
 }
 
 func newNodeInstaller(out io.Writer) (nodeInstaller, error) {
@@ -160,11 +166,12 @@ func (n nodeInstaller) installLocked(ctx context.Context, given nodeInstallSetti
 		return err
 	}
 	n.dropStaleBackups()
-	// The new node.env keeps the drain, so it bounds both the old node's stop
-	// and the new one's ExitTimeOut.
-	if n.drain, err = nodeEnvDrainTimeout(extra); err != nil {
+	// The new node.env keeps the drain, so it sets the new plist's ExitTimeOut
+	// and, with the drain the running node's plist recorded, bounds its stop.
+	if n.newDrain, err = nodeEnvDrainTimeout(extra); err != nil {
 		return err
 	}
+	n.drain = max(n.newDrain, n.installedPlistDrain())
 	if settings.server != checkedServer {
 		if err := checkServerReady(ctx, settings.server); err != nil {
 			return err
@@ -295,6 +302,28 @@ func nodeStopTimeout(drain time.Duration) time.Duration {
 	return addCapped(drain, 2*time.Minute)
 }
 
+// plistExitTimeOut finds the ExitTimeOut renderNodePlist writes.
+var plistExitTimeOut = regexp.MustCompile(`<key>ExitTimeOut</key>\s*<integer>([0-9]+)</integer>`)
+
+// installedPlistDrain is the drain the installed plist recorded: its
+// ExitTimeOut less the minute nodeExitTimeout adds. 0 without a plist or one
+// it can't read.
+func (n nodeInstaller) installedPlistDrain() time.Duration {
+	plist, err := os.ReadFile(n.paths.plist)
+	if err != nil {
+		return 0
+	}
+	match := plistExitTimeOut.FindSubmatch(plist)
+	if match == nil {
+		return 0
+	}
+	seconds, err := strconv.Atoi(string(match[1]))
+	if err != nil || seconds <= 60 {
+		return 0
+	}
+	return time.Duration(seconds-60) * time.Second
+}
+
 // swapPending is the marker an install writes before it moves files aside and
 // removes once the new node is ready. With the marker, a .old file is the last
 // working install; without it, a leftover of a run that finished.
@@ -357,7 +386,7 @@ func (n nodeInstaller) install(ctx context.Context, settings nodeInstallSettings
 		err = swapIn(swaps)
 	}
 	if err == nil {
-		err = writeNodeFile(n.paths.plist, renderNodePlist(n.paths, n.drain), 0o644)
+		err = writeNodeFile(n.paths.plist, renderNodePlist(n.paths, n.newDrain), 0o644)
 	}
 	if err == nil {
 		err = n.bootstrap(ctx)
@@ -561,6 +590,7 @@ func uninstallNode(out io.Writer) error {
 			n.drain = drain
 		}
 	}
+	n.drain = max(n.drain, n.installedPlistDrain())
 	_, dirErr := os.Stat(n.paths.dir)
 	_, plistErr := os.Stat(n.paths.plist)
 	loaded, err := n.loaded(ctx)
