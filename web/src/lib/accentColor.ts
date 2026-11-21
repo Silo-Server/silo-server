@@ -104,7 +104,7 @@ const PAGE = "#141417";
 /**
  * The accent's hover fill (--primary-hover): faded a tenth toward the page,
  * like the theme's, unless that takes `label` below 4.5:1. Only a dark label
- * can lose contrast to that fade, so the accent then lightens a tenth instead,
+ * can fall below 4.5:1 on that fade, so the accent then lightens a tenth instead,
  * which can only raise it. The accent always sets the color it checked: the
  * theme's color-mix keeps fractional channels and can land just under it.
  */
