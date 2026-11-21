@@ -244,9 +244,10 @@ function InvitationCard({ invitation, shared }: RowProps) {
     <DiagnosticsCard>
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1 space-y-0.5">
+          {/* align-with-page keeps a wrapped email's lines on the page's start side. */}
           <h3
             dir={row.recipientDir}
-            className={cn("w-fit max-w-full font-medium", row.link ? "break-words" : "break-all")}
+            className={cn("align-with-page font-medium", row.link ? "break-words" : "break-all")}
           >
             {row.recipient}
           </h3>

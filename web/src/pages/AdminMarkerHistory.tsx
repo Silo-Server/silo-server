@@ -127,21 +127,25 @@ function MarkerHistoryRow({ row }: { row: MarkerEditAuditEntry }) {
       <TableCell>
         {/* The label takes the title's direction, so a cut one keeps its start.
             Judged from the title alone: dir="auto" would also read the
-            translated template around it, which may start with a mark. */}
+            translated template around it, which may start with a mark. The
+            link cuts its own text, so the box around it doesn't clip its
+            focus outline. */}
         <div
           dir={startsRightToLeft(title) ? "rtl" : "ltr"}
-          className="w-fit max-w-[18rem] truncate font-medium"
+          className="w-fit max-w-[18rem] font-medium"
         >
           {row.item_id ? (
             <Link
               to={`/item/${encodeURIComponent(row.item_id)}`}
-              className="hover:text-primary hover:underline"
+              className="hover:text-primary block truncate hover:underline"
               title={itemLabel}
             >
               {itemLabel}
             </Link>
           ) : (
-            <span title={itemLabel}>{itemLabel}</span>
+            <span className="block truncate" title={itemLabel}>
+              {itemLabel}
+            </span>
           )}
         </div>
         {/* A path reads left to right in any language, so a cut one keeps its

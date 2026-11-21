@@ -1,6 +1,7 @@
 import { Copy, Link2, Mail, MailX } from "lucide-react";
 
 import type { AdminInvitation as Invitation } from "@/api/v2/invitations";
+import { PathText } from "@/components/PathText";
 import { Button } from "@/components/ui/button";
 import { useT } from "@/i18n";
 
@@ -29,12 +30,14 @@ export function ClaimLinkBox({
     <div className="min-w-0 space-y-4">
       <div className="bg-muted min-w-0 overflow-hidden rounded-md p-2.5">
         {/* A URL reads left to right in any language, so a cut one keeps its
-            start and its "…", and its wrapped lines line up with the page. */}
+            start and its "…", and its wrapped lines line up with the page.
+            PathText keeps folders named in Arabic in a configured public URL
+            in order. */}
         <code
           dir="ltr"
           className="align-with-page block truncate text-xs max-lg:break-all max-lg:whitespace-normal"
         >
-          {claimUrl}
+          <PathText path={claimUrl} />
         </code>
       </div>
       <p className="text-muted-foreground text-xs">{finePrint}</p>

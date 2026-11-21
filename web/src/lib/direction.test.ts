@@ -11,6 +11,8 @@ describe("startsRightToLeft", () => {
     ["a Syriac title", "ܡܠܟܐ", true],
     ["a Thaana title", "ދިވެހި", true],
     ["an N'Ko title", "ߒߞߏ", true],
+    ["an Adlam digit before a Latin title", "𞥑 Days", true],
+    ["an N'Ko digit before a Latin title", "߁ Days", true],
     ["only digits", "2049", false],
   ])("%s", (_case, text, want) => {
     expect(startsRightToLeft(text)).toBe(want);
