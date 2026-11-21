@@ -6,9 +6,11 @@ import type {
   RestoreSectionId,
   RestoreSetting,
 } from "@/api/v2/adminBackupRestore";
+import { PathList } from "@/components/PathList";
 import { RestartBadge } from "@/components/settings/RestartBadge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { useOverflowsInline } from "@/hooks/useOverflowsInline";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import {
   Table,
@@ -24,7 +26,6 @@ import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 import { RowDisclosure } from "./Disclosure";
 import { itemState, type ItemState } from "./restoreGroups";
 import { REASON_SENTENCES, displayLabel, nameDir, toggleKeys } from "./restoreModel";
-import { useOverflowsInline } from "./useOverflowsInline";
 
 /** Toggles item keys; stable for the page's life so memoized rows don't re-render. */
 export type ToggleKeys = (keys: string[], checked: boolean) => void;
@@ -272,22 +273,11 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
       </div>
     ) : null,
     paths.length > 0 ? (
-      // Paths read left to right in any language; align-with-page keeps each line,
-      // a short path's or a wrapped one's, on the page's start side. w-fit lets a
-      // folder name that can't wrap widen the list toward the page's end side
-      // instead of running past its start edge.
-      <ul
+      <PathList
         key="paths"
-        dir="ltr"
-        className={cn(
-          "text-muted-foreground align-with-page w-fit font-mono text-xs break-all",
-          KEEP_SPACES,
-        )}
-      >
-        {paths.map((path) => (
-          <li key={path}>{path}</li>
-        ))}
-      </ul>
+        paths={paths}
+        className={cn("text-muted-foreground text-xs", KEEP_SPACES)}
+      />
     ) : null,
     missingPaths.length > 0 ? (
       // The list reads left to right inside the sentence, as on the row above.

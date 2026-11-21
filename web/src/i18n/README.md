@@ -133,10 +133,14 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   wrapped or not, sits on the page's start side. Without it, an inherited `start` resolves
   against the block's own direction and puts every line at its left edge. Chromium shows
   that wherever it happens; Firefox and Safari give `li` `text-align: match-parent`, so
-  inside a right-to-left list item they right-align the lines anyway. Where the block
-  would stretch, also give it `w-fit`, without `max-w-full`: a folder name that can't
-  wrap, such as one long emoji sequence, then widens the block toward the page's end side,
-  as it would in English, instead of running past its start edge.
+  inside a right-to-left list item they right-align the lines anyway. A folder name that
+  can't wrap, such as one long emoji sequence, still runs past the block's right edge,
+  the page's start side in a right-to-left page: clip it sideways while it overflows, with
+  `useOverflowsInline` and `OVERFLOW_CLIP` (`src/hooks/useOverflowsInline.ts`), so it
+  keeps its start and stays in the block. `PathList` (`src/components/PathList.tsx`) and
+  `CardPath` handle the alignment and the clip. Don't give a list of paths `w-fit`
+  instead: one such name would make the list that wide, and its other paths would wrap
+  at that width.
 - A name that can be in either script and is cut with `truncate` (a username, say) takes
   `dir="auto"`: it reads in the direction of its first strong character (a letter, or
   right-to-left punctuation such as `؟`), and left to right when it has none, as a name

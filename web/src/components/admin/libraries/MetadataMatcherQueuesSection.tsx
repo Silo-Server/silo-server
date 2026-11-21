@@ -6,6 +6,7 @@ import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDia
 import {
   CARD_ACTION_CLASS,
   CardActions,
+  CardPath,
   DiagnosticsCard,
   DiagnosticsCardList,
 } from "@/components/admin/libraries/DiagnosticsListParts";
@@ -354,15 +355,13 @@ function MatcherQueueDetail({
                 touch ? "flex-col items-start" : "items-center justify-between",
               )}
             >
-              <code
-                className={cn(
-                  "min-w-0 font-mono",
-                  touch ? "align-with-page max-w-full break-all" : "truncate",
-                )}
-                dir="ltr"
-              >
-                {path}
-              </code>
+              {touch ? (
+                <CardPath path={path} className="max-w-full min-w-0 text-inherit" />
+              ) : (
+                <code className="min-w-0 truncate font-mono" dir="ltr">
+                  {path}
+                </code>
+              )}
               <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                 {failureKind ? (
                   <Badge variant="outline">{formatFailureKind(failureKind)}</Badge>

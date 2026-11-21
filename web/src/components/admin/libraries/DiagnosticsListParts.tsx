@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TableHead } from "@/components/ui/table";
+import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
@@ -269,14 +270,18 @@ export function CardField({ label, children }: { label: string; children: ReactN
 /**
  * A filesystem path in a card: monospace, wrapping anywhere, never scrolling.
  * It reads left to right in any language, and its lines line up with the page,
- * so the path sits under the card's heading on the page's start side.
+ * so the path sits under the card's heading on the page's start side. A folder
+ * name that can't wrap is clipped at the path's end edge while it overflows.
  */
 export function CardPath({ path, className }: { path: string; className?: string }) {
+  const [ref, overflows] = useOverflowsInline<HTMLElement>(path);
   return (
     <code
+      ref={ref}
       className={cn(
         "text-muted-foreground align-with-page block font-mono text-xs break-all",
         className,
+        overflows && OVERFLOW_CLIP,
       )}
       dir="ltr"
     >

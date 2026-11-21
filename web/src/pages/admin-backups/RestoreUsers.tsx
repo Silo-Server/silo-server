@@ -4,6 +4,7 @@ import { ShieldCheck } from "lucide-react";
 import type { RestoreDataTypeId, RestoreItem, RestoreProfile } from "@/api/v2/adminBackupRestore";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
 import { useT, type Translate } from "@/i18n";
 import { emailDir } from "@/lib/direction";
 import { cn } from "@/lib/utils";
@@ -21,7 +22,6 @@ import {
   requiredPrimary,
   toggleKeys,
 } from "./restoreModel";
-import { OVERFLOW_CLIP, useOverflowsInline } from "./useOverflowsInline";
 
 const MIDDLE_DOT = "·";
 

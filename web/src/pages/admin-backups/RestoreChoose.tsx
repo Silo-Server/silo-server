@@ -22,6 +22,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
 import { useAppLanguage, useT } from "@/i18n";
 import { pendingCount } from "@/lib/profileDataTypes";
 import { cn } from "@/lib/utils";
@@ -33,7 +34,6 @@ import { Disclosure } from "./Disclosure";
 import { PlanSentences } from "./RestoreReview";
 import { BreakableKey, ItemRow, SameRow, type ToggleKeys } from "./RestoreRows";
 import { AccountRow, DataTypesPanel } from "./RestoreUsers";
-import { OVERFLOW_CLIP, useOverflowsInline } from "./useOverflowsInline";
 import {
   FILTER_THRESHOLD,
   STATE_ORDER,
