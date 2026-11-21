@@ -30,10 +30,11 @@ func TestRenderLayoutEscapesAndPlacesContent(t *testing.T) {
 	}
 }
 
-// A mid-tone accent leaves both the white and the dark label under 4.5:1; the
-// button must keep the accent as stored and still draw a label that reads.
-func TestEmailButtonLabelReadsOnMidToneAccent(t *testing.T) {
-	for _, accent := range []string{"#8b5cf6", "#777777", "#7d7d7d"} {
+// The button keeps the accent as stored and draws a label that reads on it:
+// white on a dark accent, the dark label on a light one, and on mid-tones,
+// where both fall under 4.5:1, black.
+func TestEmailButtonLabelReadsOnAccent(t *testing.T) {
+	for _, accent := range []string{"#4f46e5", "#f59e0b", "#8b5cf6", "#777777", "#7d7d7d"} {
 		out := EmailButton(Brand{AccentColor: accent}, "Sign in", "https://example.com/")
 		background := regexp.MustCompile(`bgcolor="(#[0-9a-f]{6})"`).FindStringSubmatch(out)
 		label := regexp.MustCompile(`;color:(#[0-9a-f]{6});`).FindStringSubmatch(out)
