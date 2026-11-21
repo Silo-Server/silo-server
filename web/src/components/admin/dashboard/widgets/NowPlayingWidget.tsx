@@ -28,11 +28,12 @@ import { useT } from "@/i18n";
 const MAX_RENDERED_STREAMS = 40;
 
 /**
- * Cards shown below lg, where dashboard rows size to their content and there is
- * no widget height to fit against (matches the lg rule in app.css).
+ * Cards shown below the dashboard's 12-column layout, where rows size to their
+ * content and there is no widget height to fit against. FIXED_ROWS_QUERY is
+ * that layout's media query on .admin-widget-grid in app.css.
  */
 const STACKED_STREAM_LIMIT = 4;
-const FIXED_ROWS_QUERY = "(min-width: 1024px)";
+const FIXED_ROWS_QUERY = "(min-width: 64rem) and (min-width: 1024px)";
 
 export function NowPlayingWidget() {
   const t = useT();
@@ -316,9 +317,11 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
 
         {/* Tags. Capped at one line so every card has the same height and
             the widget's rows stay even: tags that would wrap are clipped
-            whole. The 12px line height (inherited by the pills) plus their
-            padding and border makes the 18px line. */}
-        <div className="mb-1.5 flex max-h-[18px] flex-wrap gap-1 overflow-hidden leading-3">
+            whole. The cap is the pills' height: the 0.75rem line height
+            each pill is given here (overriding its own), their 0.25rem of
+            padding, and 2px of border. Keep it in rem so it grows with
+            Text Size. */}
+        <div className="mb-1.5 flex max-h-[calc(1rem+2px)] flex-wrap gap-1 overflow-hidden leading-3 [&>*]:leading-3">
           <span
             className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodMeta.badgeClass}`}
           >

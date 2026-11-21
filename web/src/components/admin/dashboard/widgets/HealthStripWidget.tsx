@@ -208,8 +208,8 @@ function HealthCell({
       <div
         className={cn(
           "mt-1 truncate text-[0.9375rem] leading-tight font-bold tabular-nums",
-          tone === "error" && "text-destructive",
-          tone === "warn" && "text-amber-500",
+          tone === "error" && "text-destructive-label",
+          tone === "warn" && "text-warning-label",
         )}
         title={value}
       >

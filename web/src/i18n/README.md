@@ -135,8 +135,12 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   Where the box would stretch (a block, a `flex-col` child), size it to its text with
   `w-fit max-w-full` so a short name stays on the page's start side. A `flex-1` item
   can't be sized that way: keep `flex-1` on a wrapper and put the name in a
-  `block w-fit max-w-full` span inside it. `.bidi-text` alone doesn't keep the start:
-  its `unicode-bidi: plaintext` leaves the box in the page's direction, so Firefox drops
+  `block w-fit max-w-full` span inside it. A `flex-1` item capped at its text with
+  `max-w-max` can't stretch, so it can take `dir="auto"` itself unless it also carries
+  a logical margin, padding or border (`ms-auto`, `pe-2`, `border-s`): those follow
+  the element's own direction, so keep them on the outer element and put the name in
+  a `block` span inside it. `.bidi-text` alone doesn't keep the start: its
+  `unicode-bidi: plaintext` leaves the box in the page's direction, so Firefox drops
   the "…" and WebKit cuts the start.
 - Titles, names, taglines and overviews from metadata use `.bidi-text` (`app.css`).
   Where such text is cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
