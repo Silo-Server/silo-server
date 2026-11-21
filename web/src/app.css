@@ -2163,10 +2163,14 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .library-marquee-header.is-overlay .marquee-tab-trigger {
     color: color-mix(in srgb, #fff 68%, transparent);
   }
-  .marquee-tab-trigger:hover {
+  /* Mouse only, like the `hover:` variant: a tap leaves :hover stuck on touch,
+     and a stuck tab reads as selected once the selection moves on. */
+  :where(:root[data-fine-pointer="true"]) .marquee-tab-trigger:hover {
     color: var(--foreground);
   }
-  .library-marquee-header.is-overlay .marquee-tab-trigger:hover {
+  :where(:root[data-fine-pointer="true"])
+    .library-marquee-header.is-overlay
+    .marquee-tab-trigger:hover {
     color: #fff;
   }
   .marquee-tab-trigger[data-state="active"] {
