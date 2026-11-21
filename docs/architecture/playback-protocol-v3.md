@@ -1130,6 +1130,16 @@ seek fix. Starting at the next keyframe instead would skip past the requested
 position, which is worse for the viewer than a short rewind. The pre-roll is
 therefore kept.
 
+A progressive copy seek whose anchor cannot be resolved is answered with a
+retryable refusal so the client can offer one retry. That retry is a viewer
+decision, not startup latency, so the server grants its anchor probe a longer
+bounded window than the first attempt. If the probe still cannot answer, the retry is not refused a
+second time: the server starts the copy stream from the keyframe FFmpeg's input
+seek resolves, which is the unanchored form of the same pre-roll above. The
+viewer may therefore begin up to one GOP behind. A second, identical refusal for
+the same target is a server bug; the retry's answer is a plan or a different
+failure with a different remedy.
+
 ### `source.duration_seconds`
 
 The media's full runtime, and nothing else. Specifically:
