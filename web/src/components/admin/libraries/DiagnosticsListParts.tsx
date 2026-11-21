@@ -268,10 +268,11 @@ export function CardField({ label, children }: { label: string; children: ReactN
 }
 
 /**
- * A filesystem path in a card: monospace, wrapping anywhere, never scrolling.
- * It reads left to right in any language, and its lines line up with the page,
- * so the path sits under the card's heading on the page's start side. A folder
- * name that can't wrap is clipped at the path's end edge while it overflows.
+ * A filesystem path: monospace, wrapping anywhere, never scrolling. It reads
+ * left to right in any language, and its lines line up with the page, so the
+ * path sits under its heading or beside its label on the page's start side. A
+ * folder name that can't wrap is clipped at the path's end edge while it
+ * overflows.
  */
 export function CardPath({ path, className }: { path: string; className?: string }) {
   const [ref, overflows] = useOverflowsInline<HTMLElement>(path);

@@ -6,6 +6,7 @@ import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDia
 import {
   CardField,
   CardFields,
+  CardPath,
   DiagnosticsCard,
   DiagnosticsCardList,
   DiagnosticsSearch,
@@ -37,6 +38,9 @@ import { formatDateTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 
 type SkippedSortField = "root_path" | "library" | "reason" | "first_seen" | "last_seen";
+
+/** The detail paths keep the body text color, and one click selects a whole path. */
+const SKIPPED_PATH_CLASS = "text-foreground min-w-0 select-all";
 
 const REASON_BADGE_CLASS = "border-warning/30 bg-warning/5 text-warning";
 
@@ -245,17 +249,17 @@ function skippedRootKey(root: LibrarySkippedRoot): string {
 function SkippedRootDetails({ root }: { root: LibrarySkippedRoot }) {
   const t = useT();
   return (
-    <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs">
       <span className="text-muted-foreground font-medium">
         {t("web.admin.libraries.skippedRoots.rootPath")}
       </span>
-      <code className="min-w-0 font-mono break-all select-all">{root.root_path}</code>
+      <CardPath path={root.root_path} className={SKIPPED_PATH_CLASS} />
       {root.sample_file_path && (
         <>
           <span className="text-muted-foreground font-medium">
             {t("web.admin.libraries.skippedRoots.sampleFile")}
           </span>
-          <code className="min-w-0 font-mono break-all select-all">{root.sample_file_path}</code>
+          <CardPath path={root.sample_file_path} className={SKIPPED_PATH_CLASS} />
         </>
       )}
       <span className="text-muted-foreground font-medium">
