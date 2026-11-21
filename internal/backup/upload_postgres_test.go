@@ -19,10 +19,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/s3client/s3test"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 // uploadNode is one API server: its own Service over the shared database
@@ -398,7 +398,7 @@ func newOtherServer(t *testing.T, f *selectiveFixture) *otherServer {
 	keyCheck, _ := secret.KeyCheckValue(key)
 	o := &otherServer{serverID: "other-" + f.serverID}
 	o.svc = New(Options{
-		Pool: f.pool, DatabaseURL: f.svc.opts.DatabaseURL, Settings: catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(f.pool), cipher),
+		Pool: f.pool, DatabaseURL: f.svc.opts.DatabaseURL, Settings: serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(f.pool), cipher),
 		Cipher: cipher, KeyCheck: keyCheck, Stores: f.svc.opts.Stores, Destination: f.svc.opts.Destination,
 		Locker: PostgresLocker{Pool: f.pool}, Status: PostgresStatus{Pool: f.pool},
 		ServerID:  func(context.Context) (string, error) { return o.serverID, nil },
