@@ -611,7 +611,7 @@ function ProfileEditorForm({
           </p>
         </div>
 
-        <div className="border-border flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+        <div className="border-border flex flex-wrap items-center justify-between gap-3 rounded-md border px-3 py-2">
           <div className={SWITCH_ROW_TEXT}>
             <Label htmlFor="profile-is-child">{t("web.profiles.editor.kids")}</Label>
             <p className="text-muted-foreground text-xs">{t("web.profiles.editor.kidsHint")}</p>
@@ -693,7 +693,7 @@ function ProfileEditorForm({
                   : t("web.profiles.editor.advisoryAgeHelpFallback")}
               </p>
               {requireAdvisoryAgeSupported && draft.maxAdvisoryAge !== null ? (
-                <div className="flex items-start justify-between gap-3 pt-1">
+                <div className="flex flex-wrap items-start justify-between gap-3 pt-1">
                   <div className={SWITCH_ROW_TEXT}>
                     <Label htmlFor={requireAdvisoryAgeId}>
                       {t("web.profiles.editor.hideWithoutAge")}
@@ -750,7 +750,7 @@ function ProfileEditorForm({
         />
 
         {requestsAllowedSupported ? (
-          <div className="border-border flex items-center justify-between gap-4 rounded-md border px-3 py-2">
+          <div className="border-border flex flex-wrap items-center justify-between gap-4 rounded-md border px-3 py-2">
             <div className={SWITCH_ROW_TEXT}>
               <Label htmlFor={requestsAllowedId}>{t("web.profiles.editor.requestsAllowed")}</Label>
               <p id={requestsAllowedHelpId} className="text-muted-foreground text-xs">
