@@ -784,16 +784,12 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                           label: pin.label,
                                         })
                                       }
-                                      className="group/unpin pointer-reveal text-muted-foreground hover:text-destructive absolute inset-y-0 end-0 flex items-center px-1 focus-visible:outline-none"
+                                      className="pointer-reveal text-muted-foreground hover:text-destructive absolute end-1 rounded p-1.5"
                                       title={t("web.shell.sidebar.unpin")}
                                       aria-label={t("web.shell.sidebar.unpin")}
                                       aria-describedby={pinLabelId}
                                     >
-                                      {/* The button spans the row's height for an easier tap;
-                                        the focus ring stays around the icon. */}
-                                      <span className="rounded p-1 group-focus-visible/unpin:[outline:auto]">
-                                        <PinOff className="h-3 w-3" />
-                                      </span>
+                                      <PinOff className="h-3 w-3" />
                                     </button>
                                   ) : null}
                                 </div>
