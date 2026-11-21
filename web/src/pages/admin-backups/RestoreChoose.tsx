@@ -717,7 +717,7 @@ export function RestoreChoose({
               ref={noticeRef}
               role="status"
               tabIndex={noticeScrolls ? 0 : undefined}
-              className="overlay-scroll focus-visible:outline-ring rounded-sm text-[13px] text-amber-600 focus-visible:outline-2 focus-visible:outline-offset-2 lg:max-h-32 lg:min-h-0 lg:overflow-y-auto dark:text-amber-400"
+              className="overlay-scroll focus-visible:outline-ring rounded-sm text-[13px] wrap-anywhere text-amber-600 focus-visible:outline-2 focus-visible:outline-offset-2 lg:max-h-32 lg:min-h-0 lg:overflow-y-auto dark:text-amber-400"
             >
               {/* A block child, so useScrolls sees the text grow. */}
               <span className="block">{notice}</span>
