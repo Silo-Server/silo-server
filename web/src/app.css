@@ -596,7 +596,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   }
 
   /* ── Contrast-adjustable tokens ─────────────────────────────
-     These seven tokens are the ones high contrast mode lightens.
+     These eight tokens are the ones high contrast mode lightens.
      Themes define the literal under `--<token>-base`; the semantic
      token is an alias. The indirection is required, not stylistic:
      a custom property whose value references itself is a dependency
@@ -616,6 +616,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --surface-hover: var(--surface-hover-base);
     --surface-raised: var(--surface-raised-base);
     --accent: var(--accent-base);
+    --destructive: var(--destructive-base);
   }
 
   /* ── Midnight Cinema ────────────────────────────────────── */
@@ -660,12 +661,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --accent-foreground: #e8e8ec;
 
     /* Destructive: warm red for danger actions. No single red works for both
-       of its jobs on this background. --destructive is red text, icons and
+       of its jobs on this background. --destructive (set here as
+       --destructive-base; high contrast lightens it) is red text, icons and
        borders on the dark surfaces (4.89:1 on --background, 4.51:1 on --card),
        but white on it is only 3.76:1. Solid fills under a label (the
        destructive button and badge) use --destructive-fill, and their label is
        --destructive-foreground: 4.83:1. */
-    --destructive: #ef4444;
+    --destructive-base: #ef4444;
     --destructive-foreground: #ffffff;
     --destructive-fill: #dc2626;
 
@@ -834,14 +836,20 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --surface-hover: color-mix(in srgb, var(--contrast-boost) 16%, var(--surface-hover-base));
     --surface-raised: color-mix(in srgb, var(--contrast-boost) 20%, var(--surface-raised-base));
     --accent: color-mix(in srgb, var(--contrast-boost) 14%, var(--accent-base));
-    /* Status labels: each mixed just far enough to keep 5:1 on a hovered
-       row (--surface-hover), the lightest surface under one, so each keeps
-       as much of its colour as it can. On --surface-raised red would drop
-       below 4.5:1; no label sits there. */
+    /* Red text, icons and borders can sit on any surface above, so red
+       mixes far enough to keep 4.5:1 on the lightest, --surface-raised
+       (4.77:1). A red tint on --surface-raised drops red text to about
+       4:1; no red text sits there. */
+    --destructive: color-mix(in srgb, var(--contrast-boost) 65%, var(--destructive-base));
+    /* Status labels: success, warning and info each mix just far enough to
+       keep 5:1 on a hovered row (--surface-hover), the lightest surface
+       under one, so each keeps as much of its colour as it can. Red's tint
+       comes from the lightened --destructive above, so its label is that
+       red, at 4.75:1 on the tint over a hovered row. */
     --success-label: color-mix(in srgb, var(--contrast-boost) 40%, var(--success));
     --warning-label: color-mix(in srgb, var(--contrast-boost) 35%, var(--warning));
     --info-label: color-mix(in srgb, var(--contrast-boost) 50%, var(--info));
-    --destructive-label: color-mix(in srgb, var(--contrast-boost) 60%, var(--destructive));
+    --destructive-label: var(--destructive);
     --ambient-glow-opacity: 0.04;
   }
   html[data-high-contrast="true"] .surface-panel-subtle,
