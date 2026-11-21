@@ -770,7 +770,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                     ) : (
                                       <LayoutGrid className="h-3.5 w-3.5 shrink-0 opacity-60" />
                                     )}
-                                    <span id={pinLabelId} className="bidi-text truncate">
+                                    <span id={pinLabelId} dir="auto" className="bidi-text truncate">
                                       {label}
                                     </span>
                                   </ViewTransitionLink>
