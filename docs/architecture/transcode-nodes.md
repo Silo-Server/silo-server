@@ -560,9 +560,9 @@ build compiles.
 
 An install is also the upgrade: a rerun takes every value its flags leave out
 from the existing install, and replaces the binary unless it runs from the
-installed one. `--key -` asks for the key at the hidden prompt a first install
-without `--key` gets, so a rerun can replace the key without it reaching the
-command line. It checks everything it can before it writes anything: the
+installed one. The key is never a command-line argument, which other users of
+the Mac could read: a first install, and a rerun with `--new-key`, ask for it at
+a hidden prompt, or read it from standard input when that isn't a terminal. It checks everything it can before it writes anything: the
 flags and key, a `SILO_NODE_DRAIN_TIMEOUT` the node would ignore
 (`transcodenode.ParseDrainTimeout`, which the node parses it with), FFmpeg (Homebrew's `ffmpeg-full`, as `playback`'s discovery
 finds it), the server's `GET /api/v1/ready` (a `200` within five seconds, no

@@ -88,8 +88,10 @@ func TestMergeNodeInstallFlags(t *testing.T) {
 		{"a rerun without flags keeps the install", stored, nil, stored},
 		{"flags override", stored, []string{"--server", "https://silo.example", "--port", "9000"},
 			nodeInstallSettings{server: "https://silo.example", key: "stored-key", port: 9000}},
-		{"a first install gets the default port", nodeInstallSettings{}, []string{"--server", "http://localhost:8090", "--key", "k"},
-			nodeInstallSettings{server: "http://localhost:8090", key: "k", port: defaultNodeInstallPort}},
+		{"a first install gets the default port", nodeInstallSettings{}, []string{"--server", "http://localhost:8090"},
+			nodeInstallSettings{server: "http://localhost:8090", port: defaultNodeInstallPort}},
+		{"--new-key asks for a new key", stored, []string{"--new-key"},
+			nodeInstallSettings{server: "http://localhost:8090", key: nodeKeyPrompt, port: 8200}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -26,26 +26,28 @@ import (
 )
 
 const nodeCommandUsage = `usage:
-  silo node install [--server URL] [--key KEY] [--port N]
+  silo node install [--server URL] [--new-key] [--port N]
       Install this Mac's transcode node as a LaunchAgent, or upgrade it to this binary
   silo node uninstall
       Stop the node and remove it, keeping its log
   silo node version
       Print this build's revision and build number`
 
-const nodeInstallUsage = `usage: silo node install [--server URL] [--key KEY] [--port N]
+const nodeInstallUsage = `usage: silo node install [--server URL] [--new-key] [--port N]
 
 Installs this Mac's transcode node as a LaunchAgent for the current user, or
 upgrades it to this binary. A rerun keeps every value it is not given, and any
 other variable added to node.env, so "silo node install" alone upgrades in
 place.
 
+The node key Admin > Nodes issued is asked for at a hidden prompt the first
+time and with --new-key. To script an install, pipe the key in on standard
+input instead. It is never taken from the command line, where other users of
+this Mac could read it.
+
   --server URL   the Silo server's URL as this Mac reaches it, such as
                  http://localhost:8090 (required the first time)
-  --key KEY      the key Admin > Nodes issued for this node (asked for when
-                 omitted the first time). --key - asks for it at a hidden
-                 prompt, which replaces the installed key without putting
-                 it on the command line
+  --new-key      replace the installed node key
   --port N       the port the node listens on (default 8100)`
 
 // nodeLaunchdLabel names the node's LaunchAgent.
@@ -55,7 +57,7 @@ const nodeLaunchdLabel = "org.siloserver.node"
 // listens on 8080, which Docker Desktop often publishes already.
 const defaultNodeInstallPort = 8100
 
-// nodeKeyPrompt is the --key value that asks for the key at a hidden prompt.
+// nodeKeyPrompt marks a run that asks for a new key (--new-key).
 const nodeKeyPrompt = "-"
 
 // nodeExitTimeout is how long launchd waits after SIGTERM before it kills a
@@ -136,7 +138,7 @@ func parseNodeInstallFlags(args []string) (given nodeInstallSettings, help bool,
 	flags := flag.NewFlagSet("silo node install", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	flags.StringVar(&given.server, "server", "", "")
-	flags.StringVar(&given.key, "key", "", "")
+	newKey := flags.Bool("new-key", false, "")
 	flags.IntVar(&given.port, "port", 0, "")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -148,7 +150,9 @@ func parseNodeInstallFlags(args []string) (given nodeInstallSettings, help bool,
 		return nodeInstallSettings{}, false, errors.New(nodeInstallUsage)
 	}
 	given.server = strings.TrimSpace(given.server)
-	given.key = strings.TrimSpace(given.key)
+	if *newKey {
+		given.key = nodeKeyPrompt
+	}
 	// A flag given is checked by its parsed value, so --port 00 is no port
 	// and --server "" no server.
 	flags.Visit(func(f *flag.Flag) {
@@ -156,8 +160,8 @@ func parseNodeInstallFlags(args []string) (given nodeInstallSettings, help bool,
 		case err != nil:
 		case f.Name == "port" && (given.port < 1 || given.port > 65535):
 			err = errors.New("--port must be between 1 and 65535")
-		case f.Name == "server" && given.server == "", f.Name == "key" && given.key == "":
-			err = fmt.Errorf("--%s needs a value", f.Name)
+		case f.Name == "server" && given.server == "":
+			err = errors.New("--server needs a value")
 		}
 	})
 	return given, false, err

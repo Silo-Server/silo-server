@@ -3,6 +3,7 @@
 package nodeinstall
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -106,7 +107,7 @@ func installNode(args []string, in io.Reader, out io.Writer) error {
 	}
 	if !nodebuild.Node {
 		return errors.New("this silo build links Homebrew libraries, so a Homebrew upgrade can stop it from starting. " +
-			"Install the node binary from the server image instead:\n  " + nodeImageCopyHint + "\n  ./silo node install --server <URL> --key <KEY>")
+			"Install the node binary from the server image instead:\n  " + nodeImageCopyHint + "\n  ./silo node install --server <URL>")
 	}
 	n, err := newNodeInstaller(out)
 	if err != nil {
@@ -147,9 +148,9 @@ func installNode(args []string, in io.Reader, out io.Writer) error {
 	return n.installLocked(ctx, given, settings.server)
 }
 
-// askNodeKey returns the key to give the install: the one the flags give, or
-// the one entered at the prompt when --key - asks for it or neither the flags
-// nor the install have one.
+// askNodeKey returns the key to give the install: none when the install has one
+// to keep, or the one entered at the prompt (or piped in on standard input)
+// when --new-key asks for it or the install has none.
 func askNodeKey(stored, given nodeInstallSettings, prompt func() (string, error)) (string, error) {
 	asked := given.key == nodeKeyPrompt
 	merged := mergeNodeInstall(stored, given)
@@ -161,7 +162,7 @@ func askNodeKey(stored, given nodeInstallSettings, prompt func() (string, error)
 	}
 	key, err := prompt()
 	if err == nil && asked && key == "" {
-		err = errors.New("--key - asks for the key at a hidden prompt: run this in a terminal and enter the key")
+		err = errors.New("--new-key needs the key: enter it at the prompt, or pipe it in on standard input")
 	}
 	return key, err
 }
@@ -210,7 +211,7 @@ func (s nodeInstallSettings) validate() error {
 		return err
 	}
 	if s.key == "" {
-		return errors.New("--key is required the first time: the key Admin > Nodes issued for this node")
+		return errors.New("the node key is required the first time: enter the key Admin > Nodes issued at the prompt, or pipe it in on standard input")
 	}
 	if _, err := nodepool.ParseNodeKey(s.key); err != nil {
 		return fmt.Errorf("the node key is malformed (%w); copy the key Admin > Nodes issued", err)
@@ -744,17 +745,14 @@ func nodePortTaken(ctx context.Context, port int) bool {
 }
 
 // promptNodeKey asks for the key, without echoing it, when stdin is a
-// terminal; otherwise it returns "" and validation asks for --key. An
+// terminal; otherwise it reads the key from stdin's first line. An
 // interrupt at the prompt restores the terminal before the process ends.
 func promptNodeKey(in io.Reader, out io.Writer) (string, error) {
 	file, ok := in.(*os.File)
-	if !ok {
-		return "", nil
+	if !ok || !term.IsTerminal(int(file.Fd())) {
+		return readNodeKeyLine(in)
 	}
 	fd := int(file.Fd())
-	if !term.IsTerminal(fd) {
-		return "", nil
-	}
 	state, err := term.GetState(fd)
 	if err != nil {
 		return "", err
@@ -779,6 +777,16 @@ func promptNodeKey(in io.Reader, out io.Writer) (string, error) {
 	key, err := term.ReadPassword(fd)
 	_, _ = fmt.Fprintln(out)
 	return strings.TrimSpace(string(key)), err
+}
+
+// readNodeKeyLine reads a piped key: the first line of in, trimmed. A key is
+// short, so it reads at most 4 KiB.
+func readNodeKeyLine(in io.Reader) (string, error) {
+	line, err := bufio.NewReader(io.LimitReader(in, 4<<10)).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
 }
 
 // lockNodeInstall holds an exclusive lock on path until the returned func

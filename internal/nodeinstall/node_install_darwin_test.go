@@ -146,7 +146,7 @@ func TestNodeInstallLockOutlivesTheInstallFolder(t *testing.T) {
 	}
 }
 
-// --key - asks for the key even when the install has one; without it, a
+// --new-key asks for the key even when the install has one; without it, a
 // stored key is kept without asking.
 func TestAskNodeKey(t *testing.T) {
 	stored := nodeInstallSettings{server: "http://localhost:8090", key: "stored", port: 8100}
@@ -157,9 +157,19 @@ func TestAskNodeKey(t *testing.T) {
 		t.Fatalf("rerun: key %q, %v; want the stored key kept", key, err)
 	}
 	if key, err := askNodeKey(stored, nodeInstallSettings{key: nodeKeyPrompt}, prompted("new")); err != nil || key != "new" {
-		t.Fatalf("--key -: key %q, %v; want the entered key", key, err)
+		t.Fatalf("--new-key: key %q, %v; want the entered key", key, err)
 	}
 	if _, err := askNodeKey(stored, nodeInstallSettings{key: nodeKeyPrompt}, prompted("")); err == nil {
-		t.Fatal("--key - with no key entered kept the stored key")
+		t.Fatal("--new-key with no key entered kept the stored key")
+	}
+}
+
+// A key piped in on standard input is its first line, trimmed; the key never
+// has to be a command-line argument.
+func TestPromptNodeKeyReadsAPipedKey(t *testing.T) {
+	for in, want := range map[string]string{"snk1_1_abc\n": "snk1_1_abc", "  snk1_1_abc  ": "snk1_1_abc", "snk1_1_abc\nmore\n": "snk1_1_abc", "": ""} {
+		if key, err := promptNodeKey(strings.NewReader(in), io.Discard); err != nil || key != want {
+			t.Fatalf("piped %q: key %q, %v; want %q", in, key, err, want)
+		}
 	}
 }
