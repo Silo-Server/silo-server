@@ -10,6 +10,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  alertDialogButtonWrap,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -142,13 +143,16 @@ export function DeleteCollectionDialog({
           </p>
         ) : null}
         <AlertDialogFooter className="items-center sm:justify-between">
-          <p className="text-muted-foreground text-sm">
+          <p className="text-muted-foreground text-sm sm:grow sm:basis-32">
             {t("web.collections.deleteDialog.footer")}
           </p>
-          <div className="flex gap-2">
+          {/* The buttons stack below sm and wrap below the note when they don't
+              fit beside it, as in ConfirmDialog. */}
+          <div className="flex w-full flex-col-reverse gap-2 sm:ms-auto sm:w-auto sm:flex-row">
             <AlertDialogCancel disabled={isPending}>{t("common.cancel")}</AlertDialogCancel>
             <Button
               variant="destructive"
+              className={alertDialogButtonWrap}
               disabled={isPending || rows.status !== "ready"}
               onClick={onConfirm}
             >

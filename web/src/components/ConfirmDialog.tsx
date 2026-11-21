@@ -115,13 +115,14 @@ export function ConfirmDialog({
         ) : null}
         {irreversible ? (
           <AlertDialogFooter className="items-center sm:justify-between">
-            <p id={noteId} className="text-muted-foreground text-sm">
+            <p id={noteId} className="text-muted-foreground text-sm sm:grow sm:basis-32">
               {t("web.shell.confirmDialog.irreversible")}
             </p>
-            {/* Below sm the buttons stack at full width, as in the default footer:
-                a centered row wider than the dialog would put Cancel past the
-                start edge, where the dialog can't scroll to it. */}
-            <div className="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row">
+            {/* Below sm the buttons stack at full width, as in the default footer,
+                so a long label can't push one past the dialog's edge. From sm up
+                they sit at the end beside the note, which keeps at least 8rem:
+                with less room the buttons move below it instead of squeezing it. */}
+            <div className="flex w-full flex-col-reverse gap-2 sm:ms-auto sm:w-auto sm:flex-row">
               {buttons}
             </div>
           </AlertDialogFooter>

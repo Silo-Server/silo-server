@@ -49,11 +49,13 @@ function AlertDialogContent({
         data-size={size}
         className={cn(
           // As in DialogContent, the dialog scrolls when it's taller than the
-          // screen, so its actions stay reachable, and grid-cols-1 keeps the
-          // column at the dialog's width. A scroll container also clips
+          // screen, so its actions stay reachable. A scroll container also clips
           // sideways, so wrap-anywhere breaks a word that can't fit, such as a
-          // long username in a code span, instead of cutting it off.
-          "group/alert-dialog-content bg-background data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 overlay-scroll fixed top-[50%] left-[50%] z-50 grid max-h-[calc(100dvh-4rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] grid-cols-1 gap-4 overflow-y-auto rounded-lg border p-6 wrap-anywhere shadow-lg data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-lg",
+          // long username in a code span. Unlike DialogContent, the column stays
+          // auto: something that still can't fit, like a row of buttons, widens
+          // it from the start edge, which the dialog scrolls back to, instead of
+          // overflowing past an edge it can't reach.
+          "group/alert-dialog-content bg-background data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 overlay-scroll fixed top-[50%] left-[50%] z-50 grid max-h-[calc(100dvh-4rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border p-6 wrap-anywhere shadow-lg data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-lg",
           className,
         )}
         {...props}
@@ -80,7 +82,9 @@ function AlertDialogFooter({ className, ...props }: React.ComponentProps<"div">)
     <div
       data-slot="alert-dialog-footer"
       className={cn(
-        "flex flex-col-reverse gap-2 group-data-[size=sm]/alert-dialog-content:grid group-data-[size=sm]/alert-dialog-content:grid-cols-2 sm:flex-row sm:justify-end",
+        // From sm up, buttons that don't fit one line wrap onto the next instead
+        // of widening the dialog.
+        "flex flex-col-reverse gap-2 group-data-[size=sm]/alert-dialog-content:grid group-data-[size=sm]/alert-dialog-content:grid-cols-2 sm:flex-row sm:flex-wrap sm:justify-end",
         className,
       )}
       {...props}
@@ -136,11 +140,12 @@ function AlertDialogMedia({ className, ...props }: React.ComponentProps<"div">) 
 }
 
 // Below sm, where footers stack their buttons at full width, a label too long
-// for the dialog (a phone with the largest text size) wraps instead of spilling
-// past its button. min-h-9 keeps a one-line button at the default size's
-// height, border included; py-1.5 pads a wrapped one. From sm up the buttons
-// sit in a row and keep their one-line labels.
-const WRAPPING_LABEL =
+// for the dialog (a phone with the largest text size) wraps instead of widening
+// it. min-h-9 keeps a one-line button at the default size's height, border
+// included; py-1.5 pads a wrapped one. From sm up the buttons sit in a row and
+// keep their one-line labels. AlertDialogAction and AlertDialogCancel apply it;
+// pass it to a default-size Button that a footer uses in their place.
+export const alertDialogButtonWrap =
   "max-sm:h-auto max-sm:min-h-9 max-sm:py-1.5 max-sm:whitespace-normal max-sm:text-center";
 
 function AlertDialogAction({
@@ -154,7 +159,7 @@ function AlertDialogAction({
     <Button
       variant={variant}
       size={size}
-      className={size === "default" ? WRAPPING_LABEL : undefined}
+      className={size === "default" ? alertDialogButtonWrap : undefined}
       asChild
     >
       <AlertDialogPrimitive.Action
@@ -177,7 +182,7 @@ function AlertDialogCancel({
     <Button
       variant={variant}
       size={size}
-      className={size === "default" ? WRAPPING_LABEL : undefined}
+      className={size === "default" ? alertDialogButtonWrap : undefined}
       asChild
     >
       <AlertDialogPrimitive.Cancel
