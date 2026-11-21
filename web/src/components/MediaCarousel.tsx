@@ -311,7 +311,7 @@ export default function MediaCarousel({
             <h2 className={titleClass}>{title}</h2>
           )}
           {headerActions ? (
-            <span className="inline-flex min-h-lh items-center align-top">{headerActions}</span>
+            <span className="inline-flex min-h-lh items-center gap-2 align-top">{headerActions}</span>
           ) : null}
         </div>
         {viewAllHref ? (
