@@ -793,11 +793,13 @@ export default function AISettings() {
   }
 
   async function save() {
-    const batchSize = parseStrictInteger(value("subtitle_ai.batch_size"));
-    const contextLines = parseStrictInteger(value("subtitle_ai.context_neighbors"));
-    const chunkSeconds = parseStrictInteger(value("subtitle_ai.asr_chunk_seconds"));
-    const quotaJobs = parseStrictInteger(value("subtitle_ai.transcribe_quota_jobs"));
-    const maxConcurrent = parseStrictInteger(value("ai.max_concurrent_jobs"));
+    // Only a value this save sends is checked: an untouched field holds what
+    // the server has, and with no settings loaded the save itself says so.
+    const invalidCount = (key: string, min: number, max = Number.MAX_SAFE_INTEGER) => {
+      if (!form.isDirty(key)) return false;
+      const parsed = parseStrictInteger(value(key));
+      return parsed === null || parsed < min || parsed > max;
+    };
 
     // None releases the text provider; it saves while nothing translates.
     const textCleared = authMode !== "chatgpt" && textProviderID === "";
@@ -820,23 +822,23 @@ export default function AISettings() {
       toast.error(t("web.admin.settings.ai.page.chooseReasoning"));
       return;
     }
-    if (maxConcurrent === null || maxConcurrent < 1) {
+    if (invalidCount("ai.max_concurrent_jobs", 1)) {
       toast.error(t("web.admin.settings.ai.page.maxConcurrentInvalid"));
       return;
     }
-    if (batchSize === null || batchSize < 1) {
+    if (invalidCount("subtitle_ai.batch_size", 1)) {
       toast.error(t("web.admin.settings.ai.page.batchSizeInvalid"));
       return;
     }
-    if (contextLines === null || contextLines < 0) {
+    if (invalidCount("subtitle_ai.context_neighbors", 0)) {
       toast.error(t("web.admin.settings.ai.page.contextLinesInvalid"));
       return;
     }
-    if (chunkSeconds === null || chunkSeconds < 60 || chunkSeconds > 600) {
+    if (invalidCount("subtitle_ai.asr_chunk_seconds", 60, 600)) {
       toast.error(t("web.admin.settings.ai.page.chunkInvalid"));
       return;
     }
-    if (quotaJobs === null || quotaJobs < 0) {
+    if (invalidCount("subtitle_ai.transcribe_quota_jobs", 0)) {
       toast.error(t("web.admin.settings.ai.page.quotaInvalid"));
       return;
     }
