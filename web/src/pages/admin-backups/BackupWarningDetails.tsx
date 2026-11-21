@@ -21,6 +21,7 @@ import {
   type MissingFileGroup,
   type OmissionGroup,
 } from "./warningDetails";
+import { OVERFLOW_CLIP, useOverflowsInline } from "./useOverflowsInline";
 
 /**
  * Picks a toggle label's wording for the number of items it reveals. The label
@@ -39,11 +40,18 @@ const LONG_LIST =
   "bg-background/60 max-h-48 overflow-y-auto rounded-md border px-3 py-2 text-xs select-text";
 
 /**
- * Clips an account name that no line break can split (one long joined-emoji
- * grapheme) at its own box, sideways only. The 0.25em of padding, offset by an
- * equal negative margin, keeps letters whole whose ink reaches past their edge.
+ * One name in an omission group's full list. Only while it can't wrap to fit, such as
+ * one long run of joined emoji, is it clipped sideways at its column's edge; its title
+ * shows it in full.
  */
-const CLIP_NAME = "-mx-[0.25em] overflow-x-clip px-[0.25em]";
+function OmittedName({ label }: { label: string }) {
+  const [ref, overflows] = useOverflowsInline<HTMLLIElement>(label);
+  return (
+    <li ref={ref} title={label} className={cn("break-words", overflows && OVERFLOW_CLIP)}>
+      {label}
+    </li>
+  );
+}
 
 /** One section's headline: the only amber line, with the warning icon. */
 function Headline({ children }: { children: ReactNode }) {
@@ -63,6 +71,8 @@ function OmissionGroupRow({ group }: { group: OmissionGroup }) {
   // More than NAMES_SHOWN names get a full list below; otherwise the sample is the only place
   // the names appear, so it carries their full text as a tooltip.
   const hasList = group.labels.length > NAMES_SHOWN;
+  // Clipped sideways only while a name in it can't wrap to fit.
+  const [sampleRef, sampleOverflows] = useOverflowsInline<HTMLParagraphElement>(sample);
   return (
     <li className="min-w-0 space-y-1">
       <p className="text-[13px]">{omissionGroupTitle(group)}</p>
@@ -76,8 +86,12 @@ function OmissionGroupRow({ group }: { group: OmissionGroup }) {
         {group.detail}
       </p>
       <p
+        ref={sampleRef}
         title={hasList ? undefined : sample}
-        className={cn(CLIP_NAME, "text-muted-foreground text-xs break-words")}
+        className={cn(
+          "text-muted-foreground text-xs break-words",
+          sampleOverflows && OVERFLOW_CLIP,
+        )}
       >
         {sample}
       </p>
@@ -94,9 +108,7 @@ function OmissionGroupRow({ group }: { group: OmissionGroup }) {
       {open ? (
         <ul id={listId} className={cn(LONG_LIST, "gap-x-6 sm:columns-2 lg:columns-3")}>
           {group.labels.map((label, position) => (
-            <li key={`${label}-${position}`} title={label} className={cn(CLIP_NAME, "break-words")}>
-              {label}
-            </li>
+            <OmittedName key={`${label}-${position}`} label={label} />
           ))}
         </ul>
       ) : null}
