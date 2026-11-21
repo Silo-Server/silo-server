@@ -29,6 +29,13 @@ type LoginAttempt = { id: string; confirmed: boolean };
 /** The sign-in callback shown before the server names its own. */
 const DEFAULT_CALLBACK_URI = "http://127.0.0.1:51121/auth/callback";
 
+/**
+ * A saved account's Reconnect and Disconnect buttons name its email, which can
+ * be wider than a phone's tile. The label wraps inside the button, breaking the
+ * email where it must, instead of running past the screen's edge.
+ */
+const ACCOUNT_ACTION = "h-auto min-h-8 max-w-full py-1 wrap-anywhere whitespace-normal";
+
 /** Which note a saved account carries in the account select. */
 function accountState(account: {
   plan_ineligible?: boolean;
@@ -346,6 +353,7 @@ function ChatGPTConnectionPanel({
               <Button
                 size="sm"
                 variant="outline"
+                className={ACCOUNT_ACTION}
                 disabled={start.isPending}
                 onClick={() => void begin(account.client_id)}
               >
@@ -362,6 +370,7 @@ function ChatGPTConnectionPanel({
               <Button
                 size="sm"
                 variant="outline"
+                className={ACCOUNT_ACTION}
                 disabled={disconnect.isPending}
                 onClick={() => void signOut(account.client_id)}
               >
