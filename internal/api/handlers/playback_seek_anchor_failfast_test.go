@@ -245,7 +245,7 @@ func TestPrepareTransportTimelineRetryNeverRefusesTheSameSeekTwice(t *testing.T)
 	_, firstErr := handler.prepareTransportTimelineV3(
 		context.Background(),
 		&playback.Session{ID: "session-first", ProfileID: profileID, RequestedMediaFileID: fileID},
-		&models.MediaFile{ID: fileID, FilePath: "/media/episode.mkv"},
+		&models.MediaFile{ID: fileID, FilePath: "/media/episode-seek-retry.mkv"},
 		playback.PlannerResultV3{Plan: firstPlan, PlayMethod: playback.PlayRemux},
 	)
 	if firstErr == nil || !firstErr.retryable || !firstErr.seekFailure || firstErr.reason != transcodeStartFailedReasonV3 {
@@ -262,7 +262,7 @@ func TestPrepareTransportTimelineRetryNeverRefusesTheSameSeekTwice(t *testing.T)
 	timeline, retryErr := handler.prepareTransportTimelineV3(
 		context.Background(),
 		&playback.Session{ID: "session-retry", ProfileID: profileID, RequestedMediaFileID: fileID},
-		&models.MediaFile{ID: fileID, FilePath: "/media/episode.mkv"},
+		&models.MediaFile{ID: fileID, FilePath: "/media/episode-seek-retry.mkv"},
 		playback.PlannerResultV3{Plan: retryPlan, PlayMethod: playback.PlayRemux},
 	)
 	if retryErr != nil {
