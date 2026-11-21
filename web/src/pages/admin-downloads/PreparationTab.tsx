@@ -1054,7 +1054,7 @@ function PreparationDetails({
             prep.requesters.map((r, i) => (
               <div
                 key={`${r.user_id}-${r.device_id ?? "web"}-${i}`}
-                className="grid min-w-0 grid-cols-[1fr_auto] gap-2"
+                className="grid min-w-0 grid-cols-[1fr_auto] items-baseline gap-x-2"
               >
                 <span className="min-w-0 truncate font-medium text-[var(--terminal-fg)]">
                   {r.profile_name
@@ -1063,12 +1063,13 @@ function PreparationDetails({
                         profile: r.profile_name,
                       })
                     : requesterName(r)}
-                  <span className="block truncate text-[10px] font-normal text-[var(--terminal-muted)]">
-                    {requesterDevice(r)}
-                  </span>
                 </span>
                 <span className="text-[10px] text-[var(--terminal-muted)]">
                   {downloadEntryStatus(r.status).label}
+                </span>
+                {/* Full width: a long translated status only competes with the name line. */}
+                <span className="col-span-2 truncate text-[10px] text-[var(--terminal-muted)]">
+                  {requesterDevice(r)}
                 </span>
               </div>
             ))
