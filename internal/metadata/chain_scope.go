@@ -2,8 +2,11 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // A refresh that names no library still belongs to the libraries that hold the
@@ -35,8 +38,40 @@ func (s *MetadataService) withItemChainScope(ctx context.Context, contentID stri
 		// lookup failure fails the refresh and leaves it to retry.
 		return ctx, fmt.Errorf("loading libraries for the provider chain: %w", err)
 	}
+	folderIDs, err = s.enabledChainScopeFolders(ctx, folderIDs)
+	if err != nil {
+		return ctx, err
+	}
 	// An empty scope still replaces an outer one: this item's libraries decide.
 	return context.WithValue(ctx, itemChainScopeKey{}, folderIDs), nil
+}
+
+// enabledChainScopeFolders leaves a disabled library out of an item's scope
+// when an enabled one also holds the item. A disabled library's own refresh is
+// refused and the refresh queue only claims targets an enabled library holds,
+// so its chain has no say in what an enabled library receives. An item held
+// only by disabled or deleted libraries keeps them all rather than widening to
+// every provider.
+func (s *MetadataService) enabledChainScopeFolders(ctx context.Context, folderIDs []int) ([]int, error) {
+	if len(folderIDs) < 2 || s.folderRepo == nil {
+		return folderIDs, nil
+	}
+	enabled := make([]int, 0, len(folderIDs))
+	for _, folderID := range folderIDs {
+		folder, err := s.folderRepo.GetByID(ctx, folderID)
+		switch {
+		case errors.Is(err, catalog.ErrFolderNotFound):
+			continue
+		case err != nil:
+			return nil, fmt.Errorf("loading library %d for the provider chain: %w", folderID, err)
+		case folder != nil && folder.Enabled:
+			enabled = append(enabled, folderID)
+		}
+	}
+	if len(enabled) == 0 {
+		return folderIDs, nil
+	}
+	return enabled, nil
 }
 
 func itemChainScopeFolders(ctx context.Context) []int {

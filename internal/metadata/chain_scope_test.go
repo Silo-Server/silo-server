@@ -198,38 +198,54 @@ func TestScheduledRefreshOfAnItemInNoLibraryKeepsTheFallback(t *testing.T) {
 // An item in several libraries merges their chains in library ID order, so a
 // provider only one library names still runs and a provider named twice runs
 // once, at its first position. The local tier stays first even when only a
-// later library enables it.
+// later library enables it. A disabled library is left out while an enabled
+// one holds the item; an item only disabled libraries hold keeps them all.
 func TestResolveLibrariesChainMergesInLibraryOrder(t *testing.T) {
 	nfo := &numberingProvider{slug: "nfo"}
 	tmdb := &PluginProvider{installationID: 5, capabilityID: "tmdb"}
 	tvdb := &PluginProvider{installationID: 6, capabilityID: "tvdb"}
 	plugin := &PluginProvider{installationID: 7, capabilityID: "plugin-meta"}
-	h := newTestHarness()
-	expiresAt := time.Now().Add(time.Hour)
-	h.service.chainCache = map[string]chainCacheEntry{
-		// Library 3 switched local metadata off.
-		chainCacheKeyForTest(3, "series"): {providers: []Provider{tmdb, tvdb}, expiresAt: expiresAt},
-		chainCacheKeyForTest(9, "series"): {providers: []Provider{nfo, tvdb, plugin}, expiresAt: expiresAt},
-	}
-	for _, folderID := range []int{9, 3} {
-		if err := h.libraryRepo.Upsert(context.Background(), "item", folderID, time.Now()); err != nil {
-			t.Fatalf("link library: %v", err)
-		}
-	}
+	for _, tc := range []struct {
+		name    string
+		enabled map[int]bool
+		want    []string
+	}{
+		{name: "both enabled", enabled: map[int]bool{3: true, 9: true}, want: []string{"nfo", "tmdb", "tvdb", "plugin-meta"}},
+		{name: "one disabled", enabled: map[int]bool{3: false, 9: true}, want: []string{"nfo", "tvdb", "plugin-meta"}},
+		{name: "all disabled", enabled: map[int]bool{3: false, 9: false}, want: []string{"nfo", "tmdb", "tvdb", "plugin-meta"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			expiresAt := time.Now().Add(time.Hour)
+			h.service.chainCache = map[string]chainCacheEntry{
+				// Library 3 switched local metadata off.
+				chainCacheKeyForTest(3, "series"): {providers: []Provider{tmdb, tvdb}, expiresAt: expiresAt},
+				chainCacheKeyForTest(9, "series"): {providers: []Provider{nfo, tvdb, plugin}, expiresAt: expiresAt},
+			}
+			folders := &fakeMetadataFolderRepo{folders: map[int]*models.MediaFolder{}}
+			for folderID, enabled := range tc.enabled {
+				folders.folders[folderID] = &models.MediaFolder{ID: folderID, Enabled: enabled}
+				if err := h.libraryRepo.Upsert(context.Background(), "item", folderID, time.Now()); err != nil {
+					t.Fatalf("link library: %v", err)
+				}
+			}
+			h.service.folderRepo = folders
 
-	ctx, err := h.service.withItemChainScope(context.Background(), "item", 0)
-	if err != nil {
-		t.Fatalf("withItemChainScope: %v", err)
-	}
-	chain, err := h.service.resolveChainCached(ctx, 0, "series")
-	if err != nil {
-		t.Fatalf("resolveChainCached: %v", err)
-	}
-	var slugs []string
-	for _, provider := range chain {
-		slugs = append(slugs, provider.Slug())
-	}
-	if want := []string{"nfo", "tmdb", "tvdb", "plugin-meta"}; !slices.Equal(slugs, want) {
-		t.Fatalf("merged chain = %v, want %v", slugs, want)
+			ctx, err := h.service.withItemChainScope(context.Background(), "item", 0)
+			if err != nil {
+				t.Fatalf("withItemChainScope: %v", err)
+			}
+			chain, err := h.service.resolveChainCached(ctx, 0, "series")
+			if err != nil {
+				t.Fatalf("resolveChainCached: %v", err)
+			}
+			var slugs []string
+			for _, provider := range chain {
+				slugs = append(slugs, provider.Slug())
+			}
+			if !slices.Equal(slugs, tc.want) {
+				t.Fatalf("merged chain = %v, want %v", slugs, tc.want)
+			}
+		})
 	}
 }
