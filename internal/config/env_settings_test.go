@@ -34,8 +34,11 @@ func TestReadEnvSettings(t *testing.T) {
 // then reports that variable as the one setting it. Other settings have no
 // file variant.
 func TestReadEnvSettingsReadsSecretFiles(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "smtp-password")
-	if err := os.WriteFile(path, []byte("hunter2\n"), 0o600); err != nil {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "smtp-password")
+	// Only one trailing line ending is removed; edge spaces and any second
+	// newline stay part of the secret.
+	if err := os.WriteFile(path, []byte(" hunter2 \n\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	env := map[string]string{"SILO_SMTP_PASSWORD_FILE": path, "SILO_PUBLIC_URL_FILE": path}
@@ -44,8 +47,8 @@ func TestReadEnvSettingsReadsSecretFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if values := got.All(); len(values) != 1 || values["email.smtp_password"] != "hunter2" {
-		t.Fatalf("values = %v, want only email.smtp_password from the file", values)
+	if values := got.All(); len(values) != 1 || values["email.smtp_password"] != " hunter2 \n" {
+		t.Fatalf("values = %v, want only email.smtp_password with one line ending removed", values)
 	}
 	if vars := got.Vars(); vars["email.smtp_password"] != "SILO_SMTP_PASSWORD_FILE" {
 		t.Fatalf("vars = %v, want email.smtp_password set by SILO_SMTP_PASSWORD_FILE", vars)

@@ -51,9 +51,16 @@ func TestLoadBootstrapReadsSecretFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bc.DatabaseURL != "postgres://example.invalid/silo" || string(bc.SecretKey) != key || bc.RedisURL != "redis://example.invalid:6379/2" {
-		t.Fatalf("bootstrap = %q, %q, %q; want the files' values less one line ending", bc.DatabaseURL, bc.SecretKey, bc.RedisURL)
+	if bc.DatabaseURL != "postgres://example.invalid/silo" || string(bc.SecretKey) != key || bc.RedisURL != "redis://example.invalid:6379/2" || bc.RedisURLVar != "REDIS_URL_FILE" {
+		t.Fatalf("bootstrap = %q, %q, %q (%q); want the files' values less one line ending and REDIS_URL_FILE", bc.DatabaseURL, bc.SecretKey, bc.RedisURL, bc.RedisURLVar)
 	}
+
+	// A short secret in SECRET_KEY_FILE names SECRET_KEY_FILE.
+	t.Setenv("SECRET_KEY_FILE", file("short-key", "too-short\n"))
+	if _, err := LoadBootstrap(""); err == nil || !strings.Contains(err.Error(), "SECRET_KEY_FILE") {
+		t.Fatalf("short SECRET_KEY_FILE: error = %v, want one naming SECRET_KEY_FILE", err)
+	}
+	t.Setenv("SECRET_KEY_FILE", file("secret-key", key+"\r\n"))
 
 	// A secret set both ways is refused rather than guessed at.
 	t.Setenv("SECRET_KEY", key)

@@ -51,13 +51,14 @@ func TestAddRedisBootstrapSettings(t *testing.T) {
 		// A bare address reaches the event bus only, which stays on database 0.
 		"env.example.invalid:6379": "0",
 	} {
-		configured, values := map[string]bool{}, map[string]string{}
-		addRedisBootstrapSettings(redisURL, "REDIS_URL", configured, values, map[string]string{})
+		configured, values, vars := map[string]bool{}, map[string]string{}, map[string]string{}
+		addRedisBootstrapSettings(redisURL, "REDIS_URL_FILE", configured, values, vars)
 		wantConfigured := map[string]bool{"redis.url": true, config.RedisDBSettingKey: true}
 		wantValues := map[string]string{"redis.url": redisURL, config.RedisDBSettingKey: wantDB}
-		if !maps.Equal(configured, wantConfigured) || !maps.Equal(values, wantValues) {
-			t.Errorf("REDIS_URL=%q: configured = %v, values = %v; want %v and %v",
-				redisURL, configured, values, wantConfigured, wantValues)
+		wantVars := map[string]string{"redis.url": "REDIS_URL_FILE", config.RedisDBSettingKey: "REDIS_URL_FILE"}
+		if !maps.Equal(configured, wantConfigured) || !maps.Equal(values, wantValues) || !maps.Equal(vars, wantVars) {
+			t.Errorf("REDIS_URL=%q: configured = %v, values = %v, vars = %v; want %v, %v, and %v",
+				redisURL, configured, values, vars, wantConfigured, wantValues, wantVars)
 		}
 	}
 }

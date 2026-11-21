@@ -66,12 +66,12 @@ func LoadBootstrap(envFile string) (*BootstrapConfig, error) {
 	// encrypted credentials would not survive a database dump. godotenv has
 	// already loaded .env above, so dev sets it there. SECRET_KEY_FILE can name
 	// a file holding it instead; the key is its content less one line ending.
-	secretKey, _, err := envutil.LookupSecret(os.Getenv, "SECRET_KEY")
+	secretKey, secretKeyVar, err := envutil.LookupSecret(os.Getenv, "SECRET_KEY")
 	if err != nil {
 		return nil, err
 	}
 	if len(secretKey) < minSecretKeyLen {
-		return nil, fmt.Errorf("SECRET_KEY is required (>=%d chars); generate one with: openssl rand -base64 48", minSecretKeyLen)
+		return nil, fmt.Errorf("%s is required (>=%d chars); generate one with: openssl rand -base64 48", secretKeyVar, minSecretKeyLen)
 	}
 
 	port := os.Getenv("PORT")

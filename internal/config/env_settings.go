@@ -140,16 +140,29 @@ type EnvSettings []EnvSetting
 func ReadEnvSettings(getenv func(string) string, secretKeys map[string]bool) (EnvSettings, error) {
 	var out EnvSettings
 	for _, v := range envSettingVars {
-		raw := getenv(v.Var)
+		var raw string
+		fromFile := false
 		if secretKeys[v.Key] {
-			var err error
-			if raw, v.Var, err = envutil.LookupSecret(getenv, v.Var); err != nil {
+			var (
+				usedVar string
+				err     error
+			)
+			if raw, usedVar, err = envutil.LookupSecret(getenv, v.Var); err != nil {
 				return nil, err
 			}
+			fromFile = usedVar != v.Var
+			v.Var = usedVar
+		} else {
+			raw = getenv(v.Var)
 		}
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			continue
+		// Direct values trim whitespace and treat blank as unset. Values from
+		// _FILE already passed LookupSecret's blank check and keep everything
+		// past the single removed line ending intact.
+		if !fromFile {
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				continue
+			}
 		}
 		normalized, err := NormalizeAdminSetting(v.Key, raw)
 		if err != nil {

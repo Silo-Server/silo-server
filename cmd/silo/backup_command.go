@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -277,6 +276,13 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// Read the remaining secret inputs before openBackupSource fetches or
+	// decrypts the backup: a missing or conflicting _FILE variable stops here
+	// rather than after downloading the backup or swapping the database.
+	liveURL, redisURL, blobStore, err := restoreTargetEnv(f)
+	if err != nil {
+		return err
+	}
 	src, tools, validate, cleanup, err := openBackupSource(ctx, f.from, sourceOptions{
 		masterKey: masterKey, keyCheck: keyCheck, acceptLostCredentials: f.acceptLostCredentials, databaseOnly: f.databaseOnly,
 	}, out)
@@ -291,19 +297,7 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 	defer func() { _ = closeSource(src, out) }()
 	loader := backup.PGLoader{Tools: tools}
 	if f.into != "" {
-		return runSeparateRestore(ctx, f, src, loader, validate, masterKey, out)
-	}
-	liveURL, err := liveDatabaseURL()
-	if err != nil {
-		return err
-	}
-	// Read before anything changes: a REDIS_URL_FILE that cannot be read
-	// stops the restore here rather than after the swap.
-	var redisURL string
-	if !f.keepRedis {
-		if redisURL, err = backupSecretEnv(envRedisURL); err != nil {
-			return err
-		}
+		return runSeparateRestore(ctx, f, src, loader, validate, masterKey, liveURL, blobStore, out)
 	}
 	cipher, err := secret.New(masterKey)
 	if err != nil {
@@ -346,6 +340,30 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 	return nil
 }
 
+// restoreTargetEnv reads the target database, Redis, and separate-mode bucket
+// credentials a restore needs before openBackupSource fetches or decrypts.
+func restoreTargetEnv(f backupRestoreFlags) (liveURL, redisURL string, blobStore blobstore.Store, err error) {
+	if f.into != "" {
+		if liveURL, err = backupSecretEnv(envDatabaseURL); err != nil {
+			return "", "", nil, err
+		}
+		if blobStore, err = blobTarget(f.blobsInto); err != nil {
+			return "", "", nil, err
+		}
+		return liveURL, "", blobStore, nil
+	}
+	if liveURL, err = liveDatabaseURL(); err != nil {
+		return "", "", nil, err
+	}
+	if f.keepRedis {
+		return liveURL, "", nil, nil
+	}
+	if redisURL, err = backupSecretEnv(envRedisURL); err != nil {
+		return "", "", nil, err
+	}
+	return liveURL, redisURL, nil, nil
+}
+
 // restoredRedisPlan picks the Redis to clear once the restored database is
 // live: the one the servers started on it will use. REDIS_URL, when set,
 // wins, as it does at startup; otherwise the restored database names it.
@@ -371,19 +389,13 @@ func restoredRedisPlan(ctx context.Context, keep bool, liveURL, redisURL string,
 // runSeparateRestore restores into --into and --blobs-into, aimed away
 // from the live server named by DATABASE_URL, when set.
 func runSeparateRestore(ctx context.Context, f backupRestoreFlags, src *backup.Source, loader backup.PGLoader,
-	validate backup.ValidateOptions, masterKey []byte, out io.Writer) error {
-	liveURL, err := backupSecretEnv(envDatabaseURL)
-	if err != nil {
-		return err
-	}
+	validate backup.ValidateOptions, masterKey []byte, liveURL string, blobStore blobstore.Store, out io.Writer) error {
 	opts := backup.SeparateOptions{
-		Validate: validate, Into: f.into, BlobsInto: f.blobsInto, DatabaseOnly: f.databaseOnly, Out: out,
-		LiveURL: liveURL,
+		Validate: validate, Into: f.into, BlobsInto: f.blobsInto, BlobStore: blobStore,
+		DatabaseOnly: f.databaseOnly, Out: out, LiveURL: liveURL,
 	}
+	var err error
 	if opts.Cipher, err = optionalCipher(masterKey); err != nil {
-		return err
-	}
-	if opts.BlobStore, err = blobTarget(f.blobsInto); err != nil {
 		return err
 	}
 	if opts.LiveURL != "" && !f.databaseOnly && opts.BlobStore == nil {
@@ -583,7 +595,7 @@ func liveDatabaseURL() (string, error) {
 
 // backupMasterKey reads SECRET_KEY and its check value.
 func backupMasterKey(required bool) ([]byte, string, error) {
-	key, err := backupSecretEnv(envSecretKey)
+	key, usedVar, err := envutil.LookupSecret(os.Getenv, envSecretKey)
 	if err != nil {
 		return nil, "", err
 	}
@@ -591,7 +603,7 @@ func backupMasterKey(required bool) ([]byte, string, error) {
 		return nil, "", nil
 	}
 	if len(key) < secret.MinMasterKeyLen {
-		return nil, "", fmt.Errorf("SECRET_KEY is required (>=%d chars): the key the backup's server used", secret.MinMasterKeyLen)
+		return nil, "", fmt.Errorf("%s is required (>=%d chars): the key the backup's server used", usedVar, secret.MinMasterKeyLen)
 	}
 	check, err := secret.KeyCheckValue([]byte(key))
 	return []byte(key), check, err
@@ -774,17 +786,18 @@ func plainSettings(ctx context.Context, dbURL string) (map[string]string, error)
 }
 
 // runSecretCommand runs `silo secret check`: it reads a SECRET_KEY on stdin
+// (using the same 1 MiB limit and single-line-ending rule as SECRET_KEY_FILE)
 // and prints its check value, the one every backup manifest records, so an
 // operator can confirm which key a backup needs without showing the key.
 func runSecretCommand(args []string, in io.Reader, out io.Writer) error {
 	if len(args) != 1 || args[0] != "check" {
-		return errors.New("usage: printf %s \"$SECRET_KEY\" | silo secret check")
+		return errors.New("usage: printf %s \"$SECRET_KEY\" | silo secret check (or: silo secret check < \"$SECRET_KEY_FILE\")")
 	}
-	key, err := bufio.NewReader(io.LimitReader(in, 64<<10)).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
+	data, err := envutil.ReadBounded(in)
+	if err != nil {
 		return err
 	}
-	key = strings.TrimRight(key, "\r\n")
+	key := envutil.TrimOneLineEnding(string(data))
 	check, err := secret.KeyCheckValue([]byte(key))
 	if err != nil {
 		return err

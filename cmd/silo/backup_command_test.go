@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/backup/backuptest"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/envutil"
 	"github.com/Silo-Server/silo-server/internal/s3client/s3test"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
@@ -204,5 +205,60 @@ func TestBackupCommandsReadS3DB(t *testing.T) {
 	}
 	if left := dirNames(work); len(left) != 1 || left[0] != "db.dump" {
 		t.Fatalf("refused commands left %v", left)
+	}
+}
+
+// `silo secret check` matches SECRET_KEY_FILE byte for byte, including a key
+// file with an extra trailing newline or a wrapped multi-line key.
+func TestSecretCheckMatchesSecretFile(t *testing.T) {
+	dir := t.TempDir()
+	cases := map[string]string{
+		"double-newline": "0123456789abcdef0123456789abcdef\n\n",
+		"multiline":      "0123456789abcdef0123456789abcdef\nsecond-line-of-key\n",
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(dir, name)
+			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := envutil.ReadSecretFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := secret.KeyCheckValue([]byte(loaded))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			if err := runSecretCommand([]string{"check"}, strings.NewReader(raw), &out); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.TrimSpace(out.String()); got != want {
+				t.Fatalf("secret check = %q, want %q (from ReadSecretFile)", got, want)
+			}
+		})
+	}
+}
+
+// Missing or conflicting _FILE variables fail before restore reads --from.
+func TestBackupRestoreChecksSecretFilesBeforeOpeningSource(t *testing.T) {
+	dir := t.TempDir()
+	for k, v := range map[string]string{
+		"SECRET_KEY":        "0123456789abcdef0123456789abcdef-at-rest",
+		"SECRET_KEY_FILE":   "",
+		"DATABASE_URL":      "postgres://example.invalid/silo",
+		"DATABASE_URL_FILE": "",
+		"REDIS_URL":         "",
+		"REDIS_URL_FILE":    filepath.Join(dir, "missing-redis-url"),
+	} {
+		t.Setenv(k, v)
+	}
+	var out bytes.Buffer
+	err := runBackupCommand(t.Context(), []string{
+		"restore", "--from", filepath.Join(dir, "missing-backup"), "-env", filepath.Join(dir, "no.env"),
+	}, &out)
+	if err == nil || !strings.Contains(err.Error(), "REDIS_URL_FILE") {
+		t.Fatalf("error = %v, want REDIS_URL_FILE error before reading --from", err)
 	}
 }
