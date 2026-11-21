@@ -1041,8 +1041,9 @@ func TestPrepareSubtitleFilterInputLinksDecodedNonUTF8Path(t *testing.T) {
 	}
 }
 
-// A probe that can't start FFmpeg isn't a "no": it isn't cached, so the next
-// transcode asks again instead of losing the fit until a restart.
+// A probe that can't start FFmpeg isn't a "no": it isn't cached, so a later
+// transcode asks again instead of losing the fit until a restart, but not the
+// very next one, which would pay the probe's timeout again.
 func TestScaleReferenceProbeDoesNotCacheAFailedStart(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "missing-ffmpeg")
 	if supportsScaleReference(bin) {
@@ -1050,8 +1051,12 @@ func TestScaleReferenceProbeDoesNotCacheAFailedStart(t *testing.T) {
 	}
 	scaleReferenceMu.Lock()
 	_, cached := scaleReferenceCache[bin]
+	retry, backingOff := scaleReferenceRetry[bin]
 	scaleReferenceMu.Unlock()
 	if cached {
 		t.Fatal("a probe that could not start was cached")
+	}
+	if !backingOff || !retry.After(time.Now()) {
+		t.Fatal("a probe that could not start is retried on the next transcode; want it to wait")
 	}
 }

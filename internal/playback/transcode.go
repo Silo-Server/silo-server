@@ -2039,44 +2039,65 @@ func hwSurfaceToCPUFilter(opts TranscodeOpts) string {
 var (
 	scaleReferenceMu    sync.Mutex
 	scaleReferenceCache map[string]bool
+	// scaleReferenceRetry holds when a probe that gave no answer may run again.
+	scaleReferenceRetry map[string]time.Time
 
 	// scaleReferenceSupported is the probe bitmap burn-in consults; tests
 	// replace it because they build arguments for fake FFmpeg paths.
 	scaleReferenceSupported = supportsScaleReference
 )
 
+// scaleReferenceRetryAfter is how long a probe that gave no answer waits
+// before it runs again, so a struggling host doesn't pay its timeout on every
+// PGS transcode.
+const scaleReferenceRetryAfter = time.Minute
+
 // supportsScaleReference reports whether the given FFmpeg binary's scale
 // filter takes a second, reference input whose size the rw and rh expressions
 // read (FFmpeg 7.1+). Older builds fail to parse the whole graph. Probed by
-// running a tiny lavfi graph; a definite answer, FFmpeg running the graph or
-// exiting with an error, is cached per binary path, while a probe that timed out
-// or couldn't start is asked again next time.
+// running a tiny lavfi graph. A definite answer is cached per binary path:
+// FFmpeg running the graph, or rejecting the expression as one it can't parse.
+// Anything else (a timeout, a binary that won't start, another error) answers
+// no for now and probes again after scaleReferenceRetryAfter.
 func supportsScaleReference(bin string) bool {
 	scaleReferenceMu.Lock()
 	defer scaleReferenceMu.Unlock()
 	if available, ok := scaleReferenceCache[bin]; ok {
 		return available
 	}
+	if retry, ok := scaleReferenceRetry[bin]; ok && time.Now().Before(retry) {
+		return false
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	err := procgroup.CommandContext(ctx, bin, "-hide_banner", "-nostdin", "-v", "error",
+	var stderr bytes.Buffer
+	cmd := procgroup.CommandContext(ctx, bin, "-hide_banner", "-nostdin", "-v", "error",
 		"-f", "lavfi", "-i", "color=s=16x16:d=0.04",
 		"-f", "lavfi", "-i", "color=s=32x32:d=0.04",
 		"-filter_complex", "[0:v][1:v]scale=w='min(rw,iw*rw/(ih*rdar))':h=rh",
-		"-f", "null", "-").Run()
+		"-f", "null", "-")
+	cmd.Stderr = &stderr
+	err := cmd.Run()
 	available := err == nil
 	var exitErr *exec.ExitError
-	if !available && (ctx.Err() != nil || !errors.As(err, &exitErr)) {
+	rejected := !available && ctx.Err() == nil && errors.As(err, &exitErr) &&
+		bytes.Contains(stderr.Bytes(), []byte("Cannot parse expression"))
+	if !available && !rejected {
 		slog.Warn("could not probe ffmpeg's scale filter; PGS burn-in keeps the plain overlay for now", "ffmpeg", bin, "error", err)
+		if scaleReferenceRetry == nil {
+			scaleReferenceRetry = make(map[string]time.Time)
+		}
+		scaleReferenceRetry[bin] = time.Now().Add(scaleReferenceRetryAfter)
 		return false
 	}
-	if !available {
+	if rejected {
 		slog.Warn("ffmpeg's scale filter has no reference input; PGS burn-in keeps the plain overlay and needs FFmpeg 7.1+ to fit cropped and scaled frames", "ffmpeg", bin)
 	}
 	if scaleReferenceCache == nil {
 		scaleReferenceCache = make(map[string]bool)
 	}
 	scaleReferenceCache[bin] = available
+	delete(scaleReferenceRetry, bin)
 	return available
 }
 
