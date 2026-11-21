@@ -29,6 +29,13 @@ type LoginAttempt = { id: string; confirmed: boolean };
 /** The sign-in callback shown before the server names its own. */
 const DEFAULT_CALLBACK_URI = "http://127.0.0.1:51121/auth/callback";
 
+/**
+ * A Retry button in a warning row. The row puts it below the warning when the
+ * two don't fit on one line, and its label wraps when it is wider than the
+ * panel, as a long translation at a large text size can be.
+ */
+const RETRY_BUTTON = "h-auto min-h-8 min-w-0 shrink py-1 text-start whitespace-normal";
+
 /** Which note a saved account carries in the account select. */
 function accountState(account: {
   plan_ineligible?: boolean;
@@ -254,11 +261,16 @@ function ChatGPTConnectionPanel({
         {t("web.admin.settings.ai.chatgptConnection.intro")}
       </p>
       {status.isError ? (
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <SettingFieldStatus tone="warn">
             {t("web.admin.settings.ai.chatgptConnection.loadFailed")}
           </SettingFieldStatus>
-          <Button size="sm" variant="outline" onClick={() => void status.refetch()}>
+          <Button
+            size="sm"
+            variant="outline"
+            className={RETRY_BUTTON}
+            onClick={() => void status.refetch()}
+          >
             {t("common.retry")}
           </Button>
         </div>
@@ -317,11 +329,16 @@ function ChatGPTConnectionPanel({
             disabled={models.isLoading || models.isError || availableModels.length === 0}
           />
           {models.isError ? (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <SettingFieldStatus tone="warn">
                 {t("web.admin.settings.ai.chatgptConnection.modelsFailed")}
               </SettingFieldStatus>
-              <Button size="sm" variant="outline" onClick={() => void models.refetch()}>
+              <Button
+                size="sm"
+                variant="outline"
+                className={RETRY_BUTTON}
+                onClick={() => void models.refetch()}
+              >
                 {t("web.admin.settings.ai.chatgptConnection.retryModels")}
               </Button>
             </div>
