@@ -20,21 +20,13 @@ import MetadataBadges from "./components/MetadataBadges";
 import WatchedActionBar from "./components/WatchedActionBar";
 import DetailBreadcrumb from "./components/DetailBreadcrumb";
 import SeasonEpisodeGrid from "./components/SeasonEpisodeGrid";
-import type { EpisodeNavigationState } from "./itemDetailLayout";
+import { seasonDisplayName, type EpisodeNavigationState } from "./itemDetailLayout";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import { hasMachineTranslation } from "./components/machineTranslation";
 import EpisodesTranslationAction from "./components/EpisodesTranslationAction";
 import { useEpisodePlaybackList } from "./useEpisodePlaybackList";
-import { useT, type Translate } from "@/i18n";
-
-function seasonLabel(t: Translate, seasonNumber: number, title?: string) {
-  // A server title that is only the default English name gets the translated
-  // default, as getSeasonDisplayTitle does, so it matches the season indicator.
-  if (title && (seasonNumber === 0 || title !== `Season ${seasonNumber}`)) return title;
-  if (seasonNumber === 0) return t("web.detail.seasons.specials");
-  return t("web.detail.seasons.numbered", { season: seasonNumber });
-}
+import { useT } from "@/i18n";
 
 export default function SeasonContent({
   item,
@@ -74,7 +66,7 @@ export default function SeasonContent({
   const seasonNumber = item.season_number ?? 0;
   const label = item.is_specials
     ? t("web.detail.seasons.specials")
-    : seasonLabel(t, seasonNumber, item.title);
+    : seasonDisplayName(seasonNumber, item.title);
   const seriesTitle = item.series_title ?? t("web.detail.hero.typeSeries");
   const seriesId = item.series_id;
   const seriesHref = seriesId ? buildItemHref({ contentId: seriesId, libraryId }) : "/";
@@ -214,12 +206,12 @@ export default function SeasonContent({
                 {t("web.detail.episodes.heading")}
               </h2>
               <div className="flex items-center gap-3">
-                {translationWithEpisodes && (
-                  <EpisodesTranslationAction
-                    translating={overviewTranslating}
-                    onTranslate={onTranslateOverview}
-                  />
-                )}
+                {/* Mounted while the episodes load too, so a translation that
+                  starts before the list arrives is still announced here. */}
+                <EpisodesTranslationAction
+                  translating={translationWithEpisodes && overviewTranslating}
+                  onTranslate={translationWithEpisodes ? onTranslateOverview : undefined}
+                />
                 <span className="text-muted-foreground text-sm">
                   {t("web.detail.seasons.totalCount", {
                     count: item.episode_count ?? episodes.length,

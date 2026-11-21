@@ -17,6 +17,7 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -168,7 +169,8 @@ type PluginInstallationView struct {
 	// ConnectionCheckSupported reports whether the config test endpoint has
 	// a check to run for this plugin, exposed by v2 as
 	// `connection_check_supported`. The frozen v1 bridge does not carry it.
-	ConnectionCheckSupported bool `json:"-"`
+	ConnectionCheckSupported bool                       `json:"-"`
+	ProvisionOwnership       plugins.ProvisionOwnership `json:"-"`
 }
 
 // PluginRuntimeView is one installation's process state. Resident marks a
@@ -248,6 +250,7 @@ type PluginConfigValueView struct {
 }
 
 type PluginAuthBindingView struct {
+	CallbackMode  string    `json:"-"`
 	CapabilityID  string    `json:"capability_id"`
 	Enabled       bool      `json:"enabled"`
 	DisplayOrder  int       `json:"display_order"`
@@ -482,6 +485,7 @@ type PluginConnectionCheckResult struct {
 
 // PluginAuthBindingInput is the whole-row auth binding assignment.
 type PluginAuthBindingInput struct {
+	CallbackMode  string
 	CapabilityID  string
 	Enabled       bool
 	DisplayOrder  int
@@ -565,7 +569,7 @@ func (h *PluginHandler) SetAdminPluginAuthBinding(ctx context.Context, id int, i
 	if err := h.pluginMutationTarget(ctx, id); err != nil {
 		return err
 	}
-	if err := h.configs.UpsertAuthBinding(ctx, plugins.AuthBinding{InstallationID: id, CapabilityID: in.CapabilityID, Enabled: in.Enabled, DisplayOrder: in.DisplayOrder, AutoProvision: in.AutoProvision, DefaultLogin: in.DefaultLogin}); err != nil {
+	if err := h.configs.UpsertAuthBinding(ctx, plugins.AuthBinding{InstallationID: id, CapabilityID: in.CapabilityID, Enabled: in.Enabled, DisplayOrder: in.DisplayOrder, AutoProvision: in.AutoProvision, DefaultLogin: in.DefaultLogin, CallbackMode: in.CallbackMode}); err != nil {
 		return err
 	}
 	h.notifyAuthProvidersChanged(ctx)
@@ -583,7 +587,21 @@ func (h *PluginHandler) TestAdminPluginAuthConnection(ctx context.Context, id in
 	if err := h.pluginMutationTarget(ctx, id); err != nil {
 		return plugins.AuthConnectionTestResult{}, err
 	}
-	return h.service.TestAuthProviderConnection(ctx, id, capabilityID, staged)
+	result, err := h.service.TestAuthProviderConnection(ctx, id, capabilityID, staged)
+	if err != nil || h.configs == nil || auth.ProviderModeForAuthModes(result.AuthModes) != auth.ProviderModeOAuth {
+		return result, err
+	}
+	binding, err := h.configs.GetAuthBinding(ctx, id, result.CapabilityID)
+	if err != nil && !errors.Is(err, plugins.ErrAuthBindingNotFound) {
+		// The probe already ran. Return its verdict without guessing a callback URL.
+		slog.WarnContext(ctx, "could not read callback mode after plugin connection test", "installation_id", id)
+		return result, nil
+	}
+	result.CallbackMode = plugins.AuthCallbackInstallation
+	if binding != nil && binding.CallbackMode != "" {
+		result.CallbackMode = binding.CallbackMode
+	}
+	return result, nil
 }
 
 // SetAdminPluginTaskBinding replaces one task binding row and applies it to
@@ -754,6 +772,10 @@ func (h *PluginHandler) buildInstallationResponses(
 	if err != nil {
 		return nil, err
 	}
+	ownership, err := h.installations.ListProvisionOwnership(ctx)
+	if err != nil {
+		return nil, err
+	}
 	response := make([]PluginInstallationView, 0, len(installations))
 	for _, installation := range installations {
 		// The reserved builtin row is not a manageable plugin: old web builds
@@ -769,7 +791,23 @@ func (h *PluginHandler) buildInstallationResponses(
 			authBindings,
 			taskBindings,
 			repositoriesByID,
+			ownership[installation.ID],
 		)
+		if errors.Is(err, plugins.ErrInstallationChanged) {
+			// A peer replaced this release during the list. Reload this item
+			// with its current ownership and bindings before rendering it.
+			current, readErr := h.installations.GetByID(ctx, installation.ID)
+			if errors.Is(readErr, plugins.ErrInstallationNotFound) {
+				continue
+			}
+			if readErr != nil {
+				return nil, readErr
+			}
+			item, err = h.buildInstallationResponse(ctx, current, nil)
+			if errors.Is(err, plugins.ErrInstallationChanged) {
+				continue // Still changing. Serve the rest of the inventory.
+			}
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -802,6 +840,10 @@ func (h *PluginHandler) buildInstallationResponse(
 	if err != nil {
 		return PluginInstallationView{}, err
 	}
+	ownership, err := h.installations.GetProvisionOwnership(ctx, installation.ID)
+	if err != nil {
+		return PluginInstallationView{}, err
+	}
 	return h.buildInstallationResponseWithBindings(
 		ctx,
 		installation,
@@ -809,6 +851,7 @@ func (h *PluginHandler) buildInstallationResponse(
 		authBindings,
 		taskBindings,
 		repositoriesByID,
+		ownership,
 	)
 }
 
@@ -830,6 +873,7 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	authBindings []*plugins.AuthBinding,
 	taskBindings []*plugins.TaskBinding,
 	repositoriesByID map[int]*plugins.Repository,
+	ownership plugins.ProvisionOwnership,
 ) (PluginInstallationView, error) {
 	var unreadableArchive string
 	if manifest == nil {
@@ -942,6 +986,7 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 		Signature:          installation.Signature,
 
 		ConnectionCheckSupported: plugins.SupportsConnectionCheck(manifest),
+		ProvisionOwnership:       ownership,
 	}, nil
 }
 
@@ -1099,6 +1144,7 @@ func authBindingsForInstallation(installationID int, bindings []*plugins.AuthBin
 			DisplayOrder:  binding.DisplayOrder,
 			AutoProvision: binding.AutoProvision,
 			DefaultLogin:  binding.DefaultLogin,
+			CallbackMode:  binding.CallbackMode,
 			CreatedAt:     binding.CreatedAt,
 			UpdatedAt:     binding.UpdatedAt,
 		})
@@ -1131,16 +1177,7 @@ func (h *PluginHandler) loadInstallationManifest(
 		return nil, errors.New("plugin installation is required")
 	}
 	if h.service != nil {
-		manifest, err := h.service.ManifestForInstallation(ctx, installation.ID)
-		if err == nil {
-			return manifest, nil
-		}
-		if errors.Is(err, plugins.ErrArchiveNotFound) {
-			return nil, plugins.ErrArchiveNotFound
-		}
-		if !errors.Is(err, plugins.ErrArchiveNotFound) {
-			return nil, err
-		}
+		return h.service.ReadInstalledManifest(ctx, installation)
 	}
 	manifest, err := loadPluginManifest(installation)
 	if err != nil && errors.Is(err, os.ErrNotExist) {

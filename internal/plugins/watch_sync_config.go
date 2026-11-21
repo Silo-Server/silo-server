@@ -190,10 +190,44 @@ func (s *Service) SeedGlobalConfig(ctx context.Context, installationID int, key 
 	if s.configs == nil {
 		return false, nil
 	}
-	manifest, err := s.manifestForInstallation(ctx, installationID, false)
-	if err != nil {
-		return false, err
+	var created bool
+	for attempt := range maxConfigSaveAttempts {
+		installation, manifest, err := s.currentManifestForConfig(ctx, installationID)
+		if err == nil {
+			seed := declaredSeedConfig(manifest, key, value)
+			created, err = s.swapValidatedGlobalConfig(ctx, installation, key, seed, nil, nil, func() error {
+				if len(seed) == 0 {
+					return fmt.Errorf("plugin config %q declares none of the fields to seed", key)
+				}
+				if err := ValidateGlobalConfigValue(manifest, key, seed); err != nil {
+					return &ConfigValidationError{Message: err.Error(), Cause: err}
+				}
+				return nil
+			})
+		}
+		if errors.Is(err, ErrInstallationChanged) && attempt < maxConfigSaveAttempts-1 {
+			continue
+		}
+		if err != nil {
+			return false, fmt.Errorf("persist plugin config: %w", err)
+		}
+		break
 	}
+
+	if !created {
+		ready, err := s.globalConfigHasValue(ctx, installationID, key)
+		if err != nil {
+			return false, err
+		}
+		if !ready {
+			return false, fmt.Errorf("plugin config %q was not saved", key)
+		}
+		return false, nil
+	}
+	return true, s.afterGlobalConfigSaved(ctx, installationID)
+}
+
+func declaredSeedConfig(manifest *pluginv1.PluginManifest, key string, value map[string]any) map[string]any {
 	publicFields, secretFields := GlobalConfigFieldSets(manifest, key)
 	declared := stringSet(append(publicFields, secretFields...))
 	seed := make(map[string]any, len(value))
@@ -206,25 +240,5 @@ func (s *Service) SeedGlobalConfig(ctx context.Context, installationID int, key 
 		}
 		seed[field] = fieldValue
 	}
-	if len(seed) == 0 {
-		return false, fmt.Errorf("plugin config %q declares none of the fields to seed", key)
-	}
-	if err := ValidateGlobalConfigValue(manifest, key, seed); err != nil {
-		return false, &ConfigValidationError{Message: err.Error(), Cause: err}
-	}
-	created, err := s.configs.CompareAndSwapGlobalConfig(ctx, installationID, key, seed, nil)
-	if err != nil {
-		return false, fmt.Errorf("persist plugin config: %w", err)
-	}
-	if !created {
-		ready, err := s.globalConfigHasValue(ctx, installationID, key)
-		if err != nil {
-			return false, err
-		}
-		if !ready {
-			return false, fmt.Errorf("plugin config %q was not saved", key)
-		}
-		return false, nil
-	}
-	return true, s.afterGlobalConfigSaved(ctx, installationID)
+	return seed
 }

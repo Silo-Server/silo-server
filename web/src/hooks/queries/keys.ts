@@ -572,6 +572,7 @@ export const adminKeys = {
   pluginRepositories: () => ["admin", "plugins", "repositories"] as const,
   pluginCatalog: () => ["admin", "plugins", "catalog"] as const,
   pluginCatalogSettings: () => ["admin", "plugins", "catalogSettings"] as const,
+  pluginProvisioningStatus: () => ["admin", "plugins", "provisioning-status"] as const,
   pluginInstallations: () => ["admin", "plugins", "installations"] as const,
   unmatchedItems: (search?: string, ignored = false) =>
     search === undefined

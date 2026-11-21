@@ -851,14 +851,11 @@ func (r *UserRepository) ClaimInitialSetup(ctx context.Context, provision func(t
 		return fmt.Errorf("beginning initial setup: %w", err)
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", InitialSetupAdvisoryLock); err != nil {
-		return fmt.Errorf("acquiring initial setup lock: %w", err)
+	pending, err := claimSetupBoundary(ctx, tx)
+	if err != nil {
+		return err
 	}
-	var count int
-	if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM users").Scan(&count); err != nil {
-		return fmt.Errorf("counting users: %w", err)
-	}
-	if count > 0 {
+	if !pending {
 		return ErrSetupAlreadyComplete
 	}
 	if err := provision(tx); err != nil {
@@ -868,6 +865,29 @@ func (r *UserRepository) ClaimInitialSetup(ctx context.Context, provision func(t
 		return fmt.Errorf("committing initial setup: %w", err)
 	}
 	return nil
+}
+
+// NeedsSetup reports whether the users table is empty.
+func (r *UserRepository) NeedsSetup(ctx context.Context) (bool, error) {
+	return usersNeedSetup(ctx, r.pool)
+}
+
+func usersNeedSetup(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}) (bool, error) {
+	var exists bool
+	if err := q.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM users)").Scan(&exists); err != nil {
+		return false, fmt.Errorf("checking for users: %w", err)
+	}
+	return !exists, nil
+}
+
+// claimSetupBoundary serializes initial setup with account creation by an external provider.
+func claimSetupBoundary(ctx context.Context, tx pgx.Tx) (bool, error) {
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", InitialSetupAdvisoryLock); err != nil {
+		return false, fmt.Errorf("acquiring initial setup lock: %w", err)
+	}
+	return usersNeedSetup(ctx, tx)
 }
 
 // CreateInvited commits an invite use only with the account and its optional

@@ -22,6 +22,7 @@ import {
 } from "@/components/admin/libraries/LibraryRowParts";
 import { findLibraryType, libraryTypeLabel } from "@/components/admin/libraries/libraryTypes";
 import type { LibraryRow } from "@/components/admin/libraries/useLibraryRows";
+import { PathList } from "@/components/PathList";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -166,13 +167,7 @@ function LibraryCard({
 function LibraryCardPaths({ paths }: { paths: string[] }) {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
-  const pathList = (
-    <ul className="text-muted-foreground space-y-1 font-mono text-xs break-all" dir="ltr">
-      {paths.map((path) => (
-        <li key={path}>{path}</li>
-      ))}
-    </ul>
-  );
+  const pathList = <PathList paths={paths} className="text-muted-foreground space-y-1 text-xs" />;
   if (paths.length <= 1) return pathList;
   return (
     <div className="space-y-1">

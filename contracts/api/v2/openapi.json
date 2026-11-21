@@ -594,6 +594,10 @@
           "id": {
             "type": "string"
           },
+          "managed_by_env_var": {
+            "description": "The variable in the server's environment that declares this provider, such as SILO_CONFIG_FILE, when the deployment declares it. Updating or deleting such a provider is 422 validation_failed with code managed_by_environment.",
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -4031,6 +4035,7 @@
             "type": "string"
           },
           "local_username": {
+            "description": "The matched account's username, or its email when it has none",
             "type": "string"
           },
           "match": {
@@ -4120,8 +4125,21 @@
             "type": "string"
           },
           "changes": {
-            "description": "A template collection's fields the admin changed from the template's defaults that a restore writes here: title, description, visibility, featured, sort order, item sort, source, sync schedule, poster, backdrop",
+            "description": "What a restore writes to a template collection here: the fields the admin changed from the template's defaults, and libraries when it adds the collection to more of them",
             "items": {
+              "enum": [
+                "title",
+                "description",
+                "visibility",
+                "featured",
+                "sort_order",
+                "item_sort",
+                "source",
+                "sync_schedule",
+                "poster",
+                "backdrop",
+                "libraries"
+              ],
               "type": "string"
             },
             "type": "array"
@@ -4232,8 +4250,21 @@
         "additionalProperties": false,
         "properties": {
           "changes": {
-            "description": "What a restore replaces in the section here: title, position, featured, item limit, enabled, web only, configuration, and N collection items",
+            "description": "What a restore replaces in the section here",
             "items": {
+              "enum": [
+                "type",
+                "title",
+                "title_translation",
+                "position",
+                "featured",
+                "item_limit",
+                "enabled",
+                "web_only",
+                "collection_replaced",
+                "configuration",
+                "collection_items"
+              ],
               "type": "string"
             },
             "type": "array"
@@ -4249,6 +4280,11 @@
           "local_id": {
             "description": "The matching section here: the same id on the server that took the backup, else the one section of the page with the same type and title",
             "type": "string"
+          },
+          "missing_collection_items": {
+            "description": "With the collection_items change: the items of the backup's collection, in this server's catalog, that the section's collection here lacks and a restore adds",
+            "format": "int64",
+            "type": "integer"
           },
           "scope": {
             "enum": [
@@ -14231,6 +14267,10 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "deployment_managed": {
+            "description": "The API servers' deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE) lists this transcode node and supplies its key. issueAdminNodeKey and deleteAdminNode refuse it with node_deployment_managed until an API server starts with a document that no longer lists it (nodes: {} releases every node). An API server started with neither variable set leaves it managed. Requires the deployment_nodes node capability.",
+            "type": "boolean"
+          },
           "download_artifact_dir_override": {
             "description": "This node's own prepared-download directory; absent when inherited.",
             "type": "string"
@@ -14378,6 +14418,7 @@
           "drain_requested",
           "drain_state",
           "key_issued",
+          "deployment_managed",
           "env_managed"
         ],
         "type": "object"
@@ -14387,6 +14428,10 @@
         "properties": {
           "allowed": {
             "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "deployment_nodes": {
+            "description": "API servers can create transcode nodes and their keys from their deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE): deployment_managed on node rows, and issueAdminNodeKey and deleteAdminNode refuse such a node with node_deployment_managed. An API server that starts with a document no longer listing a node releases it (nodes: {} releases every node); one started with neither variable set changes nothing.",
             "type": "boolean"
           },
           "drain": {
@@ -14430,6 +14475,7 @@
           "node_keys",
           "source_access",
           "env_declarations",
+          "deployment_nodes",
           "revision",
           "state",
           "allowed"
@@ -16772,6 +16818,18 @@
           "auto_provision": {
             "type": "boolean"
           },
+          "callback_mode": {
+            "description": "Redirect URI mode for OAuth sign-in",
+            "enum": [
+              "installation",
+              "stable"
+            ],
+            "type": "string"
+          },
+          "callback_pending": {
+            "description": "True when an enabled OAuth binding is waiting for the public URL",
+            "type": "boolean"
+          },
           "callback_url": {
             "description": "Redirect URI to register at the OAuth (OIDC) provider for this installation: the v2 callback on the public URL (server.public_url). Empty for a password (LDAP) provider and while no public URL is configured",
             "examples": [
@@ -16799,6 +16857,13 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "env_managed": {
+            "description": "Binding fields owned by the deployment.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "post_logout_redirect_url": {
             "description": "Post-logout redirect URI to register at the OAuth (OIDC) provider when provider logout is on: the login page on the public URL. Empty for a password (LDAP) provider and while no public URL is configured",
@@ -16855,6 +16920,14 @@
             "description": "Create an account for a person who passes the provider's rules on first sign-in; omitted means true",
             "type": "boolean"
           },
+          "callback_mode": {
+            "description": "OAuth only. Omit to preserve the stored mode or to use installation for a new binding",
+            "enum": [
+              "installation",
+              "stable"
+            ],
+            "type": "string"
+          },
           "capability_id": {
             "maxLength": 256,
             "minLength": 1,
@@ -16878,6 +16951,40 @@
           "enabled",
           "display_order",
           "default_login"
+        ],
+        "type": "object"
+      },
+      "AdminPluginCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "env_declarations": {
+            "description": "Installation and binding reads can report env_managed ownership, mutations refuse changes to owned fields, and provisioning status is available.",
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "env_declarations",
+          "revision",
+          "state",
+          "allowed"
         ],
         "type": "object"
       },
@@ -16907,6 +17014,13 @@
           },
           "display_name": {
             "type": "string"
+          },
+          "env_managed": {
+            "description": "On an installed sign-in capability: the binding fields owned by the deployment. May appear before a binding exists.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "id": {
             "type": "string"
@@ -17466,6 +17580,10 @@
           "enabled": {
             "type": "boolean"
           },
+          "env_managed": {
+            "$ref": "#/components/schemas/AdminPluginProvisionOwnership",
+            "description": "Present when the deployment owns this installation and its package source."
+          },
           "global_config_schema": {
             "items": {
               "$ref": "#/components/schemas/AdminPluginConfigSchema"
@@ -17672,6 +17790,68 @@
           "publisher_name",
           "publisher_url",
           "license_spdx"
+        ],
+        "type": "object"
+      },
+      "AdminPluginProvisionOwnership": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_fields": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "Binding fields owned by the deployment, keyed by capability ID.",
+            "type": "object"
+          },
+          "config_fields": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "Top-level fields owned by the deployment, keyed by global configuration entry.",
+            "type": "object"
+          },
+          "version_pin": {
+            "description": "Exact package version the deployment pins, if any.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "config_fields",
+          "binding_fields"
+        ],
+        "type": "object"
+      },
+      "AdminPluginProvisionStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "description": "Redacted reason or status detail, empty when there is none.",
+            "type": "string"
+          },
+          "plugin_id": {
+            "description": "The declared manifest plugin ID. An installation need not exist.",
+            "type": "string"
+          },
+          "state": {
+            "description": "The latest recorded provisioning outcome for the declaration.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Installed version when applied. Otherwise the requested version, if any.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version",
+          "state",
+          "detail"
         ],
         "type": "object"
       },
@@ -19188,6 +19368,10 @@
           "guarded_configuration": {
             "type": "boolean"
           },
+          "request_posters": {
+            "description": "Whether admin request reads return poster_url, a path on this server that serves the request's TMDB poster (getAdminRequestPoster)",
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -19218,6 +19402,7 @@
           "routing_series_status",
           "discover_layout",
           "discover_list_order",
+          "request_posters",
           "revision",
           "state",
           "allowed"
@@ -19258,9 +19443,17 @@
             ],
             "format": "int64",
             "type": "integer"
+          },
+          "requests_enabled": {
+            "description": "Whether the server-wide requests switch is on; the queue still answers while it is off",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
+          "requests_enabled",
           "needs_approval",
           "in_progress",
           "failed",
@@ -22839,6 +23032,11 @@
             "minLength": 1,
             "type": "string"
           },
+          "episode_number": {
+            "description": "Episode number for an episode that still exists; absent otherwise",
+            "format": "int64",
+            "type": "integer"
+          },
           "last_attempt_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -22860,10 +23058,20 @@
             "format": "int64",
             "type": "integer"
           },
+          "season_number": {
+            "description": "Season number for a season or episode that still exists; absent otherwise",
+            "format": "int64",
+            "type": "integer"
+          },
+          "series_title": {
+            "description": "Series title for a season or episode that still exists; absent otherwise",
+            "type": "string"
+          },
           "target_type": {
             "type": "string"
           },
           "title": {
+            "description": "The target's own title as stored: the item's, the season's or the episode's, without its series. Empty when the target has no title or no longer exists",
             "type": "string"
           },
           "type": {
@@ -26532,7 +26740,7 @@
         "additionalProperties": false,
         "properties": {
           "callback_url": {
-            "description": "Redirect URI to register at an OAuth (OIDC) provider for this installation, on the public URL; empty when no public URL is configured. Password (LDAP) providers do not use it",
+            "description": "Redirect URI to register at the OAuth provider. Empty for password providers, when the public URL is unset, or when the binding mode is unavailable.",
             "examples": [
               "https://silo.example.test/api/v2/auth/oauth/3/callback"
             ],
@@ -30349,6 +30557,26 @@
             "description": "The page's items; empty, never null",
             "items": {
               "$ref": "#/components/schemas/AdminPluginInstallation"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CollectionAdminPluginProvisionStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminPluginProvisionStatus"
             },
             "type": "array"
           },
@@ -40711,6 +40939,14 @@
             "description": "TMDB image path",
             "type": "string"
           },
+          "poster_url": {
+            "description": "Admin request reads only (listAdminRequests and the admin request actions): the poster as a root-relative path on this server, getAdminRequestPoster, which serves the TMDB poster through the server. Fetch it with the credentials that read the row. It does not expire. Absent when the request has no TMDB poster, and on a server that cannot fetch posters (the admin request capabilities then report request_posters false)",
+            "examples": [
+              "/api/v2/admin/requests/1834729/poster"
+            ],
+            "format": "uri-reference",
+            "type": "string"
+          },
           "provider": {
             "examples": [
               "tmdb"
@@ -43641,6 +43877,10 @@
             "description": "Whether startOAuthLogin, initOAuthLogin and startNativeOAuthLogin accept prompt=select_account, which asks the provider to let the person choose another provider account (a Switch account sign-in)",
             "type": "boolean"
           },
+          "stable_callback": {
+            "description": "Whether finishStableOAuthCallback accepts provider redirects for bindings using the stable callback mode",
+            "type": "boolean"
+          },
           "state": {
             "description": "Support and configuration state, not health",
             "enum": [
@@ -43657,6 +43897,7 @@
           "native",
           "linking",
           "provider_logout",
+          "stable_callback",
           "select_account",
           "revision",
           "state"
@@ -48630,6 +48871,88 @@
         ],
         "type": "object"
       },
+      "ProfileSectionBaseline": {
+        "additionalProperties": false,
+        "properties": {
+          "section_tokens": {
+            "description": "Opaque server-keyed tokens, bound to the acting profile, for every server section on this page in a library the profile is allowed (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically. Rows tied to libraries the profile isn't allowed are left out.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "visible_sections": {
+            "description": "Pre-override active server sections the acting profile's access policy permits, in display order",
+            "items": {
+              "$ref": "#/components/schemas/ProfileSectionBaselineRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "section_tokens",
+          "visible_sections"
+        ],
+        "type": "object"
+      },
+      "ProfileSectionBaselineRow": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "examples": [
+              "s-continue-watching"
+            ],
+            "type": "string"
+          },
+          "section_type": {
+            "description": "The recipe; the set is extensible",
+            "examples": [
+              "continue_watching"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "The server's title for this row before any profile overrides",
+            "examples": [
+              "Continue Watching"
+            ],
+            "type": "string"
+          },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
+            ],
+            "type": "string"
+          },
+          "token": {
+            "description": "Opaque server-keyed token identifying this server section on this page for the acting profile, for layout export and import comparisons",
+            "examples": [
+              "m3s9R1pQv8fK2nL7wX4yZA"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "section_type",
+          "title",
+          "token"
+        ],
+        "type": "object"
+      },
       "ProfileSectionFlags": {
         "additionalProperties": false,
         "properties": {
@@ -48640,10 +48963,18 @@
               true
             ],
             "type": "boolean"
+          },
+          "home_layout_baseline": {
+            "description": "True when this server serves getProfileSectionBaseline, so a home layout export can record the server's rows and an import on this server can offer to hide rows added since.",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
-          "allow_profile_custom_sections"
+          "allow_profile_custom_sections",
+          "home_layout_baseline"
         ],
         "type": "object"
       },
@@ -53638,6 +53969,10 @@
             "type": "object"
           },
           "mime_type": {
+            "type": "string"
+          },
+          "parallel_range_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "protocol": {
@@ -65149,7 +65484,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Disconnect a provider and discard its key. A provider a job uses cannot be deleted.",
+        "summary": "Disconnect a provider and discard its key. A provider a job uses cannot be deleted, and one the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment.",
         "tags": [
           "admin-ai"
         ],
@@ -65341,7 +65676,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request.",
+        "summary": "Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request. A provider the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment.",
         "tags": [
           "admin-ai"
         ],
@@ -105006,6 +105341,16 @@
             },
             "description": "Not Acceptable"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "412": {
             "content": {
               "application/problem+json": {
@@ -109500,6 +109845,205 @@
         "x-silo-conditional": true
       }
     },
+    "/api/v2/admin/plugins/capabilities": {
+      "get": {
+        "operationId": "getAdminPluginCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPluginCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discover plugin administration features.",
+        "tags": [
+          "admin-plugins"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-conditional": true
+      }
+    },
     "/api/v2/admin/plugins/catalog": {
       "get": {
         "operationId": "listAdminPluginCatalog",
@@ -112355,6 +112899,148 @@
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/plugins/provisioning-status": {
+      "get": {
+        "operationId": "listAdminPluginProvisioningStatus",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminPluginProvisionStatus"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read recorded environment provisioning status, including declarations with no installation.",
+        "tags": [
+          "admin-plugins"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },
@@ -125266,6 +125952,141 @@
           "admin"
         ],
         "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/requests/{id}/poster": {
+      "get": {
+        "operationId": "getAdminRequestPoster",
+        "parameters": [
+          {
+            "description": "The request",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/*": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Poster bytes"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such request, the request has no TMDB poster, or TMDB refused or failed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Poster fetches are busy or not configured; retry after Retry-After"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read a media request's poster through the server, from the path admin request reads return in poster_url.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-raw-protocol": "artwork-image",
+        "x-silo-raw-reason": "Poster bytes bypass JSON encoding.",
         "x-silo-service-backed": true
       }
     },
@@ -147394,6 +148215,78 @@
         ],
         "x-silo-class": "public",
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/auth/oauth/callback": {
+      "get": {
+        "description": "Accepts only the browser holding the flow's binding cookie. A web sign-in continues to /login/oauth-complete?code=; a failure to /login?error=oauth_failed\u0026reason=\u003creason\u003e (not_permitted, account_required, email_in_use, identity_linked_elsewhere, account_disabled, provider_unavailable, state_invalid, session_expired, already_linked, login_failed). A web linking flow returns to its next path with linked=1 or error=oauth_link_failed\u0026reason=\u003creason\u003e; a native flow to the app redirect, which carries iss (see startNativeOAuthLogin).",
+        "operationId": "finishStableOAuthCallback",
+        "parameters": [
+          {
+            "description": "Provider redirect value; validated by the owning handshake.",
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider redirect value; validated by the owning handshake.",
+            "in": "query",
+            "name": "code",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider redirect value; validated by the owning handshake.",
+            "in": "query",
+            "name": "error",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect: to the provider, to the same start on the public origin, or to the flow's completion or failure location.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Plain-text handshake failure."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Continue the OAuth handshake at the provider's redirect back.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-raw-protocol": "oauth-redirect",
+        "x-silo-raw-reason": "Browser form submission and provider callback require HTTP redirects, without JSON negotiation.",
         "x-silo-service-backed": true
       }
     },
@@ -207820,6 +208713,181 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/profile/sections/baseline": {
+      "get": {
+        "operationId": "getProfileSectionBaseline",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The page the overrides apply to",
+            "explode": false,
+            "in": "query",
+            "name": "scope",
+            "schema": {
+              "default": "home",
+              "description": "The page the overrides apply to",
+              "enum": [
+                "home",
+                "library"
+              ],
+              "examples": [
+                "home"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The library; required when scope is library and refused otherwise",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "The library; required when scope is library and refused otherwise",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileSectionBaseline"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get one page's pre-override server section baseline for home layout export and import.",
+        "tags": [
+          "profile_sections"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/profile/sections/flags": {
       "get": {
         "operationId": "getProfileSectionFlags",
@@ -251298,6 +252366,7 @@
               "qsv",
               "vaapi",
               "nvenc",
+              "videotoolbox",
               "none"
             ],
             "type": "string"

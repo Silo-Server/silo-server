@@ -667,6 +667,14 @@ request's status or outcome only when it changes, so neither a reconcile pass
 nor a second target repeats an entry. The queue shows a request with source
 `watchlist` as "via watchlist".
 
+A request keeps `poster_path` and `backdrop_path` only as TMDB image paths
+(one file name under the root, such as `/abc.jpg`). Create drops a value in any
+other shape, and the TMDB detail read fills it. Admin request reads add
+`poster_url`, a stable path to `getAdminRequestPoster`, which serves the TMDB
+poster through the server so a monitoring tool never loads TMDB itself. It reads
+the stored row only, so it answers while requests are turned off. See
+[admin request posters](../images-api.md#admin-request-posters).
+
 ## Who can request
 
 Whether an account may request, whether its requests need approval, and how

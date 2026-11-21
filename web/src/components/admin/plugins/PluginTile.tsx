@@ -156,6 +156,11 @@ export function InstalledPluginTile({
       <TileFooter>
         <span className="inline-flex min-w-0 items-center gap-1.5">
           <PluginStatusLabel {...status} />
+          {installation.env_managed ? (
+            <span className="text-muted-foreground text-[12.5px]">
+              {t("web.admin.plugins.provisioning.managed")}
+            </span>
+          ) : null}
           {verifiedLabel ? (
             <span
               role="img"

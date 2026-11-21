@@ -217,7 +217,7 @@ func buildListQuery(opts ListOptions) (string, []any, int, error) {
 
 	query := fmt.Sprintf(`
 		SELECT id, timestamp, level, component, message, COALESCE(request_id, ''), user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''),
-		       COALESCE(client_ip::text, ''), COALESCE(node_id, ''), attrs
+		       COALESCE(host(client_ip), ''), COALESCE(node_id, ''), attrs
 		FROM operational_logs
 		WHERE %s
 		ORDER BY timestamp DESC, id DESC

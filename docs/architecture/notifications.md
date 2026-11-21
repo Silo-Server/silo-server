@@ -26,10 +26,9 @@ whose metadata lands a few days after the file.
 
 The detector also stores that decision on the availability row: an episode's
 `episode_availability.released_at` is set when it was recorded as a release
-(seeded library, inside the window), even while release events are turned off,
-and stays empty for back catalog and late matches. A profile that turns on
-`ui.next_up_new_releases_first` (off by default) gets Next Up ranked by the
-later of when it finished a series' previous episode and the `released_at` of
+(seeded library, inside the window), and stays empty for back catalog and late
+matches. A profile that turns on `ui.next_up_new_releases_first` (off by
+default) gets Next Up ranked by the later of when it finished a series' previous episode and the `released_at` of
 the next episode (earliest availability row in the libraries the viewer can
 reach), so a caught-up series moves to the front when a new episode or season
 arrives. Changing what counts as a release changes that order too.
@@ -45,7 +44,7 @@ Event kinds:
 
 An event can be suppressed instead of fanned out, with the reason recorded on
 the row. Fanout writes one reason, `stale`: the event aged past the fanout
-staleness horizon (extended downtime, fanout disabled for a stretch), and
+staleness horizon (72 hours; extended downtime, or no node running fanout), and
 delivering it long after the fact would be noise. Older rows can also carry
 `series_burst`, written by a per-series burst cap that profile fanout no
 longer has; the value stays readable (`SuppressedReasonSeriesBurst`). A season
@@ -126,10 +125,14 @@ What follows from the rule:
   episode to arrive there notifies. If E07 arrives before E06 is listed at
   all, E07 notifies, and E06 arriving later does not:
   `last_notified_episode_key` is already E07.
-- The rule reads the catalog when fanout runs, after the release settle delay
-  (`notifications.fanout.settle_seconds`, 30 seconds by default), so episodes
-  linked by one scan are all listed by the time any of them is evaluated,
-  whatever order the scan linked them in.
+- The rule reads the catalog when fanout runs. One ingest records all its
+  events in one transaction, so episodes linked by one scan are all listed by
+  the time any of them is evaluated, whatever order the scan linked them in.
+  For separate imports, fanout waits 30 seconds before it can claim each
+  event. If E07 arrives first and the catalog lists E06 by the time fanout
+  evaluates E07, E07 stays silent and E06 can notify when its file is
+  available. If E06's file arrives during the delay but the catalog still
+  has no entry for E06 when fanout evaluates E07, E07 can notify.
 
 Fanout never moves the cursor. It changes only when the interest recompute
 runs, which profile activity queues (see "Next Up cursor" below).
@@ -318,6 +321,10 @@ recomputes them. Under the new rule that cursor behaves like a current one for
 a profile that is caught up.
 
 ## Release-event retention
+
+Retention runs daily with fixed windows: read deliveries are kept 90 days,
+unread ones 180 days, processed release events 30 days, and unprocessed
+events past the 72-hour staleness horizon are deleted.
 
 Release events and inbox deliveries have independent lifetimes. Pruning an old
 release event clears `notification_deliveries.release_event_id` through its
@@ -515,15 +522,18 @@ line, which also counts items past the 10-embed cap.
 ### Generic payload and HMAC signing
 
 Generic webhooks receive canonical Silo JSON: event name, delivery and
-webhook IDs, timestamp, `version`, `test` flag, profile ID, delivery type,
-`reason_flags`, and the series/episode (or request) content blocks.
+webhook IDs, timestamp, `version`, `test` flag, profile ID, library ID
+(left out of request notifications), delivery type, `reason_flags`, and the
+series/episode (or request) content blocks.
 `reason_flags` is `{"next_up": <bool>}`; Next Up is the only reason an
 episode notifies for. A `watchlist.available` payload names the arrived item
 in the series block and the watchlisted title in a `watchlist` block,
 `{"tmdb_id", "media_type"}` (`movie` or `series`; `tmdb_id` is left out when
 the title has none), and its `reason_flags` read `{"next_up": false}`.
 
-Each request is signed with the webhook's per-destination 32-byte secret:
+Each request is signed with the webhook's per-destination signing secret: 32
+random bytes, base64-encoded into the 44-character string the API returns.
+The HMAC key is that string's bytes as returned, not the decoded 32 bytes.
 
 - Headers: `X-Silo-Event`, `X-Silo-Webhook-Id`, `X-Silo-Delivery-Id`,
   `X-Silo-Timestamp` (Unix epoch seconds), and

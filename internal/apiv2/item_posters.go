@@ -63,6 +63,9 @@ const (
 	itemPosterResolveMax = 4096
 )
 
+// logComponentKey is the structured-log attribute naming the subsystem.
+const logComponentKey = "component"
+
 // errPosterResolveBusy reports that a plugin poster path has no answer yet:
 // the plugin-answer memo is full, so the path is refused instead of calling
 // its plugin on every request, or the plugin did not answer in time and the
@@ -263,7 +266,7 @@ func registerItemPosters(reg *Registry) {
 		},
 		"503": {Description: "Poster fetches are busy or not configured; retry after Retry-After"},
 	}
-	RegisterRaw(reg, RawOperation{Operation: op, Protocol: "artwork-image", Reason: "Poster bytes and redirects bypass JSON encoding."}, h)
+	RegisterRaw(reg, RawOperation{Operation: op, Protocol: artworkImageProtocol, Reason: "Poster bytes and redirects bypass JSON encoding."}, h)
 }
 
 func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -306,12 +309,20 @@ func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.queueCache(r.Context(), contentID)
-	if h.fetcher == nil {
+	// A signed poster link authorizes downloads from public addresses only.
+	serveRemotePoster(w, r, h.fetcher, contentID, target, slog.String("content_id", contentID))
+}
+
+// serveRemotePoster downloads a poster that is not cached through fetcher,
+// sharing the download by key and URL, and answers with its bytes. A failed
+// download is logged with poster naming the poster: a content ID or a
+// request ID.
+func serveRemotePoster(w http.ResponseWriter, r *http.Request, fetcher RemotePosterFetcher, key, target string, poster slog.Attr) {
+	if fetcher == nil {
 		writeProblem(w, r, unavailable("poster"))
 		return
 	}
-	// A signed poster link authorizes downloads from public addresses only.
-	image, err := h.fetcher.Fetch(r.Context(), contentID, target)
+	image, err := fetcher.Fetch(r.Context(), key, target)
 	switch {
 	case errors.Is(err, imagecache.ErrRemoteBusy):
 		writeProblem(w, r, NewProblem(TypeDependencyUnavailable, "Poster fetches are busy.").WithRetryAfter(5))
@@ -320,9 +331,9 @@ func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// A refused address, an upstream failure and a body that is not an
 		// image all read the same, so the answer cannot map the network.
 		if r.Context().Err() == nil {
-			slog.InfoContext(r.Context(), "item poster fetch failed", "component", "apiv2", "content_id", contentID, "error", posterFetchLogError(err))
+			slog.InfoContext(r.Context(), "poster fetch failed", slog.String(logComponentKey, "apiv2"), poster, slog.String("error", posterFetchLogError(err)))
 		}
-		notFound()
+		writeProblem(w, r, NewProblem(TypeNotFound, "Poster not found."))
 		return
 	}
 	header := w.Header()
@@ -436,7 +447,7 @@ func (h *itemPosterHandler) queueCache(ctx context.Context, contentID string) {
 	queueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), itemPosterEnqueueTimeout)
 	defer cancel()
 	if err := h.source.EnqueueItemPosterCache(queueCtx, contentID); err != nil {
-		slog.WarnContext(ctx, "queueing an item poster cache job failed", "component", "apiv2", "content_id", contentID, "error", err)
+		slog.WarnContext(ctx, "queueing an item poster cache job failed", logComponentKey, "apiv2", "content_id", contentID, "error", err)
 		// Nothing was queued, so do not hold the item for the whole memo:
 		// try again soon, but not on every request while the database is slow.
 		h.enqueued.retryAt(contentID, time.Now().Add(itemPosterEnqueueRetry))

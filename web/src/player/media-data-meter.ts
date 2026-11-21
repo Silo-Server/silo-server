@@ -8,6 +8,23 @@ import { MAX_PROBE_KBPS, MIN_PROBE_KBPS } from "./probe-meter";
  */
 const MIN_THROUGHPUT_SAMPLE_MS = 1_000;
 
+/**
+ * The length of the union of `spans`, sorted in place by start. A long plan
+ * keeps thousands of segment requests, so the count is one pass over the
+ * sorted spans.
+ */
+function coveredMs(spans: [number, number][]): number {
+  spans.sort((a, b) => a[0] - b[0]);
+  let ms = 0;
+  let end = -Infinity;
+  for (const [first, last] of spans) {
+    if (last <= end) continue;
+    ms += last - Math.max(first, end);
+    end = last;
+  }
+  return ms;
+}
+
 /** How a request is doing: its bytes so far and when its first one arrived. */
 export interface MediaRequestProgress {
   bytes: number;
@@ -26,7 +43,7 @@ export interface MediaRequestProgress {
  */
 export class MediaDataMeter {
   private dataAt: number;
-  private requests = new Map<unknown, { first: number; last: number; bytes: number }>();
+  private requests = new Map<unknown, { bytes: number; spans: [number, number][] }>();
   private watched = new Map<unknown, () => MediaRequestProgress>();
 
   /** Until its first byte, silence counts from `startedAt`, when the plan's loading began. */
@@ -36,11 +53,21 @@ export class MediaDataMeter {
 
   /**
    * `request` has received `bytes` in all, the first of them at `first` and
-   * the latest at `last`. A request reports again as more arrives.
+   * the latest at `last`. A request reports again as more arrives. `spans` is
+   * the time it was receiving, as `[first, last]` pairs; without it the
+   * request was receiving from `first` to `last`. The browser engine's striped read
+   * reports as one request with its spans, so the time between its ranges
+   * is not receiving time.
    */
-  received(request: unknown, bytes: number, first: number, last: number) {
+  received(
+    request: unknown,
+    bytes: number,
+    first: number,
+    last: number,
+    spans: [number, number][] = [[first, last]],
+  ) {
     if (bytes <= 0) return;
-    this.requests.set(request, { first, last, bytes });
+    this.requests.set(request, { bytes, spans });
     this.dataAt = Math.max(this.dataAt, last);
   }
 
@@ -67,28 +94,20 @@ export class MediaDataMeter {
   /**
    * The rate the requests that spent at least a second receiving got their
    * data at, with time in which several were receiving counted once; capped
-   * at 1,000,000 kbps. Undefined when nothing counts or the rate is under the
+   * at 1,000,000 kbps. Only receiving time counts: a request's time is the
+   * union of its spans. Undefined when nothing counts or the rate is under the
    * 100 kbps a measurement needs.
    */
   throughputKbps(now: number): number | undefined {
     this.lastDataAt(now);
     let bytes = 0;
     const spans: [number, number][] = [];
-    for (const { first, last, bytes: received } of this.requests.values()) {
-      if (last - first < MIN_THROUGHPUT_SAMPLE_MS) continue;
+    for (const { spans: own, bytes: received } of this.requests.values()) {
+      if (coveredMs(own) < MIN_THROUGHPUT_SAMPLE_MS) continue;
       bytes += received;
-      spans.push([first, last]);
+      spans.push(...own);
     }
-    // A long plan keeps thousands of segment requests, so sort them once and
-    // count overlapping time in one pass.
-    spans.sort((a, b) => a[0] - b[0]);
-    let ms = 0;
-    let end = -Infinity;
-    for (const [first, last] of spans) {
-      if (last <= end) continue;
-      ms += last - Math.max(first, end);
-      end = last;
-    }
+    const ms = coveredMs(spans);
     if (ms < MIN_THROUGHPUT_SAMPLE_MS) return undefined;
     const kbps = Math.min(Math.floor((bytes * 8) / ms), MAX_PROBE_KBPS);
     return kbps >= MIN_PROBE_KBPS ? kbps : undefined;

@@ -151,7 +151,7 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/catalog/(items|capabilities)$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/requests$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/requests/(counts|capabilities)$`)},
-		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/requests/[^/]+/events$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/requests/[^/]+/(events|poster)$`)},
 	},
 	// The catalog listing with file paths, which the listing handler gives
 	// only to unscoped callers and keys holding this scope.

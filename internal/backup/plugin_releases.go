@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -19,15 +20,9 @@ var pluginReleaseColumns = []string{"repository_id", "version", "install_path", 
 	"update_failed_version", "update_failure_reason", "update_failed_at",
 	"signature_state", "signature_source_repo", "signature_verified_at"}
 
-// CarryPluginReleases gives each plugin installation of the restored
-// database (dbURL) that the live server (liveURL) has, by id and plugin,
-// the live release: its row's release columns, its stored archive, and its
-// capabilities, so a release replaced since the backup is never launched
-// again. An installation of the same id but another plugin, and every
-// installation when liveURL is "" (another deployment, or a separate
-// restore), is turned off and reported; one only the backup has is turned
-// off by the stricter switches (stricterFlags). It returns the
-// installations it turned off here.
+// CarryPluginReleases gives each matching installation its live release, archive,
+// and capabilities. Other restored installations stay off. It reports both why
+// a restored release cannot run and any live release omitted from the restore.
 func (l PGLoader) CarryPluginReleases(ctx context.Context, dbURL, liveURL string) ([]string, error) {
 	conn, err := pgx.Connect(ctx, dbURL)
 	if err != nil {
@@ -35,45 +30,69 @@ func (l PGLoader) CarryPluginReleases(ctx context.Context, dbURL, liveURL string
 	}
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 	var live *pgx.Conn
+	var running map[int64]pluginReleaseState
 	if liveURL != "" {
 		if live, err = pgx.Connect(ctx, liveURL); err != nil {
 			return nil, fmt.Errorf("reading the live server's plugins: %w", err)
 		}
 		defer func() { _ = live.Close(context.WithoutCancel(ctx)) }()
+		if running, err = pluginReleaseStates(ctx, live); err != nil {
+			return nil, err
+		}
 	}
 	var off []string
 	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
-		restored, err := collectPairs(ctx, tx, `SELECT id, plugin_id FROM plugin_installations WHERE kind IS DISTINCT FROM 'builtin'`)
+		restored, err := pluginReleaseStates(ctx, tx)
 		if err != nil {
 			return err
 		}
-		for id, plugin := range restored {
-			matched := false
-			if live != nil {
-				var livePlugin string
-				err := live.QueryRow(ctx, `SELECT plugin_id FROM plugin_installations WHERE id = $1`, id).Scan(&livePlugin)
-				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-					return err
-				}
-				if errors.Is(err, pgx.ErrNoRows) {
-					continue // only the backup has it: stricterFlags turns it off
-				}
-				matched = livePlugin == plugin
-			}
-			if matched {
+		for id, release := range restored {
+			here, found := running[id]
+			if found && here.pluginID == release.pluginID {
+				delete(running, id)
 				if err := copyPluginRelease(ctx, live, tx, id); err != nil {
 					return fmt.Errorf("plugin installation %d: %w", id, err)
+				}
+				if !release.enabled && here.enabled {
+					off = append(off, fmt.Sprintf("%s (installation %d) stayed off", release.pluginID, id))
 				}
 				continue
 			}
 			if _, err := tx.Exec(ctx, `UPDATE plugin_installations SET enabled = false WHERE id = $1`, id); err != nil {
 				return err
 			}
-			off = append(off, fmt.Sprintf("%s (installation %d)", plugin, id))
+			off = append(off, fmt.Sprintf("%s (installation %d) turned off", release.pluginID, id))
+		}
+		for id, release := range running {
+			off = append(off, fmt.Sprintf("%s (installation %d) absent from the restored database", release.pluginID, id))
 		}
 		return nil
 	})
+	slices.Sort(off)
 	return off, err
+}
+
+type pluginReleaseState struct {
+	pluginID string
+	enabled  bool
+}
+
+func pluginReleaseStates(ctx context.Context, q queryer) (map[int64]pluginReleaseState, error) {
+	rows, err := q.Query(ctx, `SELECT id, plugin_id, enabled FROM plugin_installations WHERE kind IS DISTINCT FROM 'builtin'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	releases := make(map[int64]pluginReleaseState)
+	for rows.Next() {
+		var id int64
+		var release pluginReleaseState
+		if err := rows.Scan(&id, &release.pluginID, &release.enabled); err != nil {
+			return nil, err
+		}
+		releases[id] = release
+	}
+	return releases, rows.Err()
 }
 
 // copyPluginRelease writes the live installation id's release into tx:
@@ -138,35 +157,16 @@ func copyPluginRelease(ctx context.Context, live *pgx.Conn, tx pgx.Tx, id int64)
 	return err
 }
 
-// collectPairs reads (id, text) rows into a map.
-func collectPairs(ctx context.Context, q queryer, sql string, args ...any) (map[int64]string, error) {
-	rows, err := q.Query(ctx, sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[int64]string{}
-	for rows.Next() {
-		var id int64
-		var v string
-		if err := rows.Scan(&id, &v); err != nil {
-			return nil, err
-		}
-		out[id] = v
-	}
-	return out, rows.Err()
-}
-
-// carryPluginReleases runs CarryPluginReleases and says what it turned off.
-func carryPluginReleases(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, out io.Writer) error {
+// carryPluginReleases reports releases the restored database cannot run.
+func carryPluginReleases(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, out io.Writer) (bool, error) {
 	off, err := loader.CarryPluginReleases(ctx, dbURL, liveURL)
 	if err != nil {
-		return fmt.Errorf("keeping the live server's plugin releases: %w", err)
+		return false, fmt.Errorf("keeping the live server's plugin releases: %w", err)
 	}
 	if len(off) > 0 {
-		_, _ = fmt.Fprintf(out, "Turned off %d plugins whose release this server does not have; reinstall or enable them after Silo starts: %s.\n", len(off), strings.Join(off, ", "))
+		_, _ = fmt.Fprintf(out, "Restricted restored plugin releases: %s. Review them after Silo starts.\n", strings.Join(off, ", "))
 	}
-	return nil
+	return len(off) > 0, nil
 }
 
 // DisablePlugins turns off every enabled plugin installation in dbURL,
