@@ -461,9 +461,9 @@ export function SubtitlesStep() {
       footnote={t("web.setup.subtitles.footnote")}
     >
       <StepSection>
-        {/* A failed refresh keeps the rows it already has, so a locked row's
-            Reload stays reachable; the error view is only for a first load. */}
-        {providers.isError && !providers.data ? (
+        {/* A failed refresh shows its error above the rows it already has,
+            so a locked row's Reload stays reachable. */}
+        {providers.isError ? (
           <div className="py-4">
             <p className="text-sm font-medium">{t("web.setup.subtitles.listLoadFailed")}</p>
             <p className="text-muted-foreground mt-1 text-xs">
@@ -481,7 +481,8 @@ export function SubtitlesStep() {
               {t("common.tryAgain")}
             </Button>
           </div>
-        ) : providerList.length === 0 ? (
+        ) : null}
+        {!providers.data ? null : providerList.length === 0 ? (
           <p className="text-muted-foreground py-4 text-sm">{t("web.setup.subtitles.none")}</p>
         ) : (
           providerList.map((config) => (
