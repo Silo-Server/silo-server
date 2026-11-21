@@ -138,16 +138,17 @@ function SidebarPinButton({
             label: collection.title,
           });
         }}
-        className={`absolute start-2 top-2 rounded-lg p-1.5 backdrop-blur-sm transition-all ${
+        // The dark poster chip of the collection actions menu, at the same size.
+        className={`absolute start-2 top-2 flex size-8 items-center justify-center rounded-[10px] backdrop-blur-sm transition-all max-lg:size-9 ${
           pinned
             ? "bg-primary/90 text-primary-foreground"
-            : "bg-background/50 text-foreground pointer-reveal group-hover/card:opacity-100"
+            : "pointer-reveal bg-black/55 text-white group-hover/card:opacity-100 hover:bg-black/70"
         }`}
         title={pinLabel}
         aria-label={pinLabel}
         aria-describedby={titleId}
       >
-        {pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+        {pinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
       </button>
     </>
   );
