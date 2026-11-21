@@ -78,6 +78,7 @@
   --color-warning-label: var(--warning-label);
   --color-info-label: var(--info-label);
   --color-destructive-label: var(--destructive-label);
+  --color-chip-label: var(--chip-label);
 
   /* ── Borders & Focus ─────────────────────────────────────── */
   --color-border: var(--border);
@@ -556,6 +557,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      --destructive      Danger/error text, icons, borders
      --destructive-fill Solid danger fill under --destructive-foreground
      --<status>-label   Status text on a 10% tint of its own colour
+     --chip-label       Secondary label before a value in a tinted chip
      --border           Default border color
      --sidebar          Sidebar background (often darkest surface)
    ================================================================ */
@@ -582,6 +584,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --warning-label: var(--warning);
     --info-label: var(--info);
     --destructive-label: color-mix(in srgb, var(--contrast-boost) 25%, var(--destructive));
+
+    /* The secondary label before a value in a tinted chip ("Network ·
+       Default"). Translucent foreground blends with the tint under it, so it
+       stays readable on any accent. High contrast lightens the surfaces, so
+       there it takes the boosted muted colour (see the block below). */
+    --chip-label: color-mix(in oklab, var(--foreground) 75%, transparent);
   }
 
   /* ── Contrast-adjustable tokens ─────────────────────────────
@@ -810,6 +818,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --warning-label: color-mix(in srgb, var(--contrast-boost) 35%, var(--warning));
     --info-label: color-mix(in srgb, var(--contrast-boost) 50%, var(--info));
     --destructive-label: color-mix(in srgb, var(--contrast-boost) 60%, var(--destructive));
+    --chip-label: var(--muted-foreground);
     --ambient-glow-opacity: 0.04;
   }
   html[data-high-contrast="true"] .surface-panel-subtle,
