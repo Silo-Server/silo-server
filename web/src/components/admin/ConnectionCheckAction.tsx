@@ -49,7 +49,7 @@ export function ConnectionCheckAction({
         <span
           role="status"
           aria-live="polite"
-          className={`text-sm wrap-anywhere ${result.success ? "text-green-600" : "text-red-600"}`}
+          className={`text-sm wrap-anywhere ${result.success ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
         >
           {result.message}
         </span>
