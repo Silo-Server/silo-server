@@ -42,12 +42,17 @@ const LONG_LIST =
 /**
  * One name in an omission group's full list. Only while it can't wrap to fit, such as
  * one long run of joined emoji, is it clipped sideways at its column's edge; its title
- * shows it in full.
+ * shows it in full. A name stays in one column: split across two, the measurement would
+ * see the union of both pieces and miss the overflow in the first.
  */
 function OmittedName({ label }: { label: string }) {
   const [ref, overflows] = useOverflowsInline<HTMLLIElement>(label);
   return (
-    <li ref={ref} title={label} className={cn("break-words", overflows && OVERFLOW_CLIP)}>
+    <li
+      ref={ref}
+      title={label}
+      className={cn("break-inside-avoid break-words", overflows && OVERFLOW_CLIP)}
+    >
       {label}
     </li>
   );
