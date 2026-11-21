@@ -50,6 +50,7 @@ import { formatDecimal } from "@/lib/numberFormat";
 import { joinList } from "@/lib/appLocale";
 import { formatDate } from "@/lib/datetime";
 import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
+import { isKeyboardFocus } from "@/hooks/useIntentPrefetch";
 
 // ─────────────────────────────────────────────────────────────────────
 // types & constants
@@ -1339,7 +1340,7 @@ function DeviceRow({
       // Keyboard focus only: a mouse press focuses on mousedown, and moving
       // the row then would land the mouseup elsewhere and lose the click.
       onFocus={(e) => {
-        if (e.currentTarget.matches(":focus-visible")) {
+        if (isKeyboardFocus(e.currentTarget)) {
           e.currentTarget.scrollIntoView({ block: "nearest" });
         }
       }}

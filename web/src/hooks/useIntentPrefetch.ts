@@ -38,7 +38,7 @@ export interface IntentPrefetchHandlers {
 
 const NO_HANDLERS: IntentPrefetchHandlers = {};
 
-function isKeyboardFocus(element: HTMLElement): boolean {
+export function isKeyboardFocus(element: HTMLElement): boolean {
   try {
     return element.matches(":focus-visible");
   } catch {
