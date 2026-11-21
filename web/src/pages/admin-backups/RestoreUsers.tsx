@@ -206,10 +206,12 @@ export const AccountRow = memo(function AccountRow({
             // Without the pending summary the line is the email (the label is the
             // username), which reads left to right in any language and so keeps its
             // start when cut short. With the summary first, the line follows the page.
+            // w-fit keeps a short line under the name, on the page's start side;
+            // max-w-full stops a long one at the column's width so it is still cut short.
             <span
               title={contact}
               dir={pending ? undefined : "ltr"}
-              className="text-muted-foreground min-w-0 truncate text-xs"
+              className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs"
             >
               {contact}
             </span>

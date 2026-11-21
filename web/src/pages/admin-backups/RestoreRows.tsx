@@ -341,11 +341,13 @@ export const ItemRow = memo(function ItemRow({
           </Label>
           {secondary ? (
             // A library's line is its folder paths, which read left to right in any
-            // language, so they keep their start when cut short.
+            // language, so they keep their start when cut short. w-fit keeps a short
+            // line under the name, on the page's start side; max-w-full stops a long
+            // one at the column's width so it is still cut short.
             <span
               title={secondary}
               dir={item.kind === "library" ? "ltr" : undefined}
-              className="text-muted-foreground min-w-0 truncate text-xs"
+              className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs"
             >
               {secondary}
             </span>
