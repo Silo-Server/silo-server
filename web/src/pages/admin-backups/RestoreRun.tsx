@@ -209,7 +209,10 @@ function AccountReport({
                           ),
                         })}
                         {data.notes.map((note, position) => (
-                          <span key={position} className="text-muted-foreground block">
+                          <span
+                            key={position}
+                            className="text-muted-foreground block wrap-anywhere"
+                          >
                             {note}
                           </span>
                         ))}
