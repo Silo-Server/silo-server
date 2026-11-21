@@ -28,6 +28,7 @@ var launchesOutsideFspath = map[string]string{
 	"internal/backup/restore_pg.go:toc":                                                      "pg_restore --list of a dump",
 	"internal/jellycompat/web_component.go:commandOutput":                                    "the web client installer's git and npm",
 	"internal/jellycompat/web_component.go:webInstallCommandRunner":                          "the web client installer's git and npm",
+	"internal/nodeinstall/launchd_darwin.go:launchctl":                                       "launchctl on the user's own LaunchAgent",
 	"internal/nodemetrics/nvidia.go:<package scope>":                                         "nvidia-smi",
 	"internal/playback/gpudetect.go:runFFmpegProbe":                                          "FFmpeg on lavfi test sources",
 	"internal/playback/gpudetect.go:runNVIDIASMIQuery":                                       "nvidia-smi",

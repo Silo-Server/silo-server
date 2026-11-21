@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log/slog"
-	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -14,14 +13,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
-
-// nodeDrainTimeoutEnv bounds how long a transcode node that received SIGTERM
-// keeps serving its sessions before it shuts down. 0 turns the drain off.
-const nodeDrainTimeoutEnv = "SILO_NODE_DRAIN_TIMEOUT"
-
-// defaultNodeDrainTimeout lets most episodes and a long tail of movie sessions
-// finish, while keeping a rolling upgrade of several nodes bounded.
-const defaultNodeDrainTimeout = 10 * time.Minute
 
 // nodeDrainKeyCheckInterval is how often a SIGTERM drain asks whether the
 // main server still accepts this node's key. The answer is an atomic read.
@@ -44,28 +35,22 @@ type nodeDrain struct {
 // timeout, or not at all when it is 0. keyRejected ends the wait early; see
 // nodeDrain.keyRejected.
 func newTranscodeNodeDrain(srv *transcodenode.Server, keyRejected func() bool) *nodeDrain {
-	timeout := nodeDrainTimeout(os.Getenv(nodeDrainTimeoutEnv))
+	timeout := nodeDrainTimeout(os.Getenv(transcodenode.EnvDrainTimeout))
 	if timeout <= 0 {
 		return nil
 	}
 	return &nodeDrain{timeout: timeout, begin: srv.BeginShutdownDrain, wait: srv.WaitDrained, activeJobs: srv.ActiveJobs, keyRejected: keyRejected}
 }
 
-// nodeDrainTimeout parses SILO_NODE_DRAIN_TIMEOUT: a Go duration ("15m") or
-// whole seconds ("900"). Empty or invalid means the default.
+// nodeDrainTimeout parses SILO_NODE_DRAIN_TIMEOUT
+// (transcodenode.ParseDrainTimeout). Invalid means the default.
 func nodeDrainTimeout(value string) time.Duration {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return defaultNodeDrainTimeout
+	timeout, err := transcodenode.ParseDrainTimeout(value)
+	if err != nil {
+		slog.Warn("invalid node drain timeout; using the default", "env", transcodenode.EnvDrainTimeout, "value", strings.TrimSpace(value), "default", transcodenode.DefaultDrainTimeout)
+		return transcodenode.DefaultDrainTimeout
 	}
-	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 && seconds <= math.MaxInt64/int(time.Second) {
-		return time.Duration(seconds) * time.Second
-	}
-	if timeout, err := time.ParseDuration(value); err == nil && timeout >= 0 {
-		return timeout
-	}
-	slog.Warn("invalid node drain timeout; using the default", "env", nodeDrainTimeoutEnv, "value", value, "default", defaultNodeDrainTimeout)
-	return defaultNodeDrainTimeout
+	return timeout
 }
 
 // run drains the node: it stops taking new work and waits until its work is
