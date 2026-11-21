@@ -223,7 +223,7 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
     item.restart_required ? (
       <p
         key="restart"
-        className="text-muted-foreground flex flex-wrap items-baseline gap-2 text-xs"
+        className="text-muted-foreground flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-balance"
       >
         <RestartBadge /> {t("web.admin.backups.restore.rows.restart")}
       </p>
