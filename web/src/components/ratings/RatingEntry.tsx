@@ -26,9 +26,9 @@ export function RatingEntry({ rating, size = "md", className }: RatingEntryProps
           className={cn("w-auto shrink-0", size === "sm" ? "h-2" : "h-2.5")}
         />
       ) : (
-        // The name keeps the caller's text color and reads as secondary by
-        // weight and size alone. Each caller picks a color that reads on its
-        // surface, and fading it would undo that.
+        // The name keeps the caller's text color, so it reads as well as the
+        // score beside it, and stays secondary by weight and size alone. A
+        // fade would put it below the score's contrast.
         <span
           className={cn(
             "font-medium tracking-tight",
