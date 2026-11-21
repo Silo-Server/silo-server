@@ -129,6 +129,8 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   segments, such as a library folder or an import source, goes through `PathText`
   (`src/components/PathText.tsx`): left to right overall, each part between `/ ? & = #` in
   its own direction. A plain `dir="ltr"` box swaps two adjacent Arabic or Hebrew segments.
+  `PathText` is inline, so a `truncate` container around it still sets `dir="ltr"` to clip
+  the end rather than the start.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also
