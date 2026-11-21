@@ -543,8 +543,9 @@ build compiles.
   shows the server's and each node's: the build number and the display
   revision.
 - **Installer.** `silo node install` and `silo node uninstall`
-  (`internal/nodeinstall/node_command.go`; launchd and file work in
-  `node_install_darwin.go`) manage one per-user LaunchAgent,
+  (`internal/nodeinstall/node_command.go`; the install, swap and file work
+  in `node_install_darwin.go`, launchctl in `launchd_darwin.go`) manage one
+  per-user LaunchAgent,
   `org.siloserver.node`, and nothing system-wide. The cgo darwin build refuses
   to install itself, since it loads Homebrew libraries, and other platforms
   refuse both commands.
