@@ -2957,10 +2957,14 @@ describe("usePlaybackSession version switches", () => {
       }),
     );
     expect(result.current.planAudioTracks).toEqual(liveAudio);
+    // The switch carries the viewer's click position. A progress sample from
+    // before the click must not move the replacement back to it.
+    act(() => result.current.updatePlaybackState(4, true));
     act(() => result.current.switchAudioTrack(1, 10));
     await waitFor(() => expect(replanBodies).toHaveLength(1));
     expect(replanBodies[0]).toMatchObject({
       operation: "track_change",
+      position_seconds: 10,
       selected_tracks: { audio: { id: "file:7:audio:1", index: 1 } },
     });
     expect(startCalls).toBe(1);
@@ -5728,6 +5732,273 @@ describe("usePlaybackSession dead-session recovery", () => {
       ),
     );
     expect(startBodies).toHaveLength(2);
+
+    unmount();
+  });
+});
+
+describe("usePlaybackSession seek reanchor autoplay", () => {
+  it("keeps the replacement playing when the old transport pauses before adoption", async () => {
+    let releaseReplan: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: fixturePlanV3({ session_id: "session-1" }),
+        });
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        return new Promise<Response>((resolve) => {
+          releaseReplan = resolve;
+        });
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // The viewer is playing; the reanchor is answered after the old transport
+    // has already been torn down and reported the pause that teardown forces.
+    act(() => {
+      result.current.updatePlaybackState(120, true);
+      result.current.reportFirstFrame();
+    });
+    expect(result.current.shouldAutoPlay).toBe(true);
+
+    let seek: Promise<boolean> | undefined;
+    act(() => {
+      seek = result.current.reanchorSeek(900);
+    });
+    await waitFor(() => expect(releaseReplan).not.toBeNull());
+    act(() => result.current.updatePlaybackState(120, false));
+
+    await act(async () => {
+      releaseReplan!(
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: fixturePlanV3({
+            session_id: "session-1",
+            plan_id: "plan:seek-autoplay0001",
+            plan_attempt_key: "v3:seek-autoplay0001",
+            stream: {
+              ...fixturePlanV3().stream,
+              url: "/stream/session-1?seek=900",
+            },
+            timeline: {
+              ...fixturePlanV3().timeline,
+              source_start_seconds: 900,
+              player_start_seconds: 0,
+              stream_origin_seconds: 900,
+              timeline_offset_seconds: 900,
+            },
+          }),
+        }),
+      );
+      await seek;
+    });
+
+    // The teardown's pause is not the viewer's intent: the replacement must
+    // autoplay, or the viewer gets a frozen frame that claims to be playing.
+    expect(result.current.shouldAutoPlay).toBe(true);
+    unmount();
+  });
+
+  it("keeps autoplay through a rapid backward seek sequence", async () => {
+    let releaseReplan: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: fixturePlanV3({ session_id: "session-1" }),
+        });
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        return new Promise<Response>((resolve) => {
+          releaseReplan = resolve;
+        });
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+    act(() => {
+      result.current.updatePlaybackState(700, true);
+      result.current.reportFirstFrame();
+    });
+
+    const targets = [690, 680, 670, 660, 650, 640];
+    for (const [index, target] of targets.entries()) {
+      let seek: Promise<boolean> | undefined;
+      act(() => {
+        seek = result.current.reanchorSeek(target, true);
+      });
+      await waitFor(() => expect(releaseReplan).not.toBeNull());
+      // Each replacement pauses the element while it loads. That is not the
+      // viewer pausing, and must not become the next plan's autoplay intent.
+      act(() => result.current.updatePlaybackState(target, false));
+      await act(async () => {
+        releaseReplan!(
+          jsonResponse({
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "playable",
+            session_id: "session-1",
+            playback_plan: fixturePlanV3({
+              session_id: "session-1",
+              plan_id: `plan:rapid-seek-${index}`,
+              plan_attempt_key: `v3:rapid-seek-${index}`,
+              timeline: {
+                ...fixturePlanV3().timeline,
+                source_start_seconds: target,
+                player_start_seconds: 0,
+                stream_origin_seconds: target,
+                timeline_offset_seconds: target,
+              },
+            }),
+          }),
+        );
+        await seek;
+      });
+      releaseReplan = null;
+      expect(result.current.shouldAutoPlay).toBe(true);
+    }
+
+    unmount();
+  });
+});
+
+describe("usePlaybackSession refused seek retry", () => {
+  const audioPlan = () =>
+    fixturePlanV3({
+      session_id: "session-1",
+      audio_tracks: [
+        {
+          track_id: "file:7:audio:0",
+          selection_index: 0,
+          index: 0,
+          codec: "aac",
+          channels: 2,
+          language: "eng",
+          default: true,
+        },
+        {
+          track_id: "file:7:audio:1",
+          selection_index: 1,
+          index: 1,
+          codec: "aac",
+          channels: 2,
+          language: "jpn",
+          default: false,
+        },
+      ],
+      selected_tracks: { audio: { id: "file:7:audio:0", index: 0 } },
+    });
+
+  it("keeps the retry card instead of dispatching a queued track change", async () => {
+    let releaseSeek: ((response: Response) => void) | null = null;
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: audioPlan(),
+        });
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Promise<Response>((resolve) => {
+          releaseSeek = resolve;
+        });
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+    act(() => {
+      result.current.updatePlaybackState(120, true);
+      result.current.reportFirstFrame();
+    });
+
+    let seek: Promise<boolean> | undefined;
+    act(() => {
+      seek = result.current.reanchorSeek(900, true);
+    });
+    await waitFor(() => expect(releaseSeek).not.toBeNull());
+
+    // A track pick made while the seek is in flight is queued behind it. On a
+    // degraded source it can otherwise fire the moment the seek is refused and
+    // replace the retry card with a 30s transport hold.
+    act(() => result.current.switchAudioTrack(1, 120));
+
+    await act(async () => {
+      releaseSeek!(
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "terminal",
+          session_id: "session-1",
+          terminal: {
+            reason: "transcode_start_failed",
+            message: "failed to resolve remux seek position",
+            retryable: true,
+          },
+        }),
+      );
+      await seek;
+    });
+
+    await waitFor(() => expect(result.current.errorReason).toBe("transcode_start_failed"));
+    expect(result.current.errorRetryable).toBe(true);
+    expect(replanBodies.filter((body) => body.operation === "track_change")).toHaveLength(0);
+
+    // The same holds for the automatic default-audio reconcile: acknowledging
+    // the invalidation must not hide the viewer's only retry.
+    expect(
+      await result.current.invalidatePlan(
+        result.current.plan!.plan_id,
+        "default_audio_reconciliation",
+        120,
+      ),
+    ).toBe(true);
+    expect(replanBodies.filter((body) => body.operation === "track_change")).toHaveLength(0);
+    expect(result.current.errorReason).toBe("transcode_start_failed");
+    expect(result.current.errorRetryable).toBe(true);
 
     unmount();
   });

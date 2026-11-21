@@ -763,8 +763,12 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
   /**
    * `seek_reanchor` replan when the target lies outside the seekable window.
    * Resolves with whether a plan at the new position was adopted.
+   *
+   * `autoplayIntent` carries the viewer's play/pause intent sampled when the
+   * seek was issued; a seek replacement keeps playing through the pause the
+   * outgoing transport's teardown reports.
    */
-  reanchorSeek: (positionSeconds: number) => Promise<boolean>;
+  reanchorSeek: (positionSeconds: number, autoplayIntent?: boolean) => Promise<boolean>;
   /**
    * Re-reads the subtitle inventory by replanning with the selection unchanged.
    * Resolves to whether a fresh plan carrying the inventory was adopted, so a
@@ -1916,10 +1920,19 @@ export function usePlaybackSession(
     positionSeconds: number;
     playbackAttemptId: string | null;
   } | null>(null);
+  // A refused seek's retryable card is a verdict the viewer must act on. While
+  // it is up, automatic track/quality replans (a held pick flush, a default
+  // audio reconcile, a subtitle refresh) must not replace it with a plan or a
+  // different error: on a degraded source those replans can also hold the
+  // client for tens of seconds. The card's Try again starts fresh, and a new
+  // seek or a real failure supersedes it.
+  const refusedSeekRetryRef = useRef<{ planId: string; positionSeconds: number } | null>(null);
   // Late-bound reanchor: declared ahead of `reanchorSeek` so the switch
   // completion above can call it without depending on render order. Bound in
   // an effect — render-time ref writes are unsafe under concurrent React.
-  const reanchorSeekRef = useRef<(positionSeconds: number) => Promise<boolean>>(async () => false);
+  const reanchorSeekRef = useRef<
+    (positionSeconds: number, autoplayIntent?: boolean) => Promise<boolean>
+  >(async () => false);
   const qualityRef = useRef(qualityPreference?.trim() || QUALITY_ORIGINAL_V3);
   // The running mid-stream reconnect, if any. `generation` invalidates the
   // timer and any request of a cycle that has ended, so nothing it started can
@@ -2125,6 +2138,13 @@ export function usePlaybackSession(
       decision: DecisionResponseV3,
       initialSubtitleFailure?: PlaybackSessionErrorState | null,
       forceTransportBump?: boolean,
+      /**
+       * The viewer's play intent sampled when the replan was sent. A transport
+       * that is torn down before its replacement is adopted reports a pause
+       * that is not the viewer's, so reading the element at adoption time can
+       * hand a seek's replacement `shouldAutoPlay=false` and leave it frozen.
+       */
+      autoplayIntent?: boolean,
     ): boolean => {
       serverFeaturesRef.current = decision.server_features;
       const plan = decision.playback_plan;
@@ -2151,13 +2171,17 @@ export function usePlaybackSession(
         return false;
       }
 
+      // A plan on screen supersedes any refused-seek card: the viewer is no
+      // longer looking at a retry, and an automatic replan is allowed again.
+      refusedSeekRetryRef.current = null;
       const prevPlan = planRef.current;
       // Any adopted plan proves the server is reachable and replaces the
       // transport, so it also ends a reconnect in progress. The new transport
       // plays only if the viewer was playing when the connection dropped; the
       // element has been paused since, so its reported state says nothing.
       if (reconnectRef.current.active) playbackPlayingRef.current = reconnectRef.current.resume;
-      planAutoPlayRef.current = playbackPlayingRef.current;
+      const playIntent = autoplayIntent ?? playbackPlayingRef.current;
+      planAutoPlayRef.current = playIntent;
       planTransportShownRef.current = false;
       const attemptId = playbackAttemptIdRef.current;
       if (prevPlan !== null && planWasReplaced(prevPlan, plan) && attemptId) {
@@ -2254,7 +2278,7 @@ export function usePlaybackSession(
           transportRevisionRef.current,
           replayRevisionRef.current,
           qualityRef.current,
-          playbackPlayingRef.current,
+          playIntent,
           current.autoFallback,
           config,
         );
@@ -2602,6 +2626,9 @@ export function usePlaybackSession(
         subtitleBurnIn?: boolean;
       };
     }): Promise<LoadSessionOutcome> => {
+      // A fresh start (including the retry card's Try again) is the viewer
+      // acting on the refusal, so its card no longer holds automatic replans.
+      refusedSeekRetryRef.current = null;
       // Any other start supersedes a running reconnect: it owns the session now.
       if (!reconnect) endReconnect(false);
       const previousState = stateRef.current;
@@ -3028,6 +3055,25 @@ export function usePlaybackSession(
       // A session answered gone cannot be replanned; every retry earns the same
       // answer. The restart action starts a new session instead.
       if (sessionGoneRef.current) return false;
+      if (
+        options.operation === "seek_reanchor" ||
+        options.operation === "failure_recovery" ||
+        options.operation === "seek_failure_recovery"
+      ) {
+        // A new seek or a real failure is the viewer's newest intent and
+        // replaces the refused-seek card.
+        refusedSeekRetryRef.current = null;
+      } else if (
+        !reconnect &&
+        refusedSeekRetryRef.current &&
+        (options.operation === "track_change" ||
+          options.operation === "quality_change" ||
+          options.operation === "output_change")
+      ) {
+        // Keep the card. These operations are not failures and none of them
+        // justifies throwing away the viewer's only retry affordance.
+        return false;
+      }
       // A switch is replacing the whole session and about to retire the plan
       // below. A replan built from that outgoing plan would be stamped with the
       // switch's sequence once the switch lands, so it could clobber the
@@ -3169,6 +3215,12 @@ export function usePlaybackSession(
       const playIntent = planTransportShownRef.current
         ? playbackPlayingRef.current
         : planAutoPlayRef.current;
+      // A seek replacement is measured against the viewer's intent at the
+      // moment the seek was issued, not the element's state now: the outgoing
+      // transport may already have been paused by a teardown or a previous
+      // seek replacement. The player passes that intent with the seek; other
+      // callers fall back to the live element.
+      const seekAutoplayIntent = options.autoplayIntent ?? playbackPlayingRef.current;
       replanInFlightRef.current = true;
       beginAdoption(loadSequence);
       const isQualityReplan =
@@ -3236,7 +3288,24 @@ export function usePlaybackSession(
           decision,
           options.operation === "track_change" && options.subtitle !== undefined ? null : undefined,
           isFailureRecovery || reconnect,
+          // The transport a seek replaces can be torn down (a generation
+          // fence, a playlist reload, the element's own load) before this
+          // adoption runs. Its pause is not the viewer's intent, so a seek
+          // replacement keeps the intent sampled when the seek was sent
+          // instead of reading the element now. Other replans keep their own
+          // semantics: an output or track change reports the live pause, and
+          // a reconnect carries its own resume flag.
+          options.operation === "seek_reanchor" ? seekAutoplayIntent : undefined,
         );
+        if (!adopted && options.operation === "seek_reanchor" && !decision.playback_plan) {
+          const refused = describeDecisionWithoutPlan(decision);
+          refusedSeekRetryRef.current = refused.retryable
+            ? {
+                planId: plan.plan_id,
+                positionSeconds: options.positionSeconds,
+              }
+            : null;
+        }
         if (
           subtitlePickKey !== null &&
           decision.playback_plan &&
@@ -4195,6 +4264,10 @@ export function usePlaybackSession(
       // reconciliation reason if the server sent something longer, which is a
       // different reason and must keep failure semantics.
       if (reason.trim() === PLAN_INVALIDATED_DEFAULT_AUDIO_RECONCILIATION) {
+        // A refused seek is showing the viewer's only retry. A default-audio
+        // reconcile is not a failure and can wait for the fresh start that
+        // retry begins; issuing its no-op replan now would replace the card.
+        if (refusedSeekRetryRef.current) return true;
         // The reason goes back on the wire verbatim, not trimmed to the
         // classification: it is how the server tells that this replan *is* the
         // answer to the decision it persisted, instead of falling back to a
@@ -4215,11 +4288,11 @@ export function usePlaybackSession(
   );
 
   const reanchorSeek = useCallback(
-    (positionSeconds: number): Promise<boolean> => {
+    (positionSeconds: number, autoplayIntent?: boolean): Promise<boolean> => {
       playbackPositionRef.current = positionSeconds;
       awaitingInitialPlayerPositionRef.current = false;
       reportEvent("seek_reanchor_requested");
-      return replan({ operation: "seek_reanchor", positionSeconds });
+      return replan({ operation: "seek_reanchor", positionSeconds, autoplayIntent });
     },
     [replan, reportEvent],
   );

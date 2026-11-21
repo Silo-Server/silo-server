@@ -76,7 +76,13 @@ import {
 } from "../utils/pendingSeek";
 import { resolveVersionAudioLanguage } from "../utils/effectiveAudioLanguage";
 import { resolveEffectiveVersion } from "../utils/resolveEffectiveVersion";
-import { StartupGuard } from "../utils/startupGuard";
+import {
+  isStaleGenerationError,
+  MAX_STALE_GENERATION_RECOVERIES,
+  recoverFromStaleGeneration,
+  StartupGuard,
+} from "../utils/startupGuard";
+import type { DecodeErrorCarrier } from "../decode-failure";
 import {
   SegmentRetryBudget,
   StartupSegmentBudget,
@@ -376,8 +382,16 @@ interface VideoPlayerProps {
   /**
    * `seek_reanchor` replan when a seek target falls outside the seekable window.
    * Reports whether the replan landed a plan at the requested position.
+   *
+   * `autoplayIntent` is the viewer's play/pause intent at the moment the seek
+   * was issued. A seek replacement starts loading while the old transport may
+   * already be paused by its own teardown; the session uses this intent instead
+   * of reading that transient pause so the replacement keeps playing.
    */
-  onReanchorSeek?: (positionSeconds: number) => boolean | Promise<boolean>;
+  onReanchorSeek?: (
+    positionSeconds: number,
+    autoplayIntent?: boolean,
+  ) => boolean | Promise<boolean>;
   preferredSubtitleLanguage?: string | null;
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
@@ -473,6 +487,12 @@ const FIREFOX_STALL_BUFFERED_MS = 2_000;
 // stream at the paused position instead. The value sits well inside the
 // default window.
 const PROGRESSIVE_REMUX_IDLE_REOPEN_MS = 60_000;
+// How long a progressive remux replacement started for a seek may stay silent
+// before the seek is reported as failed. The server bounds a remux's first media
+// byte itself, so a start that produces nothing by this point has already
+// exhausted that window; waiting longer only freezes the playhead at the target
+// while the old frame stays on screen. The viewer gets a retry instead.
+export const PROGRESSIVE_REMUX_SEEK_NO_BYTES_MS = 15_000;
 // How often a rejected autoplay is retried, and how many times. A transport
 // swap tears the previous source down with `load()`, and the media element load
 // algorithm is required to reject any play that is still pending with an
@@ -795,6 +815,23 @@ export function VideoPlayer({
   const isMountedRef = useRef(true);
   const effectiveTransportRevision = transportRevision ?? planRevision;
   const hlsRef = useRef<HlsType | null>(null);
+  // The hls.js instance a pending-seek generation fence stopped, with the
+  // transport identity it belongs to. If the reanchor reuses that same
+  // generation, no transport effect runs, so a planRevision effect refetches
+  // its playlist (see below) instead of leaving a stopped instance behind. A
+  // reanchor that builds a new generation must not restart the stopped one: its
+  // refetch would request the fenced segment a second time and then be aborted
+  // by the replacement.
+  const stoppedHlsForSeekRef = useRef<{
+    hls: HlsType;
+    streamUrl: string;
+    transportRevision: number;
+  } | null>(null);
+  // The viewer's play/pause intent, kept across the transient pauses a
+  // transport teardown or a seek replacement reports. A rapid sequence of
+  // backward seeks must not sample one of those pauses as "the viewer paused"
+  // and hand the next replacement shouldAutoPlay=false.
+  const viewerPlayIntentRef = useRef(shouldAutoPlay);
   // The plan's media requests, where its transport can see their bytes:
   // hls.js fragments and the browser engine's reads. The media element's own
   // loads show none.
@@ -927,6 +964,11 @@ export function VideoPlayer({
   // element has not reached yet — including a reanchor still being replanned —
   // is the position playback is heading to, so the next skip starts there.
   const pendingSeekTimeRef = useRef<number | null>(null);
+  // Where the media was when a server reanchor asked for a new window. A
+  // refused seek leaves the old transport where it was; putting the controls
+  // back there keeps the retry card (and its Try again) on the position the
+  // viewer was at instead of on the target that never played.
+  const seekOriginTimeRef = useRef<number | null>(null);
   // The session and plan revision the pending target was requested in. A
   // transport only serves a target from its own session: a leftover from a
   // previous session must never aim the next one. The revision records which
@@ -1952,12 +1994,21 @@ export function VideoPlayer({
     if (!replanError || replanning) return;
 
     // A refused reanchor never reaches its target. Resume relative skips from
-    // the surviving stream instead of extending the abandoned request.
+    // the surviving stream instead of extending the abandoned request, and put
+    // the controls back on where the media actually is — the position the
+    // viewer was at — not on the target that never played. The stream that
+    // was going to be replaced keeps the frame, so stop it: the position on
+    // screen must be the one that is playing, not one advancing unseen under
+    // the error card.
+    const refusedSeek = pendingSeekTimeRef.current !== null;
+    const origin = refusedSeek ? seekOriginTimeRef.current : null;
+    seekOriginTimeRef.current = null;
     pendingSeekTimeRef.current = null;
     pendingSeekContextRef.current = null;
     setPendingSeekTime(null);
     const video = videoRef.current;
-    if (video) setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
+    if (origin !== null) setCurrentTime(origin);
+    else if (video) setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
 
     const failureKey = `${sessionId}:${plan.plan_attempt_key}:${planRevision}`;
     if (reportedPlanFailureKeyRef.current === failureKey) {
@@ -1966,8 +2017,17 @@ export function VideoPlayer({
     if (
       transportFailedForPlanRevisionRef.current === planRevision ||
       !isPlayerReady ||
-      replanErrorReason === "replan_timeout"
+      replanErrorReason === "replan_timeout" ||
+      // A replan the server itself marked retryable is a verdict the viewer
+      // must be able to act on, even when the old transport is still alive and
+      // nothing was torn down: that is the seek path, where a refused reanchor
+      // otherwise leaves the player with no retry at all. A refused subtitle
+      // pick keeps its menu toast instead of the full error card.
+      (replanErrorRetryable && !requestedSubtitleTrackChangeRef.current)
     ) {
+      // The card is the only thing on screen; a stream advancing behind it
+      // would make its position disagree with what the viewer sees.
+      video?.pause();
       setPlayerError(replanError, replanErrorRetryable);
     }
   }, [
@@ -2025,12 +2085,29 @@ export function VideoPlayer({
   // the surviving stream unless a newer seek has already replaced the target.
   const releasePendingSeek = useCallback((seconds: number) => {
     if (pendingSeekTimeRef.current !== seconds) return;
+    // Only a caller that knows this release is a *refused* seek restores the
+    // captured origin (see reanchorAt). Every other release follows the media.
+    seekOriginTimeRef.current = null;
     pendingSeekTimeRef.current = null;
     pendingSeekContextRef.current = null;
     setPendingSeekTime(null);
     const video = videoRef.current;
     if (video) setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
   }, []);
+
+  // A refused reanchor never reaches its target. Put the controls back on the
+  // position the media was at when the seek started, then clear the pending
+  // target. releasePendingSeek has already moved them to the element, which is
+  // the same place while the old transport survives; the origin is the honest
+  // position when it does not.
+  const releaseRefusedSeek = useCallback(
+    (seconds: number) => {
+      const origin = seekOriginTimeRef.current;
+      releasePendingSeek(seconds);
+      if (origin !== null) setCurrentTime(origin);
+    },
+    [releasePendingSeek],
+  );
 
   // This viewer's newest room seek request the room has not run yet: the
   // origin of the next relative skip and the position the controls show (see
@@ -2105,26 +2182,40 @@ export function VideoPlayer({
   const reanchorAt = useCallback(
     (seconds: number): boolean | Promise<boolean> => {
       if (!onReanchorSeek) return false;
+      // Capture where the media is before the controls move to the target: a
+      // refused seek must land back here, not on the target that never played.
+      const video = videoRef.current;
+      seekOriginTimeRef.current = video
+        ? toMediaTime(video.currentTime, timelineOffsetRef.current)
+        : seconds;
       rememberPendingSeek(seconds);
       setCurrentTime(seconds);
-      const accepted = onReanchorSeek(seconds);
+      // Carry the viewer's intent through the replacement. The outgoing
+      // transport may already be paused by its teardown, and the session must
+      // not read that as a pause the viewer asked for.
+      const accepted = onReanchorSeek(seconds, viewerPlayIntentRef.current);
       if (typeof accepted === "boolean") {
-        if (!accepted) releasePendingSeek(seconds);
+        if (!accepted) releaseRefusedSeek(seconds);
         return accepted;
       }
       return accepted.then(
         (ok) => {
-          if (!ok) releasePendingSeek(seconds);
+          if (!ok) releaseRefusedSeek(seconds);
           return ok;
         },
         (error: unknown) => {
-          releasePendingSeek(seconds);
+          releaseRefusedSeek(seconds);
           throw error;
         },
       );
     },
-    [onReanchorSeek, releasePendingSeek, rememberPendingSeek],
+    [onReanchorSeek, releaseRefusedSeek, rememberPendingSeek],
   );
+  // The hls.js error handler runs inside the transport effect, whose identity
+  // must not depend on this callback. Reading it through a ref keeps a replan
+  // of the same session from reloading the element.
+  const reanchorAtRef = useRef(reanchorAt);
+  reanchorAtRef.current = reanchorAt;
 
   // Reports whether the seek was taken up, which callers that show an
   // affordance for it (the intro prompt) need in order to know whether the
@@ -3292,6 +3383,21 @@ export function VideoPlayer({
     const unbufferedLoads = new UnbufferedFragmentLoads();
     let startHoleRecovered = false;
     let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+    // A progressive remux replacement started for a seek has no segment layer
+    // to report progress through: if it never produces a byte, the element
+    // waits with the old frame and the viewer cannot tell the seek failed. Hold
+    // it to the same bound a no-byte remux start is expected to fail inside, and
+    // surface a retry instead of a frozen playhead.
+    let progressiveSeekNoBytesTimer: ReturnType<typeof setTimeout> | null = null;
+    let progressiveSeekSettle: (() => void) | null = null;
+    // Bounds the stale-generation playlist refetches for this transport. A seek
+    // does not refetch the playlist; it reanchors (see the hls.js ERROR
+    // handler), so this only counts the in-place replay recovery.
+    let staleGenerationRecoveries = 0;
+    // The pending seek target a stale-generation fence already sent back as a
+    // reanchor. A second fence for the same target is not re-sent: it falls
+    // through to the ordinary failure path, so one seek cannot loop on replans.
+    let staleSeekReanchorTarget: number | null = null;
     let playbackStarted = false;
     let autoplayInFlight = false;
     let autoplayAttempts = 0;
@@ -3314,6 +3420,11 @@ export function VideoPlayer({
     setPlayerError(null);
     setAwaitingFirstFrame(true);
     setAutoplayBlocked(false);
+    // A seek replacement starts on the old transport's last frame while it
+    // loads. Until it actually plays, the controls must not inherit the torn
+    // down transport's "playing": that reads as a playing stream that never
+    // advances. The new transport's `play` event turns it back on.
+    if (pendingSeekTimeRef.current !== null) setPlaying(false);
 
     const clearAutoplayRetry = () => {
       if (autoplayRetryTimer === null) return;
@@ -3640,6 +3751,77 @@ export function VideoPlayer({
               const details = String(data.details);
               const loaded = (data as { stats?: { loaded?: number } }).stats?.loaded ?? 0;
               const subtitleLoad = details.startsWith("subtitle") || data.frag?.type === "subtitle";
+              // A 412 from the segment route is the server's generation fence,
+              // not a failed link. Retrying the same URL can never succeed:
+              // its sgen token names bytes the live generation replaced.
+              //
+              // A seek is asking for a new window. The plan on screen may still
+              // advertise the window from before an in-place restart, so the
+              // browser requested a segment below where the restarted
+              // generation now begins. Hand the pending target back to the
+              // session as a seek_reanchor; the server rebuilds at that
+              // position, which is what plays what the viewer asked for. Do not
+              // refetch the playlist here: its `startPosition` would clamp the
+              // target forward to the new generation's first segment, which is
+              // the silent jump this fence used to end in.
+              //
+              // Playback that was not seeking only needs the playlist reloaded
+              // with the live token, bounded so a session that keeps restarting
+              // still reaches the ordinary failure path.
+              if (
+                !subtitleLoad &&
+                data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+                isStaleGenerationError(data as DecodeErrorCarrier)
+              ) {
+                const seekTarget = pendingSeekTimeRef.current;
+                if (seekTarget !== null) {
+                  // hls.js has already queued its own retry of this fragment
+                  // for the next tick. Every one of those requests names the
+                  // same fenced URL and answers 412 again, so stop the load
+                  // before it can make one: the replan brings a generation
+                  // that can serve the seek, this one cannot.
+                  if (hls) {
+                    stoppedHlsForSeekRef.current = {
+                      hls,
+                      streamUrl: effectiveStreamUrl,
+                      transportRevision: effectiveTransportRevision,
+                    };
+                  }
+                  hls?.stopLoad();
+                  if (staleSeekReanchorTarget !== seekTarget) {
+                    staleSeekReanchorTarget = seekTarget;
+                    console.warn(
+                      "[hls.js] stale generation for a pending seek; re-anchoring at the target",
+                      { target: seekTarget },
+                    );
+                    void reanchorAtRef.current(seekTarget);
+                  }
+                  // A pending seek never refetches this playlist: its
+                  // startPosition is below the restarted generation and would
+                  // clamp the target forward (the silent jump this fence used
+                  // to end in). Wait for the reanchor instead.
+                  return;
+                }
+                if (!destroyed && staleGenerationRecoveries < MAX_STALE_GENERATION_RECOVERIES) {
+                  staleGenerationRecoveries += 1;
+                  // hls.js's startPosition is on the playlist's own clock, the
+                  // same clock the element reports, not the media timeline.
+                  const resume = video.currentTime;
+                  if (
+                    hls &&
+                    recoverFromStaleGeneration(
+                      hls as unknown as Parameters<typeof recoverFromStaleGeneration>[0],
+                      resume,
+                    )
+                  ) {
+                    console.warn(
+                      "[hls.js] stale generation during playback; reloading the playlist",
+                      { resume, attempt: staleGenerationRecoveries },
+                    );
+                    return;
+                  }
+                }
+              }
               if (
                 data.type === Hls.ErrorTypes.NETWORK_ERROR &&
                 !subtitleLoad &&
@@ -4035,6 +4217,51 @@ export function VideoPlayer({
             ? transportStartPosition()
             : effectiveInitialPositionRef.current;
           attemptAutoplayWhenReady();
+          // A seek replacement that never produces media leaves the element on
+          // its old frame at the target, which reads as a seek that succeeded.
+          // Hold the no-byte window to the server's own first-output bound and
+          // surface a retry instead. A start with no pending seek is an ordinary
+          // start and keeps the startup guard's longer window.
+          const seekTarget = pendingSeekTimeRef.current;
+          if (isProgressiveRemux && seekTarget !== null) {
+            const settle = () => {
+              if (progressiveSeekNoBytesTimer !== null) {
+                clearTimeout(progressiveSeekNoBytesTimer);
+                progressiveSeekNoBytesTimer = null;
+              }
+            };
+            progressiveSeekSettle = settle;
+            video.addEventListener("loadeddata", settle, { once: true });
+            video.addEventListener("playing", settle, { once: true });
+            video.addEventListener("timeupdate", settle, { once: true });
+            video.addEventListener("error", settle, { once: true });
+            progressiveSeekNoBytesTimer = setTimeout(() => {
+              progressiveSeekNoBytesTimer = null;
+              if (destroyed || video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return;
+              // Put the controls back on the seek's origin, where the viewer
+              // was, rather than the target this stream never produced. It may
+              // already have been folded into the plan revision, which clears
+              // the pending ref, so clear the rest too.
+              const seekOrigin = seekOriginTimeRef.current;
+              releasePendingSeek(seekTarget);
+              seekOriginTimeRef.current = null;
+              pendingSeekTimeRef.current = null;
+              pendingSeekContextRef.current = null;
+              setPendingSeekTime(null);
+              if (seekOrigin !== null) setCurrentTime(seekOrigin);
+              // Nothing is advancing; the error card must not sit over a
+              // player that still claims to be playing.
+              video.pause();
+              if (
+                !reportCurrentPlanFailureRef.current({
+                  classification: "network_error",
+                  message: "The stream produced no media for the seek.",
+                })
+              ) {
+                setPlayerError("The seek didn't produce any media. Please try again.", true);
+              }
+            }, PROGRESSIVE_REMUX_SEEK_NO_BYTES_MS);
+          }
         }
       }
     }
@@ -4047,6 +4274,17 @@ export function VideoPlayer({
       if (recoveryTimer !== null) {
         clearTimeout(recoveryTimer);
         recoveryTimer = null;
+      }
+      if (progressiveSeekNoBytesTimer !== null) {
+        clearTimeout(progressiveSeekNoBytesTimer);
+        progressiveSeekNoBytesTimer = null;
+      }
+      if (progressiveSeekSettle !== null) {
+        video.removeEventListener("loadeddata", progressiveSeekSettle);
+        video.removeEventListener("playing", progressiveSeekSettle);
+        video.removeEventListener("timeupdate", progressiveSeekSettle);
+        video.removeEventListener("error", progressiveSeekSettle);
+        progressiveSeekSettle = null;
       }
       settlePausedRef.current = () => {};
       video.removeEventListener("suspend", endHoldOnceLoaded);
@@ -4101,6 +4339,38 @@ export function VideoPlayer({
     shouldAutoPlay,
   ]);
 
+  // A 412 on a pending seek stops hls.js so it cannot retry the fenced URL.
+  // When the reanchor the server answered reuses that same generation (the
+  // target is inside its window), no transport effect runs and the stopped
+  // instance would never load again. Refetch its playlist with the live token
+  // and resume at the seek target, the same recovery ordinary playback uses.
+  //
+  // Only a reanchor that kept the same transport generation may do this. The
+  // transport identity is checked before the new hls.js instance even exists
+  // (its construction is asynchronous), so a reanchor that builds a new
+  // generation cannot make the stopped one refetch a playlist and request the
+  // fenced segment a second time only to be aborted by the replacement.
+  useEffect(() => {
+    const stopped = stoppedHlsForSeekRef.current;
+    stoppedHlsForSeekRef.current = null;
+    if (!stopped) return;
+    const video = videoRef.current;
+    if (!video || hlsRef.current !== stopped.hls) return;
+    if (
+      effectiveStreamUrl !== stopped.streamUrl ||
+      effectiveTransportRevision !== stopped.transportRevision
+    ) {
+      return;
+    }
+    const target = pendingSeekTimeRef.current;
+    const resume =
+      target !== null ? toPlayerTime(target, timelineOffsetRef.current) : video.currentTime;
+    recoverFromStaleGeneration(
+      stopped.hls as unknown as Parameters<typeof recoverFromStaleGeneration>[0],
+      resume,
+    );
+  }, [effectiveStreamUrl, effectiveTransportRevision, planRevision]);
+
   // -- Video event listeners --
   useEffect(() => {
     const video = videoRef.current;
@@ -4126,6 +4396,9 @@ export function VideoPlayer({
         video.pause();
         return;
       }
+      // Playback started, whether from autoplay or a viewer control: the
+      // intent is to play.
+      viewerPlayIntentRef.current = true;
       setPlaying(true);
       setAutoplayBlocked(false);
       const idleSince = transportIdleSinceRef.current;
@@ -4137,6 +4410,9 @@ export function VideoPlayer({
     const onPause = () => {
       resetRoomCatchupRate();
       setPlaying(false);
+      // Do not record this as viewer intent. A teardown, a seek replacement or
+      // a translation handoff pauses the element without the viewer asking;
+      // `setPlayback` records the controls' own play/pause intent.
       // Only a stream that played or has opened. The pause a teardown queues
       // arrives after the next transport has started over, before it has
       // metadata.
@@ -4186,6 +4462,7 @@ export function VideoPlayer({
       if (resolved.pendingSeekTime !== pendingSeekTime) {
         setPendingSeekTime(resolved.pendingSeekTime);
       }
+      if (resolved.pendingSeekTime === null) seekOriginTimeRef.current = null;
       // A correction's reloaded media is playing. How long it took to load
       // becomes the lead for the next reload.
       if (
@@ -4211,6 +4488,7 @@ export function VideoPlayer({
       const resolved = resolveSeekAt(seekedTime);
       setCurrentTime(resolved.currentTime);
       setPendingSeekTime(resolved.pendingSeekTime);
+      if (resolved.pendingSeekTime === null) seekOriginTimeRef.current = null;
       // Reloading a stream can finish an older native seek. It does not settle
       // the requested seek. Readiness is still evaluated: the sync hook checks
       // the actual media position against the room's seek target, and the
@@ -5493,6 +5771,11 @@ export function VideoPlayer({
         showWatchTogetherNotice("Joining room playback. Try again in a moment.", "info");
         return;
       }
+
+      // The viewer's intent, not the element's transient state. A seek
+      // replacement pauses the outgoing transport while it loads; a later
+      // reanchor must still know the viewer meant to keep playing.
+      viewerPlayIntentRef.current = shouldPlay;
 
       if (watchTogether.room) {
         watchTogetherSync.requestTransport(
