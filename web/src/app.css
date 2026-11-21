@@ -769,10 +769,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
       text-align: match-parent;
     }
   }
-  /* Left-to-right text in a block, such as a path, whose lines line up the way
-     the text around it does: at the right on a right-to-left page. An inherited
-     `start` would resolve against the block's own `dir="ltr"` instead. Not named
-     `text-*`, which `cn()` would take for a text color and drop the real one. */
+  /* Text with a direction of its own in a block, such as a path or a name, whose
+     lines line up the way the text around it does: at the right on a right-to-left
+     page. An inherited `start` would resolve against the block's own `dir` instead.
+     Not named `text-*`, which `cn()` would take for a text color and drop the real
+     one. */
   .align-with-page {
     text-align: -webkit-match-parent;
   }

@@ -4,12 +4,12 @@ import type { RestoreDataTypeId, RestoreSet } from "@/api/v2/adminBackupRestore"
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "@/pages/admin-settings/FieldGroup";
 
 import { restoreCaveats, restorePlan, type SelectionKeys } from "./restoreModel";
-import { OVERFLOW_CLIP, useOverflowsInline } from "./useOverflowsInline";
 
 export interface RestoreRefusal {
   message: string;

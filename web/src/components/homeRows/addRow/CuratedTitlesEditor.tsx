@@ -133,9 +133,13 @@ export function CuratedTitlesEditor({
               const already = picked.has(item.content_id);
               return (
                 <li key={item.content_id} className="flex items-center gap-2 px-3 py-2 text-sm">
-                  <span className="min-w-0 flex-1 truncate">
-                    {item.title}
-                    <span className="text-muted-foreground ms-1.5 text-xs">
+                  {/* The year and type sit under the title so the title has the
+                      whole width; only the title is cut, from its own start. */}
+                  <span className="min-w-0 flex-1">
+                    <span dir="auto" className="bidi-text block truncate">
+                      {item.title}
+                    </span>
+                    <span className="text-muted-foreground block text-xs">
                       {item.year
                         ? t("web.home.addRow.curated.resultMeta", {
                             year: item.year,

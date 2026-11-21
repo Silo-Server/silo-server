@@ -667,7 +667,7 @@ function TokenDialog({
           )}
         </div>
         {conflict ? <ImportEditorConflict onReload={reload} /> : null}
-        <DialogFooter className="gap-2">
+        <DialogFooter className="gap-2 sm:flex-wrap">
           {source.has_admin_token && (
             <Button
               variant="destructive"
