@@ -138,7 +138,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
               value={intervalDraft.unit}
               onValueChange={(u) => updateInterval(intervalDraft.text, u as IntervalUnit)}
             >
-              <SelectTrigger className="w-full sm:w-[120px]">
+              <SelectTrigger className="w-full sm:w-30 sm:min-w-fit">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
