@@ -18,6 +18,7 @@ import type {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
 import { useT, type MessageKey } from "@/i18n";
 import { formatTime } from "@/lib/datetime";
 import { DATA_TYPE_LABELS, dataCountsPhrase, titleList } from "@/lib/profileDataTypes";
@@ -33,7 +34,6 @@ import {
   displayLabel,
   reportHeadline,
 } from "./restoreModel";
-import { OVERFLOW_CLIP, useOverflowsInline } from "./useOverflowsInline";
 
 const OUTCOME = {
   restored: {
