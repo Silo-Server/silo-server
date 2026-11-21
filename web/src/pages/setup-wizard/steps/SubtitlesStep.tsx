@@ -144,6 +144,16 @@ function ProviderRow({
 
   const rowDisabled = disabled || draft.loading || draft.loadFailed || draft.saveFailed;
 
+  // Reload disappears once the saved state is back, so focus moves to the
+  // provider's switch instead of dropping to the page.
+  const switchRef = useRef<HTMLButtonElement>(null);
+  const refocusAfterReload = useRef(false);
+  useEffect(() => {
+    if (!refocusAfterReload.current || draft.saveFailed) return;
+    refocusAfterReload.current = false;
+    switchRef.current?.focus();
+  }, [draft.saveFailed]);
+
   let description = meta ? t(meta.description) : "";
   if (draft.loadFailed && !draft.saveFailed) description = t("web.setup.subtitles.loadFailed");
 
@@ -172,7 +182,10 @@ function ProviderRow({
       type="button"
       variant="secondary"
       size="sm"
-      onClick={onReload}
+      onClick={() => {
+        refocusAfterReload.current = true;
+        onReload();
+      }}
       disabled={disabled || draft.loading}
       // The label is long and longer still in most languages, so it wraps
       // rather than widening the card on a phone.
@@ -186,6 +199,7 @@ function ProviderRow({
     <>
       <SettingFieldRow label={displayName} description={description} status={status}>
         <Switch
+          ref={switchRef}
           checked={draft.enabled}
           aria-label={t("web.setup.subtitles.enableLabel", { provider: displayName })}
           disabled={rowDisabled}

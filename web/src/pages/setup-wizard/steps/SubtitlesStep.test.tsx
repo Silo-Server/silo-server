@@ -118,6 +118,7 @@ describe("SubtitlesStep", () => {
     await user.click(reload);
     await waitFor(() => expect(screen.getByLabelText("API key")).toHaveValue(""));
     expect(toggle).toBeChecked();
+    expect(toggle).toHaveFocus();
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(markDone).toHaveBeenCalledWith("subtitles");
