@@ -181,12 +181,11 @@ export const AccountRow = memo(function AccountRow({
         )
       : null;
   // The label can already be the email: an invited account's username is its address,
-  // and an account with no username is labeled by its email. Sign-in matches emails
-  // without regard to case, so a case-only difference is still the same address.
+  // and an account with no username is labeled by its email.
   const contact = [
     pending,
     account.username !== item.label ? account.username : null,
-    account.email.toLowerCase() !== item.label.toLowerCase() ? account.email : null,
+    account.email !== item.label ? account.email : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -225,7 +224,11 @@ export const AccountRow = memo(function AccountRow({
               !item.selectable && "text-muted-foreground",
             )}
           >
-            <BreakableKey value={item.label} />
+            {/* <bdi> reads the name in its own direction, so an address that starts
+                with digits stays in order on a right-to-left page. */}
+            <bdi>
+              <BreakableKey value={item.label} />
+            </bdi>
           </Label>
           {contact ? (
             // Without the pending summary the line is the email (the label is the
