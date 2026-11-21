@@ -34,6 +34,10 @@ tester.run("text-size-in-rem", rule, {
       `<div className="text-[0.78125rem] sm:text-[0.6875rem] !text-[0.65625rem] text-[0.875rem]/tight" />`,
     ),
     fixed("cn(`text-[9.5px] ${size}`)", "cn(`text-[0.59375rem] ${size}`)"),
+    fixed(
+      `<div className="[&_[data-slot=input]]:text-[13px]" />`,
+      `<div className="[&_[data-slot=input]]:text-[0.8125rem]" />`,
+    ),
     fixed(`<div className="text-[length:13px]" />`, `<div className="text-[length:0.8125rem]" />`),
   ],
 });
