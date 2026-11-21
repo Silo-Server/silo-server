@@ -489,6 +489,11 @@ accent as stored. A stored value that is not a `#rgb` or
 the web app manifest use it too. The branding document has no default theme
 or light-theme logo URLs, and the API has no theme overrides or theme catalog.
 
+Text in the accent color (`text-primary`) doesn't use the stored value as is.
+The web client lightens the accent just enough to read at 4.5:1 on Cinema
+Dark's lightest surface and on the accent's own 20% tint, with a paler variant
+for high contrast. Fills, borders and the focus ring keep the stored color.
+
 ### Retired theme settings
 
 Manifest revision 12 deprecates `ui.theme`, `ui.custom_theme_vars` and
