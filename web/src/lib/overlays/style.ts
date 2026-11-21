@@ -47,8 +47,10 @@ function alphaOf(hex: string): number {
 // tinted by the accent in presets that fill with it, and a custom text or
 // border colour yields to the accent in presets that paint the accent there.
 // A solid fill without a chosen text colour gets black or white text, since
-// the preset's own colour was picked to read on the artwork. An accent the
-// preset writes as text that would not read on that fill tints it instead.
+// the preset's own colour was picked for its own fill or for the artwork. A
+// see-through fill in a preset that fills with the accent gets white text,
+// since that text sits on the artwork again. An accent the preset writes as
+// text that would not read on a solid fill tints it instead.
 export function applyOverlayStyle(
   preset: OverlayPreset,
   style: OverlayStyle | undefined,
@@ -101,8 +103,6 @@ export function applyOverlayStyle(
           : background;
       }
       if (solidFill) css.textShadow = undefined;
-      // The preset picked its text colour for the accent fill. A see-through
-      // fill puts the text back on the artwork, where accent fills draw white.
       const seeThroughAccent = accentFill && background && !solidFill;
       const text =
         textColor ??
@@ -143,8 +143,7 @@ function contrastRatio(a: string, b: string): number {
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
-// Black or white, whichever reads better on a hex fill. Used for the rating
-// source chips the plate preset draws in the accent colour, and for text on
+// Black or white, whichever reads better on a hex fill, such as an accent or
 // a solid style fill. A colour that isn't hex gets white: both ratios are
 // infinite, so neither wins.
 export function readableTextOn(hex: string): "#000000" | "#ffffff" {
