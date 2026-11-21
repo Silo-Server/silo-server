@@ -99,16 +99,17 @@ export function CollectionPosterCard({
       {meta !== undefined ? <div className="px-0.5">{meta}</div> : null}
       {tag ? <div className="px-0.5 pt-1.5">{tag}</div> : null}
       {/* With a handle, the two corner chips share the top edge; on the
-          narrowest cards (about 88 px on a 320 px phone) a tighter inset
+          narrowest cards (about 88 px on a 320 px phone, or wider ones under
+          a larger text size, since the chips scale with it) a tighter inset
           keeps a gap between them. Only a card with a handle is the poster
           container, so the menu keeps its inset everywhere else. */}
       {menu ? (
-        <div className="absolute end-2 top-2 z-10 @max-[96px]/poster:end-1.5 @max-[96px]/poster:top-1.5">
+        <div className="absolute end-2 top-2 z-10 @max-[6rem]/poster:end-1.5 @max-[6rem]/poster:top-1.5">
           {menu}
         </div>
       ) : null}
       {handle ? (
-        <div className="absolute start-2 top-2 z-10 @max-[96px]/poster:start-1.5 @max-[96px]/poster:top-1.5">
+        <div className="absolute start-2 top-2 z-10 @max-[6rem]/poster:start-1.5 @max-[6rem]/poster:top-1.5">
           {handle}
         </div>
       ) : null}
