@@ -37,8 +37,8 @@ tester.run("text-size-in-rem", rule, {
     ),
     fixed("cn(`text-[9.5px] ${size}`)", "cn(`text-[0.59375rem] ${size}`)"),
     fixed(
-      `<div className="[&_[data-slot=input]]:text-[13px]" />`,
-      `<div className="[&_[data-slot=input]]:text-[0.8125rem]" />`,
+      `<div className="[&_[data-slot=input]]:[&:not(:has([data-a]:hover))]:text-[13px]" />`,
+      `<div className="[&_[data-slot=input]]:[&:not(:has([data-a]:hover))]:text-[0.8125rem]" />`,
     ),
     fixed(
       `<div className="text-[13px]/[18px]" />`,

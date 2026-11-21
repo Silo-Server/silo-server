@@ -2,14 +2,21 @@
 
 /**
  * Splits a class token into its variants (`md:`, `data-[state=open]:`,
- * `[&:hover]:`), `!` before or after (v3 and v4 forms), and the utility. A
- * colon inside brackets, as in `text-[length:13px]` or `[&_[data-x=a:b]]:`,
- * belongs to its segment; brackets nest one level deep.
+ * `[&:not(:has(a:hover))]:`), `!` before or after (v3 and v4 forms), and the
+ * utility. Variants end at the last colon outside brackets and parentheses, so
+ * `text-[length:13px]` and `text-(length:--size)` stay whole at any nesting.
  */
 export function classParts(token) {
-  const [, variants, lead, utility, trail] =
-    /^((?:(?:[^\s:"'`[\]]|\[(?:[^[\]]|\[[^\]]*\])*\])+:)*)(!?)(.*?)(!?)$/.exec(token);
-  return { variants, lead, utility, trail };
+  let depth = 0;
+  let end = 0;
+  for (let i = 0; i < token.length; i++) {
+    const char = token[i];
+    if (char === "[" || char === "(") depth++;
+    else if (char === "]" || char === ")") depth = Math.max(0, depth - 1);
+    else if (char === ":" && depth === 0) end = i + 1;
+  }
+  const [, lead, utility, trail] = /^(!?)(.*?)(!?)$/.exec(token.slice(end));
+  return { variants: token.slice(0, end), lead, utility, trail };
 }
 
 // Tokens are separated by whitespace, quotes, or template-literal joints.
