@@ -11,6 +11,9 @@ describe("providerMonogram", () => {
     ["हिंदी", "हिंदी"],
     // वाक् संवाद: the word-final virama must not join the next word's letter
     ["वाक् संवाद", "वाक्"],
+    // क् कैटलॉग: a non-joiner keeps क् and कै from fusing into one conjunct
+    ["क् कैटलॉग", "क्\u200Cकै"],
+    ["1\uFE0F\u20E3 AniList", "1\u200CA"],
     ["AniList", "AN"],
     ["", "??"],
   ])("marks %j as %j", (name, monogram) => {
