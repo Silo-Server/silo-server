@@ -74789,7 +74789,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Перезавантажте, щоб побачити поточні значення. Якщо хоча б одна з ваших змін стосується параметра, який змінився, або збереженого пароля чи ключа, усі ваші зміни буде скасовано; інакше їх буде збережено."
+      "value": "Перезавантажте, щоб побачити поточні значення. Якщо щось на цій сторінці змінилося або ви редагували збережений пароль чи ключ, усі ваші зміни буде скасовано; інакше їх буде збережено."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -91579,6 +91579,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"

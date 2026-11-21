@@ -74,9 +74,9 @@ function isAbsoluteUrl(url: string): boolean {
  * no token is added to it. The server names one of three:
  *
  * 1. The plan's own stream on the page's origin, as a reference relative to
- *    the API root. The engine stripes on `streamUrl`, and only when the page
- *    itself came over HTTP/1.1, where the browser opens several connections.
- *    Over HTTP/2 or HTTP/3 the ranges would share one.
+ *    the API root. The engine stripes on `streamUrl`, and only when the page's
+ *    origin answers over HTTP/1.1, where the browser opens several
+ *    connections. Over HTTP/2 or HTTP/3 the ranges would share one.
  * 2. The proxy node's URL the plan already uses. The engine stripes on it.
  * 3. The same stream on the administrator's media origin. A URL that does not
  *    parse gives no stripe URL.
@@ -101,6 +101,40 @@ function parallelRangeUrlFor(
   return named;
 }
 
+/**
+ * The protocol the page's origin answers on: the navigation entry's when it has one, else the
+ * `nextHopProtocol` of the newest same-origin resource that has one. A repeat load can leave the
+ * navigation entry's protocol empty while the page's resources still report it. A resource entry
+ * names the requested URL but reports the protocol of the host it ended on, so an entry that
+ * followed a redirect (`redirectStart > 0`) can carry another host's protocol under a same-origin
+ * name, as a stored poster does when it redirects to its storage URL; those entries are skipped.
+ * Entries whose name is not a URL are skipped too.
+ */
+export function pageOriginProtocol(
+  navigationProtocol: string,
+  resources: readonly {
+    name: string;
+    nextHopProtocol: string;
+    startTime: number;
+    redirectStart: number;
+  }[],
+  origin: string,
+): string {
+  if (navigationProtocol !== "") return navigationProtocol;
+  let newest: { nextHopProtocol: string; startTime: number } | undefined;
+  for (const resource of resources) {
+    if (resource.nextHopProtocol === "" || resource.redirectStart > 0) continue;
+    if (newest && resource.startTime <= newest.startTime) continue;
+    try {
+      if (new URL(resource.name).origin !== origin) continue;
+    } catch {
+      continue;
+    }
+    newest = resource;
+  }
+  return newest?.nextHopProtocol ?? "";
+}
+
 function unsupported(message: string): OriginalPlaybackRoute {
   return { kind: "unsupported", failure: { classification: ENGINE_UNSUPPORTED_SOURCE, message } };
 }
@@ -121,7 +155,7 @@ export function resolveOriginalPlaybackRoute(input: {
   native: NativeOriginalSupport;
   engine: EngineCapabilities | null;
   audioTracks: readonly PlayerAudioTrack[];
-  /** The page navigation's `nextHopProtocol`; empty when the browser gives none. */
+  /** The protocol the page's origin answers on (see `pageOriginProtocol`); empty when unknown. */
   navigationProtocol?: string;
 }): OriginalPlaybackRoute {
   const { plan, streamUrl, native, engine, audioTracks } = input;

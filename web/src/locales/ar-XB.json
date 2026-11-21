@@ -64534,7 +64534,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "\u200F\u202EReload to see the current values. If one of your edits is to a setting that changed, or to a saved password or key, all your edits are undone; otherwise they’re kept.\u202C"
+      "value": "\u200F\u202EReload to see the current values. If something on this page changed, or you edited a saved password or key, all your edits are undone; otherwise they’re kept.\u202C"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -81207,6 +81207,32 @@
     {
       "type": 0,
       "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": "\u202E - \u202C"
     },
     {
       "type": 1,

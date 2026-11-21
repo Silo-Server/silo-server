@@ -388,7 +388,7 @@ function ViewCount({
         count > 0 && view === "needs_approval"
           ? "bg-primary text-primary-foreground"
           : count > 0 && view === "failed"
-            ? "bg-destructive text-white"
+            ? "bg-destructive-fill text-destructive-foreground"
             : "bg-foreground/10",
       )}
     >

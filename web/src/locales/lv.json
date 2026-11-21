@@ -68985,7 +68985,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Ielādējiet iestatījumus vēlreiz, lai redzētu pašreizējās vērtības. Ja kāds no jūsu labojumiem attiecas uz iestatījumu, kas ir mainījies, vai uz saglabātu paroli vai atslēgu, visi jūsu labojumi tiks atsaukti; pretējā gadījumā tie tiks saglabāti."
+      "value": "Ielādējiet iestatījumus vēlreiz, lai redzētu pašreizējās vērtības. Ja kaut kas šajā lapā ir mainījies vai jūs labojāt saglabātu paroli vai atslēgu, visi jūsu labojumi tiks atsaukti; pretējā gadījumā tie tiks saglabāti."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -85547,6 +85547,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"

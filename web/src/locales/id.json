@@ -54501,7 +54501,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Muat ulang untuk melihat nilai saat ini. Jika salah satu perubahan Anda mengenai pengaturan yang berubah, atau kata sandi atau kunci yang disimpan, semua perubahan Anda dibatalkan; jika tidak, perubahan Anda dipertahankan."
+      "value": "Muat ulang untuk melihat nilai saat ini. Jika ada yang berubah di halaman ini, atau Anda mengedit kata sandi atau kunci yang disimpan, semua perubahan Anda dibatalkan; jika tidak, perubahan Anda dipertahankan."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -70367,6 +70367,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

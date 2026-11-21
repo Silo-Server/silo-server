@@ -60578,7 +60578,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Güncel değerleri görmek için yeniden yükleyin. Düzenlemelerinizden biri değişen bir ayara ya da kayıtlı bir parola veya anahtara aitse tüm düzenlemeleriniz geri alınır; aksi takdirde korunur."
+      "value": "Güncel değerleri görmek için yeniden yükleyin. Bu sayfada bir şey değiştiyse ya da kayıtlı bir parolayı veya anahtarı düzenlediyseniz tüm düzenlemeleriniz geri alınır; aksi takdirde korunur."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -76716,6 +76716,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

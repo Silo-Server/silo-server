@@ -68080,7 +68080,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Ponovno učitajte da biste vidjeli trenutačne vrijednosti. Ako se neka od vaših izmjena odnosi na postavku koja se promijenila ili na spremljenu lozinku ili ključ, poništavaju se sve vaše izmjene; u suprotnom se zadržavaju."
+      "value": "Ponovno učitajte da biste vidjeli trenutačne vrijednosti. Ako se nešto na ovoj stranici promijenilo ili ste uredili spremljenu lozinku ili ključ, poništavaju se sve vaše izmjene; u suprotnom se zadržavaju."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -84586,6 +84586,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"

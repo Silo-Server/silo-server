@@ -681,7 +681,7 @@ function InstalledPluginPage({
                 })
               }
               disabled={deleteInstallation.isPending || ownership !== undefined}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {deleteInstallation.isPending
                 ? t("web.admin.plugins.detail.uninstalling")

@@ -59,6 +59,9 @@ export function RedisGroup({
       setEnabledOverride(null);
     }
   }
+  // Once REDIS_URL sets the connection the switch is locked, so a choice
+  // made before it took over no longer applies.
+  if (urlEnv && enabledOverride !== null) setEnabledOverride(null);
   const enabled = enabledOverride ?? (redisUrl.trim() !== "" || configured);
   // URL edits go through the page's editors, which drop a keystroke that
   // arrives while a save is in flight.
@@ -110,6 +113,13 @@ export function RedisGroup({
             return;
           }
           setEnabledOverride(false);
+          // With no saved URL there is nothing to switch off: drop what was
+          // typed, since the fields that showed it are about to hide.
+          if (!configured) {
+            form.resetValue("redis.url");
+            form.resetValue("redis.db");
+            return;
+          }
           stageRedisUrl(form, "");
         }}
         disabled={secrets.disabled}

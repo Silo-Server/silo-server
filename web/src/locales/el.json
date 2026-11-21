@@ -61394,7 +61394,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Ανανεώστε για να δείτε τις τρέχουσες τιμές. Αν κάποια από τις αλλαγές σας αφορά ρύθμιση που άλλαξε ή αποθηκευμένο κωδικό πρόσβασης ή κλειδί, αναιρούνται όλες οι αλλαγές σας. Διαφορετικά, διατηρούνται."
+      "value": "Ανανεώστε για να δείτε τις τρέχουσες τιμές. Αν άλλαξε κάτι σε αυτήν τη σελίδα ή αν επεξεργαστήκατε αποθηκευμένο κωδικό πρόσβασης ή κλειδί, αναιρούνται όλες οι αλλαγές σας. Διαφορετικά, διατηρούνται."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -77632,6 +77632,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"

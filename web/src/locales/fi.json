@@ -61142,7 +61142,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Lataa uudelleen, niin näet nykyiset arvot. Jos jokin muokkauksistasi koskee muuttunutta asetusta tai tallennettua salasanaa tai avainta, kaikki muokkauksesi kumotaan; muuten ne säilyvät."
+      "value": "Lataa uudelleen, niin näet nykyiset arvot. Jos jokin tällä sivulla on muuttunut tai muokkasit tallennettua salasanaa tai avainta, kaikki muokkauksesi kumotaan; muuten ne säilyvät."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -77348,6 +77348,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

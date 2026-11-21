@@ -60814,7 +60814,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Laad opnieuw om de huidige waarden te zien. Als een van je wijzigingen een instelling betreft die is veranderd, of een opgeslagen wachtwoord of sleutel, worden al je wijzigingen ongedaan gemaakt; anders blijven ze behouden."
+      "value": "Laad opnieuw om de huidige waarden te zien. Als er iets op deze pagina is veranderd, of als je een opgeslagen wachtwoord of sleutel hebt bewerkt, worden al je wijzigingen ongedaan gemaakt; anders blijven ze behouden."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -76976,6 +76976,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

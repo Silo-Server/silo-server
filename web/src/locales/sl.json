@@ -74797,7 +74797,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Znova naložite, da vidite trenutne vrednosti. Če se katera od vaših sprememb nanaša na nastavitev, ki se je medtem spremenila, ali na shranjeno geslo ali ključ, bodo razveljavljene vse vaše spremembe; sicer bodo ohranjene."
+      "value": "Znova naložite, da vidite trenutne vrednosti. Če se je na tej strani kaj spremenilo ali ste urejali shranjeno geslo ali ključ, bodo vse vaše spremembe razveljavljene; sicer bodo ohranjene."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -91639,6 +91639,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"

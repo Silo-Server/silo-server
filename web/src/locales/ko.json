@@ -54921,7 +54921,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "현재 값을 보려면 새로고침하세요. 수정 사항 중 하나라도 변경된 설정이나 저장된 비밀번호 또는 키에 대한 것이면 모든 수정 사항이 취소되고, 그렇지 않으면 유지돼요."
+      "value": "현재 값을 보려면 새로고침하세요. 이 페이지에서 변경된 항목이 있거나 저장된 비밀번호 또는 키를 수정했다면 모든 수정 사항이 취소되고, 그렇지 않으면 유지돼요."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -70819,6 +70819,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"
