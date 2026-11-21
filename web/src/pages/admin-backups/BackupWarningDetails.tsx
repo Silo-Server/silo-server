@@ -21,7 +21,7 @@ import {
   type MissingFileGroup,
   type OmissionGroup,
 } from "./warningDetails";
-import { OVERFLOW_CLIP, useOverflowsInline } from "./useOverflowsInline";
+import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
 
 /**
  * Picks a toggle label's wording for the number of items it reveals. The label
