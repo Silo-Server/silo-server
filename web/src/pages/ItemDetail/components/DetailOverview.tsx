@@ -91,10 +91,13 @@ export default function DetailOverview({
             {expanded ? t("web.detail.overview.less") : t("web.detail.overview.more")}
           </button>
         )}
-        {translating && (
-          <TranslatingStatus label={t("web.detail.translation.translating")} className="mt-1" />
-        )}
-        {!translating && machineTranslated && <MachineTranslatedLabel className="mt-1" />}
+        <TranslatingStatus
+          translating={translating}
+          label={t("web.detail.translation.translating")}
+          className="mt-1"
+        >
+          {machineTranslated && <MachineTranslatedLabel />}
+        </TranslatingStatus>
         {!translating && onTranslate && (
           <button
             type="button"
