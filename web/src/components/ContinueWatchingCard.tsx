@@ -164,7 +164,7 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
   // The episode or chapter title is cut in its own box, in its own direction,
   // so an English title after Arabic words keeps its start.
   const episodeTitle = card.title ? (
-    <span dir="auto" className="bidi-text max-w-max min-w-[1.5em] flex-1 basis-0 truncate">
+    <span dir="auto" className="bidi-text max-w-max min-w-[2.5em] flex-1 truncate">
       {card.title}
     </span>
   ) : null;
