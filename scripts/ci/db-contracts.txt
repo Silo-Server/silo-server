@@ -25,7 +25,8 @@
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestRecentlyReleasedOrdersByReleaseDate
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
-./internal/sections TestBookMediaScopeRowsKeepTheirTypePostgres
+./internal/sections TestMediaScopeRowsMatchSeeAllPostgres
+./internal/sections TestEpisodeScopeRowReadsPastOneCursorPagePostgres
 ./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
 ./internal/sections TestNextUpDismissalKeepsTheRowFullPostgres
 ./internal/sections TestNextUpOutOfScopeSeriesKeepTheRowFullPostgres
@@ -49,6 +50,7 @@
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
 ./internal/scanner TestScannedGroupForItemDB
+./internal/scanner TestListMarkerEditAuditClientIPHasNoNetmaskDB
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
 ./internal/scanner TestMatroskaTrackBackfillStopsOnIntermittentStalls
@@ -282,6 +284,10 @@
 # episode content IDs.
 ./internal/adminjob TestCompleteItemRefreshKeepsPodcastIDsDB
 
+# A complete metadata refresh of an ebook keeps its content ID, its ISBN and
+# its reader progress.
+./internal/adminjob TestCompleteItemRefreshKeepsEbookIDDB
+
 # A complete metadata refresh of a series, season or episode relinks its files
 # and resolves the rebuilt item (#934).
 ./internal/metadata TestCompleteRefreshRebuildsSeriesDB
@@ -303,7 +309,10 @@
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestPasswordSignInForDB
 ./internal/auth TestCreatePersonalAPIKeyDB
+./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
+./internal/auth TestExternalAccountCannotPreemptInitialSetupDB
+./internal/auth TestPluginAuthBindingCallbackModeDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
 ./internal/auth TestSignupPolicySerializationDB
@@ -431,6 +440,7 @@
 ./internal/notifications TestWebPushResubscribeRecordsTheNewLoginDB
 ./internal/notifications TestWebPushSweepOfUnboundSubscriptionsDB
 ./internal/notifications TestQueuedWebPushStopsWhenTheRegisteringLoginEndsDB
+./internal/notifications TestWebPushRetryAfterNeverShortensTheScheduleDB
 
 # Session-less Android push retirement is ordered against registration by generation.
 ./internal/notifications TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB
@@ -561,6 +571,7 @@
 ./internal/notifications TestPluginDestinationTextNeverCarriesSecretsDB
 ./internal/notifications TestPluginDestinationExhaustedScheduleDB
 ./internal/notifications TestPluginDestinationRetryOutlivesInboxRetentionDB
+./internal/notifications TestPushRetryOutlivesInboxRetentionDB
 ./internal/notifications TestFanoutQueuesPluginDestinationAttemptsDB
 ./internal/notifications TestPluginDestinationCreateAndAccountDeletionDontDeadlockDB
 ./internal/notifications TestPluginDestinationCreateRechecksTheProfileDB
@@ -610,6 +621,8 @@
 ./internal/downloads TestConcurrentArtifactCreatesCannotBypassQuotaDB
 ./internal/downloads TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB
 ./internal/downloads TestRegistrationRefusesAFileOfAnotherTitleDB
+./internal/downloads TestDownloadClientAddressesDB
+./internal/downloads TestDownloadChangeOutboxDB
 ./internal/downloads TestRegistrationAndRetitleSerializeOnTheFileRowDB
 ./internal/downloads TestDeadAccountTransferReleasesItsConcurrentSlotDB
 ./internal/downloads TestManagedRequestRegistersNothingWhenAFileLeftItsTitleDB
@@ -642,6 +655,7 @@
 ./internal/downloads TestStaleAbandonedPreparationsAreRetiredNotClaimedDB
 ./internal/userstore/pgstore TestPostgresClearResumePosition
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
+./internal/userstore/pgstore TestPostgresCollectionsHolding
 ./internal/userstore/pgstore TestPostgresFailedSyncKeepsANewerResult
 ./internal/userstore/pgstore TestPostgresDeleteProfileCoversEveryProfileTable
 ./internal/userstore/pgstore TestPostgresDeleteProfileRemovesProfileState
@@ -708,6 +722,8 @@
 ./internal/api/handlers TestLifecycleSweepSelectsWhatItCanEndDB
 ./internal/api/handlers TestLifecycleSweepPassesLiveJellyfinPlaysDB
 ./internal/api/handlers TestLifecycleSweepBacksOffFailedEndsDB
+# A live row names an episode as the history entry its play leaves does.
+./internal/api/handlers TestEpisodeLiveRowNamesItAsHistoryDB
 
 # An Audiobookshelf play a client only reports through its local session is
 # one play across servers under a cluster-wide account cap; Activity lists it
@@ -743,6 +759,13 @@
 
 # Stored sidecar subtitles take the scanner's reading of their names.
 ./internal/database TestPostgresExternalSubtitleNameBackfill
+
+# Stored content-rating ages take what access.Normalize resolves now.
+./internal/database TestPostgresContentRatingAgeRederive
+
+# Stored ISBNs and ebook ISBN group keys become ISBN-13, one owner per item type.
+./internal/database TestPostgresISBN13Backfill
+./internal/database TestPostgresISBN13BackfillRetriesUniqueViolation
 
 # The Postgres auto-tuning restart warning lists only settings a restart would change.
 ./internal/database TestPostgresSettingsPendingRestartPostgres
@@ -838,7 +861,10 @@
 # the row and leaves its files, which can sit above the plugin root, and the
 # installation and user settings lists still answer with the row present.
 ./internal/plugins TestInstallationStoreDeleteRemovesOnlyTrustedFiles
+./internal/plugins TestInstallationStoreRetiresFilesAfterCommittedDeleteDB
+./internal/plugins TestArchiveCacheRejectsSupersededSameVersionDB
 ./internal/api/handlers TestPluginListsKeepWorkingWithAnInvalidIdentityRowDB
+./internal/api/handlers TestPluginInventoryDuringReplacementDB
 
 # An enabled plugin whose stored archive won't open stays in the installation
 # list, marked failed, leaves the user settings list working, and turning it off
@@ -848,6 +874,16 @@
 # A refused automatic plugin update stays on its installation until it is
 # cleared or the installed version changes.
 ./internal/plugins TestInstallationStoreUpdateFailureDB
+./internal/plugins TestLifecyclePollRecoversMissedEnablementCycleDB
+
+# Provisioned settings remain protected when runtime and admin writes share
+# an entry, and release puts its settings back under ordinary admin control.
+./internal/plugins TestProvisionOwnershipGuardsDB
+./internal/plugins TestProvisionedReplacementValidatesOwnedCallbackDB
+./internal/plugins TestProvisionedReplacementValidatesStoredConfigDB
+./internal/plugins TestProvisionedReplacementProtectsNestedCredentialDB
+./internal/plugins TestLegacyReplacementPreservesCredentialProtectionDB
+./internal/plugins TestReenableRejectsIneligibleStableBindingDB
 
 # Updating an installed plugin from its catalog stops the running plugin only
 # after the new package passed its download and checksum checks.
@@ -857,14 +893,24 @@
 # refused, and the newer release, its stored archive and its files stay.
 ./internal/plugins TestInstallerReplacementRefusedAfterInstallationChangedDB
 
+# A plugin has one installation: an archive link for an installed plugin
+# replaces it, and a second create for the same plugin is refused.
+./internal/plugins TestPluginInstallKeepsOneInstallationPerPluginDB
+./internal/plugins TestProvisionPackageCommitAndRollbackDB
+./internal/plugins TestAutoUpdateClearsWithdrawnNoticeDB
+
+# Cleaning up duplicate installations keeps a break-glass account's local
+# credentials and moves a deleted duplicate's marker provider settings.
+./migrations TestUniquePluginInstallationCleanupPostgres
+
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
 ./internal/autoscan TestUpdateConnectionMarkerReset
 
 # ChatGPT credential rotations serialize independently of general settings.
-./internal/catalog TestEncryptedSettingsValueAtomicSerializesWithoutBlockingGeneralSettingsDB
-./internal/catalog TestSettingsValueWaitersPreservePoolCapacityDB
-./internal/catalog TestSelectionUsesOneConnectionAndWaitsBeforeGeneralLockDB
+./internal/serversettings TestEncryptedSettingsValueAtomicSerializesWithoutBlockingGeneralSettingsDB
+./internal/serversettings TestSettingsValueWaitersPreservePoolCapacityDB
+./internal/serversettings TestSelectionUsesOneConnectionAndWaitsBeforeGeneralLockDB
 
 # Marker thumbnails preserve current ranges and provider image inventories.
 ./internal/chapterthumbs TestMarkerOnlyThumbnailsAndStaleEditsDB
@@ -1052,6 +1098,8 @@
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
 ./internal/playback/planstore TestAttemptDesiredTracksRoundTrip
 ./internal/playback/planstore TestProgressCommitsLifecycleStateDB
+./internal/playback/planstore TestLatePlaybackProgressCannotOverwriteFinalStopDB
+./internal/playback/planstore TestPlaybackStopCommitsResumeAndEpisodeSpanOnceDB
 ./internal/api/handlers TestSlowPlanDeliveryLookupKeepsTheSummaryDB
 ./internal/api/handlers TestForgetDeviceKeepsConnectionsUntilLastRegistrationDB
 ./internal/api/handlers TestConcurrentLastRegistrationDeletesDropConnectionsDB
@@ -1065,6 +1113,9 @@
 ./internal/api/handlers TestServerCollectionCountsFollowTheViewerDB
 ./internal/api/handlers TestCollectionRowCardsFollowTheViewerDB
 ./internal/api/handlers TestCollectionRowCardsShowVisiblePersonalCollectionsDB
+./internal/api/handlers TestItemCollectionsDB
+./internal/api/handlers TestItemCollectionsPreviewDB
+./internal/api/handlers TestItemCollectionsPreviewLibraryDB
 ./internal/sections TestRowOfCollectionsReferencesItsCollectionsPostgres
 
 # A scan that adds or removes titles refreshes the stored counts of the smart
@@ -1245,7 +1296,8 @@
 
 # Backups: the full restore round trip (needs the PostgreSQL 18 client), the
 # manifest written last and the sweep, the cluster-wide subsystem lock, the
-# published status of the operation holding it, every table classified
+# published status of the operation holding it, the nightly slot a scheduled
+# run records, every table classified
 # for backup and restore, and a carried credential kept only for a profile
 # of its own account. Selective restore: the
 # restore round trip with re-run after interruption, idempotency and digest
@@ -1253,6 +1305,7 @@
 # a restored library whose setup partly failed, or whose provider placement
 # could not be read, reports it so it is retried without a fallback chain.
 ./internal/backup TestBackupRestoreRoundTripDB
+./internal/backup TestRestorePluginProvisioningDB
 ./internal/backup TestCarryOntoAnOlderKeyDropsSharedRowsDB
 ./internal/backup TestCarryDropsAProfileKeyItCannotBindDB
 ./internal/backup TestCarryMovesAnswerSequencePastCarriedLinksDB
@@ -1269,9 +1322,11 @@
 ./internal/backup TestListReportsThePublishedOperationDB
 ./internal/backup TestStatusBelongsToTheOperationHoldingTheLockDB
 ./internal/backup TestStatusRecordsTheLastSuccessDB
+./internal/backup TestNightlyRecordsTheSlotItWasAdmittedForDB
 ./internal/backup TestBackupAndDeleteWithOnePoolConnectionDB
 ./internal/backup TestEveryTableIsClassifiedDB
 ./internal/backup TestSelectiveRestoreDB
+./internal/backup TestSelectivePluginRestorePreviewsOwnedConfigDB
 ./internal/backup TestRestoreRechecksAccessSettingsUnderTheLockDB
 ./internal/backup TestRestoreNeverSendsLiveSecretsToARestoredAddressDB
 ./internal/backup TestTemplateCollectionsAndHomeSectionsDB
@@ -1405,6 +1460,18 @@
 ./internal/nodepool TestNodeDeclarationsLockFieldsDB
 ./internal/nodepool TestProxyDeclarationsDB
 
+# Declared transcode nodes: an API server creates the declared rows with their
+# keys and owns them (no rewrite on repeat, rotation, admin key issue and delete
+# refused, release on an empty declaration), never takes a proxy, keyless or
+# admin-keyed row, a deleted id or a proxy's address, and adopts a row that
+# already holds the declared key.
+./internal/nodepool TestProvisionTranscodeNodesDB
+./internal/nodepool TestProvisionTranscodeNodesRefusesOtherRowsDB
+# A provisioning pass waits for an admin edit's row lock instead of
+# deadlocking with it, and a failed pass leaves its ids unused for the retry.
+./internal/nodepool TestProvisionWaitsForAdminRowLockDB
+./internal/nodepool TestProvisionRetriesAFailedPassDB
+
 # Admin node writes reach every credential registry: the writing API server's
 # before it answers (a deleted node's key is refused at once, a moved node is
 # signable at its new URL, a disabled one keeps its key), a proxy's through
@@ -1427,3 +1494,33 @@
 # Frame posters list only movies whose poster slot is empty with nothing on its
 # way, and a frame is saved only while the slot is still empty with the source read.
 ./internal/catalog TestFramePostersListOnlyEmptySlotsAndSaveOnlyOverThemDB
+
+# Turning a library off or on sends catalog.library.changed, so catalog mirrors re-list.
+./internal/api/handlers TestLibraryEnabledTogglePublishesCatalogLibraryChangedDB
+./internal/api/handlers TestLibraryDisableAfterConcurrentEnablePublishesDB
+
+# A book's work ids are claims many editions may share, kept out of the
+# provider IDs: each answer replaces its own source's claims, a failed lookup
+# keeps them, a reset or a book Identify clears them, an answer contradicting
+# the item's edition ids stores none, and the migration moves legacy rows before
+# the CHECK forbids them. All three writers store a plugin answer's claim, and
+# a shared claim makes an opposite-format edition a link candidate.
+./internal/catalog TestWorkClaimsReplacePerSourceDB
+./internal/catalog TestSeparateBookWorkIDsMigrationDB
+./internal/audiobooks TestAudiobookMatchStoresWorkClaimDB
+./internal/ebooks TestEbookEnrichmentStoresWorkClaimsDB
+./internal/metadata TestEbookRefreshStoresWorkClaimsDB
+./internal/metadata TestEbookRefreshDropsWorkClaimsOfAContradictingAnswerDB
+./internal/metadata TestEbookIdentifyClearsOldWorkClaimsDB
+./internal/literaryworks TestCandidatesIncludeEditionsSharingOnlyAWorkIDDB
+
+# Provisioning rolls back an entire conflicting declaration, fences a second
+# writer on a dedicated session, and preserves generations on identical input.
+./internal/plugins TestProvisionWriterAtomicOfflineDB
+./internal/plugins TestProvisionWriterMetadataPlacementRecoveryDB
+./internal/plugins TestProvisionWriterOrphanedSessionDB
+./internal/plugins TestProvisionWriterPreservesPrivateNumbersDB
+./internal/plugins TestProvisionWriterRefusesInvalidSavedConfigDB
+./internal/plugins TestProvisionWriterReleasesHeldFieldsDB
+./internal/plugins TestProvisionWriterRestartsAfterRestoreHoldDB
+./internal/plugins TestAutomaticInstallHonorsRestoreHoldDB

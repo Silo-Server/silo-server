@@ -16,6 +16,7 @@ func fallbackTestResolver() *CatalogSelectionResolver {
 		{FileID: 3, Resolution: "1080p", FileSize: 100},
 		{FileID: 4, Resolution: "1080p", FileSize: 400, EditionKey: "different-cut"},
 		{FileID: 5, Resolution: "1080p", FileSize: 400, PresentationPartIndex: 2},
+		{FileID: 6, Resolution: "1080p", FileSize: 400, Unreadable: true},
 	}})
 }
 

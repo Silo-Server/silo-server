@@ -195,6 +195,21 @@ type fakeInstallationStore struct {
 func (s *fakeInstallationStore) ListEnabled(_ context.Context) ([]*Installation, error) {
 	return s.installations, nil
 }
+func (s *fakeInstallationStore) ListEnabledWithCapabilityTypes(_ context.Context, types []string) ([]*Installation, error) {
+	var installations []*Installation
+	for _, installation := range s.installations {
+		if installation == nil {
+			continue
+		}
+		for _, capability := range s.capabilities[installation.ID] {
+			if capability != nil && slices.Contains(types, capability.Type) {
+				installations = append(installations, installation)
+				break
+			}
+		}
+	}
+	return installations, nil
+}
 func (s *fakeInstallationStore) ListCapabilities(_ context.Context, id int) ([]*Capability, error) {
 	return s.capabilities[id], nil
 }

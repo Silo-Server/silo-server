@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Setat de mediul nodului. Modificați-l acolo și reporniți nodul."
+      "value": "Valoarea este setată de mediul de implementare. Modificați-o acolo și reporniți serviciul afectat."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "Conectați-vă prin sistemul de conectare al rețelei dvs. pentru a continua."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Acest nod este setat de configurația de implementare a serverului. Eliminați-l de acolo și reporniți serverele API pentru a-l gestiona aici."
     }
   ],
   "error.not_acceptable": [
@@ -2036,6 +2042,110 @@
     {
       "type": 0,
       "value": "Limba aplicației"
+    }
+  ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "La final"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minut înainte de final"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute înainte de final"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de minute înainte de final"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " secundă înainte de final"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " secunde înainte de final"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de secunde înainte de final"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Afișare Episoade următoare"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Dezactivat"
     }
   ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
@@ -13945,7 +14055,7 @@
             },
             {
               "type": 0,
-              "value": " element nu poate fi restaurat — setările sale sunt criptate cu un alt SECRET_KEY"
+              "value": " element nu poate fi restaurat — setările sale sunt criptate cu altă cheie SECRET_KEY"
             }
           ]
         },
@@ -13957,7 +14067,7 @@
             },
             {
               "type": 0,
-              "value": " elemente nu pot fi restaurate — setările lor sunt criptate cu un alt SECRET_KEY"
+              "value": " elemente nu pot fi restaurate — setările lor sunt criptate cu altă cheie SECRET_KEY"
             }
           ]
         },
@@ -13969,7 +14079,7 @@
             },
             {
               "type": 0,
-              "value": " de elemente nu pot fi restaurate — setările lor sunt criptate cu un alt SECRET_KEY"
+              "value": " de elemente nu pot fi restaurate — setările lor sunt criptate cu altă cheie SECRET_KEY"
             }
           ]
         }
@@ -14438,6 +14548,52 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " element nu poate fi restaurat — mediul acestui server setează opțiunile care diferă sau o parte din conexiunea sa"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elemente nu pot fi restaurate — mediul acestui server setează opțiunile care diferă sau o parte din conexiunea lor"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de elemente nu pot fi restaurate — mediul acestui server setează opțiunile care diferă sau o parte din conexiunea lor"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14451,7 +14607,7 @@
             },
             {
               "type": 0,
-              "value": " element nu poate fi restaurat — este criptat cu un alt SECRET_KEY"
+              "value": " element nu poate fi restaurat — este criptat cu altă cheie SECRET_KEY"
             }
           ]
         },
@@ -14463,7 +14619,7 @@
             },
             {
               "type": 0,
-              "value": " elemente nu pot fi restaurate — sunt criptate cu un alt SECRET_KEY"
+              "value": " elemente nu pot fi restaurate — sunt criptate cu altă cheie SECRET_KEY"
             }
           ]
         },
@@ -14475,7 +14631,7 @@
             },
             {
               "type": 0,
-              "value": " de elemente nu pot fi restaurate — sunt criptate cu un alt SECRET_KEY"
+              "value": " de elemente nu pot fi restaurate — sunt criptate cu altă cheie SECRET_KEY"
             }
           ]
         }
@@ -14773,7 +14929,7 @@
             },
             {
               "type": 0,
-              "value": " element nu poate fi restaurat — acest server i-ar oferi mai mult acces decât backupul"
+              "value": " element nu poate fi restaurat — acest server i-ar oferi mai mult acces decât îi oferea backupul"
             }
           ]
         },
@@ -14785,7 +14941,7 @@
             },
             {
               "type": 0,
-              "value": " elemente nu pot fi restaurate — acest server le-ar oferi mai mult acces decât backupul"
+              "value": " elemente nu pot fi restaurate — acest server le-ar oferi mai mult acces decât le oferea backupul"
             }
           ]
         },
@@ -14797,7 +14953,7 @@
             },
             {
               "type": 0,
-              "value": " de elemente nu pot fi restaurate — acest server le-ar oferi mai mult acces decât backupul"
+              "value": " de elemente nu pot fi restaurate — acest server le-ar oferi mai mult acces decât le oferea backupul"
             }
           ]
         }
@@ -15128,6 +15284,52 @@
     {
       "type": 0,
       "value": "Adresa unui serviciu se schimbă fără ca datele sale de autentificare să fie în backup, așa că restaurarea le șterge aici și dezactivează serviciul până când sunt introduse din nou."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " setare își păstrează valoarea curentă, deoarece mediul acestui server setează această opțiune sau o parte din conexiunea ei."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " setări își păstrează valorile curente, deoarece mediul acestui server setează aceste opțiuni sau o parte din conexiunea lor."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de setări își păstrează valorile curente, deoarece mediul acestui server setează aceste opțiuni sau o parte din conexiunea lor."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15694,8 +15896,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Ascundeți-le"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți-le"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți-le"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -15880,8 +16110,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Afișați-le"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați-le"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați-le"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -18528,6 +18786,12 @@
       "value": "Un alt cont de aici se conectează cu numele său de utilizator sau adresa sa de e-mail."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Mediul acestui server setează opțiunile care diferă sau o parte din conexiunea lor, așa că acest server își păstrează valorile curente."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19162,6 +19426,166 @@
       "value": "."
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Imagine de fundal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " element din colecție"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elemente din colecție"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de elemente din colecție"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Colecție înlocuită"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Configurație"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Descriere"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Activare"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Recomandare"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Limită de elemente"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Sortarea elementelor"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Biblioteci"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Poziție"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Poster"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Ordine de sortare"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Sursă"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Program de sincronizare"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Titlu"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Traducerea titlului"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Tip"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Vizibilitate"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Doar web"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -19738,6 +20162,16 @@
     {
       "type": 0,
       "value": " (păstrată: mai strictă)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (se păstrează: mediu)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -20920,6 +21354,20 @@
       "value": "În fusul orar al serverului."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "În fusul orar al serverului. Adică "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " în fusul dvs. orar."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -21952,20 +22400,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Ascundeți conturile"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți contul"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți conturile"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți conturile"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Ascundeți fișierele"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți fișierul"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți fișierele"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți fișierele"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Ascundeți fișierele"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți fișierul"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți fișierele"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ascundeți fișierele"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -22434,8 +22960,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Afișați conturile"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați contul"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați conturile"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați conturile"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -22498,14 +23050,66 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Afișați fișierele"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați fișierul"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați fișierele"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați fișierele"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Afișați fișierele"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați fișierul"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați fișierele"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați fișierele"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -31224,6 +31828,12 @@
       "value": "eșuată"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Sarcina nu a reușit. Consultați diagnosticarea pentru administratori pentru detalii."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -33472,7 +34082,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Flux al sesiunilor de redare pornite recent"
+      "value": "Cele mai recente redări din toate conturile"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35272,6 +35882,72 @@
     {
       "type": 0,
       "value": "Nu s-a putut încărca activitatea."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " a redat "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " a redat "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -55191,6 +55867,12 @@
       "value": "Introduceți adresa serverului pentru a completa setările."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Cheie setată de configurația de implementare a serverului"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -56115,6 +56797,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nodul este setat de configurația de implementare a serverului. Eliminați-l de acolo și reporniți serverele API pentru a-l putea șterge aici."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -58059,6 +58747,68 @@
       "value": "Pluginuri"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Aplicat"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Suspendat"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Nu s-a putut încărca starea provizionării pluginurilor."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Gestionat de mediul de implementare"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "În așteptare"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Refuzat"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Implementarea controlează sursa pachetului și eliminarea acestuia."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Starea provizionării"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Implementarea fixează acest plugin la versiunea "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -58358,7 +59108,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Sarcinile sunt înregistrate la pornirea serverului, așa că activarea sau dezactivarea uneia are efect după o repornire. După ce o sarcină există, modificați-i programul pe pagina sarcinii."
+      "value": "Activarea sau dezactivarea unei sarcini se aplică fără repornire, deși celelalte servere pot avea nevoie de câteva momente pentru a o prelua. După ce o sarcină este activată, modificați-i programul pe pagina sarcinii."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -58813,6 +59563,136 @@
       "value": "Dezactivat. Rulările doar elimină titlurile vechi."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Generarea s-a oprit. Recomandările stocate rămân vizibile în Descoperiți până la repornirea serverului."
+    }
+  ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Se clasifică titlurile pentru profiluri ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Se preiau listele TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Se caută titlurile și se creează embeddingurile ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "S-a eliminat "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titlu expirat"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "S-au eliminat "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titluri expirate"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "S-au eliminat "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de titluri expirate"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -58857,6 +59737,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Rezolvați mai jos conflictul de blocare a embeddingurilor înainte de a genera recomandările în Descoperiți."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Rulați mai întâi jobul Embeddinguri, ca Silo să aibă vectori ai bibliotecii cu care să compare."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Conectați un furnizor de embedding în Servicii AI înainte de a genera recomandările în Descoperiți."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Niciun profil nu are încă un profil de preferințe. Rulați Profiluri de preferințe după ce cineva a vizionat sau a evaluat titluri."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -61103,6 +62007,32 @@
       "value": "Rândul rămâne gol până la activarea recomandărilor în Descoperiți din Administrare → Recomandări."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Rândurile de recomandări rămân goale până la activarea recomandărilor în Descoperiți din "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Administrare → Recomandări"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Dezactivat în Recomandări"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -62710,6 +63640,12 @@
       "value": "Rândurile noi se adaugă la sfârșitul paginii Descoperiți"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Deschideți setările din Recomandări"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -62722,6 +63658,12 @@
       "value": "Feedul MDBList nu include sortarea salvată pe pagina listei. Alegeți-o pe cea afișată acolo."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Profilul dvs. nu are încă recomandări în Descoperiți. Rulați Recomandări în Descoperiți sau vizionați și evaluați câteva titluri pentru a previzualiza acest rând."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -62732,6 +63674,12 @@
     {
       "type": 0,
       "value": "Alegeți o listă sau lipiți linkul acesteia pentru a-i vedea titlurile."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Activați recomandările în Descoperiți din Administrare → Recomandări pentru a previzualiza acest rând."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -63618,6 +64566,12 @@
     {
       "type": 0,
       "value": "Mesajul a fost trimis"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Playerul nu a confirmat primirea mesajului. Este posibil ca mesajul să apară mai târziu sau deloc."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -66563,6 +67517,12 @@
       "value": "Nu s-a putut verifica conexiunea."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nu s-a putut verifica dacă mediul serverului definește această setare. Reîncărcați pagina pentru a o edita."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -67133,6 +68093,30 @@
     {
       "type": 0,
       "value": "Nu s-a putut actualiza canalul"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Reîncărcați pentru a vedea valorile curente. Dacă ceva de pe această pagină s-a schimbat sau ați modificat o parolă ori o cheie salvată, toate modificările dvs. se anulează; altfel, se păstrează."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Reîncărcați"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-au putut reîncărca setările. Încercați din nou."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Setările au fost modificate în altă parte"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -70255,136 +71239,10 @@
       "value": "Nu s-au putut încărca setările notificărilor"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Conținutul nou nu este înregistrat, deci nu se poate trimite nimic. Reactivați opțiunea în secțiunea Procesare."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Trimiterea este întreruptă; conținutul nou așteaptă în coadă. Reactivați-o în secțiunea Procesare."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Dacă este dezactivat, se trimite în schimb rezumatul zilnic."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Cum detectează Silo conținutul nou, cum îl grupează în mesaje și cât timp le păstrează."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Identificarea persoanelor interesate"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Compară fiecare element cu preferințele tuturor."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Grupare și limitarea avalanșelor de mesaje"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Procesare"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Vechimea maximă a conținutului"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Elementele mai vechi sunt eliminate în loc să ajungă drept noutăți depășite."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Număr maxim de mesaje per serial"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Ce depășește această limită este omis pentru lotul respectiv."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Detectarea conținutului nou"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Înregistrează elementele noi în timpul scanărilor bibliotecii."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Flux de procesare"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notificări citite"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Păstrare"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Istoricul trimiterilor"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Evidența notificărilor deja trimise de Silo."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Interval de stabilizare"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Elementele a căror scanare se termină împreună sosesc într-o singură notificare."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notificări necitite"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -71313,18 +72171,6 @@
     {
       "type": 0,
       "value": "Notificări"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "zile"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "ore"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -72857,6 +73703,24 @@
       "value": "Trecerea la alt model necesită resetarea embeddingurilor, ceea ce le șterge pe toate. Un alt furnizor care servește același model se aplică după o repornire."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Adăugați în Descoperiți"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-au putut adăuga rândurile de recomandări pe pagina Descoperiți."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "S-au adăugat rândurile de recomandări pe pagina Descoperiți."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -72879,6 +73743,44 @@
     {
       "type": 0,
       "value": "Câte titluri care nu sunt în bibliotecă păstrează serverul pentru recomandări. Fiecare este căutat pe TMDB și transformat în embedding. Crearea embeddingurilor este de obicei ieftină, dar un număr mai mare poate costa mai mult sau poate dura mai mult, în funcție de furnizorul dvs. de embeddinguri, și folosește mai mult spațiu de stocare."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Pagina Descoperiți nu afișează încă niciun rând Recomandări."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Activați opțiunea „Activați recomandările” de mai sus și reporniți serverul înainte ca jobul Recomandări în Descoperiți să poată rula."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Cererile sunt dezactivate momentan. Activați-le în "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Setări cereri"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", ca spectatorii să poată vedea pagina Descoperiți."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Deschideți pagina Descoperiți"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -78033,7 +78935,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Canale de livrare, canale de server și modul în care conținutul nou devine notificări."
+      "value": "Canale de livrare și canale de server."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -78132,12 +79034,6 @@
       "value": "E-mail"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Grupare și limitarea volumului de mesaje"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -78156,28 +79052,10 @@
       "value": "Permiteți utilizatorilor să aleagă un e-mail per episod"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Vechimea maximă a conținutului"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Număr maxim de mesaje per serial"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Menționați solicitantul pe Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Detectarea conținutului nou"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -78186,46 +79064,16 @@
       "value": "Webhookuri personale"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Procesare"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Notificări citite"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Adresa URL a releului"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Păstrare"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Istoricul trimiterilor"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Canale de server"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Interval de stabilizare"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -78240,12 +79088,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Notificări necitite"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -78256,12 +79098,6 @@
     {
       "type": 0,
       "value": "Webhookuri per persoană"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Stabilirea destinatarilor interesați"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -79696,6 +80532,12 @@
     {
       "type": 0,
       "value": "Conectare pe TV: pornire"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Cereri pentru postere"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -82215,6 +83057,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Spațiul de stocare nu poate fi mutat aici cât timp mediul setează opțiunile de stocare ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Mai întâi eliminați aceste variabile și reporniți fiecare server API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -83409,6 +84265,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Acest program provine din setările de backup. Modificați-l în "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Copii de rezervă"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -83727,10 +84603,66 @@
       "value": "Erori recente"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Reîmprospătarea nu a reușit. Consultați diagnosticarea pentru administratori pentru detalii."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Examinați programul curent"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -84175,6 +85107,18 @@
     {
       "type": 0,
       "value": "Reîncercare webhook Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Recitește antetul fișierelor MKV cu subtitrări ASS scanate înainte ca Silo să excludă fonturile încorporate din rata de biți, astfel încât acestea să nu fie transcodate pentru o rată de biți pe care nu o ating la streaming."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Corectare rată de biți pentru fișiere cu fonturi încorporate"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -94644,25 +95588,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Nu s-a putut conecta televizorul. Încercați din nou."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Verificați dacă aplicația afișează"
+      "value": "Nu s-a putut aproba conectarea. Încercați din nou."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Verificați dacă televizorul afișează"
+      "value": "Verificați dacă acest cod corespunde"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Introduceți codul de pe televizor sau din aplicație"
+      "value": "Introduceți codul afișat pe dispozitivul dvs."
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94674,13 +95612,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Conectați un televizor sau alt dispozitiv cu contul dvs."
+      "value": "Conectați un televizor, o aplicație sau alt dispozitiv."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Conectați un televizor"
+      "value": "Aprobarea conectării"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94700,13 +95638,13 @@
     },
     {
       "type": 0,
-      "value": " pentru a aproba un televizor. Doar contul respectiv poate conecta un televizor."
+      "value": " pentru a aproba această conectare. Doar contul respectiv poate aproba dispozitive."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Opriți vizualizarea ca acest utilizator pentru a aproba un televizor. Doar contul respectiv poate conecta un televizor."
+      "value": "Opriți vizualizarea ca acest utilizator pentru a aproba această conectare. Doar contul respectiv poate aproba dispozitive."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94724,39 +95662,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Codul nu a fost găsit. Verificați codul de pe televizor."
+      "value": "Nu am găsit acest cod. Verificați codul și încercați din nou."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Nu acum"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Aplicațiile TV mai vechi afișează în schimb "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Aprobați doar un dispozitiv care se află chiar acum în fața dvs."
+      "value": "Refuzați"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Aprobați doar un televizor care se află chiar acum în fața dvs."
+      "value": "Aprobați doar o conectare pe care ați pornit-o chiar dvs."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94782,7 +95700,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Oricine folosește acest televizor poate alege dintre profilurile dvs. Profilurile cu cod PIN rămân blocate."
+      "value": "Astfel, dispozitivul primește acces la profilurile dvs. Profilurile cu cod PIN rămân blocate."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94829,6 +95747,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Cerere trimisă "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -94842,7 +95770,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Acest televizor nu mai așteaptă. Porniți din nou procesul pe televizor."
+      "value": "Acest dispozitiv nu mai așteaptă. Porniți din nou conectarea pe dispozitiv."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -94851,10 +95779,38 @@
       "value": "Această conectare a fost refuzată."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Gata. Dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se conectează."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " este conectat."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Acest cod a expirat. Televizorul afișează unul nou. Folosiți codul respectiv."
+      "value": "Acest cod a expirat. Obțineți un cod nou pe dispozitiv și încercați din nou."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -94938,25 +95894,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Televizorul respectiv este deja conectat."
+      "value": "Acest dispozitiv este deja conectat."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Acest televizor a fost aprobat și finalizează conectarea."
+      "value": "Acest dispozitiv a fost aprobat și finalizează conectarea."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Gata. Televizorul se conectează."
+      "value": "Gata. Dispozitivul dvs. se conectează."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Televizorul este conectat."
+      "value": "Dispozitivul dvs. este conectat."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -95000,7 +95956,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Conectați dispozitivul "
+      "value": "Permiteți conectarea dispozitivului "
     },
     {
       "type": 1,
@@ -95014,7 +95970,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Conectați acest dispozitiv?"
+      "value": "Permiteți conectarea acestui dispozitiv?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -95034,13 +95990,13 @@
     },
     {
       "type": 0,
-      "value": " pentru a aproba acest televizor."
+      "value": " pentru a aproba această conectare."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Conectați televizorul"
+      "value": "Aprobați conectarea"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -96086,7 +97042,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Nu s-a putut conecta dispozitivul. Încercați din nou."
+      "value": "Nu s-a putut aproba conectarea. Încercați din nou."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -104525,6 +105481,12 @@
       "value": "bibliotecile dvs."
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Număr indisponibil"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -106581,6 +107543,24 @@
       "value": "Adăugați"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-a putut verifica dacă se pot adăuga titluri."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Reîncercați încărcarea"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Se verifică dacă se pot adăuga titluri…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -106599,6 +107579,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Acest server nu poate adăuga titluri în siguranță cât timp este încărcată doar o parte din colecție. Puteți în continuare să eliminați titluri și să editați colecția."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Încărcați din nou titlurile înainte de a adăuga altele."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -106613,6 +107605,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Se încarcă titlurile înainte de a adăuga altele…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -116178,6 +117176,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Apare și în"
+    }
+  ],
   "web.detail.sections.cast": [
     {
       "type": 0,
@@ -119311,6 +120315,12 @@
       "value": "Afișează"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Rândul este gestionat de acest server. Ce afișează nu poate fi modificat aici; adăugați un rând propriu pentru a alege ce afișează."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -119625,6 +120635,12 @@
       "value": "Se traduce…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ascundeți rândurile serverului adăugate după acest export:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -119643,6 +120659,12 @@
     {
       "type": 0,
       "value": ", înlocuind secțiunile pe care le-ați adăugat aici anterior. Modificările dvs. aduse secțiunilor acestui server se păstrează."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Rândurile acestui server s-au modificat după exportarea acestui fișier, așa că alegeți mai jos rândurile de ascuns."
     }
   ],
   "web.home.layout.checking": [
@@ -119693,6 +120715,26 @@
     {
       "type": 0,
       "value": "Activează opțiunea „Ascunderea elementelor vizionate”."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Ascunde rândurile selectate pe: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", fără a modifica celelalte rânduri ale dvs. de acolo."
     }
   ],
   "web.home.layout.import": [
@@ -119797,6 +120839,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -120016,6 +121076,12 @@
     {
       "type": 0,
       "value": "Secțiune fără titlu"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ascundeți rândurile serverului care nu sunt în acest fișier:"
     }
   ],
   "web.home.page.customize": [
@@ -123202,6 +124268,12 @@
     {
       "type": 0,
       "value": "Banner principal · Doar web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Server"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -136725,34 +137797,6 @@
       "value": " în lista de vizionare"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Pentru că ați vizionat "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Pentru că ați vizionat "
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": " și "
-    },
-    {
-      "type": 1,
-      "value": "second"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -136815,6 +137859,34 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Similar cu "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Similar cu "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " și "
+    },
+    {
+      "type": 1,
+      "value": "second"
     }
   ],
   "web.requests.discoverSection.empty": [

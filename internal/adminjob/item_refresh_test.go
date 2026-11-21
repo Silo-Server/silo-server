@@ -1,6 +1,7 @@
 package adminjob
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -814,6 +815,13 @@ func newPodcastRefreshFixture(t *testing.T, pool *pgxpool.Pool) *podcastRefreshF
 	if _, err := scan.ScanFolder(ctx, folder); err != nil {
 		t.Fatalf("ScanFolder: %v", err)
 	}
+	executor := newItemRefreshDBExecutor(pool, scan, fileRepo, &itemRefreshTestRefresher{})
+	return &podcastRefreshFixture{pool: pool, fileRepo: fileRepo, executor: executor, folderID: folder.ID, episodes: episodes}
+}
+
+// newItemRefreshDBExecutor builds an item refresh executor over the test
+// database whose scans run on scan and whose metadata step is refresher.
+func newItemRefreshDBExecutor(pool *pgxpool.Pool, scan *scanner.Scanner, fileRepo *scanner.FileRepository, refresher *itemRefreshTestRefresher) *ItemRefreshExecutor {
 	folders := catalog.NewFolderRepository(pool)
 	skippedRoots := metadata.NewSkippedRootRepository(pool)
 	executor := NewItemRefreshExecutor(
@@ -826,12 +834,12 @@ func newPodcastRefreshFixture(t *testing.T, pool *pgxpool.Pool) *podcastRefreshF
 		catalog.NewEpisodeRepository(pool),
 		libraryingest.NewExecutor(scan, podcastRefreshNoMatcher{}, folders, skippedRoots, nil, nil),
 		&itemRefreshTestScanRuns{},
-		&itemRefreshTestRefresher{},
+		refresher,
 		nil,
 		nil,
 	)
 	executor.evictRails = nil
-	return &podcastRefreshFixture{pool: pool, fileRepo: fileRepo, executor: executor, folderID: folder.ID, episodes: episodes}
+	return executor
 }
 
 // catalogIDs returns the show ID and the episode ID of each episode file.
@@ -856,8 +864,8 @@ func (f *podcastRefreshFixture) catalogIDs(t *testing.T) (string, []string) {
 	return showID, episodeIDs
 }
 
-// podcastRefreshNoMatcher stands in for the metadata matcher: the podcast
-// scanner links its own files, so a podcast ingest has nothing to match.
+// podcastRefreshNoMatcher stands in for the metadata matcher: the podcast and
+// ebook scanners link their own files, so their ingest has nothing to match.
 type podcastRefreshNoMatcher struct{}
 
 func (podcastRefreshNoMatcher) ProcessBatchByFolderAndPathPrefix(context.Context, int, string, time.Time) (int, error) {
@@ -870,4 +878,200 @@ func (podcastRefreshNoMatcher) ProcessAllByFolderAndPathPrefix(context.Context, 
 
 func (podcastRefreshNoMatcher) RetryUnmatchedItemsByFolderAndPathPrefix(context.Context, int, string) (int, int, error) {
 	return 0, 0, nil
+}
+
+// A complete refresh of an ebook keeps the book's content ID, so its ISBN,
+// reader progress and other per-user rows stay on it.
+func TestCompleteItemRefreshKeepsEbookIDDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	const isbn = "9780441172719"
+	f := newEbookRefreshFixture(t, pool, isbn)
+	resolver := NewItemRefreshResolver(
+		catalog.NewItemRepository(pool),
+		catalog.NewSeasonRepository(pool),
+		catalog.NewEpisodeRepository(pool),
+		catalog.NewFolderRepository(pool),
+		f.fileRepo,
+	)
+	req, err := resolver.ResolveWithMode(ctx, f.contentID, ItemRefreshModeComplete)
+	if err != nil {
+		t.Fatalf("ResolveWithMode: %v", err)
+	}
+	result, err := f.executor.Execute(ctx, *req, nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var gotContentID string
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(content_id, '') FROM media_files WHERE id = $1`, f.fileID,
+	).Scan(&gotContentID); err != nil {
+		t.Fatalf("load refreshed file: %v", err)
+	}
+	if gotContentID != f.contentID || result.RefreshContentID != f.contentID || result.DetailContentID != f.contentID {
+		t.Fatalf("after complete refresh: file content_id=%q refresh=%q detail=%q, want %q",
+			gotContentID, result.RefreshContentID, result.DetailContentID, f.contentID)
+	}
+	if !f.refresher.reset || f.refresher.contentID != f.contentID {
+		t.Fatalf("metadata step: reset=%v content_id=%q, want a reset of %q", f.refresher.reset, f.refresher.contentID, f.contentID)
+	}
+	if got := ebookISBNOwner(t, pool, isbn); got != f.contentID {
+		t.Fatalf("isbn owner after refresh = %q, want %q", got, f.contentID)
+	}
+	var progressRows, ebookItems int
+	if err := pool.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM ebook_reader_progress WHERE user_id = $1 AND content_id = $2),
+			(SELECT COUNT(*) FROM media_items mi
+			   JOIN media_item_libraries mil ON mil.content_id = mi.content_id
+			  WHERE mil.media_folder_id = $3 AND mi.type = 'ebook')`,
+		f.userID, f.contentID, f.folderID,
+	).Scan(&progressRows, &ebookItems); err != nil {
+		t.Fatalf("load refreshed state: %v", err)
+	}
+	if progressRows != 1 || ebookItems != 1 {
+		t.Fatalf("after complete refresh: reader progress rows=%d ebook items=%d, want 1 and 1", progressRows, ebookItems)
+	}
+}
+
+type ebookRefreshFixture struct {
+	fileRepo  *scanner.FileRepository
+	executor  *ItemRefreshExecutor
+	refresher *itemRefreshTestRefresher
+	folderID  int
+	contentID string
+	fileID    int
+	userID    int
+}
+
+// newEbookRefreshFixture scans an ebook library holding one EPUB with an
+// ISBN and gives a profile reading progress on it.
+func newEbookRefreshFixture(t *testing.T, pool *pgxpool.Pool, isbn string) *ebookRefreshFixture {
+	t.Helper()
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "ebooks")
+	bookPath := filepath.Join(root, "Frank Herbert", "Dune.epub")
+	writeItemRefreshTestEPUB(t, bookPath, "Dune", "Frank Herbert", isbn)
+
+	folder := &models.MediaFolder{Type: "ebooks", Name: "Ebook refresh test", Enabled: true, Paths: []string{root}}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO media_folders (type, name, enabled) VALUES ($1, $2, true) RETURNING id`, folder.Type, folder.Name,
+	).Scan(&folder.ID); err != nil {
+		t.Fatalf("seed folder: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `
+			DELETE FROM media_items WHERE content_id IN (
+				SELECT content_id FROM media_files WHERE media_folder_id = $1 AND content_id IS NOT NULL
+				UNION
+				SELECT content_id FROM media_item_libraries WHERE media_folder_id = $1
+			)`, folder.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = $1`, folder.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folder_paths WHERE media_folder_id = $1`, folder.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folder.ID)
+	})
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO media_folder_paths (media_folder_id, path) VALUES ($1, $2)`, folder.ID, root,
+	); err != nil {
+		t.Fatalf("seed folder path: %v", err)
+	}
+
+	fileRepo := scanner.NewFileRepository(pool)
+	scan := scanner.NewScanner(fileRepo, "ffprobe", nil, 1, false, 0)
+	if _, err := scan.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("ScanFolder: %v", err)
+	}
+	f := &ebookRefreshFixture{fileRepo: fileRepo, refresher: &itemRefreshTestRefresher{}, folderID: folder.ID}
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(content_id, ''), id FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folder.ID, bookPath,
+	).Scan(&f.contentID, &f.fileID); err != nil || f.contentID == "" {
+		t.Fatalf("load scanned book: content_id=%q err=%v", f.contentID, err)
+	}
+	if got := ebookISBNOwner(t, pool, isbn); got != f.contentID {
+		t.Fatalf("isbn owner after scan = %q, want %q", got, f.contentID)
+	}
+
+	username := fmt.Sprintf("ebook-refresh-%d", time.Now().UnixNano())
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO users (username, email, password_hash, role, enabled)
+		VALUES ($1, $2, 'test', 'user', true) RETURNING id`, username, username+"@example.invalid",
+	).Scan(&f.userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, f.userID) })
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO ebook_reader_progress (user_id, profile_id, content_id, file_id, location, progress)
+		VALUES ($1, 'profile-1', $2, $3, 'epubcfi(/6/4)', 0.4)`, f.userID, f.contentID, f.fileID,
+	); err != nil {
+		t.Fatalf("seed reader progress: %v", err)
+	}
+	f.executor = newItemRefreshDBExecutor(pool, scan, fileRepo, f.refresher)
+	return f
+}
+
+func ebookISBNOwner(t *testing.T, pool *pgxpool.Pool, isbn string) string {
+	t.Helper()
+	var owner string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COALESCE(MAX(content_id), '') FROM media_item_provider_ids WHERE provider = 'isbn' AND provider_id = $1`, isbn,
+	).Scan(&owner); err != nil {
+		t.Fatalf("load isbn owner: %v", err)
+	}
+	return owner
+}
+
+// writeItemRefreshTestEPUB writes a minimal EPUB whose OPF carries the title,
+// author and ISBN.
+func writeItemRefreshTestEPUB(t *testing.T, path, title, author, isbn string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir book: %v", err)
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create epub: %v", err)
+	}
+	zw := zip.NewWriter(file)
+	for _, entry := range []struct{ name, body string }{
+		{"META-INF/container.xml", `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`},
+		{"OPS/content.opf", `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <metadata>
+    <dc:title>` + title + `</dc:title>
+    <dc:creator>` + author + `</dc:creator>
+    <dc:identifier>` + isbn + `</dc:identifier>
+    <dc:language>en</dc:language>
+  </metadata>
+</package>`},
+	} {
+		w, err := zw.Create(entry.name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", entry.name, err)
+		}
+		if _, err := w.Write([]byte(entry.body)); err != nil {
+			t.Fatalf("write zip entry %s: %v", entry.name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close epub: %v", err)
+	}
 }

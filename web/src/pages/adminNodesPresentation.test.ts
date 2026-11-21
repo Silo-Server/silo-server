@@ -20,6 +20,7 @@ import {
   nodeHasHWDeviceInventory,
   hwDeviceSyntaxChanges,
   nodeUsesCUDADevices,
+  nodeUsesVideoToolbox,
   restoreEnvManagedFields,
 } from "./adminNodesPresentation";
 
@@ -67,7 +68,7 @@ describe("describeNodeGPU", () => {
       backend: {
         label: "QSV",
         state: "failed",
-        badgeClass: "bg-warning/10 text-warning border-warning/15",
+        badgeClass: "bg-warning/10 text-warning-label border-warning/15",
         title: "QSV probe failed: h264_qsv smoke encode failed: device busy",
       },
       failures: [],
@@ -517,6 +518,16 @@ describe("buildNodeHWDeviceRows", () => {
       description: "Pinned device this node does not report",
     });
     expect(rows[2]?.title).toContain("not in this node's last capability report");
+  });
+});
+
+describe("nodeUsesVideoToolbox", () => {
+  it("follows a Mac node's own resolution and an explicit pin", () => {
+    const mac = makeNode({ capabilities: { resolved: "videotoolbox" } });
+    expect(nodeUsesVideoToolbox(mac, HW_ACCEL_INHERIT, "auto")).toBe(true);
+    expect(nodeUsesVideoToolbox(mac, "auto", "qsv")).toBe(true);
+    expect(nodeUsesVideoToolbox(makeNode({}), "videotoolbox")).toBe(true);
+    expect(nodeUsesVideoToolbox(mac, HW_ACCEL_INHERIT, "qsv")).toBe(false);
   });
 });
 

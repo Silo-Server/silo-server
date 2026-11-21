@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/envutil"
 )
 
 // EnvScope says where a setting set by an environment variable applies.
@@ -28,6 +30,10 @@ type EnvSettingVar struct {
 	Scope EnvScope
 }
 
+// BackupEnabledEnvVar sets backup.enabled. A migration job reads it alone,
+// for the backup before migrations.
+const BackupEnabledEnvVar = "SILO_BACKUP_ENABLED"
+
 // envSettingVars is the one list of settings an operator can set from the
 // environment. API servers (integrated and api mode) read it; proxies and
 // transcode nodes do not. A key belongs here only when setting it needs
@@ -39,6 +45,7 @@ var envSettingVars = []EnvSettingVar{
 	{"SILO_SERVER_NAME", "branding.server_name", EnvScopeStored},
 	{"SILO_PUBLIC_URL", "server.public_url", EnvScopeStored},
 	{"SILO_LOCAL_URL", ServerLocalURLSettingKey, EnvScopeStored},
+	{"SILO_WEB_MEDIA_URL", WebMediaURLSettingKey, EnvScopeStored},
 	{"SILO_LAN_DISCOVERY", ServerLANDiscoverySettingKey, EnvScopeStored},
 	{"SILO_LOG_LEVEL", "server.log_level", EnvScopeStored},
 	{"SILO_LOG_FORMAT", serverLogFormatSettingKey, EnvScopeStored},
@@ -53,6 +60,7 @@ var envSettingVars = []EnvSettingVar{
 	{"SILO_SEARCH_PROVIDER", "catalog.search.provider", EnvScopeStored},
 	{"SILO_MEILISEARCH_URL", "catalog.search.meilisearch.url", EnvScopeStored},
 	{"SILO_MEILISEARCH_API_KEY", "catalog.search.meilisearch.api_key", EnvScopeStored},
+	{"SILO_MEILISEARCH_INDEX", "catalog.search.meilisearch.index", EnvScopeStored},
 
 	{"SILO_ARTWORK_STORAGE", "artwork.storage_backend", EnvScopeStored},
 	{"SILO_ARTWORK_PATH", "artwork.local_path", EnvScopeStored},
@@ -85,14 +93,32 @@ var envSettingVars = []EnvSettingVar{
 	{"SILO_SMTP_FROM_ADDRESS", "email.from_address", EnvScopeStored},
 	{"SILO_SMTP_FROM_NAME", "email.from_name", EnvScopeStored},
 
+	{"SILO_DISCORD_CLIENT_ID", "discord.client_id", EnvScopeStored},
+	{"SILO_DISCORD_CLIENT_SECRET", "discord.client_secret", EnvScopeStored},
+	{"SILO_DISCORD_BOT_TOKEN", "discord.bot_token", EnvScopeStored},
+
 	{"SILO_FFMPEG_PATH", "playback.ffmpeg_path", EnvScopeStored},
 	{"SILO_HW_ACCEL", "playback.hw_accel", EnvScopeStored},
 	{"SILO_HW_DEVICE", "playback.hw_device", EnvScopeStored},
 	{"SILO_TRANSCODE_DIR", playbackTranscodeDirSettingKey, EnvScopeStored},
 	{"SILO_TRANSCODE_ENABLED", "playback.transcode_enabled", EnvScopeStored},
 	{"SILO_DOWNLOAD_ARTIFACT_DIR", downloadArtifactDirSettingKey, EnvScopeStored},
+	{"SILO_DOWNLOAD_ARTIFACT_MAX_BYTES", "download.artifact_max_bytes", EnvScopeStored},
+
+	{"SILO_SCANNER_REALTIME_MONITORING", "scanner.realtime_monitoring", EnvScopeStored},
+
+	{BackupEnabledEnvVar, BackupEnabledSettingKey, EnvScopeStored},
+	{"SILO_BACKUP_TIME", BackupTimeSettingKey, EnvScopeStored},
+	{"SILO_BACKUP_KEEP", BackupKeepSettingKey, EnvScopeStored},
+	{"SILO_BACKUP_INCLUDE_SUBTITLES", BackupIncludeSubtitlesSettingKey, EnvScopeStored},
+	{"SILO_BACKUP_INCLUDE_INTRO_FINGERPRINTS", BackupIncludeIntroFingerprintsSettingKey, EnvScopeStored},
+
+	{"SILO_RECOMMENDATIONS_ENABLED", "recommendations.enabled", EnvScopeStored},
+	{"SILO_RECOMMENDATIONS_PROVIDER", EmbeddingProviderSettingKey, EnvScopeStored},
+	{"SILO_RECOMMENDATIONS_MODEL", "recommendations.embedding_model", EnvScopeStored},
 
 	{"SILO_TMDB_API_KEY", "tmdb.api_key", EnvScopeStored},
+	{"SILO_MDBLIST_API_KEY", "mdblist.api_key", EnvScopeStored},
 
 	{"SILO_DB_MAX_CONNECTIONS", "database.max_connections", EnvScopeProcess},
 	{"SILO_USERDB_POOL_MAX_OPEN", "userdb.pool_max_open", EnvScopeProcess},
@@ -110,14 +136,37 @@ type EnvSetting struct {
 type EnvSettings []EnvSetting
 
 // ReadEnvSettings returns the settings the environment sets. A blank or unset
-// variable sets nothing. Each value is normalized the way an admin save
-// normalizes it, and an invalid value is an error naming the variable.
-func ReadEnvSettings(getenv func(string) string) (EnvSettings, error) {
+// variable sets nothing. A setting whose key is in secretKeys (the settings
+// stored encrypted) can instead be read from the file its _FILE variant
+// names; the setting then records that variable as the one that sets it.
+// Each value is normalized the way an admin save normalizes it, and an
+// invalid value is an error naming the variable.
+func ReadEnvSettings(getenv func(string) string, secretKeys map[string]bool) (EnvSettings, error) {
 	var out EnvSettings
 	for _, v := range envSettingVars {
-		raw := strings.TrimSpace(getenv(v.Var))
-		if raw == "" {
-			continue
+		var raw string
+		fromFile := false
+		if secretKeys[v.Key] {
+			var (
+				usedVar string
+				err     error
+			)
+			if raw, usedVar, err = envutil.LookupSecret(getenv, v.Var); err != nil {
+				return nil, err
+			}
+			fromFile = usedVar != v.Var
+			v.Var = usedVar
+		} else {
+			raw = getenv(v.Var)
+		}
+		// Direct values trim whitespace and treat blank as unset. Values from
+		// _FILE already passed LookupSecret's blank check and keep everything
+		// past the single removed line ending intact.
+		if !fromFile {
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				continue
+			}
 		}
 		normalized, err := NormalizeAdminSetting(v.Key, raw)
 		if err != nil {

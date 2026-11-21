@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
 type handshakePlugin struct {
@@ -57,21 +58,27 @@ func (f *handshakeCompleter) LinkOAuthIdentity(_ context.Context, in auth.OAuthL
 }
 
 type handshakeRig struct {
-	h         http.Handler
-	plugin    *handshakePlugin
-	completer *handshakeCompleter
+	h            http.Handler
+	plugin       *handshakePlugin
+	completer    *handshakeCompleter
+	callbackMode string
 }
 
 func newHandshakeRig(t *testing.T) *handshakeRig {
 	t.Helper()
+	return newHandshakeRigOnURL(t, "https://silo.example")
+}
+
+func newHandshakeRigOnURL(t *testing.T, publicURL string) *handshakeRig {
+	t.Helper()
 	rig := &handshakeRig{plugin: new(handshakePlugin), completer: new(handshakeCompleter)}
 	svc := auth.NewOAuthHandler(auth.OAuthHandlerDeps{
-		Store: auth.NewInMemoryOAuthStore(), StateSecret: []byte("synthetic-state-secret"), HostBaseURL: "https://silo.example",
-		ResolveClient: func(_ context.Context, id int) (auth.OAuthClient, string, error) {
+		Store: auth.NewInMemoryOAuthStore(), StateSecret: []byte("synthetic-state-secret"), HostBaseURL: publicURL,
+		ResolveClient: func(_ context.Context, id int) (auth.OAuthClient, string, string, error) {
 			if id != 3 {
-				return nil, "", context.Canceled
+				return nil, "", "", context.Canceled
 			}
-			return rig.plugin, "fixture", nil
+			return rig.plugin, "fixture", rig.callbackMode, nil
 		},
 		LoginCompleter: rig.completer,
 		ServerID:       func(context.Context) (string, error) { return fixtureServerID, nil },
@@ -321,5 +328,87 @@ func TestLinkingRefusalsShareProblemTypes(t *testing.T) {
 	}
 	if !errors.Is(auth.ErrProviderAccountDisabled, auth.ErrUserDisabled) {
 		t.Fatal("ErrProviderAccountDisabled no longer wraps ErrUserDisabled; the ordering this test guards is moot")
+	}
+}
+
+func TestStableOAuthCallbackThroughStrippedPublicPath(t *testing.T) {
+	const publicPath = "/media"
+	rig := newHandshakeRigOnURL(t, "https://silo.example"+publicPath)
+	rig.callbackMode = plugins.AuthCallbackStable
+	rig.h = http.StripPrefix(publicPath, rig.h)
+	base := "https://silo.example" + publicPath + Prefix + "/auth/oauth/"
+	rec := rig.serve(http.MethodGet, base+"3/start")
+	cookie := binderCookie(t, rec)
+	wantRedirect := base + "callback"
+	if got := rig.plugin.init.GetRedirectUri(); got != wantRedirect {
+		t.Fatalf("redirect URI = %q, want %q", got, wantRedirect)
+	}
+	if cookie.Path != publicPath+Prefix+"/auth/oauth/callback" || !cookie.Secure {
+		t.Fatalf("cookie = %+v", cookie)
+	}
+	query := "?code=provider-code&state=" + url.QueryEscape(rig.plugin.init.GetState())
+	rec = rig.serve(http.MethodGet, base+"3/callback"+query, cookie)
+	if rec.Header().Get("Location") != "/login?error=oauth_failed&reason=state_invalid" || rig.plugin.exchanges != 0 {
+		t.Fatalf("numeric callback: %d %v, exchanges %d", rec.Code, rec.Header(), rig.plugin.exchanges)
+	}
+
+	// Changing the default affects future flows. The outstanding flow still
+	// exchanges on the URI it sent to the provider.
+	rig.callbackMode = plugins.AuthCallbackInstallation
+	rec = rig.serve(http.MethodGet, wantRedirect+query, cookie)
+	if !strings.HasPrefix(rec.Header().Get("Location"), "https://silo.example/media/login/oauth-complete?code=") ||
+		rig.plugin.exchange.GetRedirectUri() != wantRedirect || rig.completer.in.InstallationID != 3 {
+		t.Fatalf("stable callback: %d %v, exchange %v", rec.Code, rec.Header(), rig.plugin.exchange)
+	}
+	var cleared *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == cookie.Name {
+			cleared = c
+			break
+		}
+	}
+	if cleared == nil || cleared.Path != cookie.Path || cleared.MaxAge >= 0 || !cleared.Secure {
+		t.Fatalf("clearing cookie = %+v", cleared)
+	}
+	rec = rig.serve(http.MethodGet, wantRedirect+query, cookie)
+	if rec.Header().Get("Location") != "/login?error=oauth_failed&reason=session_expired" || rig.plugin.exchanges != 1 {
+		t.Fatalf("callback replay: %d %v, exchanges %d", rec.Code, rec.Header(), rig.plugin.exchanges)
+	}
+}
+
+func TestAdminOAuthInstallationReportsBindingCallbackMode(t *testing.T) {
+	reg := &Registry{deps: Dependencies{OAuth: fakeOAuth{}}}
+	installation := handlers.PluginInstallationView{
+		ID: 3, Enabled: true,
+		Capabilities: []handlers.PluginCapabilityView{
+			{Type: "auth_provider.v1", ID: "oidc", AuthModes: []string{"oauth2"}},
+			{Type: "auth_provider.v1", ID: "ldap", AuthModes: []string{"password"}},
+		},
+		AuthBindings: []handlers.PluginAuthBindingView{
+			{CapabilityID: "oidc", Enabled: true, CallbackMode: plugins.AuthCallbackStable},
+			{CapabilityID: "ldap", CallbackMode: plugins.AuthCallbackInstallation},
+		},
+	}
+	out, err := reg.adminPluginInstallationOf(installation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://silo.example.test/api/v2/auth/oauth/callback"
+	if got := out.Capabilities[0].CallbackURL; got == nil || *got != want {
+		t.Fatalf("OAuth capability callback = %v", got)
+	}
+	if got := out.AuthBindings[0]; got.CallbackURL != want || got.CallbackMode != plugins.AuthCallbackStable || got.CallbackPending {
+		t.Fatalf("OAuth binding = %+v", got)
+	}
+	if got := out.AuthBindings[1]; got.CallbackURL != "" || got.CallbackMode != "" {
+		t.Fatalf("password binding = %+v", got)
+	}
+	reg.deps.OAuth = auth.NewOAuthHandler(auth.OAuthHandlerDeps{})
+	out, err = reg.adminPluginInstallationOf(installation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := out.AuthBindings[0]; !got.CallbackPending || got.CallbackURL != "" {
+		t.Fatalf("OAuth binding without public URL = %+v", got)
 	}
 }

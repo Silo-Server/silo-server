@@ -65,6 +65,12 @@ interface CatalogFilterSheetProps {
   sortRelevanceScope?: QuerySortRelevanceScope;
   editorMode: "guided" | "advanced";
   onEditorModeChange: (mode: "guided" | "advanced") => void;
+  /**
+   * False hides Advanced's Sort by. A search sorts from the toolbar, which
+   * offers Relevance; Advanced's list has no Relevance and would show the
+   * Date Added placeholder instead. Guided never shows a sort here.
+   */
+  showAdvancedSort?: boolean;
   /** False when the rules use options Guided can't show; Guided is then off. */
   guidedAvailable?: boolean;
   queryDefinition: QueryDefinition;
@@ -89,6 +95,7 @@ export default function CatalogFilterSheet({
   sortRelevanceScope,
   editorMode,
   onEditorModeChange,
+  showAdvancedSort = true,
   guidedAvailable = true,
   queryDefinition,
   onQueryDefinitionChange,
@@ -117,12 +124,14 @@ export default function CatalogFilterSheet({
 
         <PortalContainerContext.Provider value={portalContainer}>
           <SheetHeader className="border-b pb-3">
-            <div className="flex items-start justify-between gap-4">
-              <div>
+            {/* The mode buttons drop below the text on a narrow phone rather than
+                squeezing the title and subtitle into a column a few letters wide. */}
+            <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+              <div className="grow basis-40">
                 <SheetTitle>{t("web.catalog.filters.heading")}</SheetTitle>
                 <SheetDescription>{t("web.catalog.filters.subtitle")}</SheetDescription>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1">
                 <Button
                   type="button"
                   variant={editorMode === "guided" ? "default" : "outline"}
@@ -159,6 +168,7 @@ export default function CatalogFilterSheet({
                   allowPersonalizedFilters={allowPersonalizedFilters}
                   allowPersonalizedSorts={allowPersonalizedSorts}
                   sortRelevanceScope={sortRelevanceScope}
+                  showSortControls={showAdvancedSort}
                 />
               ) : (
                 <CollectionGuidedRulesEditor

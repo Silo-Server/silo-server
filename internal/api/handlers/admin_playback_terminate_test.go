@@ -14,7 +14,8 @@ import (
 
 // TestAdminTerminateStopsThenNotifies drives the v2 terminate against a live
 // session: the session is stopped first, the client is notified only when a
-// lane is open, and a repeat on the now-unknown session is 404.
+// lane is open, and a repeat on the now-unknown session (one without an
+// attempt row, as on the bridge) is 404.
 func TestAdminTerminateStopsThenNotifies(t *testing.T) {
 	for _, lane := range []string{"offline", "online"} {
 		t.Run(lane, func(t *testing.T) {
@@ -190,5 +191,57 @@ func TestAdminTerminateEndsAJellyfinPlayHeldElsewhere(t *testing.T) {
 	// A session neither surface knows stays unknown.
 	if _, err := control.Terminate(t.Context(), AdminTerminateInput{SessionID: uuid.NewString(), ActorID: 2}); !errors.Is(err, playback.ErrSessionNotFound) {
 		t.Fatalf("unknown session err = %v", err)
+	}
+}
+
+// TestAdminTerminateRepeatConverges: a terminate of a session an
+// administrator already ended answers the converged receipt and dispatches
+// nothing, while a session its player stopped first stays unknown. Both rest
+// on the attempt row, which every replica reads.
+func TestAdminTerminateRepeatConverges(t *testing.T) {
+	for _, earlier := range []string{"terminate", "player stop"} {
+		t.Run(earlier, func(t *testing.T) {
+			control, sessionMgr, hub, session := newAdminPlaybackControlTestHandler(t)
+			if err := control.playback.PlanStoreV3.SaveAttempt(t.Context(), playback.AttemptRecordV3{
+				PlaybackAttemptID: uuid.NewString(), SessionID: session.ID, UserID: 1, ProfileID: "profile-1",
+				RequestedMediaFileID: 100, EffectiveMediaFileID: 100, ExpiresAt: time.Now().Add(time.Hour),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			conn := &adminPlaybackControlTestConn{}
+			registration := hub.Register(session.ID, conn)
+			if registration == nil {
+				t.Fatal("register lane")
+			}
+			t.Cleanup(func() { hub.Unregister(registration) })
+
+			if earlier == "terminate" {
+				if _, err := control.Terminate(t.Context(), AdminTerminateInput{SessionID: session.ID, ActorID: 2}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				// The player's stop won the row and ended the live session.
+				stopAttemptAs(control.playback, session.ID, uuid.NewString())
+				if err := sessionMgr.StopSession(session.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			sent := len(conn.messages)
+
+			view, err := control.Terminate(t.Context(), AdminTerminateInput{SessionID: session.ID, ActorID: 2, Reason: "again"})
+			if earlier == "player stop" {
+				if !errors.Is(err, playback.ErrSessionNotFound) || errors.Is(err, ErrSessionEndedByAdmin) {
+					t.Fatalf("terminate after a player stop: %+v, %v; want not found", view, err)
+				}
+			} else {
+				want := AdminTerminateView{SessionID: session.ID, AuthorityRevoked: true, AlreadyRevoked: true, DurableState: AdminTerminateDurableStopped, Delivery: AdminTerminateDeliveryNone}
+				if err != nil || view != want {
+					t.Fatalf("repeat = %+v, %v; want %+v", view, err, want)
+				}
+			}
+			if len(conn.messages) != sent {
+				t.Fatalf("repeat dispatched %d more messages", len(conn.messages)-sent)
+			}
+		})
 	}
 }

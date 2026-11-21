@@ -1857,6 +1857,49 @@ subscription snapshot is `null`. FFmpeg output for every attempt, on the API hos
 or a node, is logged under the row's `log_session_id` (`download-prepare-<id>`) as
 `playback_session_id`. None of this changes the client-facing download contract.
 
+### Client addresses (admin)
+
+Administrator download rows (`GET /api/v2/admin/downloads/entries` and
+`GET /api/v2/admin/users/{id}/downloads`) carry `created_client_ip`, where the
+device registered the download from, and `last_client_ip`, where it was last
+seen. Both come from the trusted-proxy resolution playback history uses for its
+`client_ip` (`internal/clientip`), never from a raw forwarding header, and are
+`null` when nothing was recorded. A row registered before servers recorded
+them starts with both `null`; a later status report or file request fills its
+`last_client_ip`, and its `created_client_ip` stays `null`. `client_ip` in
+`GET /api/v2/admin/downloads/storage/capabilities` says the rows carry them.
+
+What records an address:
+
+| Request | Records |
+|---|---|
+| Registration: `POST /downloads`, series and season creates, and the monitor request that inserts episode rows (sync; native monitor create and update insert none) | Both fields, from the request that inserted the row. A monitor sync is the device's own request, so the episodes it registers take the device's address. |
+| Accepted status report (`PATCH /downloads/{id}`) | `last_client_ip`, in the same write as the report. An older or equal event changes nothing. |
+| `GET`/`HEAD /downloads/{id}/file` | `last_client_ip`. The API server authorizes the request and serves the bytes itself, from its disk or relayed from the node that holds the prepared file, so it sees the device. |
+| `GET`/`HEAD /downloads/{id}/file-proxy` | `last_client_ip`, when the API server authorizes the request. The bytes then come from the node the 307 names, which records nothing, so range requests the device sends straight to the node do not update it. |
+
+A file request writes `last_client_ip` only when the address differs from the
+stored one and the stored one is at least a minute old, so a transfer's range
+requests from one address cost no write and a device that alternates addresses
+rewrites it at most once a minute. Download bytes are never handed out as
+object-storage URLs; artwork and subtitle requests do not record an address.
+Administrator actions (revoke, deleting prepared files, clean-up) never change either
+field, and ephemeral web rows record only `created_client_ip`, which no
+administrator route shows.
+
+### Download change events (admin)
+
+Triggers on `downloads` queue a row in `download_change_events` whenever a
+managed download is inserted, changes `status`, `revision`, `content_id` or
+`episode_id` (a catalog merge moving it to another title), or is deleted,
+including by cascade; every API server drains the outbox and publishes
+`download.changed` on the admin-only `downloads` realtime channel, which an
+`admin:monitor:read` key may join. The event names the download, account,
+profile, device, title and status, never a prepared file, path or error text
+(see [download changes](realtime-api.md#download-changes)). It is separate from
+the per-user `download` event on `user_state` (section 9.4), which reaches only
+the owning profile.
+
 ### Pausing and canceling preparation (admin)
 
 A paused job keeps its queued status and claim position; `paused_at` hides it

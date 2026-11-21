@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Iestatīts mezgla vidē. Mainiet to tur un restartējiet mezglu."
+      "value": "Šo vērtību iestata vide. Mainiet to tur un restartējiet attiecīgo pakalpojumu."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "Lai turpinātu, pierakstieties, izmantojot sava tīkla pierakstīšanos."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Šo mezglu iestata servera izvietošanas konfigurācija. Noņemiet to tur un restartējiet API serverus, lai to pārvaldītu šeit."
     }
   ],
   "error.not_acceptable": [
@@ -2052,6 +2058,110 @@
     {
       "type": 0,
       "value": "Lietotnes valoda"
+    }
+  ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Beigās"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minūtes pirms beigām"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minūte pirms beigām"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minūtes pirms beigām"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundes pirms beigām"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekunde pirms beigām"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekundes pirms beigām"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Rādīt nākamās epizodes"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Izslēgts"
     }
   ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
@@ -14079,7 +14189,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to rādītā kolekcija nav ne šeit, ne dublējumā"
+              "value": " vienumus – to rādītā kolekcija nav ne šeit, ne dublējumā"
             }
           ]
         },
@@ -14095,7 +14205,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tā rādītā kolekcija nav ne šeit, ne dublējumā"
+              "value": " vienumu – tā rādītā kolekcija nav ne šeit, ne dublējumā"
             }
           ]
         },
@@ -14111,7 +14221,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to rādītā kolekcija nav ne šeit, ne dublējumā"
+              "value": " vienumus – to rādītā kolekcija nav ne šeit, ne dublējumā"
             }
           ]
         }
@@ -14137,7 +14247,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to iestatījumi ir šifrēti ar citu SECRET_KEY"
+              "value": " vienumus – to iestatījumi ir šifrēti ar citu SECRET_KEY"
             }
           ]
         },
@@ -14153,7 +14263,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tā iestatījumi ir šifrēti ar citu SECRET_KEY"
+              "value": " vienumu – tā iestatījumi ir šifrēti ar citu SECRET_KEY"
             }
           ]
         },
@@ -14169,7 +14279,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to iestatījumi ir šifrēti ar citu SECRET_KEY"
+              "value": " vienumus – to iestatījumi ir šifrēti ar citu SECRET_KEY"
             }
           ]
         }
@@ -14195,7 +14305,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šis serveris tos nevar pieņemt"
+              "value": " vienumus – šis serveris tos nevar pieņemt"
             }
           ]
         },
@@ -14211,7 +14321,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — šis serveris to nevar pieņemt"
+              "value": " vienumu – šis serveris to nevar pieņemt"
             }
           ]
         },
@@ -14227,7 +14337,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šis serveris tos nevar pieņemt"
+              "value": " vienumus – šis serveris tos nevar pieņemt"
             }
           ]
         }
@@ -14311,7 +14421,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šajā serverī trūkst to failu"
+              "value": " vienumus – šajā serverī trūkst to failu"
             }
           ]
         },
@@ -14327,7 +14437,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — šajā serverī trūkst tā failu"
+              "value": " vienumu – šajā serverī trūkst tā failu"
             }
           ]
         },
@@ -14343,7 +14453,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šajā serverī trūkst to failu"
+              "value": " vienumus – šajā serverī trūkst to failu"
             }
           ]
         }
@@ -14369,7 +14479,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to mapju nav šajā serverī"
+              "value": " vienumus – to mapju nav šajā serverī"
             }
           ]
         },
@@ -14385,7 +14495,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tā mapju nav šajā serverī"
+              "value": " vienumu – tā mapju nav šajā serverī"
             }
           ]
         },
@@ -14401,7 +14511,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to mapju nav šajā serverī"
+              "value": " vienumus – to mapju nav šajā serverī"
             }
           ]
         }
@@ -14427,7 +14537,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to piekļuves grupa nav šajā serverī"
+              "value": " vienumus – to piekļuves grupa nav šajā serverī"
             }
           ]
         },
@@ -14443,7 +14553,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tā piekļuves grupa nav šajā serverī"
+              "value": " vienumu – tā piekļuves grupa nav šajā serverī"
             }
           ]
         },
@@ -14459,7 +14569,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to piekļuves grupa nav šajā serverī"
+              "value": " vienumus – to piekļuves grupa nav šajā serverī"
             }
           ]
         }
@@ -14485,7 +14595,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šī servera katalogā nav to satura"
+              "value": " vienumus – to nosaukuma nav šī servera katalogā"
             }
           ]
         },
@@ -14501,7 +14611,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — šī servera katalogā nav tā satura"
+              "value": " vienumu – tā nosaukuma nav šī servera katalogā"
             }
           ]
         },
@@ -14517,7 +14627,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šī servera katalogā nav to satura"
+              "value": " vienumus – to nosaukuma nav šī servera katalogā"
             }
           ]
         }
@@ -14543,7 +14653,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie paplašinātu piekļuvi, tāpēc šis serveris saglabā savas stingrākās vērtības"
+              "value": " vienumus – tie paplašinātu piekļuvi, tāpēc šis serveris saglabā savas stingrākās vērtības"
             }
           ]
         },
@@ -14559,7 +14669,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tas paplašinātu piekļuvi, tāpēc šis serveris saglabā savas stingrākās vērtības"
+              "value": " vienumu – tas paplašinātu piekļuvi, tāpēc šis serveris saglabā savas stingrākās vērtības"
             }
           ]
         },
@@ -14575,7 +14685,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie paplašinātu piekļuvi, tāpēc šis serveris saglabā savas stingrākās vērtības"
+              "value": " vienumus – tie paplašinātu piekļuvi, tāpēc šis serveris saglabā savas stingrākās vērtības"
             }
           ]
         }
@@ -14601,7 +14711,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to bibliotēka nav šajā serverī"
+              "value": " vienumus – to bibliotēka nav šajā serverī"
             }
           ]
         },
@@ -14617,7 +14727,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tā bibliotēka nav šajā serverī"
+              "value": " vienumu – tā bibliotēka nav šajā serverī"
             }
           ]
         },
@@ -14633,7 +14743,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to bibliotēka nav šajā serverī"
+              "value": " vienumus – to bibliotēka nav šajā serverī"
             }
           ]
         }
@@ -14659,7 +14769,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to bibliotēku šeit nevar atjaunot"
+              "value": " vienumus – to bibliotēku šeit nevar atjaunot"
             }
           ]
         },
@@ -14675,7 +14785,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tā bibliotēku šeit nevar atjaunot"
+              "value": " vienumu – tā bibliotēku šeit nevar atjaunot"
             }
           ]
         },
@@ -14691,7 +14801,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to bibliotēku šeit nevar atjaunot"
+              "value": " vienumus – to bibliotēku šeit nevar atjaunot"
             }
           ]
         }
@@ -14758,6 +14868,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nevar atjaunot "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vienumus – šī servera vide nosaka atšķirīgos iestatījumus vai daļu no savienojuma, kuram tie pieder"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nevar atjaunot "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vienumu – šī servera vide nosaka atšķirīgos iestatījumus vai daļu no savienojuma, kuram tie pieder"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nevar atjaunot "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vienumus – šī servera vide nosaka atšķirīgos iestatījumus vai daļu no savienojuma, kuram tie pieder"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14775,7 +14943,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie ir šifrēti ar citu SECRET_KEY"
+              "value": " vienumus – tie ir šifrēti ar citu SECRET_KEY"
             }
           ]
         },
@@ -14791,7 +14959,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tas ir šifrēts ar citu SECRET_KEY"
+              "value": " vienumu – tas ir šifrēts ar citu SECRET_KEY"
             }
           ]
         },
@@ -14807,7 +14975,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie ir šifrēti ar citu SECRET_KEY"
+              "value": " vienumus – tie ir šifrēti ar citu SECRET_KEY"
             }
           ]
         }
@@ -14833,7 +15001,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie vispirms jāinstalē no spraudņu kataloga"
+              "value": " vienumus – tie vispirms jāinstalē no spraudņu kataloga"
             }
           ]
         },
@@ -14849,7 +15017,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tas vispirms jāinstalē no spraudņu kataloga"
+              "value": " vienumu – tas vispirms jāinstalē no spraudņu kataloga"
             }
           ]
         },
@@ -14865,7 +15033,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie vispirms jāinstalē no spraudņu kataloga"
+              "value": " vienumus – tie vispirms jāinstalē no spraudņu kataloga"
             }
           ]
         }
@@ -14891,7 +15059,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — kopā ar tiem jāatjauno to primārais profils"
+              "value": " vienumus – kopā ar tiem jāatjauno to primārais profils"
             }
           ]
         },
@@ -14907,7 +15075,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — kopā ar to jāatjauno tā primārais profils"
+              "value": " vienumu – kopā ar to jāatjauno tā primārais profils"
             }
           ]
         },
@@ -14923,7 +15091,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — kopā ar tiem jāatjauno to primārais profils"
+              "value": " vienumus – kopā ar tiem jāatjauno to primārais profils"
             }
           ]
         }
@@ -14949,7 +15117,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — dublējumā to nav"
+              "value": " vienumus – dublējumā to nav"
             }
           ]
         },
@@ -14965,7 +15133,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — dublējumā tā nav"
+              "value": " vienumu – dublējumā tā nav"
             }
           ]
         },
@@ -14981,7 +15149,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — dublējumā to nav"
+              "value": " vienumus – dublējumā to nav"
             }
           ]
         }
@@ -15181,7 +15349,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šis serveris tiem dotu plašāku piekļuvi nekā dublējumā"
+              "value": " vienumus – šis serveris tiem dotu plašāku piekļuvi nekā dublējumā"
             }
           ]
         },
@@ -15197,7 +15365,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — šis serveris tam dotu plašāku piekļuvi nekā dublējumā"
+              "value": " vienumu – šis serveris tam dotu plašāku piekļuvi nekā dublējumā"
             }
           ]
         },
@@ -15213,7 +15381,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šis serveris tiem dotu plašāku piekļuvi nekā dublējumā"
+              "value": " vienumus – šis serveris tiem dotu plašāku piekļuvi nekā dublējumā"
             }
           ]
         }
@@ -15297,7 +15465,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šeit tie jau ir tādi paši"
+              "value": " vienumus – šeit tie jau ir tādi paši"
             }
           ]
         },
@@ -15313,7 +15481,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — šeit tas jau ir tāds pats"
+              "value": " vienumu – šeit tas jau ir tāds pats"
             }
           ]
         },
@@ -15329,7 +15497,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — šeit tie jau ir tādi paši"
+              "value": " vienumus – šeit tie jau ir tādi paši"
             }
           ]
         }
@@ -15413,7 +15581,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to kopiju dublējumā nevar nolasīt"
+              "value": " vienumus – to kopiju dublējumā nevar nolasīt"
             }
           ]
         },
@@ -15429,7 +15597,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tā kopiju dublējumā nevar nolasīt"
+              "value": " vienumu – tā kopiju dublējumā nevar nolasīt"
             }
           ]
         },
@@ -15445,7 +15613,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — to kopiju dublējumā nevar nolasīt"
+              "value": " vienumus – to kopiju dublējumā nevar nolasīt"
             }
           ]
         }
@@ -15471,7 +15639,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie izveido savienojumu ar ārējiem pakalpojumiem, un šis serveris nevar pārbaudīt dublējumu"
+              "value": " vienumus – tie izveido savienojumu ar ārējiem pakalpojumiem, un šis serveris nevar pārbaudīt dublējumu"
             }
           ]
         },
@@ -15487,7 +15655,7 @@
             },
             {
               "type": 0,
-              "value": " vienumu — tas izveido savienojumu ar ārējiem pakalpojumiem, un šis serveris nevar pārbaudīt dublējumu"
+              "value": " vienumu – tas izveido savienojumu ar ārējiem pakalpojumiem, un šis serveris nevar pārbaudīt dublējumu"
             }
           ]
         },
@@ -15503,7 +15671,7 @@
             },
             {
               "type": 0,
-              "value": " vienumus — tie izveido savienojumu ar ārējiem pakalpojumiem, un šis serveris nevar pārbaudīt dublējumu"
+              "value": " vienumus – tie izveido savienojumu ar ārējiem pakalpojumiem, un šis serveris nevar pārbaudīt dublējumu"
             }
           ]
         }
@@ -15616,6 +15784,52 @@
     {
       "type": 0,
       "value": "Pakalpojuma adrese mainās, bet dublējumā nav tā akreditācijas datu, tāpēc atjaunošana tos šeit notīra un izslēdz pakalpojumu, līdz tie tiek ievadīti vēlreiz."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " iestatījumi saglabā pašreizējās vērtības, jo šī servera vide nosaka tos vai daļu no to savienojuma."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " iestatījums saglabā pašreizējo vērtību, jo šī servera vide nosaka to vai daļu no tā savienojuma."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " iestatījumi saglabā pašreizējās vērtības, jo šī servera vide nosaka tos vai daļu no to savienojuma."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -16182,8 +16396,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Paslēpt tos"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt tos"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt to"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt tos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16368,8 +16610,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Rādīt tos"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt tos"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt to"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt tos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -19116,6 +19386,12 @@
       "value": "Šeit ar tā lietotājvārdu vai e-pasta adresi pierakstās cits konts."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Šī servera vide nosaka atšķirīgos iestatījumus vai daļu no savienojuma, kuram tie pieder, tāpēc šis serveris saglabā pašreizējās vērtības."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19754,6 +20030,166 @@
       "value": "."
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Fona attēls"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijas vienumi"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijas vienums"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijas vienumi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Kolekcija aizstāta"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Konfigurācija"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Apraksts"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Ieslēgts"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Izcelts"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Vienumu ierobežojums"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Vienumu kārtošana"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Bibliotēkas"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Novietojums"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Plakāts"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Kārtošanas secība"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Avots"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Sinhronizācijas grafiks"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Nosaukums"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Nosaukuma tulkojums"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Tips"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Redzamība"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Tikai tīmeklī"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -20374,6 +20810,16 @@
     {
       "type": 0,
       "value": " (saglabāts: stingrāks)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (saglabāts: vide)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -21584,6 +22030,20 @@
       "value": "Servera laika joslā."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Servera laika joslā. Jūsu laika joslā tas ir plkst. "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -22628,20 +23088,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Paslēpt kontus"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt kontu"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt kontus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt kontus"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Paslēpt failus"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt failu"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt failus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt failus"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Paslēpt failus"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt failu"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt failus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt failus"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -23134,8 +23672,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Rādīt kontus"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt kontu"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt kontus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt kontus"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -23198,14 +23762,66 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Rādīt failus"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt failu"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt failus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt failus"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Rādīt failus"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt failu"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt failus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt failus"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -31992,6 +32608,12 @@
       "value": "neizdevās"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Uzdevums neizdevās. Sīkāku informāciju skatiet administratora diagnostikā."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -34244,7 +34866,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Nesen sākto atskaņošanas sesiju plūsma"
+      "value": "Jaunākie atskaņojumi visos kontos"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -36048,6 +36670,88 @@
     {
       "type": 0,
       "value": "Neizdevās ielādēt aktivitāti."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " atskaņoja vienumu "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„"
+        },
+        {
+          "type": 1,
+          "value": "title"
+        },
+        {
+          "type": 0,
+          "value": "”"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " atskaņoja vienumu "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„"
+        },
+        {
+          "type": 1,
+          "value": "title"
+        },
+        {
+          "type": 0,
+          "value": "”"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -56082,6 +56786,12 @@
       "value": "Ievadiet servera adresi, lai pabeigtu iestatījumus."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Atslēga iestatīta servera izvietošanas konfigurācijā"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -57026,6 +57736,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Iestatīts servera izvietošanas konfigurācijā. Noņemiet to tur un restartējiet API serverus, lai to dzēstu šeit."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -59006,6 +59722,68 @@
       "value": "Spraudņi"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Piemērots"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Aizturēts"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Neizdevās ielādēt spraudņu nodrošināšanas statusu."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Pārvalda vide"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Gaida"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Noraidīts"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Pakotnes avotu un noņemšanu pārvalda izvietojums."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Nodrošināšanas statuss"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Izvietojums piesaista šo spraudni versijai "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -59313,7 +60091,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Uzdevumi tiek reģistrēti, kad serveris startē, tāpēc uzdevuma ieslēgšana vai izslēgšana stājas spēkā pēc restartēšanas. Kad uzdevums ir izveidots, mainiet tā grafiku uzdevuma lapā."
+      "value": "Uzdevuma ieslēgšana vai izslēgšana stājas spēkā bez restartēšanas, taču citiem serveriem var būt vajadzīgs brīdis, lai to pārņemtu. Kad uzdevums ir ieslēgts, mainiet tā grafiku uzdevuma lapā."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -59768,6 +60546,136 @@
       "value": "Izslēgts. Izpildes tikai notīra vecos nosaukumus."
     }
   ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Ģenerēšana ir apturēta. Saglabātie ieteikumi paliek redzami sadaļā „Atklāt”, līdz serveris tiks restartēts."
+    }
+  ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Notiek profilu ranžēšana ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Notiek TMDB sarakstu ielāde ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Notiek nosaukumu uzmeklēšana un iegulumu izveide ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Notīrīti "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " novecojuši nosaukumi"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Notīrīts "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " novecojis nosaukums"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Notīrīti "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " novecojuši nosaukumi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -59824,6 +60732,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Pirms ieteikumu izveides sadaļai „Atklāt” novērsiet tālāk norādīto iegulumu bloķēšanas konfliktu."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Vispirms palaidiet darbu „Iegulumi”, lai Silo būtu bibliotēkas vektori, ar kuriem salīdzināt."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Pirms ieteikumu izveides sadaļai „Atklāt” pievienojiet iegulumu nodrošinātāju sadaļā „MI pakalpojumi”."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Nevienam profilam vēl nav gaumes profila. Palaidiet darbu „Gaumes profili”, kad kāds noskatīsies vai novērtēs nosaukumus."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -62046,6 +62978,32 @@
       "value": "Paliek tukša, līdz ieteikumi sadaļai „Atklāt” tiek ieslēgti sadaļā „Administrēšana → Ieteikumi”."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Ieteikumu rindas paliek tukšas, līdz ieteikumi sadaļai „Atklāt” tiek ieslēgti sadaļā „"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Administrēšana → Ieteikumi"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Izslēgts sadaļā „Ieteikumi”"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -63661,6 +64619,12 @@
       "value": "Jaunās rindas tiek novietotas lapas „Atklāt” apakšā"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Atvērt ieteikumu iestatījumus"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -63673,6 +64637,12 @@
       "value": "MDBList plūsmā nav iekļauta kārtošana, kas saglabāta saraksta lapā. Atlasiet to, kas tajā redzama."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Jūsu profilam vēl nav ieteikumu sadaļai „Atklāt”. Lai priekšskatītu šo rindu, palaidiet ieteikumu izveidi sadaļai „Atklāt” vai noskatieties un novērtējiet dažus nosaukumus."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -63683,6 +64653,12 @@
     {
       "type": 0,
       "value": "Atlasiet sarakstu vai ielīmējiet tā saiti, lai redzētu tā nosaukumus."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Lai priekšskatītu šo rindu, ieslēdziet ieteikumus sadaļai „Atklāt” sadaļā „Administrēšana → Ieteikumi”."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -64617,6 +65593,12 @@
     {
       "type": 0,
       "value": "Ziņojums nosūtīts"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Atskaņotājs neapstiprināja ziņojuma saņemšanu. Ziņojums var parādīties ar aizkavi vai neparādīties nemaz."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -67570,6 +68552,12 @@
       "value": "Savienojuma pārbaude neizdevās."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Neizdevās pārbaudīt, vai servera vide nosaka šo iestatījumu. Lai to rediģētu, ielādējiet lapu vēlreiz."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -68140,6 +69128,30 @@
     {
       "type": 0,
       "value": "Neizdevās atjaunināt kanālu"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Ielādējiet iestatījumus vēlreiz, lai redzētu pašreizējās vērtības. Ja kaut kas šajā lapā ir mainījies vai jūs labojāt saglabātu paroli vai atslēgu, visi jūsu labojumi tiks atsaukti; pretējā gadījumā tie tiks saglabāti."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Ielādēt vēlreiz"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās vēlreiz ielādēt iestatījumus. Mēģiniet vēlreiz."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Iestatījumi ir mainīti citur"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -71270,136 +72282,10 @@
       "value": "Neizdevās ielādēt paziņojumu iestatījumus"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Jauns saturs netiek reģistrēts, tāpēc neko nevar nosūtīt. Ieslēdziet to atkal sadaļā „Apstrāde”."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Sūtīšana ir pauzēta; jaunais saturs gaida rindā. Ieslēdziet to atkal sadaļā „Apstrāde”."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Ja izslēgts, tā vietā tiek sūtīts ikdienas kopsavilkums."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Kā Silo pamana jaunu saturu, grupē to ziņojumos un cik ilgi tos glabā."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Noteikt, kas to vēlas"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Salīdzināt katru vienumu ar visu lietotāju preferencēm."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Grupēšana un pārslodzes ierobežošana"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Apstrāde"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Maksimālais satura vecums"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Vecāki vienumi tiek atmesti, lai tie nepienāktu kā novecojušas ziņas."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Maks. ziņojumu skaits vienam seriālam"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Viss, kas pārsniedz šo skaitu, šajā paketē tiek izlaists."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Pamanīt jaunu saturu"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Reģistrēt jaunus vienumus bibliotēku skenēšanas laikā."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Konveijers"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Izlasītie paziņojumi"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Glabāšana"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Nosūtīšanas vēsture"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Ieraksts par to, par ko Silo jau ir paziņojis."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Nogaidīšanas logs"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Vienumi, kuru skenēšana beidzas vienlaikus, pienāk kā viens paziņojums."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Neizlasītie paziņojumi"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -72328,18 +73214,6 @@
     {
       "type": 0,
       "value": "Paziņojumi"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dienas"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "stundas"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -73856,6 +74730,24 @@
       "value": "Lai pārslēgtos uz citu modeli, ir jāatiestata iegulumi, un tādējādi tie visi tiek izdzēsti. Cits nodrošinātājs, kas nodrošina to pašu modeli, tiek lietots pēc restartēšanas."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Pievienot sadaļai „Atklāt”"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās pievienot ieteikumu rindas lapai „Atklāt”."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Ieteikumu rindas pievienotas lapai „Atklāt”."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -73878,6 +74770,44 @@
     {
       "type": 0,
       "value": "Cik nosaukumu, kuru nav bibliotēkā, serveris glabā, lai no tiem ieteiktu. Katrs tiek uzmeklēts TMDB un iegults. Iegulšana parasti ir lēta, taču lielāks skaits atkarībā no jūsu iegulumu nodrošinātāja var izmaksāt vairāk vai aizņemt ilgāku laiku, kā arī izmanto vairāk krātuves."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Jūsu lapā „Atklāt” vēl netiek rādīta neviena ieteikumu rinda."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Lai varētu palaist ieteikumus sadaļai „Atklāt”, ieslēdziet augstāk esošo opciju „Iespējot ieteikumus” un restartējiet serveri."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Pieprasījumi pašlaik ir izslēgti. Ieslēdziet tos "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "pieprasījumu iestatījumos"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", lai skatītāji varētu redzēt lapu „Atklāt”."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Atvērt lapu „Atklāt”"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -79052,7 +79982,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Piegādes kanāli, servera kanāli un tas, kā no jauna satura rodas paziņojumi."
+      "value": "Piegādes kanāli un servera kanāli."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -79151,12 +80081,6 @@
       "value": "E-pasts"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Grupēšana un pārpludināšanas kontrole"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -79175,28 +80099,10 @@
       "value": "Ļaut lietotājiem izvēlēties e-pasta ziņojumu par katru epizodi"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Maksimālais satura vecums"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Maksimālais ziņojumu skaits seriālam"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Pieminēt pieprasītāju Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Pamanīt jaunu saturu"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -79205,46 +80111,16 @@
       "value": "Personīgie webhook"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Apstrāde"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Izlasītie paziņojumi"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Retranslatora URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Glabāšana"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Nosūtīto vēsture"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Servera kanāli"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Nostabilizēšanās laika logs"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -79259,12 +80135,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Nelasītie paziņojumi"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -79275,12 +80145,6 @@
     {
       "type": 0,
       "value": "Webhook uz personu"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Noskaidrot, kas to vēlas"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -80715,6 +81579,12 @@
     {
       "type": 0,
       "value": "Pierakstīšanās televizorā: sākšana"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Plakātu pieprasījumi"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -83242,6 +84112,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Krātuvi nevar pārvietot uz šejieni, kamēr krātuves iestatījumi ir norādīti vidē ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Vispirms noņemiet šos mainīgos un restartējiet katru API serveri."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -84448,6 +85332,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Šo grafiku nosaka dublējumu iestatījumi. Mainiet to sadaļā "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Serveris › Dublējumi"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -84778,10 +85682,66 @@
       "value": "Nesenās kļūdas"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Atsvaidzināšana neizdevās. Sīkāku informāciju skatiet administratora diagnostikā."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Pārskatīt pašreizējo grafiku"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -85226,6 +86186,18 @@
     {
       "type": 0,
       "value": "Autoscan webhook atkārtošana"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Atkārtoti nolasa galveni MKV failiem ar ASS subtitriem, kas skenēti, pirms Silo sāka neieskaitīt iegultos fontus bitu pārraides ātrumā, lai šie faili netiktu pārkodēti bitu pārraides ātruma dēļ, ko tie nemaz nestraumē."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Bitu pārraides ātruma labošana failiem ar iegultiem fontiem"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -95743,25 +96715,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Neizdevās pierakstīties televizorā. Mēģiniet vēlreiz."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Pārbaudiet, vai jūsu lietotnē ir redzams"
+      "value": "Neizdevās apstiprināt pierakstīšanos. Mēģiniet vēlreiz."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Pārbaudiet, vai jūsu televizorā ir redzams"
+      "value": "Pārliecinieties, ka šis kods sakrīt"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Ievadiet kodu, kas redzams televizorā vai lietotnē"
+      "value": "Ievadiet ierīcē redzamo kodu"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -95773,13 +96739,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Pierakstieties televizorā vai citā ierīcē ar savu kontu."
+      "value": "Pierakstiet televizoru, lietotni vai citu ierīci."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Pierakstīšanās televizorā"
+      "value": "Pierakstīšanās apstiprināšana"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -95799,13 +96765,13 @@
     },
     {
       "type": 0,
-      "value": ", lai apstiprinātu televizoru. Pierakstīties televizorā var tikai pats konts."
+      "value": ", lai apstiprinātu šo pierakstīšanos. Ierīces var apstiprināt tikai pats konts."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Pārtrauciet skatīšanos kā šis lietotājs, lai apstiprinātu televizoru. Pierakstīties televizorā var tikai pats konts."
+      "value": "Pārtrauciet skatīšanos kā šis lietotājs, lai apstiprinātu šo pierakstīšanos. Ierīces var apstiprināt tikai pats konts."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -95823,39 +96789,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Šo kodu neizdevās atrast. Pārbaudiet kodu televizorā."
+      "value": "Neizdevās atrast šo kodu. Pārbaudiet kodu un mēģiniet vēlreiz."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ne tagad"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Vecākas televizoru lietotnes tā vietā rāda: "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Apstipriniet tikai tādu ierīci, kas pašlaik ir jūsu priekšā."
+      "value": "Noraidīt"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Apstipriniet tikai tādu televizoru, kas pašlaik ir jūsu priekšā."
+      "value": "Apstipriniet tikai tad, ja pierakstīšanos sākāt jūs."
     }
   ],
   "web.auth.activate.playOn": [
@@ -95881,7 +96827,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Ikviens, kas izmanto šo televizoru, var izvēlēties kādu no jūsu profiliem. Ar PIN aizsargātie profili paliek bloķēti."
+      "value": "Tādējādi tai tiek piešķirta piekļuve jūsu profiliem. Profili ar PIN paliek bloķēti."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -95928,6 +96874,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Pieprasīts "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -95941,7 +96897,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Šis televizors pārstāja gaidīt. Sāciet vēlreiz televizorā."
+      "value": "Šī ierīce vairs negaida. Sāciet pierakstīšanos tajā vēlreiz."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -95950,10 +96906,38 @@
       "value": "Šī pierakstīšanās tika noraidīta."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Gatavs. Ierīce „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "” pierakstās."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Ierīce „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "” ir pierakstīta."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Šim kodam beidzās derīguma termiņš. Jūsu televizorā tiek rādīts jauns kods. Izmantojiet to."
+      "value": "Šī koda derīguma termiņš ir beidzies. Iegūstiet ierīcē jaunu kodu un mēģiniet vēlreiz."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -96037,25 +97021,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Šajā televizorā jau ir veikta pierakstīšanās."
+      "value": "Šī ierīce jau ir pierakstīta."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Šis televizors tika apstiprināts un pabeidz pierakstīšanos."
+      "value": "Šī ierīce tika apstiprināta un pabeidz pierakstīšanos."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Gatavs. Jūsu televizors pierakstās."
+      "value": "Gatavs. Jūsu ierīce pierakstās."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Jūsu televizorā ir veikta pierakstīšanās."
+      "value": "Jūsu ierīce ir pierakstīta."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -96099,7 +97083,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Vai pierakstīt ierīci "
+      "value": "Vai atļaut ierīcei „"
     },
     {
       "type": 1,
@@ -96107,13 +97091,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": "” pierakstīties?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Vai pierakstīt šo ierīci?"
+      "value": "Vai atļaut šai ierīcei pierakstīties?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -96133,13 +97117,13 @@
     },
     {
       "type": 0,
-      "value": ", lai apstiprinātu šo televizoru."
+      "value": ", lai apstiprinātu šo pierakstīšanos."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Pierakstīt televizoru"
+      "value": "Apstiprināt pierakstīšanos"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -97193,7 +98177,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Neizdevās pierakstīt ierīci. Mēģiniet vēlreiz."
+      "value": "Neizdevās apstiprināt pierakstīšanos. Mēģiniet vēlreiz."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -105789,6 +106773,12 @@
       "value": "jūsu bibliotēkas"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Skaits nav pieejams"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -107849,6 +108839,24 @@
       "value": "Pievienot"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās pārbaudīt, vai var pievienot vienumus."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Mēģināt ielādēt vēlreiz"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Notiek pārbaude, vai var pievienot vienumus…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -107865,6 +108873,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Šis serveris nevar droši pievienot vienumus, kamēr ir ielādēta tikai daļa kolekcijas. Jūs joprojām varat noņemt vienumus un rediģēt kolekciju."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Pirms pievienojat vēl, ielādējiet vienumus vēlreiz."
     }
   ],
   "web.collections.manual.addTitle": [
@@ -107885,6 +108905,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Notiek vienumu ielāde pirms citu pievienošanas…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -117522,6 +118548,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Arī kolekcijās"
+    }
+  ],
   "web.detail.sections.cast": [
     {
       "type": 0,
@@ -120759,6 +121791,12 @@
       "value": "Rāda"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Šo rindu pārvalda šis serveris. Šeit nevar mainīt, ko tā rāda; pievienojiet savu rindu, lai izvēlētos, ko tajā rādīt."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 1,
@@ -121077,6 +122115,12 @@
       "value": "Notiek tulkošana…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Paslēpt servera rindas, kas pievienotas pēc šī eksporta:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -121095,6 +122139,12 @@
     {
       "type": 0,
       "value": ", aizstājot sadaļas, ko iepriekš pievienojāt šeit. Jūsu izmaiņas šī servera sadaļās saglabāsies."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Šī servera rindas ir mainījušās, kopš šis fails tika eksportēts, tāpēc tālāk izvēlieties, kuras rindas paslēpt."
     }
   ],
   "web.home.layout.checking": [
@@ -121145,6 +122195,26 @@
     {
       "type": 0,
       "value": "Ieslēdz iestatījumu „Paslēpt skatītos vienumus”."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Paslēpj atlasītās rindas lapās: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", nemainot pārējās jūsu rindas tajās."
     }
   ],
   "web.home.layout.import": [
@@ -121249,6 +122319,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -121468,6 +122556,12 @@
     {
       "type": 0,
       "value": "Sadaļa bez nosaukuma"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Paslēpt servera rindas, kuru nav šajā failā:"
     }
   ],
   "web.home.page.customize": [
@@ -124703,6 +125797,12 @@
     {
       "type": 0,
       "value": "Galvenais baneris · Tikai tīmeklī"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Serveris"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -138390,42 +139490,6 @@
       "value": "” jūsu skatīšanās sarakstam"
     }
   ],
-  "web.requests.card.becauseYouWatched": [
-    {
-      "type": 0,
-      "value": "Jo jūs skatījāties „"
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": "”"
-    }
-  ],
-  "web.requests.card.becauseYouWatchedTwo": [
-    {
-      "type": 0,
-      "value": "Jo jūs skatījāties „"
-    },
-    {
-      "type": 1,
-      "value": "first"
-    },
-    {
-      "type": 0,
-      "value": "” un „"
-    },
-    {
-      "type": 1,
-      "value": "second"
-    },
-    {
-      "type": 0,
-      "value": "”"
-    }
-  ],
   "web.requests.card.label": [
     {
       "type": 1,
@@ -138496,6 +139560,42 @@
     {
       "type": 0,
       "value": "” pieprasījuma sūtīšana…"
+    }
+  ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Līdzīgi vienumam „"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "”"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Līdzīgi vienumiem „"
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": "” un „"
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "”"
     }
   ],
   "web.requests.discoverSection.empty": [

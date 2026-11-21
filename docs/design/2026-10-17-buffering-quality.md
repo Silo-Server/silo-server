@@ -807,7 +807,11 @@ requests count (video and audio segments, or a progressive body), from its
 adoption until it stops being the playing plan; not subtitles, images, probes
 or other playback in the app. A request's receiving time starts at the first
 byte of its body; a platform that sees only the response headers may start
-there, which reads low.
+there, which reads low. A client that reads one progressive body as many range
+responses counts them as one request, whose bytes are their sum and whose
+receiving time is the union of each response's first-to-last-byte span. The
+1,000 ms rule below then applies to that request. The other clients do not
+stripe, so their rule does not change.
 
 - Only a request that spent at least 1,000 ms receiving counts, in bytes and in
   time. A short request on a warm connection, such as one HLS segment, arrives

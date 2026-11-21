@@ -96,6 +96,7 @@ func MergeMetadata(source, target *MetadataResult, locked []MetadataField, mode 
 
 	// Provider IDs always accumulate, never overwrite
 	mergeProviderIDs(target, source)
+	target.WorkClaims = append(target.WorkClaims, source.WorkClaims...)
 }
 
 // MergeGlobalMetadata merges only provider-invariant fields, preserving any
@@ -157,6 +158,7 @@ func MergeGlobalMetadata(source, target *MetadataResult, locked []MetadataField,
 	}
 
 	mergeProviderIDs(target, source)
+	target.WorkClaims = append(target.WorkClaims, source.WorkClaims...)
 }
 
 // mergeVideos accumulates source videos into target, skipping entries the

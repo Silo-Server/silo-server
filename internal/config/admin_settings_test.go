@@ -95,6 +95,45 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+// The login credential travels to this origin, so only a bare https origin may
+// be stored, and a stray "?" must not leak into the published stripe URL.
+func TestAdminSettingWebMediaURLValidation(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string // empty with wantErr unset means the setting is off
+		err   bool
+	}{
+		{name: "origin", value: "https://media.example.test", want: "https://media.example.test"},
+		{name: "port", value: "https://media.example.test:8443", want: "https://media.example.test:8443"},
+		{name: "trailing slash", value: "https://media.example.test/", want: "https://media.example.test"},
+		{name: "empty query marker", value: "https://media.example.test?", want: "https://media.example.test"},
+		{name: "empty is off", value: "", want: ""},
+		{name: "plain http", value: "http://media.example.test", err: true},
+		{name: "user information", value: "https://user@media.example.test", err: true},
+		{name: "path", value: "https://media.example.test/path", err: true},
+		{name: "query", value: "https://media.example.test?q=1", err: true},
+		{name: "fragment", value: "https://media.example.test#f", err: true},
+		{name: "port out of range", value: "https://media.example.test:65536", err: true},
+		{name: "port without a hostname", value: "https://:443", err: true},
+		{name: "hostname a browser rejects", value: "https://a<b.example", err: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := NormalizeAdminSetting(WebMediaURLSettingKey, tc.value)
+			if tc.err {
+				if err == nil {
+					t.Fatalf("NormalizeAdminSetting(%q) = %q, nil; want an error", tc.value, got)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("NormalizeAdminSetting(%q) = %q, %v; want %q", tc.value, got, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestValidateAdminSettingsRejectsImpossibleHardPlaybackRoute(t *testing.T) {
 	values := map[string]string{
 		PlaybackRoutingRemuxExecutionSettingKey: "api_only",

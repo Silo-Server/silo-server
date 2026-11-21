@@ -302,6 +302,15 @@ func ParseBackupTime(value string) (hour, minute int, ok bool) {
 // Read per request, so a change applies without restart.
 const ServerLocalURLSettingKey = "server.local_url"
 
+// WebMediaURLSettingKey is an optional https origin that serves the same API
+// over HTTP/1.1 only, for a deployment whose main address speaks HTTP/2. The
+// web player stripes direct-play range reads across it (parallel_range_url in
+// the playback plan) when the API serves the file; the URL's st authorizes each
+// range. Empty names no media origin: the player then stripes on the page's own
+// origin when the page loaded over HTTP/1.1, and on a proxy node's own URL.
+// Read per request, so a change applies without restart.
+const WebMediaURLSettingKey = "server.web_media_url"
+
 // External sign-in settings (docs/architecture/external-sign-in.md).
 const (
 	// AuthLocalPasswordLoginSettingKey turns local password sign-in on or off
@@ -405,6 +414,7 @@ var adminSettingDefaults = map[string]string{
 
 	ServerLANDiscoverySettingKey:              "true",
 	ServerLocalURLSettingKey:                  "",
+	WebMediaURLSettingKey:                     "",
 	AuthLocalPasswordLoginSettingKey:          "true",
 	AuthEmailAutoMatchSettingKey:              "false",
 	AuthUserAPIKeysSettingKey:                 "false",
@@ -549,14 +559,7 @@ var adminSettingDefaults = map[string]string{
 	"email.smtp_security": "starttls",
 	"email.from_name":     "Silo",
 
-	"notifications.release_events_enabled":                     "true",
-	"notifications.fanout_enabled":                             "true",
 	"notifications.ui_enabled":                                 "true",
-	"notifications.fanout.settle_seconds":                      "30",
-	"notifications.fanout.max_event_age_hours":                 "72",
-	"notifications.retention.read_days":                        "90",
-	"notifications.retention.unread_days":                      "180",
-	"notifications.retention.event_days":                       "30",
 	"notifications.webhooks_enabled":                           "false",
 	"notifications.webhooks.max_per_profile":                   "10",
 	"notifications.webhooks.allow_private_destinations":        "false",
@@ -761,7 +764,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,
 		"scanner.empty_trash_after_scan", "scanner.realtime_monitoring", "matcher.enable_tv_series_root_queue",
 		"matcher.enable_tv_series_group_queue", "policy.editor_enabled",
-		"overlays.enabled", "notifications.release_events_enabled", "notifications.fanout_enabled",
+		"overlays.enabled",
 		"notifications.ui_enabled", "notifications.webhooks_enabled",
 		"notifications.webhooks.allow_private_destinations", "media_servers.allow_private_destinations",
 		"notifications.email_enabled",
@@ -895,13 +898,6 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 60000)
 	case "email.smtp_port":
 		return normalizeAdminInt(key, value, 1, 65535)
-	case "notifications.fanout.settle_seconds":
-		return normalizeAdminInt(key, value, 0, 3600)
-	case "notifications.fanout.max_event_age_hours":
-		return normalizeAdminInt(key, value, 1, 24*365)
-	case "notifications.retention.read_days", "notifications.retention.unread_days",
-		"notifications.retention.event_days":
-		return normalizeAdminInt(key, value, 1, 3650)
 	case "notifications.webhooks.max_per_profile":
 		return normalizeAdminInt(key, value, 1, 100)
 	case "notifications.webhooks.deliveries_per_minute_per_profile":
@@ -1029,6 +1025,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminURL(key, value)
 	case ServerLocalURLSettingKey:
 		return normalizeLocalURL(value)
+	case WebMediaURLSettingKey:
+		return normalizeWebMediaURL(value)
 	case "redis.url":
 		return NormalizeRedisURL(value)
 	case RedisDBSettingKey:
@@ -1534,18 +1532,67 @@ func normalizeAdminEnum(key, value string, allowed ...string) (string, error) {
 // normalizeLocalURL accepts an http(s) origin: clients reach the API at its
 // root, and the connections document publishes origins only.
 func normalizeLocalURL(value string) (string, error) {
-	normalized, err := normalizeAdminURL(ServerLocalURLSettingKey, value)
+	return normalizeOriginURL(ServerLocalURLSettingKey, value)
+}
+
+// normalizeWebMediaURL accepts an https origin: an HTTPS page cannot fetch
+// plain HTTP, and the stream reference travels to this origin.
+func normalizeWebMediaURL(value string) (string, error) {
+	normalized, err := normalizeOriginURL(WebMediaURLSettingKey, value)
+	if err != nil || normalized == "" {
+		return normalized, err
+	}
+	if !strings.HasPrefix(normalized, "https://") {
+		return "", fmt.Errorf("%s must use https", WebMediaURLSettingKey)
+	}
+	// url.Parse accepts an empty hostname and any digits as a port. A browser
+	// accepts neither, and the web player parses this origin before it plays
+	// anything.
+	if host, port, err := net.SplitHostPort(strings.TrimPrefix(normalized, "https://")); err == nil {
+		if host == "" {
+			return "", fmt.Errorf("%s must include a hostname", WebMediaURLSettingKey)
+		}
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return "", fmt.Errorf("%s must use a port from 1 to 65535", WebMediaURLSettingKey)
+		}
+	}
+	// url.Parse also accepts a hostname with a character a browser refuses, such
+	// as "a<b.example". Refuse the forbidden domain code points of the WHATWG URL
+	// host parser (https://url.spec.whatwg.org/#forbidden-domain-code-point). An
+	// IP literal is exempt: its colons are valid, and url.Parse checks its form.
+	host := strings.TrimPrefix(normalized, "https://")
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if !strings.Contains(host, ":") && strings.ContainsFunc(host, isForbiddenDomainCodePoint) {
+		return "", fmt.Errorf("%s must use a valid hostname", WebMediaURLSettingKey)
+	}
+	return normalized, nil
+}
+
+// isForbiddenDomainCodePoint reports whether a browser's URL host parser
+// rejects r in a domain: a C0 control, U+007F, space, or one of
+// # % / : < > ? @ [ \ ] ^ |.
+func isForbiddenDomainCodePoint(r rune) bool {
+	return r <= 0x20 || r == 0x7f || strings.ContainsRune(`#%/:<>?@[\]^|`, r)
+}
+
+// normalizeOriginURL accepts an http(s) origin and returns it as scheme://host,
+// so a stray "?" or "#" with nothing after it never reaches a URL built from it.
+// Empty is accepted as off.
+func normalizeOriginURL(key, value string) (string, error) {
+	normalized, err := normalizeAdminURL(key, value)
 	if err != nil || normalized == "" {
 		return normalized, err
 	}
 	parsed, err := url.Parse(normalized)
 	if err != nil {
-		return "", fmt.Errorf("%s must include a URL scheme and host", ServerLocalURLSettingKey)
+		return "", fmt.Errorf("%s must include a URL scheme and host", key)
 	}
 	if parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
-		return "", fmt.Errorf("%s must be a scheme, host and optional port, such as http://192.168.1.20:8080", ServerLocalURLSettingKey)
+		return "", fmt.Errorf("%s must be a scheme, host and optional port, such as https://media.example.com or http://192.168.1.20:8080", key)
 	}
-	return normalized, nil
+	return parsed.Scheme + "://" + parsed.Host, nil
 }
 
 func normalizeAdminURL(key, value string) (string, error) {

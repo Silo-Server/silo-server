@@ -173,6 +173,9 @@ func cursorSeekSQL(terms []queryCursorTerm, after *QueryCursor, start int) (stri
 	return seek, args, nil
 }
 
+// cursorPageMax is the most items PreviewCursorPage answers at once.
+const cursorPageMax = 200
+
 // PreviewCursorPage uses a SQL keyset, including the identity tie breaker. Its
 // rows intentionally use the general episode relation until optimized
 // projections expose exactly the same typed tuple; its total is Count's. Page
@@ -182,8 +185,8 @@ func (e *QueryExecutor) PreviewCursorPage(ctx context.Context, def QueryDefiniti
 	if e == nil || e.Pool == nil {
 		return QueryCursorPage{}, fmt.Errorf("query executor requires a database pool")
 	}
-	if limit < 1 || limit > 200 {
-		return QueryCursorPage{}, fmt.Errorf("cursor limit must be between 1 and 200")
+	if limit < 1 || limit > cursorPageMax {
+		return QueryCursorPage{}, fmt.Errorf("cursor limit must be between 1 and %d", cursorPageMax)
 	}
 	consumed := 0
 	if after != nil {

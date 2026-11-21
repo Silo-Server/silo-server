@@ -16,7 +16,7 @@ import {
   TOUCH_CONTROL_CLASS,
 } from "@/components/admin/libraries/DiagnosticsListParts";
 import {
-  useLibrariesTableLayout,
+  useWideDiagnosticsTableLayout,
   usePagination,
 } from "@/components/admin/libraries/diagnosticsListState";
 import { Badge } from "@/components/ui/badge";
@@ -31,13 +31,13 @@ import {
 } from "@/components/ui/table";
 import { flattenStaleMediaIDs, useStaleMediaIDs } from "@/hooks/queries/admin/libraries";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 import { formatDateTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 
 export function StaleIDsSection() {
   const t = useT();
-  const showTable = useLibrariesTableLayout();
+  const showTable = useWideDiagnosticsTableLayout();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
@@ -92,7 +92,10 @@ export function StaleIDsSection() {
         <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
           <Table aria-label={t("web.admin.libraries.staleIds.tableLabel")}>
             <TableHeader>
-              <TableRow className="hover:bg-transparent">
+              {/* Headers wrap: in longer languages they are wider than the
+                  dates and IDs under them, and would push the table past its
+                  section. */}
+              <TableRow className="hover:bg-transparent [&>th]:whitespace-normal">
                 <TableHead>{t("web.admin.libraries.column.title")}</TableHead>
                 <TableHead>{t("web.admin.libraries.column.year")}</TableHead>
                 <TableHead>{t("web.admin.libraries.column.library")}</TableHead>
@@ -108,9 +111,21 @@ export function StaleIDsSection() {
             <TableBody>
               {pag.rows.map((s) => (
                 <TableRow key={staleIDKey(s)}>
-                  <TableCell className="font-medium">{s.title}</TableCell>
-                  <TableCell className="tabular-nums">{s.year}</TableCell>
-                  <TableCell className="text-sm">{s.library_name}</TableCell>
+                  {/* The title and library name wrap, so a long one can't push the
+                      table past its section. The title keeps a minimum width, so a
+                      long library name can't squeeze it to a few letters a line. */}
+                  <TableCell className="font-medium whitespace-normal">
+                    <span className="bidi-text block min-w-32 wrap-anywhere">{s.title}</span>
+                  </TableCell>
+                  <TableCell className="tabular-nums">{numberText(s.year)}</TableCell>
+                  <TableCell className="text-sm whitespace-normal">
+                    <span
+                      dir="auto"
+                      className="align-with-page block w-fit max-w-full wrap-anywhere"
+                    >
+                      {s.library_name}
+                    </span>
+                  </TableCell>
                   <TableCell>
                     <Badge variant="outline">{s.provider}</Badge>
                   </TableCell>
@@ -134,7 +149,7 @@ export function StaleIDsSection() {
               <h3 className="font-medium break-words">{s.title}</h3>
               <CardFields>
                 <CardField label={t("web.admin.libraries.column.year")}>
-                  <span className="tabular-nums">{s.year}</span>
+                  <span className="tabular-nums">{numberText(s.year)}</span>
                 </CardField>
                 <CardField label={t("web.admin.libraries.column.library")}>
                   {s.library_name}

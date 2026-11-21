@@ -34,6 +34,7 @@ import {
 import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 import { toast } from "sonner";
 import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
+import { NextUpPromptSetting } from "./NextUpPromptSetting";
 
 /**
  * Every preference on this screen is the profile's own choice. A device, a
@@ -49,9 +50,9 @@ import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
  * surfaces cannot land on different scopes.
  */
 const BASE_PLAYBACK_KEYS: SettingKey[] = [
-  SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
+  SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS,
 ];
 
 const BUFFERING_MODE_SETTING = SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE];
@@ -741,19 +742,10 @@ export default function PlaybackSettings() {
           than on the admin plugin page, which is server-wide. */}
 
       <SettingsGroup title={t("web.settings.playback.nextEpisode.title")}>
-        <SettingRow
-          label={t("web.settings.playback.nextEpisode.previewLabel")}
-          description={t("web.settings.playback.nextEpisode.previewDescription")}
-          control={(id) => (
-            <Switch
-              id={id}
-              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW)}
-              disabled={pending}
-              onCheckedChange={(checked) =>
-                saveValue(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW, checked)
-              }
-            />
-          )}
+        <NextUpPromptSetting
+          seconds={read<number>(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS)}
+          disabled={pending}
+          onChange={(seconds) => saveValue(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS, seconds)}
         />
 
         <AutoPlayNextSetting />

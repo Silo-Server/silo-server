@@ -77,6 +77,14 @@ CREATE INDEX IF NOT EXISTS idx_watch_history_item_witness
 CREATE INDEX IF NOT EXISTS idx_watch_history_profile_watched
     ON watch_history (profile_id, watched_at, id);
 
+CREATE TABLE IF NOT EXISTS playback_stop_commits (
+    id TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_playback_stop_commits_expiry ON playback_stop_commits (expires_at);
+
 CREATE TABLE IF NOT EXISTS hidden_history_items (
     profile_id TEXT NOT NULL,
     media_item_id TEXT NOT NULL,
