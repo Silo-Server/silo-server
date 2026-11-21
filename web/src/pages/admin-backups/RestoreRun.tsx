@@ -266,6 +266,13 @@ function downloadReport(job: RestoreJob) {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * The report's actions are never wider than the page: a label too long for
+ * the row wraps inside its button instead of running past the right edge.
+ */
+const RUN_ACTION =
+  "h-auto min-h-9 max-w-full py-1.5 text-start text-balance wrap-anywhere whitespace-normal";
+
 export interface RestoreRunProps {
   job: RestoreJob;
   /** This server's backups, to name the recovery point by its time. */
@@ -403,12 +410,12 @@ export function RestoreRun({
 
       <div className="flex flex-wrap gap-2">
         {report ? (
-          <Button variant="outline" onClick={() => downloadReport(job)}>
+          <Button variant="outline" className={RUN_ACTION} onClick={() => downloadReport(job)}>
             <Download data-icon="inline-start" aria-hidden="true" />
             {t("web.admin.backups.restore.run.downloadReport")}
           </Button>
         ) : null}
-        <Button variant="outline" onClick={onChooseAgain}>
+        <Button variant="outline" className={RUN_ACTION} onClick={onChooseAgain}>
           {t("web.admin.backups.restore.run.chooseAgain")}
         </Button>
       </div>
