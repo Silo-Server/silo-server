@@ -154,8 +154,15 @@ export function SkippedRootsSection() {
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm break-words whitespace-normal">
-                        {root.library_name}
+                      <TableCell className="text-sm whitespace-normal">
+                        {/* A long library name wraps, so it can't push the table past
+                            its section. */}
+                        <span
+                          dir="auto"
+                          className="align-with-page block w-fit max-w-full wrap-anywhere"
+                        >
+                          {root.library_name}
+                        </span>
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={REASON_BADGE_CLASS}>

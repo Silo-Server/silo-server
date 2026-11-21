@@ -114,16 +114,16 @@ export function StaleIDsSection() {
                   {/* The title and library name wrap, so a long one can't push the
                       table past its section; the title takes the width left over. */}
                   <TableCell className="w-full font-medium whitespace-normal">
+                    <span className="bidi-text block wrap-anywhere">{s.title}</span>
+                  </TableCell>
+                  <TableCell className="tabular-nums">{numberText(s.year)}</TableCell>
+                  <TableCell className="text-sm whitespace-normal">
                     <span
                       dir="auto"
                       className="align-with-page block w-fit max-w-full wrap-anywhere"
                     >
-                      {s.title}
+                      {s.library_name}
                     </span>
-                  </TableCell>
-                  <TableCell className="tabular-nums">{numberText(s.year)}</TableCell>
-                  <TableCell className="text-sm break-words whitespace-normal">
-                    {s.library_name}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">{s.provider}</Badge>
