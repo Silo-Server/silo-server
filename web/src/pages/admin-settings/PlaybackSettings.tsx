@@ -448,12 +448,19 @@ export default function PlaybackSettings() {
                           row.path,
                           deviceOrder,
                         );
-                        // Back to the saved devices, however the saved value
-                        // is spaced, is no change.
-                        if (next === savedDevices.join(",")) {
+                        // Back to the saved devices stages the saved string
+                        // itself, so the form can tell it undoes the edit
+                        // however that string is spaced, and keeps it staged
+                        // while a save settles. An unset value is never in
+                        // the snapshot, so outside a save that draft is
+                        // dropped directly.
+                        const saved = form.getPersistedValue("playback.hw_device");
+                        if (next !== savedDevices.join(",")) {
+                          form.setValue("playback.hw_device", next);
+                        } else if (saved === "" && !form.isSaving) {
                           form.resetValue("playback.hw_device");
                         } else {
-                          form.setValue("playback.hw_device", next);
+                          form.setValue("playback.hw_device", saved);
                         }
                       }}
                     />
