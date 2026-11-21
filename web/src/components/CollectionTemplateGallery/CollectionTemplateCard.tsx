@@ -45,7 +45,7 @@ export function PickRow({
   title: string;
   tag?: string;
   poster?: ReactNode;
-  meta: string;
+  meta: ReactNode;
 }) {
   const id = useId();
   return (

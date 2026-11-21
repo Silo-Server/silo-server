@@ -4,6 +4,7 @@ import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-ki
 import { CSS } from "@dnd-kit/utilities";
 import { AlertTriangle, ArrowDown, ArrowUp, Check, GripVertical, Plus, X } from "lucide-react";
 import { PosterArt } from "@/components/calm/PosterTile";
+import { LineName, MetaLine } from "@/components/MetaLine";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProfiles } from "@/hooks/queries/profiles";
@@ -57,7 +58,7 @@ export function CollectionsRowEditor({
       return {
         title: option.title,
         option,
-        meta: [collectionOptionMeta(option), owner(option)].filter(Boolean).join(" · "),
+        meta: <MetaLine parts={[collectionOptionMeta(option), owner(option)]} />,
       };
     }
     return { title: settled ? t("web.home.addRow.collections.unavailable") : "", missing: settled };
@@ -122,13 +123,13 @@ export function CollectionsRowEditor({
 interface ChosenLine {
   title: string;
   option?: CollectionOption;
-  meta?: string;
+  meta?: ReactNode;
   /** The collection is gone, hidden or no longer shared. */
   missing?: boolean;
 }
 
 /** "Yours" or "by Name" on a personal collection; nothing on a server one. */
-function useOwnerLine(): (option: CollectionOption) => string | undefined {
+function useOwnerLine(): (option: CollectionOption) => ReactNode {
   const t = useT();
   const { data: profiles = [] } = useProfiles();
   const { profile } = useCurrentProfile();
@@ -136,7 +137,7 @@ function useOwnerLine(): (option: CollectionOption) => string | undefined {
     if (option.source !== "user" || !option.creator_profile_id) return undefined;
     if (option.creator_profile_id === profile?.id) return t("web.home.addRow.collections.yours");
     return t("web.collections.posterCard.byOwner", {
-      owner: ownerName(profiles, option.creator_profile_id),
+      owner: <LineName name={ownerName(profiles, option.creator_profile_id)} />,
     });
   };
 }
@@ -373,7 +374,7 @@ function Chooser({
   collections: RowCollections;
   chosen: ReadonlySet<string>;
   full: boolean;
-  owner: (option: CollectionOption) => string | undefined;
+  owner: (option: CollectionOption) => ReactNode;
   onToggle: (option: CollectionOption) => void;
 }) {
   const t = useT();
@@ -431,12 +432,12 @@ function ChooserOption({
   added: boolean;
   /** The row is full: only a chosen collection can be pressed, to take it out. */
   disabled: boolean;
-  ownerLine?: string;
+  ownerLine?: ReactNode;
   onToggle: () => void;
 }) {
   const t = useT();
   const metaId = useId();
-  const meta = [collectionOptionMeta(option), ownerLine].filter(Boolean).join(" · ");
+  const meta = <MetaLine parts={[collectionOptionMeta(option), ownerLine]} />;
   return (
     <li>
       <button
