@@ -31,7 +31,8 @@ export function edgeMask({ left, right }: ScrollEdges): string | undefined {
  * keeps the active item (`activeSelector`, inside the strip) in view, at least
  * `inset` px from a faded edge, whenever `activeKey` changes or the strip or
  * its first child changes size. Put the items in one child of the scroller so
- * their size can be observed.
+ * their size can be observed. `reveal` brings the active item back into view
+ * on demand, such as when focus returns to it after a hand scroll.
  */
 export function useScrollStrip<T extends HTMLElement>(
   activeSelector: string,
@@ -96,5 +97,5 @@ export function useScrollStrip<T extends HTMLElement>(
     });
   }, []);
 
-  return { ref, edges, measure, page };
+  return { ref, edges, measure, page, reveal };
 }

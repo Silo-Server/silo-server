@@ -131,6 +131,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/server"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/storagetransition"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
@@ -522,7 +523,7 @@ func keptSubtitleStore(stores blobstore.Stores, assetsS3 *s3client.Client) blobs
 func configureOperationalLogging(
 	ctx context.Context,
 	pool *pgxpool.Pool,
-	settingsRepo catalog.SettingsStore,
+	settingsRepo serversettings.SettingsStore,
 	logStreamHub *logstream.Hub,
 	filteredHandler slog.Handler,
 	nodeID string,
@@ -645,7 +646,7 @@ func librarySettingsCleaner(pool *pgxpool.Pool, stores userstore.UserStoreProvid
 // provider registry, once. Every API node may run it; the settings lock makes
 // the first one do the work and the rest find nothing left to convert. A
 // failure leaves those jobs unconfigured rather than stopping the server.
-func convertLegacyAIProviders(ctx context.Context, settings *catalog.EncryptedSettingsRepo) {
+func convertLegacyAIProviders(ctx context.Context, settings *serversettings.EncryptedSettingsRepo) {
 	converted := false
 	var unconverted []string
 	err := settings.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
@@ -671,7 +672,7 @@ func convertLegacyAIProviders(ctx context.Context, settings *catalog.EncryptedSe
 // mismatch gets the fix and this key's check value, which the GCM error alone
 // does not point to.
 func settingsLoadError(err error, secretKey []byte) string {
-	if !errors.Is(err, catalog.ErrSecretKeyMismatch) {
+	if !errors.Is(err, serversettings.ErrSecretKeyMismatch) {
 		return fmt.Sprintf("loading settings: %v", err)
 	}
 	check, cerr := secret.KeyCheckValue(secretKey)
@@ -685,7 +686,7 @@ func settingsLoadError(err error, secretKey []byte) string {
 		"To compare keys, run: printf %%s \"$SECRET_KEY\" | silo secret check (or: silo secret check --file \"$SECRET_KEY_FILE\")", err, check)
 }
 
-func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *catalog.EncryptedSettingsRepo) {
+func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *serversettings.EncryptedSettingsRepo) {
 	settingsN, err := settings.BackfillSensitiveSettings(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "secret backfill: sensitive settings", "component", "app", "error", err)
@@ -944,7 +945,7 @@ func main() {
 	var deploymentDocument *plugins.ProvisionDocument
 	var declaredAIProviders deploymentAIProviders
 	if isPrimaryNode && !*migrateOnly && !*migrateStatus && *migrateDownTo < 0 {
-		envSettings, err = config.ReadEnvSettings(os.Getenv, catalog.SensitiveSettingKeys)
+		envSettings, err = config.ReadEnvSettings(os.Getenv, serversettings.SensitiveSettingKeys)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
@@ -1040,7 +1041,7 @@ func main() {
 	// every consumer (config.LoadFromDB, admin, ABS, watchers) transparently sees
 	// plaintext while sensitive keys rest as ciphertext. The settings backfill
 	// (run after migrations, before this GetAll) is wired further below.
-	settingsRepo := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
+	settingsRepo := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), dataCipher)
 	if isPrimaryNode {
 		// Read once before the backfills: under a wrong SECRET_KEY they would
 		// encrypt plaintext credentials with that key, leaving rows the right
@@ -1126,7 +1127,7 @@ func main() {
 	}
 	// Re-wrap with the encrypting decorator so the recreated pool's settings repo
 	// still encrypts/decrypts — no raw settings repo may escape into later wiring.
-	settingsRepo = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
+	settingsRepo = serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), dataCipher)
 	// One reader for access.unrated_content, shared by every scope resolver and
 	// the recommendations engine: forgetting the builder call at a construction
 	// site fails silently (unrated titles hidden, no error).
@@ -1850,7 +1851,7 @@ func main() {
 		// Read the identity rows under the settings mutation lock, so a commit
 		// already in progress finishes before the check. The rows are plain,
 		// so an unreadable encrypted setting cannot block a rejoin.
-		identityRows := catalog.NewServerSettingsRepo(pool)
+		identityRows := serversettings.NewServerSettingsRepo(pool)
 		storageAdmission.SetRejoinCheck(func(ctx context.Context) error {
 			err := identityRows.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
 				return nil, blobstore.CheckRecordedLocation(current, assetsIdentity, privateIdentity)
@@ -4491,7 +4492,7 @@ func main() {
 			lanDiscoveryDone = make(chan struct{})
 			go func() {
 				defer close(lanDiscoveryDone)
-				advertiseOnLAN(lanCtx, apiListener.Addr(), serveridentity.New(catalog.NewServerSettingsRepo(pool)), brandingSvc)
+				advertiseOnLAN(lanCtx, apiListener.Addr(), serveridentity.New(serversettings.NewServerSettingsRepo(pool)), brandingSvc)
 			}()
 		}
 		if pluginProvisionWriter != nil {
@@ -5597,11 +5598,11 @@ func (r scopeEntitlementResolver) resolveScope(ctx context.Context, userID int, 
 	})
 }
 
-// audiobooksSettingsAdapter bridges catalog.ServerSettingsRepo (which
+// audiobooksSettingsAdapter bridges serversettings.ServerSettingsRepo (which
 // exposes Get) to the audiobooks.SettingsReader interface (which
 // requires GetString). The two signatures are identical modulo name.
 type audiobooksSettingsAdapter struct {
-	repo catalog.SettingsStore
+	repo serversettings.SettingsStore
 }
 
 func (a *audiobooksSettingsAdapter) GetString(ctx context.Context, key string) (string, error) {

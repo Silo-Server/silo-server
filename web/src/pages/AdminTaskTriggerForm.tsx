@@ -46,11 +46,16 @@ interface TriggerFormRowProps {
 // so one long label can't push the Remove button out of view.
 const TRIGGER_FIELD_WIDTH = "w-full sm:w-fit sm:min-w-40 sm:max-w-full";
 
-// In em so the box grows with its own text size. 11.5em holds the widest "None"
-// placeholder measured, Croatian "Bez ograničenja" (167 px at 16 px text and
-// 152 px at 14 px in Firefox), beside the number spinners Firefox and Safari
-// always draw.
-const MAX_RUNTIME_INPUT_WIDTH = "w-full sm:w-[11.5em]";
+// Sized for the widest "None" placeholder measured, Croatian "Bez ograničenja"
+// (167 px at 16 px text and 152 px at 14 px in Firefox), beside the number
+// spinners Firefox and Safari always draw: about 11.5em. Plus Jakarta Sans's cap
+// height is about 0.75em, so 15.5cap is the same width; change both together.
+// A browser minimum font size moves ic and cap in Firefox, but only cap in
+// Chromium, and em in neither, so where cap is supported the box takes the
+// larger of the two. Other browsers keep 11.5em. The box stops at its column's
+// width.
+const MAX_RUNTIME_INPUT_WIDTH =
+  "w-full sm:w-[11.5em] sm:supports-[width:1cap]:w-[max(11.5ic,15.5cap)] sm:max-w-full";
 
 type IntervalUnit = "seconds" | "minutes" | "hours";
 
@@ -198,34 +203,36 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
           </div>
         )}
 
-        {/* Wraps at large text sizes, so the label, box, and unit stack instead of
-            widening the row past its panel. */}
+        {/* At large text sizes the label wraps above the box instead of widening the
+            row past its panel; the box and its unit stay together. */}
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-          <label className="text-muted-foreground text-xs whitespace-nowrap">
+          <label className="text-muted-foreground text-xs text-balance break-words">
             {t("web.admin.tasks.detail.maxRuntimeLabel")}
           </label>
-          <Input
-            type="number"
-            min={0}
-            step="any"
-            className={MAX_RUNTIME_INPUT_WIDTH}
-            placeholder={t("web.admin.tasks.detail.maxRuntimeNone")}
-            value={trigger.max_runtime_ms != null ? trigger.max_runtime_ms / 60_000 : ""}
-            onChange={(e) => {
-              // Fractional minutes keep sub-minute limits saved through the API.
-              // A typed 0 stays 0 (no limit) so "0.5" can be entered; only an
-              // empty field clears it.
-              const raw = e.target.value;
-              onChange({
-                ...trigger,
-                max_runtime_ms:
-                  raw === "" ? undefined : Math.max(0, Math.round(Number(raw) * 60_000)),
-              });
-            }}
-          />
-          <span className="text-muted-foreground text-xs">
-            {t("web.admin.tasks.detail.maxRuntimeUnit")}
-          </span>
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <Input
+              type="number"
+              min={0}
+              step="any"
+              className={MAX_RUNTIME_INPUT_WIDTH}
+              placeholder={t("web.admin.tasks.detail.maxRuntimeNone")}
+              value={trigger.max_runtime_ms != null ? trigger.max_runtime_ms / 60_000 : ""}
+              onChange={(e) => {
+                // Fractional minutes keep sub-minute limits saved through the API.
+                // A typed 0 stays 0 (no limit) so "0.5" can be entered; only an
+                // empty field clears it.
+                const raw = e.target.value;
+                onChange({
+                  ...trigger,
+                  max_runtime_ms:
+                    raw === "" ? undefined : Math.max(0, Math.round(Number(raw) * 60_000)),
+                });
+              }}
+            />
+            <span className="text-muted-foreground text-xs">
+              {t("web.admin.tasks.detail.maxRuntimeUnit")}
+            </span>
+          </div>
         </div>
       </div>
 

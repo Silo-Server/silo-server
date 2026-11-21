@@ -129,6 +129,21 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   `dir="auto"` doesn't do this: an empty field resolves to left to right, so a
   translated placeholder lands on the wrong side. `type="url"` rejects addresses
   without a scheme.
+- A path or URL shown as text (a `code` block, a list of folders) also sets `dir="ltr"`,
+  and the block that holds it takes `align-with-page` (in `app.css`). The class gives the
+  block its parent's `text-align`, with `start` and `end` resolved in the parent's
+  direction, so under a start-aligned parent that runs in the page's direction every line,
+  wrapped or not, sits on the page's start side. Without it, an inherited `start` resolves
+  against the block's own direction and puts every line at its left edge. Chromium shows
+  that wherever it happens; Firefox and Safari give `li` `text-align: match-parent`, so a
+  list item in a start-aligned right-to-left list, even `<li dir="ltr">`, and everything
+  inside it are right-aligned there anyway. A folder name that can't wrap, such as one
+  long emoji sequence, still runs past the block's right edge, the page's start side in a
+  right-to-left page: clip it sideways while it overflows, with `useOverflowsInline` and
+  `OVERFLOW_CLIP` (`src/hooks/useOverflowsInline.ts`), so it keeps its start and stays in
+  the block. `PathList` (`src/components/PathList.tsx`) and `CardPath` handle the
+  alignment and the clip. Don't give a list of paths `w-fit` instead: one such name would
+  make the list that wide, and its other paths would wrap at that width.
 - A name that can be in either script and is cut with `truncate` (a username, say) takes
   `dir="auto"`: it reads in the direction of its first strong character (a letter, or
   right-to-left punctuation such as `؟`), and left to right when it has none, as a name
@@ -138,8 +153,58 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   Where the box would stretch (a block, a `flex-col` child), size it to its text with
   `w-fit max-w-full` so a short name stays on the page's start side. A `flex-1` item
   can't be sized that way: keep `flex-1` on a wrapper and put the name in a
-  `block w-fit max-w-full` span inside it. Don't use `.bidi-text` for this: its
-  `unicode-bidi: plaintext` drops the "…" in Firefox and cuts the start in WebKit.
+  `block w-fit max-w-full` span inside it. A `flex-1` item capped at its text with
+  `max-w-max` can't stretch, so it can take `dir="auto"` itself unless it also carries
+  a logical margin, padding or border (`ms-auto`, `pe-2`, `border-s`): those follow
+  the element's own direction, so keep them on the outer element and put the name in
+  a `block` span inside it. A name that can also wrap takes `align-with-page`, so its
+  wrapped lines stay on the page's start side in every browser; Chromium otherwise puts
+  them on the name's own start side. A clip, or a measurement of whether the name
+  overflows, goes on the name's own box, since it overflows toward its own end.
+  `.bidi-text` alone doesn't keep the start: its `unicode-bidi: plaintext` leaves the box
+  in the page's direction, so Firefox drops the "…" and WebKit cuts the start.
+- A name inside a longer line (a name and "(you)", a sentence that names someone, a
+  name and a device) takes `dir="auto"` on its own element, never on the line, where
+  the name's script would set the direction of the translated words too. Pass that
+  element to `t()` as the value
+  (`t(id, { name: <span dir="auto" className="truncate">{name}</span> })`). When the
+  words must stay and the name is cut, make the line a
+  `flex overflow-hidden whitespace-pre` box: the words become flex items that keep the
+  page's direction and don't shrink, and `whitespace-pre` keeps the spaces at their
+  edges. User text on the line (a note, a device name) is its own `dir="auto"`
+  `truncate` element too, whose `nowrap` folds any line breaks `pre` would keep. A
+  rich-text tag that wraps the name (`<strong>{name}</strong>`) is the flex
+  item, so it needs `overflow-hidden` too, or the name can't shrink inside it. Where
+  the row can squeeze the line narrower than its words (the impersonation banner),
+  the words shrink too, but only once the name is down to a letter and "…"
+  (`wordsYieldLast` in `ImpersonationBanner.tsx`); where the row has other text that
+  doesn't shrink, cap it (`max-w-1/2 truncate`) so the line keeps room. When the text
+  after the name is cut first (a suggestion's note, a requester's device), give the
+  name `max-w-full shrink-0`: the name is then cut only when it alone fills the line
+  (`SuggestionList.tsx`).
+- Titles, names, taglines and overviews from metadata use `.bidi-text` (`app.css`).
+  Where such text is cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
+  stylesheet), it also takes `dir="auto"`. Without it, text that runs the other way
+  loses its "…" in Firefox and its start in WebKit, and a clamped paragraph gets its "…"
+  at the start of its last line. `.bidi-text` keeps a short one on the page's start
+  side, so it needs no `w-fit`. The mixed-direction limit above applies here too.
+- A path shown as text, cut or not, takes `dir="ltr"` and renders through
+  `PathText` (`src/components/PathText.tsx`), which keeps each folder name in its
+  own direction; without it, folders named in Arabic swap places. An email cut with
+  `truncate` takes `dir={emailDir(email)}` (`src/lib/direction.ts`), which keeps one
+  with an Arabic name part in the page's direction; `dir="auto"` would turn it right
+  to left on a left-to-right page. Size a cut one as for a name, above; a path that
+  wraps instead follows the path or URL rule above.
+- A cut line that joins translated text with a name or email (`<summary> · <email>`)
+  can't be one `truncate` span: the "…" falls at the line's end, so the part there loses
+  its start. Render each part as its own truncating `flex` item, the translated part in
+  the page's direction and the other in its own (`dir="auto"`, or `emailDir` for an
+  email), each with its own `title` so the tooltip reads that way too. Let the line wrap,
+  so a part that doesn't fit moves to a line of its own instead of cutting both, and hide
+  the separator that would open that line, as `UserDetailHeader` does. A part that
+  carries the separator's negative margin keeps the page's direction and takes its `dir`
+  on an inner span, as above. `AccountRow` in `src/pages/admin-backups/RestoreUsers.tsx`
+  does this.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also

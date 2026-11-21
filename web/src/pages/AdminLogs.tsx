@@ -2,6 +2,7 @@ import { memo, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import { PageHeader } from "@/components/page/PageHeader";
+import { PathText } from "@/components/PathText";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -720,8 +721,14 @@ const AuditLogRow = memo(function AuditLogRow({ entry }: { entry: AuditLogEntry 
       </TableCell>
       <TableCell>{entry.method}</TableCell>
       <TableCell>
-        <div className="max-w-[420px] truncate font-mono text-xs" title={entry.path}>
-          {entry.path}
+        {/* A path reads left to right in any language, so a cut one keeps its
+            start; w-fit keeps it on the page's start side. */}
+        <div
+          dir="ltr"
+          className="w-fit max-w-[420px] truncate font-mono text-xs"
+          title={entry.path}
+        >
+          <PathText path={entry.path} />
         </div>
       </TableCell>
       <TableCell>{entry.status_code}</TableCell>
