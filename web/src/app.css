@@ -179,6 +179,10 @@
 
   /* ── Font Family ───────────────────────────────────────────── */
   --font-family-display: var(--font-display, var(--font-body));
+  /* The interface font, as `font-ui`. Tailwind's own `font-sans` is the system
+     stack. A `font-mono` field whose placeholder is translated prose adds
+     `placeholder:font-ui`: monospace fonts draw Arabic letters unjoined. */
+  --font-ui: var(--font-body);
 
   /* ── Hero Backdrop Defaults ─────────────────────────────────── */
   --hero-backdrop-brightness: 0.9;
