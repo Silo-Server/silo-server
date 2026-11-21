@@ -11,7 +11,7 @@ import {
 import { toast } from "sonner";
 import { useSelectChatGPTAccount, useCompleteChatGPTLogin } from "./chatgpt";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
-vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), dismiss: vi.fn() } }));
 function fixture() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: 3 } },

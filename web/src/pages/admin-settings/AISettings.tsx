@@ -113,6 +113,8 @@ interface AITestState {
   message: string;
   at: number;
   durationMs: number;
+  /** The tile's values the test ran with. */
+  tested: string;
 }
 
 /** A passed test's message with how long ago it ran and how long it took. */
@@ -705,6 +707,14 @@ export default function AISettings() {
     capabilities.isSuccess &&
     !!capabilities.data &&
     !capabilities.data.reasoning_levels.includes(reasoningEffort);
+  // A result shows only beside the values it tested: a reload after a refused
+  // save can undo a tile's edits without going through this page.
+  const tileValues = (keys: readonly string[]) =>
+    keys.map((key) => form.getValue(key)).join("\u0000");
+  // The text tile tests the model it shows, which falls back to the subtitle
+  // model while none is set.
+  const textTested = [tileValues(TEXT_AI_KEYS), currentModel].join("\u0000");
+  const speechTested = tileValues(SPEECH_AI_KEYS);
   const textDirty = TEXT_AI_KEYS.some((key) => form.isDirty(key));
   const speechDirty = SPEECH_AI_KEYS.some((key) => form.isDirty(key));
   const advancedChangedCount = AI_ADVANCED_KEYS.filter((key) => form.isDirty(key)).length;
@@ -752,6 +762,7 @@ export default function AISettings() {
         message: result.message,
         at: Date.now(),
         durationMs: Date.now() - started,
+        tested: textTested,
       });
     } catch (error) {
       if (!isCapturedProfileAuthorityActive(authority)) return;
@@ -761,6 +772,7 @@ export default function AISettings() {
           error instanceof Error ? error.message : t("web.admin.settings.ai.page.textCheckFailed"),
         at: Date.now(),
         durationMs: Date.now() - started,
+        tested: textTested,
       });
     } finally {
       if (authMode === "chatgpt" && isCapturedProfileAuthorityActive(authority)) {
@@ -781,6 +793,7 @@ export default function AISettings() {
         message: result.message,
         at: Date.now(),
         durationMs: Date.now() - started,
+        tested: speechTested,
       });
     } catch (error) {
       setSpeechResult({
@@ -791,6 +804,7 @@ export default function AISettings() {
             : t("web.admin.settings.ai.page.speechCheckFailed"),
         at: Date.now(),
         durationMs: Date.now() - started,
+        tested: speechTested,
       });
     }
   }
@@ -907,7 +921,7 @@ export default function AISettings() {
               onSettingsTransitionStarted={form.beginSettingsTransition}
               onTest={() => void checkTextConnection()}
               isTesting={textCheck.isPending}
-              test={textResult}
+              test={textResult?.tested === textTested ? textResult : undefined}
               // A staged edit forces its tile open: the save bar must never
               // block on a field the admin cannot see.
               expanded={expandedTile === "text" || textDirty}
@@ -923,7 +937,7 @@ export default function AISettings() {
               onChange={setValue}
               onTest={() => void checkSpeechConnection()}
               isTesting={speechCheck.isPending}
-              test={speechResult}
+              test={speechResult?.tested === speechTested ? speechResult : undefined}
               expanded={expandedTile === "speech" || speechDirty}
               onExpand={() => setExpandedTile("speech")}
               onCollapse={() => setExpandedTile(null)}

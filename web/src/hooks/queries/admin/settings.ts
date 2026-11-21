@@ -4,6 +4,7 @@ import {
   adminSettingsKey,
   readAdminSettings,
   captureSettingsBaseline,
+  isSettingsSaveConflict,
   type SettingsValues,
   type SettingsBaseline,
 } from "@/api/v2/adminSettingsSnapshot";
@@ -229,7 +230,12 @@ export function useAdminServerStatus(enabled = true) {
   });
 }
 
-export function useUpdateServerSettings(displayed?: SettingsValues) {
+/**
+ * Saves several settings, guarded by the validator of `displayed` (else the
+ * first snapshot this hook saw). Pass `reportConflict` false when the caller
+ * shows its own way forward for a 412 instead of the server's message.
+ */
+export function useUpdateServerSettings(displayed?: SettingsValues, reportConflict = true) {
   const { data: current } = useAdminServerSettings();
   const retained = useRetainedSettingsBaseline(displayed, current);
   const queryClient = useQueryClient();
@@ -302,6 +308,7 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
     },
     onError: (err, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
+      if (!reportConflict && isSettingsSaveConflict(err)) return;
       toast.error(
         err instanceof Error ? err.message : t("web.admin.settings.hooks.settings.updateFailed"),
       );

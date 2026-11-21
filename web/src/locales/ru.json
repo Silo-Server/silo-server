@@ -75711,7 +75711,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Перезагрузите настройки, чтобы увидеть текущие значения. Ваши правки изменившихся настроек, сохранённых паролей и ключей, а также связанных с ними настроек будут отменены; остальные правки сохранятся."
+      "value": "Перезагрузите, чтобы увидеть текущие значения. Если что-то на этой странице изменилось или вы изменили сохранённый пароль либо ключ, все ваши правки будут отменены; в остальных случаях они сохранятся."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -92601,6 +92601,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " — "
+    },
     {
       "type": 1,
       "value": "code"

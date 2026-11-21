@@ -5,7 +5,7 @@ import {
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
 import { adminKeys } from "@/hooks/queries/keys";
-import { v2 } from "./request";
+import { v2, V2ProblemError } from "./request";
 import { t } from "@/i18n";
 
 export type SettingsValues = Record<string, string>;
@@ -48,4 +48,16 @@ export function captureSettingsBaseline(values: SettingsValues | undefined): Set
   if (!isCapturedProfileAuthorityActive(baseline.profileContext) || !captureProfileRequestContext())
     throw new StaleApiRequestContextError();
   return baseline;
+}
+
+/**
+ * Whether a settings save was refused because the settings changed after the
+ * page read them (412 on `PUT /api/v2/admin/settings`).
+ */
+export function isSettingsSaveConflict(error: unknown): boolean {
+  return (
+    error instanceof V2ProblemError &&
+    error.status === 412 &&
+    error.operationId === "updateAdminSettings"
+  );
 }

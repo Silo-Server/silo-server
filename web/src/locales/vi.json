@@ -61354,7 +61354,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Tải lại để xem các giá trị hiện tại. Các chỉnh sửa của bạn đối với những cài đặt đã thay đổi, cũng như đối với mật khẩu và khóa đã lưu cùng các cài đặt liên quan, sẽ bị hoàn tác; các chỉnh sửa khác của bạn vẫn được giữ."
+      "value": "Tải lại để xem các giá trị hiện tại. Nếu có nội dung nào trên trang này đã thay đổi, hoặc bạn đã chỉnh sửa một mật khẩu hay khóa đã lưu, tất cả chỉnh sửa của bạn sẽ bị hoàn tác; nếu không, các chỉnh sửa vẫn được giữ."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -77632,6 +77632,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

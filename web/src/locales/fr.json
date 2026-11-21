@@ -67618,7 +67618,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Rechargez pour afficher les valeurs actuelles. Vos modifications des paramètres qui ont changé, ainsi que des mots de passe et clés enregistrés et des paramètres qui leur sont associés, sont annulées ; vos autres modifications sont conservées."
+      "value": "Rechargez pour afficher les valeurs actuelles. Si un élément de cette page a changé, ou si vous avez modifié un mot de passe ou une clé enregistrés, toutes vos modifications sont annulées ; sinon, elles sont conservées."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -84064,6 +84064,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

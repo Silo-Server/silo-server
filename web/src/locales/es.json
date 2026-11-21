@@ -67842,7 +67842,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Recarga para ver los valores actuales. Se deshacen tus cambios en los ajustes que cambiaron y en las contraseñas y claves guardadas junto con sus ajustes relacionados; se conservan tus demás cambios."
+      "value": "Recarga para ver los valores actuales. Si algo de esta página cambió o editaste una contraseña o clave guardada, se deshacen todos tus cambios; si no, se conservan."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -84332,6 +84332,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 
+import { isSettingsSaveConflict } from "@/api/v2/adminSettingsSnapshot";
 import type { SkippableStep } from "./setupStorage";
 import { useWizardContext } from "./WizardContext";
 
@@ -34,6 +35,9 @@ export function useStepSubmit(
       if ((await beforeDone?.()) === false) return;
       markDone(step);
     } catch (err) {
+      // A settings save refused because settings changed is already on screen,
+      // with its Reload action.
+      if (isSettingsSaveConflict(err)) return;
       toast.error(err instanceof Error ? err.message : errorMessage);
     } finally {
       setSubmitting(false);

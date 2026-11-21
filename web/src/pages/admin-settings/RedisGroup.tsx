@@ -42,13 +42,22 @@ export function RedisGroup({
   const urlEnv = form.envVar("redis.url");
   const configured = form.sensitiveConfigured.includes("redis.url");
   const [enabledOverride, setEnabledOverride] = useState<boolean | null>(null);
-  // Saving or discarding clears the toggle override so it follows the stored
-  // URL again. Adjusting during render (rather than in an effect) keeps the
-  // override alive while the admin is still editing.
-  const [lastDirtyCount, setLastDirtyCount] = useState(form.dirtyCount);
-  if (lastDirtyCount !== form.dirtyCount) {
-    setLastDirtyCount(form.dirtyCount);
-    if (form.dirtyCount === 0) setEnabledOverride(null);
+  // The toggle follows the stored URL again once the page is clean (saved or
+  // discarded), or once its Redis edits are gone while other edits stay (a
+  // reload after a refused save replaced them). Switching Redis on with no
+  // URL saved stages nothing, so the clean page is what clears that. Adjusting
+  // during render (rather than in an effect) keeps the override alive while
+  // the admin is still editing.
+  const redisStaged = REDIS_KEYS.some((key) => form.isDirty(key));
+  const formClean = form.dirtyCount === 0;
+  const [lastRedisStaged, setLastRedisStaged] = useState(redisStaged);
+  const [lastFormClean, setLastFormClean] = useState(formClean);
+  if (lastRedisStaged !== redisStaged || lastFormClean !== formClean) {
+    setLastRedisStaged(redisStaged);
+    setLastFormClean(formClean);
+    if ((lastRedisStaged && !redisStaged) || (!lastFormClean && formClean)) {
+      setEnabledOverride(null);
+    }
   }
   // Once REDIS_URL sets the connection the switch is locked, so a choice
   // made before it took over no longer applies.
@@ -94,6 +103,10 @@ export function RedisGroup({
           if (secrets.disabled) return;
           if (value === "true") {
             setEnabledOverride(true);
+            // Taking back the switch-off clears the Redis edits, and maybe the
+            // whole page, by the switch's own doing: the override stays.
+            setLastRedisStaged(false);
+            setLastFormClean(form.dirtyKeys.every((key) => REDIS_KEYS.includes(key)));
             // Takes back a staged switch-off, which cleared the number too.
             form.resetValue("redis.url");
             form.resetValue("redis.db");

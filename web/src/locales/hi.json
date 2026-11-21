@@ -60842,7 +60842,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "मौजूदा वैल्यू देखने के लिए फिर से लोड करें। जो सेटिंग बदल गई हैं उनमें, और सेव किए गए पासवर्ड और कुंजियों के साथ उनसे जुड़ी सेटिंग में किए गए आपके बदलाव वापस ले लिए गए हैं; आपके बाकी बदलाव बने हुए हैं।"
+      "value": "मौजूदा वैल्यू देखने के लिए फिर से लोड करें। अगर इस पेज पर कुछ बदला है, या आपने किसी सेव किए गए पासवर्ड या कुंजी में बदलाव किया है, तो आपके सभी बदलाव वापस ले लिए जाएँगे; नहीं तो वे बने रहेंगे।"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -77032,6 +77032,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

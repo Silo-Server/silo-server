@@ -67926,7 +67926,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Recarregue para ver os valores atuais. Suas edições nas configurações que mudaram, bem como nas senhas e chaves salvas e nas configurações relacionadas a elas, serão desfeitas; suas outras edições serão mantidas."
+      "value": "Recarregue para ver os valores atuais. Se algo nesta página mudou ou se você editou uma senha ou chave salva, todas as suas edições serão desfeitas; caso contrário, elas serão mantidas."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -84388,6 +84388,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

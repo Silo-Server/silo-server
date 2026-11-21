@@ -67946,7 +67946,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Torna a carregar per veure els valors actuals. Es desfan els canvis que hagis fet a les opcions que han canviat i a les contrasenyes i claus desades, juntament amb les opcions relacionades; la resta de canvis es mantenen."
+      "value": "Torna a carregar per veure els valors actuals. Si ha canviat alguna cosa d’aquesta pàgina o has editat una contrasenya o una clau desades, es desfan tots els canvis que has fet; si no, es mantenen."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -84440,6 +84440,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"
