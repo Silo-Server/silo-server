@@ -133,6 +133,8 @@ export function DashboardGrid({
     id: WidgetId;
     /** The resize handle the session started from. */
     handle: Element;
+    /** The pointer that pressed it; other pointers' moves and releases are ignored. */
+    pointerId: number;
     title: string;
     startX: number;
     /** 1, or -1 right to left, where the handle grows the widget leftward. */
@@ -390,6 +392,7 @@ export function DashboardGrid({
       resizeSessionRef.current = {
         id,
         handle: event.currentTarget,
+        pointerId: event.pointerId,
         title: t(widget.titleKey),
         startX: event.clientX,
         inlineSign: isRightToLeft(event.currentTarget) ? -1 : 1,
@@ -462,7 +465,7 @@ export function DashboardGrid({
   const handleResizePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
       const session = resizeSessionRef.current;
-      if (!session) return;
+      if (session?.pointerId !== event.pointerId) return;
       session.latestClientX = event.clientX;
       session.latestClientY = event.clientY;
       applyResizePreview();
@@ -476,7 +479,7 @@ export function DashboardGrid({
   const handleResizePointerEnd = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
       const session = resizeSessionRef.current;
-      if (!session) return;
+      if (session?.pointerId !== event.pointerId) return;
       endResize();
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
