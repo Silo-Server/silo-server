@@ -542,12 +542,26 @@ func TestFilesystemStopsAtFreeSpaceReserve(t *testing.T) {
 	if err = s.CreateExclusive(ctx, "kept/poster.jpg", bytes.NewReader(make([]byte, 64<<10)), ""); !errors.Is(err, ErrExists) {
 		t.Fatalf("exclusive create of an existing key at the reserve: %v", err)
 	}
-	// A restore's rollback putting a replaced file back may use the reserve.
-	if err = s.PutStream(WithoutFreeSpaceReserve(ctx), "kept/poster.jpg", bytes.NewReader([]byte("original")), ""); err != nil {
-		t.Fatalf("rollback write at the reserve: %v", err)
-	}
 	if n, err := s.Delete(ctx, []string{"kept/poster.jpg", "kept/during.jpg", "kept/fill.jpg"}); err != nil || n != 3 {
 		t.Fatalf("delete while full: %d %v", n, err)
+	}
+}
+
+// A restore's rollback putting a replaced file back may use the reserve,
+// which other writes may not.
+func TestFilesystemRollbackWritesMayUseTheReserve(t *testing.T) {
+	s, err := NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	realStat := statSpace
+	statSpace = func(string) (int64, int64, error) { return 2 << 30, 100 << 30, nil }
+	t.Cleanup(func() { statSpace = realStat })
+	if err = s.PutStream(t.Context(), "posters/1.jpg", bytes.NewReader([]byte("original")), ""); !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("write at the reserve: %v", err)
+	}
+	if err = s.PutStream(WithoutFreeSpaceReserve(t.Context()), "posters/1.jpg", bytes.NewReader([]byte("original")), ""); err != nil {
+		t.Fatalf("rollback write at the reserve: %v", err)
 	}
 }
 
