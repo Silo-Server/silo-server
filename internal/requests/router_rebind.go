@@ -48,17 +48,26 @@ func (r *Repository) RebindOrphanedIntegrations(ctx context.Context) ([]string, 
 // server id names. The caller holds the routing mode lock.
 func rebindOrphanedIntegrations(ctx context.Context, tx pgx.Tx, id *string) ([]string, error) {
 	// Lock the orphaned servers in id order first, as a route save does with
-	// FOR SHARE, so rebinding several servers cannot deadlock with it.
-	if _, err := tx.Exec(ctx, `
+	// FOR SHARE, so rebinding several servers cannot deadlock with it. The
+	// update then touches only the servers locked here.
+	rows, err := tx.Query(ctx, `
 		SELECT i.id FROM request_integrations i
 		WHERE i.plugin_id <> '' AND i.installation_id IS NOT NULL
 			AND ($1::text IS NULL OR i.id = $1)
 			AND NOT EXISTS (SELECT 1 FROM plugin_installations p WHERE p.id = i.installation_id)
 		ORDER BY i.id
-		FOR UPDATE`, id); err != nil {
+		FOR UPDATE`, id)
+	if err != nil {
 		return nil, fmt.Errorf("lock orphaned request integrations: %w", err)
 	}
-	rows, err := tx.Query(ctx, `
+	orphaned, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("lock orphaned request integrations: %w", err)
+	}
+	if len(orphaned) == 0 {
+		return nil, nil
+	}
+	rows, err = tx.Query(ctx, `
 		WITH candidates AS (
 			SELECT i.id, min(p.id) AS installation_id, count(DISTINCT p.id) AS matches
 			FROM request_integrations i
@@ -67,8 +76,7 @@ func rebindOrphanedIntegrations(ctx context.Context, tx pgx.Tx, id *string) ([]s
 				ON pc.plugin_installation_id = p.id
 				AND pc.capability_type = 'request_router.v1'
 				AND pc.capability_id = i.capability_id
-			WHERE i.plugin_id <> '' AND i.installation_id IS NOT NULL
-				AND ($1::text IS NULL OR i.id = $1)
+			WHERE i.id = ANY($1)
 				AND NOT EXISTS (SELECT 1 FROM plugin_installations p WHERE p.id = i.installation_id)
 			GROUP BY i.id
 		)
@@ -76,7 +84,7 @@ func rebindOrphanedIntegrations(ctx context.Context, tx pgx.Tx, id *string) ([]s
 		SET installation_id = c.installation_id, updated_at = now()
 		FROM candidates c
 		WHERE i.id = c.id AND c.matches = 1
-		RETURNING i.id`, id)
+		RETURNING i.id`, orphaned)
 	if err != nil {
 		return nil, fmt.Errorf("rebind request integrations: %w", err)
 	}
@@ -89,16 +97,10 @@ func rebindOrphanedIntegrations(ctx context.Context, tx pgx.Tx, id *string) ([]s
 
 // failUnboundTargets fails the queued and downloading targets of a server no
 // plugin installation backs, so deleting it does not leave requests that no
-// plugin will ever report on. A server whose plugin was installed again is
-// rebound first, as the lifecycle hook would, so a delete that runs before the
-// hook still refuses while the reinstalled plugin tracks its requests. A bound
-// server's live targets are left alone: its plugin still tracks them, and the
-// delete refuses. The caller holds the routing mode lock and the server's row
-// lock.
+// plugin will ever report on. A bound server's live targets are left alone:
+// its plugin still tracks them, and the delete refuses. The caller holds the
+// routing mode lock and the server's row lock, and rebinds the server first.
 func (r *Repository) failUnboundTargets(ctx context.Context, tx pgx.Tx, id string) error {
-	if _, err := rebindOrphanedIntegrations(ctx, tx, &id); err != nil {
-		return err
-	}
 	var unbound bool
 	if err := tx.QueryRow(ctx, `
 		SELECT NOT EXISTS (
