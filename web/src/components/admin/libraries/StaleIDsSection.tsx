@@ -92,7 +92,10 @@ export function StaleIDsSection() {
         <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
           <Table aria-label={t("web.admin.libraries.staleIds.tableLabel")}>
             <TableHeader>
-              <TableRow className="hover:bg-transparent">
+              {/* Headers wrap: in longer languages they are wider than the
+                  dates and IDs under them, and would push the table past its
+                  section. */}
+              <TableRow className="hover:bg-transparent [&>th]:whitespace-normal">
                 <TableHead>{t("web.admin.libraries.column.title")}</TableHead>
                 <TableHead>{t("web.admin.libraries.column.year")}</TableHead>
                 <TableHead>{t("web.admin.libraries.column.library")}</TableHead>
