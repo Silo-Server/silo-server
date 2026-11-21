@@ -221,13 +221,17 @@ export function RequestSeasonsDialog({
           >
             {(createRequest.isPending || refreshing) && <Loader2 className="size-4 animate-spin" />}
             <span className="flex min-w-0 whitespace-pre">
-              {selected.length > 0
-                ? t("web.requests.seasons.requestSeasons", {
-                    seasons: <span className="truncate">{formatSeasonList(selected)}</span>,
-                  })
-                : serverChooses
-                  ? t("web.requests.seasons.requestSeries")
-                  : t("web.requests.request")}
+              {selected.length > 0 ? (
+                t("web.requests.seasons.requestSeasons", {
+                  seasons: <span className="truncate">{formatSeasonList(selected)}</span>,
+                })
+              ) : (
+                <span className="truncate">
+                  {serverChooses
+                    ? t("web.requests.seasons.requestSeries")
+                    : t("web.requests.request")}
+                </span>
+              )}
             </span>
           </Button>
         </DialogFooter>
