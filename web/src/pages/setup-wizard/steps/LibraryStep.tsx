@@ -16,6 +16,8 @@ import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
 import { useStepSummary } from "../useStep";
 import { useWizardContext } from "../WizardContext";
 
+// Paths are technical, not prose: a localized list (joinList) would run them
+// together in Chinese and Japanese.
 const PATH_SEPARATOR = ", ";
 
 /**
