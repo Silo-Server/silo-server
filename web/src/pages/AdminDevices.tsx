@@ -1336,7 +1336,13 @@ function DeviceRow({
       // The margin keeps a focused row clear of its group's sticky header and,
       // below lg, the admin mobile header. Firefox doesn't scroll a partly
       // visible row on focus, so ask for it; "nearest" is a no-op when clear.
-      onFocus={(e) => e.currentTarget.scrollIntoView({ block: "nearest" })}
+      // Keyboard focus only: a mouse press focuses on mousedown, and moving
+      // the row then would land the mouseup elsewhere and lose the click.
+      onFocus={(e) => {
+        if (e.currentTarget.matches(":focus-visible")) {
+          e.currentTarget.scrollIntoView({ block: "nearest" });
+        }
+      }}
       className={cn(
         "group relative flex scroll-mt-24 items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors lg:scroll-mt-10",
         active ? "bg-surface-hover/70" : "hover:bg-surface-hover/40",
