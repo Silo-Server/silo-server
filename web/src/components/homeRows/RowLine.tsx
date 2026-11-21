@@ -49,7 +49,7 @@ function Description({ parts }: { parts: DescriptionPart[] }) {
         </span>
       );
     return (
-      <b key={index} className="text-foreground/75 font-medium">
+      <b key={index} className="text-foreground font-medium">
         {part.strong}
       </b>
     );
@@ -117,7 +117,7 @@ export function RowLine({
               className={
                 row.own
                   ? "text-info font-semibold sm:hidden"
-                  : "text-foreground/75 font-medium sm:hidden"
+                  : "text-foreground font-medium sm:hidden"
               }
             >
               {row.own ? t("web.home.rows.line.yours") : t("web.home.rows.line.server")}
