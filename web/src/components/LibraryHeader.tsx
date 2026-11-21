@@ -3,6 +3,7 @@ import { Tabs as TabsPrimitive } from "radix-ui";
 import { Shuffle } from "lucide-react";
 import { edgeMask, useScrollStrip } from "@/hooks/useScrollStrip";
 import { useT, type MessageKey } from "@/i18n";
+import { hasArabicScript } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 import { isAudiobookLibraryType } from "@/pages/libraryPageSearchParams";
 
@@ -107,7 +108,12 @@ export default function LibraryHeader({
           <span className="@max-[15.5rem]:hidden">{t("web.library.header.eyebrow")}</span>
           {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a divider glyph, not text */}
           <span className="hero-eyebrow-divider @max-[15.5rem]:hidden">/</span>
-          <span className="hero-eyebrow-strong">{libraryName}</span>
+          <span
+            className="hero-eyebrow-strong"
+            data-cursive={hasArabicScript(libraryName) || undefined}
+          >
+            {libraryName}
+          </span>
         </p>
       </div>
       <div className="flex min-w-0 items-center gap-2">

@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
+import { hasArabicScript } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 
 /** Keep mobile titles readable; fit desktop titles into a bounded line budget. */
@@ -107,6 +108,7 @@ export default function DetailTitle({
     <h1
       ref={titleRef}
       dir="auto"
+      data-cursive={hasArabicScript(title) || undefined}
       title={bounded ? title : undefined}
       className={cn("bidi-text", className)}
     >

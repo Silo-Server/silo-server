@@ -39,6 +39,7 @@ import {
 } from "@/lib/externalSignIn";
 import { toast } from "sonner";
 import { useT, type MessageKey } from "@/i18n";
+import { hasArabicScript } from "@/lib/direction";
 
 type DeviceLoginSession = V2Result<"POST /api/v2/auth/device/start">;
 // The phone sign-in status line: a catalog message, or an error's own text.
@@ -487,7 +488,12 @@ export default function Login() {
       <h1 className="sr-only">{t("web.auth.login.heading", { server: serverName })}</h1>
       <Card className="auth-card glass panel-border w-full max-w-md border-0">
         <CardHeader>
-          <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">{serverName}</CardTitle>
+          <CardTitle
+            className="text-3xl font-extrabold tracking-[-0.04em]"
+            data-cursive={hasArabicScript(serverName) || undefined}
+          >
+            {serverName}
+          </CardTitle>
           <CardDescription className="mt-2 text-sm leading-6">{loginSubtitle}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -576,7 +582,7 @@ export default function Login() {
                     <span className="flex flex-col items-start text-start">
                       <span>{label}</span>
                       {owner && (
-                        <span className="text-xs font-(--font-weight-ui)">
+                        <span className="text-xs font-normal">
                           {t("web.auth.login.network.via", { provider: entry.display_name })}
                         </span>
                       )}

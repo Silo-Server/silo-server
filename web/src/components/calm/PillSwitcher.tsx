@@ -93,7 +93,7 @@ export function PillSwitcher({
                         {" "}
                         <span
                           className={cn(
-                            "text-[12.5px] font-(--font-weight-ui)",
+                            "text-[12.5px] font-normal",
                             // On the accent fill only the label's own color is sure to read.
                             // Off it, a step below the label's /80. Not muted-foreground:
                             // high contrast pins that brighter than the label.

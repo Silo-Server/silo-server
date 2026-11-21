@@ -302,7 +302,9 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
       body = (
         <div className="space-y-2" role="status">
           <div className="flex items-baseline justify-between gap-3 text-sm">
-            <span className="min-w-0 truncate">{chosenFile?.name}</span>
+            <span dir="auto" className="min-w-0 truncate">
+              {chosenFile?.name}
+            </span>
             <span className="text-muted-foreground shrink-0 tabular-nums">
               {progressLabel(sent, total)}
             </span>
