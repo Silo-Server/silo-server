@@ -23,6 +23,7 @@ import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { formatHoursMinutes } from "@/lib/audiobooks/duration";
 import { cardGridClasses } from "@/lib/uiCustomization";
+import { getInitial } from "@/lib/text";
 
 interface AudiobookGroupsViewProps {
   libraryId: number;
@@ -72,7 +73,7 @@ function groupInitials(name: string): string {
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
+    .map((part) => getInitial(part))
     .join("");
 }
 

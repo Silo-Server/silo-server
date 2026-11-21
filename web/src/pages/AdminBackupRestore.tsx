@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type Ref,
+} from "react";
 import { ArrowLeft, Check } from "lucide-react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -27,6 +35,7 @@ import { adminKeys } from "@/hooks/queries/keys";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
+import { isRestorePending } from "@/lib/scrollRestoration";
 import { cn } from "@/lib/utils";
 import { RestoreChoose } from "@/pages/admin-backups/RestoreChoose";
 import { RestoreReview, type RestoreRefusal } from "@/pages/admin-backups/RestoreReview";
@@ -54,20 +63,22 @@ const STEPS: readonly MessageKey[] = [
   "web.admin.backups.restore.steps.restore",
 ];
 
-function StepIndicator({ current }: { current: number }) {
+/** The current step can take focus, without joining the Tab order. */
+function StepIndicator({ current, listRef }: { current: number; listRef: Ref<HTMLOListElement> }) {
   const t = useT();
   return (
     <nav aria-label={t("web.admin.backups.restore.steps.label")}>
-      <ol className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+      <ol ref={listRef} className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
         {STEPS.map((label, index) => {
           const done = index < current;
           const active = index === current;
           return (
             <li
               key={label}
+              tabIndex={active ? -1 : undefined}
               aria-current={active ? "step" : undefined}
               className={cn(
-                "flex items-center gap-2",
+                "flex items-center gap-2 outline-none",
                 active ? "text-foreground font-medium" : "text-muted-foreground",
               )}
             >
@@ -233,6 +244,35 @@ export default function AdminBackupRestore() {
     if (terminal) void queryClient.invalidateQueries({ queryKey: adminKeys.backups() });
   }, [queryClient, terminal]);
 
+  const step = jobId ? 2 : reviewing ? 1 : 0;
+
+  // A step change replaces everything below the step list, usually including
+  // the control that made it, and focus drops to the page. Move it to the new
+  // step's name in the list instead.
+  const stepList = useRef<HTMLOListElement>(null);
+  const shownStep = useRef(step);
+  // Before paint, or the new step shows for a frame at the old scroll offset.
+  useLayoutEffect(() => {
+    if (shownStep.current === step) return;
+    shownStep.current = step;
+    const steps = stepList.current;
+    const current = steps?.querySelector<HTMLElement>('[aria-current="step"]');
+    if (!steps || !current) return;
+    // The control can sit far down the page (Review restore beside or after a
+    // long chooser, Back below a long review), and the new step would then
+    // open partway down. Back or Forward returns to where the page was left.
+    const restoring = isRestorePending();
+    if (!restoring) window.scrollTo({ top: 0, behavior: "instant" });
+    // Focus that dropped lands on the page or on what holds it (Safari and
+    // Firefox on macOS focus <main> for a clicked button). Focus on the list
+    // follows the current step, since a restore can pass through Choose on its
+    // way to the run. Focus anywhere else, such as the sidebar, stays put.
+    const focused = document.activeElement;
+    if (!focused || focused.contains(steps) || steps.contains(focused)) {
+      current.focus({ preventScroll: restoring });
+    }
+  }, [step]);
+
   // A queued or running restore of this source without its job in the
   // address (a reload, another admin) is shown instead of the chooser.
   const forThisBackup = (candidate: RestoreJob) => {
@@ -256,8 +296,6 @@ export default function AdminBackupRestore() {
   const taken = takenAt ? new Date(takenAt) : null;
   const version = set?.silo_version ?? backup?.silo_version ?? uploadSource?.silo_version;
   const { title, subtitle } = restoreHeading(t, { taken, version, set: origin, fromUpload });
-
-  const step = jobId ? 2 : reviewing ? 1 : 0;
 
   const restore = () => {
     if (!set) return;
@@ -437,7 +475,7 @@ export default function AdminBackupRestore() {
         {t("web.admin.backups.restore.backLink")}
       </Link>
       <PageHeader title={title} subtitle={subtitle} className="mb-4" />
-      <StepIndicator current={step} />
+      <StepIndicator current={step} listRef={stepList} />
       {body}
     </div>
   );

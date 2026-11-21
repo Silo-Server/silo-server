@@ -16,18 +16,24 @@ export default function EpisodesTranslationAction({
   onTranslate?: () => void;
 }) {
   const t = useT();
-  if (translating) {
-    return <TranslatingStatus label={t("web.detail.translation.translating")} />;
-  }
-  if (!onTranslate) return null;
+  // The status stays mounted beside the action so its live region exists
+  // before a translation starts.
   return (
-    <button
-      type="button"
-      onClick={onTranslate}
-      className="text-muted-foreground hover:text-foreground border-border/60 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors"
-    >
-      <Languages className="h-3 w-3" />
-      {t("web.detail.translation.translateEpisodes")}
-    </button>
+    <>
+      <TranslatingStatus
+        translating={translating}
+        label={t("web.detail.translation.translating")}
+      />
+      {!translating && onTranslate && (
+        <button
+          type="button"
+          onClick={onTranslate}
+          className="text-muted-foreground hover:text-foreground border-border/60 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors"
+        >
+          <Languages className="h-3 w-3" />
+          {t("web.detail.translation.translateEpisodes")}
+        </button>
+      )}
+    </>
   );
 }

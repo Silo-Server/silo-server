@@ -308,7 +308,7 @@ function ItemChip({ title }: { title: string }) {
     <div className="bg-muted/40 flex items-center gap-3 rounded-xl p-3">
       <span
         aria-hidden
-        className="bg-muted text-muted-foreground grid aspect-[2/3] w-8 place-items-center rounded-md"
+        className="bg-muted text-muted-foreground grid aspect-[2/3] w-8 shrink-0 place-items-center rounded-md"
       >
         <Film className="size-4" />
       </span>
