@@ -1316,7 +1316,7 @@ function DeviceGroup({
   );
 }
 
-/** How long after a pointer press a row's focus counts as coming from it (a tap focuses on release). */
+/** How long after a pointer press or release a row's focus counts as coming from it. */
 const POINTER_FOCUS_WINDOW_MS = 1000;
 
 /** Scrolls the device list so its group's sticky header no longer covers `row`. */
@@ -1341,6 +1341,7 @@ function DeviceRow({
 }) {
   const t = useT();
   const lastPointerDown = useRef(Number.NEGATIVE_INFINITY);
+  const lastPointerUp = useRef(Number.NEGATIVE_INFINITY);
   const kind = classifyPlatform(device.device_platform);
   const profileSuffix = activeProfileId ? `?profile=${encodeURIComponent(activeProfileId)}` : "";
   const href = `/admin/devices/${device.user_id}/${encodeURIComponent(device.device_id)}${profileSuffix}`;
@@ -1354,14 +1355,24 @@ function DeviceRow({
       // focus, and a larger minimum font can make the header taller than the
       // margin, so move the row out from under the header here. Not for a
       // pointer press: it focuses on mousedown (or on a tap), and moving the
-      // row then would land the release elsewhere and lose the click. A press
-      // that never focuses (a right-click, a press on the focused row) just
-      // ages out instead of blocking the next keyboard focus.
+      // row then would land the release elsewhere and lose the click. Times,
+      // not a flag: a touch held longer than the window still focuses just
+      // after its release, and a press that never focuses (a right-click, a
+      // press on the focused row) ages out instead of blocking the keyboard.
       onPointerDown={() => {
         lastPointerDown.current = performance.now();
       }}
+      onPointerUp={() => {
+        lastPointerUp.current = performance.now();
+      }}
       onFocus={(e) => {
-        if (performance.now() - lastPointerDown.current < POINTER_FOCUS_WINDOW_MS) return;
+        const now = performance.now();
+        if (
+          now - lastPointerDown.current < POINTER_FOCUS_WINDOW_MS ||
+          now - lastPointerUp.current < POINTER_FOCUS_WINDOW_MS
+        ) {
+          return;
+        }
         revealRowUnderHeader(e.currentTarget);
       }}
       className={cn(
