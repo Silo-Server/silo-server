@@ -119,9 +119,10 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   reason; a `dir="ltr"` box keeps flex order and text there left to right. `pre` is
   always left to right; inline `code`, `kbd` and `samp` take their text's direction
   unless they carry a `dir`.
-- A URL, path, or file name shown as text, which may hold Arabic or Hebrew segments,
-  renders through `PathText` (`src/components/PathText.tsx`): left to right overall, each
-  `/`-separated segment in its own direction.
+- Show a new URL, path, or file name through `PathText` (`src/components/PathText.tsx`):
+  left to right overall, each `/`-separated segment in its own direction. A plain
+  `dir="ltr"` box, which some older path displays still use, swaps two adjacent Arabic or
+  Hebrew segments.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also
