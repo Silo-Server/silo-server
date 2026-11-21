@@ -20,7 +20,8 @@ const { sensitiveStatus } = vi.hoisted(() => ({
 vi.mock("@/hooks/queries/admin/settings", () => ({
   // The snapshot never carries the URL; whether one is saved comes from the
   // protected-credential status.
-  useAdminServerSettings: () => ({ data: { "redis.db": "" }, isLoading: false }),
+  // The server reports the number in use: 0 when the URL names none.
+  useAdminServerSettings: () => ({ data: { "redis.db": "0" }, isLoading: false }),
   useAdminSensitiveStatus: () => ({ data: sensitiveStatus.current, isError: false }),
   useUpdateServerSettings: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCheckAdminSettingsConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -72,6 +73,8 @@ describe("RedisGroup", () => {
     await userEvent.type(screen.getByLabelText("Other setting"), "https://media.example.com");
     await userEvent.click(screen.getByRole("switch", { name: "Use Redis" }));
     expect(screen.queryByLabelText("Connection URL")).not.toBeInTheDocument();
+    // The switch-off stages the URL and the number with it.
+    expect(screen.getByText("3 staged")).toBeInTheDocument();
 
     // REDIS_URL sets both keys, as the server reports it.
     sensitiveStatus.current = {
