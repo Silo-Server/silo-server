@@ -305,13 +305,13 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   }, []);
 
   // After a refused save, the admin asked for the settings as they are now.
-  // An edit is kept only while its setting still shows what it showed when
-  // that edit began; an edit to a setting that changed meanwhile is replaced,
-  // so the next save cannot overwrite a change nobody here has seen. Secrets
-  // never appear in a snapshot, so an edit to one that was set then or is set
-  // now is replaced too: nothing here can show whether it changed. Reads refs
-  // and fresh results only, so a toast holding an old copy still reconciles
-  // the drafts as they are when it runs.
+  // The edits are kept only if every one can be vouched for: its setting still
+  // shows what it showed when the edit began, and it isn't a saved password or
+  // key, which no snapshot shows. Otherwise all of them are undone. Edits on a
+  // page go together (a server address and its password, a search provider
+  // and its connection), so keeping some could save a mix nobody entered.
+  // Reads refs and fresh results only, so a toast holding an old copy still
+  // reconciles the drafts as they are when it runs.
   const reloadAfterConflict = useCallback(async () => {
     if (reloading.current || savePending.current) return;
     const generation = draftGeneration.current;
@@ -349,26 +349,11 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         if (!was || was.value !== now) return true;
         return now === undefined && (was.secretSet || (configured?.includes(key) ?? true));
       };
+      // The Redis database number is read from a saved URL no snapshot shows.
+      const unverifiable = (key: string) =>
+        changed(key) || (REDIS_KEYS.includes(key) && (configured?.includes("redis.url") ?? true));
       const drafts = [...dirtyRef.current];
-      // The Redis URL and database number save as a pair (`stageRedisUrl`),
-      // and a database number means nothing without the server it is on. A
-      // saved URL is a secret, so with one set the pair can't be checked.
-      const redisDrafts = drafts.filter((key) => REDIS_KEYS.includes(key));
-      const redisReplaced =
-        redisDrafts.length > 0 &&
-        (redisDrafts.some(changed) || (configured?.includes("redis.url") ?? true));
-      // An undone password or key takes the rest of its group with it (the
-      // settings sharing its key prefix, such as a host or endpoint), so a
-      // connection's settings are never saved apart from its credential.
-      const undoneSecretGroups = new Set(
-        drafts.filter((key) => !Object.hasOwn(fresh, key) && changed(key)).map(settingGroup),
-      );
-      const replaced = drafts.filter(
-        (key) =>
-          changed(key) ||
-          undoneSecretGroups.has(settingGroup(key)) ||
-          (redisReplaced && REDIS_KEYS.includes(key)),
-      );
+      const replaced = drafts.some(unverifiable) ? drafts : [];
       // Retire a ChatGPT sign-in callback that started before this reload.
       saveEpoch.current++;
       for (const key of replaced) {
@@ -554,11 +539,6 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     buildConnectionCheckRequest,
     beginSettingsTransition,
   };
-}
-
-/** The settings a key belongs with: its key up to the last segment. */
-function settingGroup(key: string) {
-  return key.slice(0, key.lastIndexOf(".") + 1);
 }
 
 /**

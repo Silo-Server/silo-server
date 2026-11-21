@@ -378,8 +378,8 @@ it.each([false, true])(
     expect(result.current.dirtyCount).toBe(competitor ? 1 : 0);
   },
 );
-it("lets a refused settings save through after a reload, replacing only edits it cannot vouch for", async () => {
-  let stored = {
+it("lets a refused settings save through after a reload, keeping the edits only when it can vouch for all", async () => {
+  let stored: Record<string, string> = {
     "branding.server_name": "Silo",
     "branding.login_subtitle": "Welcome",
     "server.log_level": "info",
@@ -425,8 +425,23 @@ it("lets a refused settings save through after a reload, replacing only edits it
       }),
     fixture(),
   );
+  async function reloadAfterRefusal() {
+    const action = vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.action as
+      | { onClick: (event: { preventDefault: () => void }) => void }
+      | undefined;
+    expect(action).toBeDefined();
+    const preventDefault = vi.fn();
+    const dismissals = vi.mocked(toast.dismiss).mock.calls.length;
+    act(() => action?.onClick({ preventDefault }));
+    expect(preventDefault).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(vi.mocked(toast.dismiss).mock.calls.length).toBeGreaterThan(dismissals),
+    );
+  }
   await waitFor(() => expect(result.current.sensitiveStatusReady).toBe(true));
   await waitFor(() => expect(result.current.getValue("branding.server_name")).toBe("Silo"));
+
+  // Every edit can be vouched for, so Reload keeps them all.
   act(() => result.current.setValue("branding.server_name", "Casa"));
   // Another administrator saves the subtitle, and a background read shows it
   // before this admin edits it in turn.
@@ -437,13 +452,9 @@ it("lets a refused settings save through after a reload, replacing only edits it
   });
   await waitFor(() => expect(result.current.getValue("branding.login_subtitle")).toBe("Hello"));
   act(() => result.current.setValue("branding.login_subtitle", "Hello there"));
-  act(() => result.current.setValue("server.log_level", "debug"));
-  // Unset, so no snapshot carries it; a new mail server with a new password
-  // for it, and that password is a saved secret no snapshot shows.
+  // Unset, so no snapshot carries it.
   act(() => result.current.setValue("download.artifact_dir", "/srv/artifacts"));
-  act(() => result.current.setValue("email.smtp_host", "mail.example.invalid"));
-  act(() => result.current.setValue("email.smtp_password", "new-secret"));
-  // The other administrator then saves the log level too.
+  // The other administrator then saves a setting this admin didn't edit.
   stored = { ...stored, "server.log_level": "warn" };
   tag = '"tagB"';
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -453,25 +464,9 @@ it("lets a refused settings save through after a reload, replacing only edits it
   }
   expect(writes.map((write) => write.tag)).toEqual(['"tagA"', '"tagA"']);
   // Each refusal is reported once, by the form, with a way to reload.
-  const refusals = vi.mocked(toast.error).mock.calls;
-  expect(refusals).toHaveLength(2);
-  const action = refusals[1]?.[1]?.action as
-    | { onClick: (event: { preventDefault: () => void }) => void }
-    | undefined;
-  expect(action).toBeDefined();
-  const preventDefault = vi.fn();
-  act(() => action?.onClick({ preventDefault }));
-  expect(preventDefault).toHaveBeenCalled();
-  await waitFor(() => expect(toast.dismiss).toHaveBeenCalled());
-  // The log level changed after its edit began, so the edit gives way to the
-  // saved value. Nothing here can tell whether the saved password changed, so
-  // its edit is undone, and the mail server edit goes with it. The subtitle
-  // edit began over the value now saved, so it stays.
+  expect(vi.mocked(toast.error).mock.calls).toHaveLength(2);
+  await reloadAfterRefusal();
   expect(result.current.getValue("server.log_level")).toBe("warn");
-  expect(result.current.getValue("email.smtp_password")).toBe("");
-  expect(result.current.getValue("email.smtp_host")).toBe("");
-  expect(result.current.getValue("branding.server_name")).toBe("Casa");
-  expect(result.current.getValue("branding.login_subtitle")).toBe("Hello there");
   expect([...result.current.dirtyKeys].sort()).toEqual([
     "branding.login_subtitle",
     "branding.server_name",
@@ -488,13 +483,24 @@ it("lets a refused settings save through after a reload, replacing only edits it
     },
     tag: '"tagB"',
   });
-  expect(stored).toEqual({
-    "branding.server_name": "Casa",
-    "branding.login_subtitle": "Hello there",
-    "server.log_level": "warn",
-    "download.artifact_dir": "/srv/artifacts",
-  });
   expect(result.current.dirtyCount).toBe(0);
+
+  // A new mail server with a new password for it: nothing here can tell
+  // whether the saved password changed, so Reload undoes every edit rather
+  // than save the server without the password it was entered with.
+  act(() => result.current.setValue("branding.server_name", "Villa"));
+  act(() => result.current.setValue("email.smtp_host", "mail.example.invalid"));
+  act(() => result.current.setValue("email.smtp_password", "new-secret"));
+  stored = { ...stored, "server.log_level": "error" };
+  tag = '"tagD"';
+  await act(async () => {
+    await expect(result.current.save()).rejects.toBeInstanceOf(Error);
+  });
+  await reloadAfterRefusal();
+  expect(result.current.dirtyCount).toBe(0);
+  expect(result.current.getValue("branding.server_name")).toBe("Casa");
+  expect(result.current.getValue("email.smtp_host")).toBe("");
+  expect(result.current.getValue("email.smtp_password")).toBe("");
 });
 it("refreshes the link capabilities when the public URL changes", async () => {
   const fetchMock = vi
