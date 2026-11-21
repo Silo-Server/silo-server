@@ -99,7 +99,10 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
       <div className="-mx-[0.25em] min-w-0 flex-1 overflow-x-clip px-[0.25em]">
         <p className="text-sm wrap-anywhere">
           {t("web.admin.backups.restore.run.itemLine", {
-            label,
+            // <bdi>, not the isolate characters a string value gets in right-to-left languages:
+            // the line could break after the opening isolate, before a name that can't wrap,
+            // and leave the first line empty.
+            label: <bdi>{label}</bdi>,
             section: t(SECTION_TITLES[item.section]),
             // The status stays whole: no break at its spaces or between its Chinese, Japanese,
             // or Korean characters. One wider than the line still breaks, through
