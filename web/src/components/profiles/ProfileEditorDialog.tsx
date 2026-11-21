@@ -464,7 +464,7 @@ function ProfileEditorForm({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="text-muted-foreground hover:text-foreground h-7 px-2 text-xs"
+                  className="text-muted-foreground hover:text-foreground h-auto min-h-7 max-w-full px-2 py-1 text-start text-xs whitespace-normal"
                   onClick={() => {
                     const next = !draft.clearPin;
                     setDraft((current) => ({
