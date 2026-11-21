@@ -19,18 +19,22 @@ import { useWizardContext } from "../WizardContext";
 // Paths are technical, not prose: a localized list (joinList) would run them
 // together in Chinese and Japanese.
 const PATH_SEPARATOR = ", ";
+const NAME_SEPARATOR = "/";
 
 /**
  * One folder path for a left-to-right line. Each folder name is its own
- * isolate, so the slashes read left to right even between two Arabic names
- * (`/وسائط/أفلام`), and a copied path has no added characters.
+ * left-to-right isolate, so the slashes read left to right even between two
+ * Arabic names (`/وسائط/أفلام`), a leading dot stays beside its slash, and a
+ * copied path has no added characters. Only `/` separates: server paths are
+ * POSIX, where a backslash is part of a name.
  */
 function FolderPath({ path }: { path: string }) {
-  return path
-    .split(/([\\/])/)
-    .map((part, position) =>
-      position % 2 === 1 || part === "" ? part : <bdi key={position}>{part}</bdi>,
-    );
+  return path.split(NAME_SEPARATOR).map((name, position) => (
+    <Fragment key={position}>
+      {position > 0 ? NAME_SEPARATOR : null}
+      {name === "" ? null : <span dir="ltr">{name}</span>}
+    </Fragment>
+  ));
 }
 
 /**
