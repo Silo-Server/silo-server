@@ -652,8 +652,9 @@ export function RestoreChoose({
             box's clipping edge. The fade covers only the box's bottom padding,
             so it shows just while more of the summary scrolls on below. Its
             outsized shrink factor makes it give up its height before the
-            notice does. */}
-        <div className="overlay-scroll space-y-4 lg:-mx-1 lg:-mt-1 lg:mb-0 lg:min-h-0 lg:shrink-[999] lg:overflow-y-auto lg:[mask-image:linear-gradient(to_bottom,black_calc(100%_-_1rem),transparent)] lg:px-1 lg:pt-1 lg:pb-4">
+            notice does; flexbox shares overflow by weight, and a smaller one
+            still trims the notice by a fraction of a pixel, enough to scroll. */}
+        <div className="overlay-scroll space-y-4 lg:-mx-1 lg:-mt-1 lg:mb-0 lg:min-h-0 lg:shrink-[100000] lg:overflow-y-auto lg:[mask-image:linear-gradient(to_bottom,black_calc(100%_-_1rem),transparent)] lg:px-1 lg:pt-1 lg:pb-4">
           <SectionIndex sections={set.sections} selection={selection} variant="list" />
           <h2 id="restore-summary-heading" className="text-[15px] font-semibold tracking-tight">
             {t("web.admin.backups.restore.choose.summaryHeading")}
