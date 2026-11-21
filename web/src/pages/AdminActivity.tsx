@@ -107,10 +107,22 @@ const ROW_LINK_CLASS =
  * truncate: Firefox and WebKit clip its text to its rounded corners with either
  * `overflow: hidden` or `overflow-x: clip`, which cuts off a first or last
  * letter's descender (the "j" in "jordan"). This box has no corners, and the
- * link keeps its rounded focus ring. The link needs `min-w-0` to shrink.
+ * link keeps its rounded focus ring. It clips only the inline axis: `truncate`'s
+ * `overflow: hidden` would cut the top of "Ẩ" and Arabic vowel marks below the
+ * line. Padding offset by a negative margin, as in `OVERFLOW_CLIP`, moves the clip
+ * past the text's edges, so ink that reaches beyond them (the hook of a leading
+ * "j") stays whole. A flex-item link needs `min-w-0` to shrink; a block link
+ * needs `flow-root`, or the negative margins pass through it and stretch its
+ * focus ring.
  */
 function RowLinkText({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <span className={`block truncate ${className}`}>{children}</span>;
+  return (
+    <span
+      className={`-m-[0.25em] block overflow-x-clip p-[0.25em] text-ellipsis whitespace-nowrap ${className}`}
+    >
+      {children}
+    </span>
+  );
 }
 /**
  * A clickable row's highlight and lit expand chevron, held back while the
@@ -992,7 +1004,7 @@ function TitleLink({ session }: { session: AdminSession }) {
       to={itemHref}
       title={title}
       dir="auto"
-      className={`${ROW_LINK_CLASS} block w-fit max-w-full text-[13px] font-medium`}
+      className={`${ROW_LINK_CLASS} flow-root w-fit max-w-full text-[13px] font-medium`}
     >
       <RowLinkText className="bidi-text">{title}</RowLinkText>
     </Link>
