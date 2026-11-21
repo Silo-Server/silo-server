@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -179,6 +179,22 @@ export default function CompatibilityProxiesSettings() {
   const removeWeb = useRemoveJellyfinCompatWeb();
   const updateCompatSettings = useUpdateJellyfinCompatSettings();
   const status = statusQuery.data;
+  // Switching the API off also turns Jellyfin Web off (setJellyfinAPIEnabled),
+  // as the server's own Jellyfin settings endpoint does. That edit has no field
+  // here, so it stays only while an API switch-off is staged: flipping the
+  // switch back, switching off an API that is already off, or the environment
+  // taking the switch over (the form then drops its draft) takes it back.
+  // A layout effect, so the save bar never paints the extra count.
+  const webOffAlone =
+    form.isDirty("jellyfin_compat.web_enabled") &&
+    !(
+      form.isDirty("jellyfin_compat.enabled") &&
+      form.getValue("jellyfin_compat.enabled") === "false"
+    );
+  const { resetValue } = form;
+  useLayoutEffect(() => {
+    if (webOffAlone) resetValue("jellyfin_compat.web_enabled");
+  }, [webOffAlone, resetValue]);
 
   if (form.isLoading || statusQuery.isLoading)
     return (

@@ -1294,7 +1294,8 @@
 
 # Backups: the full restore round trip (needs the PostgreSQL 18 client), the
 # manifest written last and the sweep, the cluster-wide subsystem lock, the
-# published status of the operation holding it, every table classified
+# published status of the operation holding it, the nightly slot a scheduled
+# run records, every table classified
 # for backup and restore, and a carried credential kept only for a profile
 # of its own account. Selective restore: the
 # restore round trip with re-run after interruption, idempotency and digest
@@ -1319,6 +1320,7 @@
 ./internal/backup TestListReportsThePublishedOperationDB
 ./internal/backup TestStatusBelongsToTheOperationHoldingTheLockDB
 ./internal/backup TestStatusRecordsTheLastSuccessDB
+./internal/backup TestNightlyRecordsTheSlotItWasAdmittedForDB
 ./internal/backup TestBackupAndDeleteWithOnePoolConnectionDB
 ./internal/backup TestEveryTableIsClassifiedDB
 ./internal/backup TestSelectiveRestoreDB
@@ -1455,6 +1457,18 @@
 # only when asked to, and a node cannot declare a proxy's address.
 ./internal/nodepool TestNodeDeclarationsLockFieldsDB
 ./internal/nodepool TestProxyDeclarationsDB
+
+# Declared transcode nodes: an API server creates the declared rows with their
+# keys and owns them (no rewrite on repeat, rotation, admin key issue and delete
+# refused, release on an empty declaration), never takes a proxy, keyless or
+# admin-keyed row, a deleted id or a proxy's address, and adopts a row that
+# already holds the declared key.
+./internal/nodepool TestProvisionTranscodeNodesDB
+./internal/nodepool TestProvisionTranscodeNodesRefusesOtherRowsDB
+# A provisioning pass waits for an admin edit's row lock instead of
+# deadlocking with it, and a failed pass leaves its ids unused for the retry.
+./internal/nodepool TestProvisionWaitsForAdminRowLockDB
+./internal/nodepool TestProvisionRetriesAFailedPassDB
 
 # Admin node writes reach every credential registry: the writing API server's
 # before it answers (a deleted node's key is refused at once, a moved node is

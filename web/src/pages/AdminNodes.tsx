@@ -517,12 +517,16 @@ function NodeGroupFilter({
  *
  * The missing-key status is worded as its consequence: the node is listed and
  * health-checked, but receives no work until it has a key. The button needs a
- * server that can issue keys (`onKey` is undefined otherwise).
+ * server that can issue keys (`onKey` is undefined otherwise), and a node whose
+ * key comes from the server's deployment configuration has none: the server
+ * refuses to issue it one.
  */
 function NodeKeyLine({ node, onKey }: { node: StreamNode; onKey?: (node: StreamNode) => void }) {
   const t = useT();
   if (node.key_issued === undefined) return null;
   const issued = node.key_issued;
+  let status = issued ? t("web.admin.nodes.key.issued") : t("web.admin.nodes.key.missing");
+  if (node.deployment_managed) status = t("web.admin.nodes.key.deploymentManaged");
   return (
     <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
       <KeyRound
@@ -530,9 +534,9 @@ function NodeKeyLine({ node, onKey }: { node: StreamNode; onKey?: (node: StreamN
         aria-hidden="true"
       />
       <span className={issued ? "text-muted-foreground" : "text-warning font-medium"}>
-        {issued ? t("web.admin.nodes.key.issued") : t("web.admin.nodes.key.missing")}
+        {status}
       </span>
-      {onKey && (
+      {onKey && !node.deployment_managed && (
         <Button
           variant="link"
           size="sm"
@@ -730,15 +734,35 @@ function NodeUnit({
           >
             <Pencil className="h-3 w-3" aria-hidden="true" />
           </Button>
+          {/* A node the deployment configuration owns cannot be deleted here.
+              The button stays focusable (aria-disabled, not disabled) so
+              keyboard and touch users can reach the reason, which a press
+              shows. */}
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7"
+            className={cn("h-7 w-7", node.deployment_managed && "cursor-not-allowed opacity-50")}
             aria-label={t("web.admin.nodes.unit.delete", { name: node.name })}
-            onClick={() => onDelete(node)}
+            aria-disabled={node.deployment_managed || undefined}
+            aria-describedby={node.deployment_managed ? `node-${node.id}-deployment` : undefined}
+            title={
+              node.deployment_managed
+                ? t("web.admin.nodes.unit.deleteDeploymentManaged")
+                : undefined
+            }
+            onClick={() => {
+              if (node.deployment_managed)
+                toast.info(t("web.admin.nodes.unit.deleteDeploymentManaged"));
+              else onDelete(node);
+            }}
           >
             <Trash2 className="h-3 w-3" aria-hidden="true" />
           </Button>
+          {node.deployment_managed && (
+            <span id={`node-${node.id}-deployment`} className="sr-only">
+              {t("web.admin.nodes.unit.deleteDeploymentManaged")}
+            </span>
+          )}
         </div>
       </div>
 

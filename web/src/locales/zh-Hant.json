@@ -12963,7 +12963,7 @@
             },
             {
               "type": 0,
-              "value": " 個無法還原——還原會放寬存取權限，因此此伺服器保留較嚴格的值"
+              "value": " 個無法還原——還原會放寬存取權限，因此此伺服器保留自身較嚴格的值"
             }
           ]
         }
@@ -13030,6 +13030,28 @@
             {
               "type": 0,
               "value": " 個無法還原——此處已有其他帳號使用該使用者名稱或電子郵件登入"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個無法還原——不同的設定項目或其連線的一部分由此伺服器的環境設定"
             }
           ]
         }
@@ -13394,6 +13416,28 @@
       "value": "某項服務的位址已變更，但備份中沒有其憑證，因此還原時會清除此處的憑證並關閉該服務，直到重新輸入為止。"
     }
   ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個設定項目保留目前的值，因為這些項目或其連線的一部分由此伺服器的環境設定。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.caveat.filesMissing": [
     {
       "type": 6,
@@ -13742,8 +13786,20 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "隱藏"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13860,8 +13916,20 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "顯示"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -15764,6 +15832,12 @@
       "value": "此處已有其他帳號使用其使用者名稱或電子郵件登入。"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "不同的設定項目或其連線的一部分由此伺服器的環境設定，因此此伺服器保留目前的值。"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16722,6 +16796,16 @@
     {
       "type": 0,
       "value": "（保留：較嚴格）"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "（保留：環境）"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -17696,6 +17780,20 @@
       "value": "使用伺服器的時區。"
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "以伺服器的時區為準。在你的時區是 "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -18608,20 +18706,56 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "隱藏帳號"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏帳號"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "隱藏檔案"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏檔案"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "隱藏檔案"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏檔案"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -18882,8 +19016,20 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "顯示帳號"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示帳號"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -18914,14 +19060,38 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "顯示檔案"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示檔案"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "顯示檔案"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示檔案"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -26012,6 +26182,12 @@
     {
       "type": 0,
       "value": "失敗"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "任務失敗。請查看管理員診斷資訊以了解詳情。"
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -45313,7 +45489,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "由伺服器的部署設定指定。請在該處移除，才能在此刪除。"
+      "value": "此項目由伺服器的部署設定指定。請在該處移除，然後重新啟動 API 伺服器，才能在此刪除。"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -47738,6 +47914,98 @@
       "value": "已停止產生推薦。在伺服器重新啟動之前，已儲存的推薦仍會顯示在探索中。"
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "正在為個人檔案排名（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "正在擷取 TMDB 清單（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "正在查詢並嵌入作品（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "已清除 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 部過期作品"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -47762,6 +48030,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "建立探索推薦之前，請先解決下方的嵌入鎖定衝突。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "請先執行嵌入向量作業，讓 Silo 有媒體庫向量可供比對。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "建立探索推薦之前，請先在 AI 服務中連接嵌入提供者。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "目前還沒有任何個人檔案擁有品味檔案。有人觀看或評分作品後，請執行品味檔案作業。"
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -49260,6 +49552,32 @@
       "value": "在「管理 → 推薦」中開啟探索推薦之前，此列會保持空白。"
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "管理 → 推薦"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中開啟探索推薦之前，推薦列會保持空白。"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "已在推薦中關閉"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -50637,6 +50955,12 @@
       "value": "新列會加入探索頁面底部"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "開啟推薦設定"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -50649,6 +50973,12 @@
       "value": "MDBList 的資料來源不包含清單頁面上儲存的排序方式。請選擇清單頁面顯示的排序。"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "你的個人檔案還沒有探索推薦。請執行探索推薦作業，或觀看並評分幾部作品，即可預覽此列。"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -50659,6 +50989,12 @@
     {
       "type": 0,
       "value": "選擇清單或貼上清單連結，以查看其中的作品。"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "請在「管理 → 推薦」中開啟探索推薦，即可預覽此列。"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -54242,6 +54578,12 @@
       "value": "連線檢查失敗。"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "無法檢查伺服器的環境是否已設定此項目。請重新載入頁面以進行編輯。"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -54780,6 +55122,30 @@
     {
       "type": 0,
       "value": "無法更新頻道"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "重新載入即可查看目前的值。你對已變更的設定項目，以及對已儲存的密碼、金鑰及其相關設定項目所做的編輯都會復原；其他編輯則會保留。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "重新載入"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "無法重新載入設定。請再試一次。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "設定已在其他地方變更"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -60154,6 +60520,24 @@
       "value": "改用其他模型需要重設嵌入，這會刪除所有嵌入。若改由其他提供者提供相同模型，則會在重新啟動後套用。"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "新增至探索"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "無法將推薦列新增至探索頁面。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "已將推薦列新增至探索頁面。"
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -60176,6 +60560,44 @@
     {
       "type": 0,
       "value": "伺服器保留多少部不在媒體庫中的作品以供推薦。每部作品都會在 TMDB 上查詢並建立嵌入。建立嵌入通常成本不高，但數量越多，視你的嵌入提供者而定，可能花費更多或耗時更久，也會占用更多儲存空間。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "你的探索頁面目前尚未顯示任何推薦列。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "請開啟上方的「啟用推薦」並重新啟動伺服器，探索推薦才能執行。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "請求功能目前已關閉。請在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "請求設定"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中開啟，讓觀眾能看到探索頁面。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "開啟探索頁面"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -69272,6 +69694,20 @@
       "value": "）。"
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "環境變數已設定儲存設定（"
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "）時，無法在此移動儲存空間。請先取消設定這些變數，並重新啟動所有 API 伺服器。"
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -70354,6 +70790,26 @@
       "value": " 次"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "此排程來自備份設定。請在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "伺服器 › 備份"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中變更。"
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -70644,10 +71100,44 @@
       "value": "最近的錯誤"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "重新整理失敗。請查看管理員診斷資訊以了解詳情。"
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "檢視目前排程"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -71080,6 +71570,18 @@
     {
       "type": 0,
       "value": "Autoscan Webhook 重試"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "重新讀取 Silo 開始將內嵌字型排除於位元速率之外以前所掃描、含 ASS 字幕的 MKV 檔案標頭，避免這些檔案因串流時不會用到的位元速率而被轉碼。"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "修正含內嵌字型檔案的位元速率"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -79785,25 +80287,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "無法讓電視登入。請再試一次。"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "確認你的 App 顯示的是"
+      "value": "無法核准登入。請再試一次。"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "確認你的電視顯示的是"
+      "value": "請確認此代碼相符"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "輸入電視或 App 上的代碼"
+      "value": "輸入你的裝置上顯示的代碼"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -79815,13 +80311,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "使用你的帳號登入電視或其他裝置。"
+      "value": "登入電視、App 或其他裝置。"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "登入電視"
+      "value": "核准登入"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -79841,13 +80337,13 @@
     },
     {
       "type": 0,
-      "value": " 的身分檢視，才能核准電視。只有該帳號本身能讓電視登入。"
+      "value": " 的身分檢視，才能核准這次登入。只有該帳號本身能核准裝置。"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "請停止以這位使用者的身分檢視，才能核准電視。只有該帳號本身能讓電視登入。"
+      "value": "請停止以這位使用者的身分檢視，才能核准這次登入。只有該帳號本身能核准裝置。"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -79865,39 +80361,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "找不到這組代碼。請檢查電視上的代碼。"
+      "value": "找不到該代碼。請檢查代碼後再試一次。"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "暫時不要"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "舊版電視 App 會改為顯示 "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "。"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "只核准目前就在你面前的裝置。"
+      "value": "拒絕"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "只核准目前就在你面前的電視。"
+      "value": "只有在登入是你本人發起時才核准。"
     }
   ],
   "web.auth.activate.playOn": [
@@ -79923,7 +80399,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "使用這台電視的任何人都能從你的個人檔案中選擇。設有 PIN 的個人檔案會保持鎖定。"
+      "value": "這會讓該裝置存取你的個人檔案。設有 PIN 的個人檔案會保持鎖定。"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -79970,6 +80446,16 @@
       "value": " 請求"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "請求時間："
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -79983,7 +80469,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "這台電視已停止等待。請在電視上重新開始。"
+      "value": "此裝置已停止等待。請在該裝置上重新開始登入。"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -79992,10 +80478,34 @@
       "value": "這次登入已被拒絕。"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "完成。"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 正在登入。"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 已登入。"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "這組代碼已過期。你的電視正顯示新的代碼，請改用該代碼。"
+      "value": "此代碼已過期。請在裝置上取得新代碼，然後再試一次。"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -80029,7 +80539,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "完成。這部裝置正以 "
+      "value": "完成。此裝置正以 "
     },
     {
       "type": 1,
@@ -80079,25 +80589,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "該電視已登入。"
+      "value": "此裝置已登入。"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "這台電視已獲核准，正在完成登入。"
+      "value": "此裝置已獲核准，正在完成登入。"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "完成。你的電視正在登入。"
+      "value": "完成。你的裝置正在登入。"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "你的電視已登入。"
+      "value": "你的裝置已登入。"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -80141,7 +80651,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "要讓 "
+      "value": "要允許 "
     },
     {
       "type": 1,
@@ -80155,7 +80665,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "要讓這部裝置登入嗎？"
+      "value": "要允許此裝置登入嗎？"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -80175,13 +80685,13 @@
     },
     {
       "type": 0,
-      "value": " 以核准這台電視。"
+      "value": " 以核准這次登入。"
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "登入電視"
+      "value": "核准登入"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -81235,7 +81745,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "無法登入裝置。請再試一次。"
+      "value": "無法核准登入。請再試一次。"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -100341,6 +100851,12 @@
       "value": "顯示內容"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "由此伺服器管理。無法在這裡變更它顯示的內容；若要自行選擇顯示的內容，請新增一列你自己的列。"
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -103868,6 +104384,12 @@
     {
       "type": 0,
       "value": "主視覺橫幅 · 僅限網頁版"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "伺服器"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

@@ -14235,6 +14235,10 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "deployment_managed": {
+            "description": "The API servers' deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE) lists this transcode node and supplies its key. issueAdminNodeKey and deleteAdminNode refuse it with node_deployment_managed until an API server starts with a document that no longer lists it (nodes: {} releases every node). An API server started with neither variable set leaves it managed. Requires the deployment_nodes node capability.",
+            "type": "boolean"
+          },
           "download_artifact_dir_override": {
             "description": "This node's own prepared-download directory; absent when inherited.",
             "type": "string"
@@ -14382,6 +14386,7 @@
           "drain_requested",
           "drain_state",
           "key_issued",
+          "deployment_managed",
           "env_managed"
         ],
         "type": "object"
@@ -14391,6 +14396,10 @@
         "properties": {
           "allowed": {
             "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "deployment_nodes": {
+            "description": "API servers can create transcode nodes and their keys from their deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE): deployment_managed on node rows, and issueAdminNodeKey and deleteAdminNode refuse such a node with node_deployment_managed. An API server that starts with a document no longer listing a node releases it (nodes: {} releases every node); one started with neither variable set changes nothing.",
             "type": "boolean"
           },
           "drain": {
@@ -14434,6 +14443,7 @@
           "node_keys",
           "source_access",
           "env_declarations",
+          "deployment_nodes",
           "revision",
           "state",
           "allowed"
@@ -19401,9 +19411,17 @@
             ],
             "format": "int64",
             "type": "integer"
+          },
+          "requests_enabled": {
+            "description": "Whether the server-wide requests switch is on; the queue still answers while it is off",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
+          "requests_enabled",
           "needs_approval",
           "in_progress",
           "failed",
@@ -105275,6 +105293,16 @@
               }
             },
             "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "412": {
             "content": {

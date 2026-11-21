@@ -459,7 +459,7 @@ function RegisterRelayRow({
             <AlertDialogAction
               disabled={pending}
               onClick={() => void clearRelay()}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {pending
                 ? t("web.admin.settings.notifications.relay.clearing")
@@ -614,38 +614,34 @@ function DiscordAppCredentials({
   const [testing, setTesting] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
 
-  const clientId = clientIdDraft ?? savedClientId;
+  // The server refuses a save of a key its environment sets, so those keys
+  // stay out of every save and clear this card sends. A draft typed before
+  // the environment took its key over is ignored where it is read, so the
+  // field, the invite link and the saves all use the environment's value.
+  const editableKeys = DISCORD_APP_KEYS.filter((key) => envVar(key) == null);
+  const editable = (key: string) => editableKeys.includes(key);
+  const clientId = editable("discord.client_id") ? (clientIdDraft ?? savedClientId) : savedClientId;
+  const secretDraft = editable("discord.client_secret") ? clientSecret : "";
+  const tokenDraft = editable("discord.bot_token") ? botToken : "";
   const configuredKeys = new Set(sensitiveConfigured);
   const secretConfigured = configuredKeys.has("discord.client_secret");
   const tokenConfigured = configuredKeys.has("discord.bot_token");
   const ready = savedClientId.trim() !== "" && secretConfigured && tokenConfigured;
-  // The server refuses a save of a key its environment sets, so those keys
-  // stay out of every save and clear this card sends, including a draft
-  // typed before the environment took the key over.
-  const editableKeys = DISCORD_APP_KEYS.filter((key) => envVar(key) == null);
+  const unsaved =
+    clientId !== savedClientId || secretDraft.trim() !== "" || tokenDraft.trim() !== "";
+  // The card's drafts live outside useSettingsForm, so the navigation guard
+  // and the reload prompt only see them through this report.
+  useReportUnsavedChanges(unsaved);
   const stored: Record<string, boolean> = {
     "discord.client_id": savedClientId.trim() !== "",
     "discord.client_secret": secretConfigured,
     "discord.bot_token": tokenConfigured,
   };
   const anyStoredEditable = editableKeys.some((key) => stored[key]);
-  const changed: Record<string, boolean> = {
-    "discord.client_id": clientId !== savedClientId,
-    "discord.client_secret": clientSecret.trim() !== "",
-    "discord.bot_token": botToken.trim() !== "",
-  };
-  const unsaved = editableKeys.some((key) => changed[key]);
-  // The card's drafts live outside useSettingsForm, so the navigation guard
-  // and the reload prompt only see them through this report.
-  useReportUnsavedChanges(unsaved);
   const updates: Record<string, string> = {};
-  if (editableKeys.includes("discord.client_id")) updates["discord.client_id"] = clientId;
-  if (editableKeys.includes("discord.client_secret") && changed["discord.client_secret"]) {
-    updates["discord.client_secret"] = clientSecret;
-  }
-  if (editableKeys.includes("discord.bot_token") && changed["discord.bot_token"]) {
-    updates["discord.bot_token"] = botToken;
-  }
+  if (clientId !== savedClientId) updates["discord.client_id"] = clientId;
+  if (secretDraft.trim() !== "") updates["discord.client_secret"] = secretDraft;
+  if (tokenDraft.trim() !== "") updates["discord.bot_token"] = tokenDraft;
   const nothingToSave = Object.keys(updates).length === 0;
 
   async function save() {
@@ -730,7 +726,7 @@ function DiscordAppCredentials({
       <div className="settings-field-list">
         <SecretField
           label={t("web.admin.settings.notifications.discord.clientSecret")}
-          value={clientSecret}
+          value={secretDraft}
           configured={secretConfigured}
           onChange={setClientSecret}
           hint={t("web.admin.settings.notifications.discord.fromOAuth2Page")}
@@ -739,7 +735,7 @@ function DiscordAppCredentials({
         />
         <SecretField
           label={t("web.admin.settings.notifications.discord.botToken")}
-          value={botToken}
+          value={tokenDraft}
           configured={tokenConfigured}
           onChange={setBotToken}
           hint={t("web.admin.settings.notifications.discord.fromBotPage")}
@@ -809,7 +805,7 @@ function DiscordAppCredentials({
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
               onClick={() => {
                 void clearAll();
                 setConfirmClear(false);

@@ -38,6 +38,11 @@ interface TriggerFormRowProps {
   onRemove: () => void;
 }
 
+// The browser draws the time in its own language's format. 10rem holds the widest
+// one measured (Amharic, 159 px at 16 px text); min-w-fit lets larger text widen
+// the box instead of clipping it.
+const TIME_INPUT_WIDTH = "w-full sm:w-40 sm:min-w-fit";
+
 type IntervalUnit = "seconds" | "minutes" | "hours";
 
 const UNIT_MS: Record<IntervalUnit, number> = {
@@ -152,7 +157,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
         {trigger.type === "daily" && (
           <Input
             type="time"
-            className="w-full sm:w-[140px]"
+            className={TIME_INPUT_WIDTH}
             value={trigger.time_of_day ?? "00:00"}
             onChange={(e) => onChange({ ...trigger, time_of_day: e.target.value })}
           />
@@ -164,7 +169,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
               value={String(trigger.day_of_week ?? 0)}
               onValueChange={(v) => onChange({ ...trigger, day_of_week: parseInt(v, 10) })}
             >
-              <SelectTrigger className="w-full sm:w-[140px]">
+              <SelectTrigger className="w-full sm:w-40">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -177,7 +182,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
             </Select>
             <Input
               type="time"
-              className="w-full sm:w-[140px]"
+              className={TIME_INPUT_WIDTH}
               value={trigger.time_of_day ?? "00:00"}
               onChange={(e) => onChange({ ...trigger, time_of_day: e.target.value })}
             />

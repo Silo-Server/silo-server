@@ -1,4 +1,5 @@
 import { joinList } from "@/lib/appLocale";
+import { itemTypeLabel } from "@/lib/itemTypeLabels";
 import {
   lazy,
   Suspense,
@@ -45,7 +46,7 @@ import { cn } from "@/lib/utils";
 import { Search } from "lucide-react";
 import { EnterKeyHint, Kbd } from "@/components/ui/kbd";
 import CardPlayOverlay from "./CardPlayOverlay";
-import { numberText, useT, type MessageKey } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 
 import { LocalErrorBoundary } from "./LocalErrorBoundary";
 import { isImeComposing } from "@/lib/imeComposition";
@@ -88,27 +89,6 @@ function scrollSearchResultIntoView(index: number) {
   document.getElementById(searchResultOptionId(index))?.scrollIntoView?.({ block: "nearest" });
 }
 
-function typeLabelKey(type: BrowseItem["type"]): MessageKey | null {
-  switch (type) {
-    case "movie":
-      return "web.search.typeMovie";
-    case "series":
-      return "web.search.typeSeries";
-    case "season":
-      return "web.search.typeSeason";
-    case "episode":
-      return "web.search.typeEpisode";
-    case "ebook":
-      return "web.search.typeEbook";
-    case "audiobook":
-      return "web.search.typeAudiobook";
-    case "manga":
-      return "web.search.typeManga";
-    default:
-      return null;
-  }
-}
-
 // Shared by the option row and the play-overlay layer stacked on top of it, so
 // the overlay always lands on the poster even if the row's spacing changes.
 const ROW_LAYOUT_CLASSES = "flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-start";
@@ -132,9 +112,7 @@ function GlobalSearchResultRow({
   const t = useT();
   const { loaded, onLoad, onError } = useImageLoaded(item.poster_url);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
-  // A kind the client has no label for shows as the server sends it.
-  const kindKey = typeLabelKey(item.type);
-  const typeLabel = kindKey ? t(kindKey) : item.type;
+  const typeLabel = itemTypeLabel(t, item.type);
 
   // Virtual focus: keyboard focus stays in the search input and the option is
   // pointed at by aria-activedescendant, so the row is not a tab stop.

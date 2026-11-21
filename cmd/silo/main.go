@@ -842,6 +842,13 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "node-key" {
+		if err := runNodeKeyCommand(os.Args[2:], os.Stdout); err != nil {
+			log.Fatalf("node-key: %v", err)
+		}
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "plugins" {
 		if err := runPluginRecoveryCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
 			log.Fatalf("plugins: %v", err)
@@ -989,19 +996,18 @@ func main() {
 	// server's, back up the database when migrations are pending, then
 	// migrate (database.MigrateAtStartup, docs/architecture/backups.md).
 	migrationWait := database.MigrationWait()
-	// A migration job reads only the variable that backup uses,
-	// SILO_BACKUP_ENABLED, so no other variable can stop it or drop that one.
-	backupEnv := envSettings
-	if *migrateOnly {
-		onlyBackupEnabled := func(name string) string {
-			if name == config.BackupEnabledEnvVar {
-				return os.Getenv(name)
-			}
-			return ""
+	// That backup takes one setting from the environment, SILO_BACKUP_ENABLED,
+	// on every server that migrates (an API server has already refused an
+	// invalid value), so a migration job's other variables can't stop it or
+	// drop that one.
+	backupEnv, backupEnvErr := config.ReadEnvSettings(func(name string) string {
+		if name == config.BackupEnabledEnvVar {
+			return os.Getenv(name)
 		}
-		if backupEnv, err = config.ReadEnvSettings(onlyBackupEnabled); err != nil {
-			slog.Warn("the backup before migrations uses the stored backup.enabled", "error", err)
-		}
+		return ""
+	})
+	if backupEnvErr != nil {
+		slog.Warn("the backup before migrations uses the stored backup.enabled", "error", backupEnvErr)
 	}
 	startupMigrations := database.StartupOptions{
 		Wait:          migrationWait,
@@ -1697,6 +1703,10 @@ func main() {
 	if mode == "integrated" || mode == "api" {
 		nodeRepo := nodepool.NewRepository(pool)
 		deps.NodeRepo = nodeRepo
+
+		// Before the first pool and credential loads, so both see the
+		// declared nodes.
+		provisionTranscodeNodes(appCtx, pool, dataCipher, eventBus)
 
 		proxyPool := nodepool.NewProxyPool()
 		transcodePool := nodepool.NewTranscodePool()

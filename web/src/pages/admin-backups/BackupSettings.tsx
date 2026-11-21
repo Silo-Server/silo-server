@@ -64,6 +64,8 @@ export function BackupScheduleSettings({ form }: { form: SettingsForm }) {
           description={t("web.admin.backups.schedule.timeDescription")}
           managedByEnv={timeEnv}
         >
+          {/* As wide as a number field, and wider when the time needs it: the
+              browser draws the time in its own language's format. */}
           <Input
             id={timeId}
             type="time"
@@ -72,7 +74,7 @@ export function BackupScheduleSettings({ form }: { form: SettingsForm }) {
             disabled={timeEnv != null}
             value={form.getValue(BACKUP_TIME_KEY)}
             onChange={(event) => form.setValue(BACKUP_TIME_KEY, event.target.value)}
-            className={cn("border-muted-foreground/25", SETTINGS_NUMBER_WIDTH, "sm:w-32")}
+            className={cn("border-muted-foreground/25", SETTINGS_NUMBER_WIDTH, "sm:min-w-fit")}
           />
         </SettingFieldRow>
         <SettingFieldRow

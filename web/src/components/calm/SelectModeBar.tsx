@@ -50,9 +50,9 @@ export type SelectModeNoun = keyof typeof SELECT_MODE_TEXT;
  * done to them. Actions refuse more than `limit` items at a time.
  *
  * The bar is fixed to the viewport over the content column rather than
- * sticky: AdminLayout clips horizontal overflow, which would hold a sticky bar
- * at the end of the list. The page reserves room at its foot so the last item
- * is never under the bar.
+ * sticky: from lg, AdminLayout clips horizontal overflow with `hidden`, which
+ * would hold a sticky bar at the end of the list. The page reserves room at its
+ * foot so the last item is never under the bar.
  */
 export function SelectModeBar({
   count,

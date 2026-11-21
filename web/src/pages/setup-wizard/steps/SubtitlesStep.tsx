@@ -69,6 +69,9 @@ function draftFor(config: SubtitleProviderConfig): ProviderDraft {
 }
 
 function providerBody(name: string, draft: ProviderDraft) {
+  // Credentials show only while the provider is on, so one switched off sends
+  // none and the server keeps whatever it already stores.
+  if (!draft.enabled) return { enabled: false };
   return name === "opensubtitles"
     ? { enabled: draft.enabled, username: draft.username, password: draft.password }
     : { enabled: draft.enabled, api_key: draft.apiKey };

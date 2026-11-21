@@ -243,7 +243,9 @@ func (s *AdminConfigurationStore) Update(ctx context.Context, id int, input Upda
 }
 
 // Delete atomically removes the row and records durable reconciliation work.
-// A missing node is not a receipt for a previous caller's deletion.
+// A missing node is not a receipt for a previous caller's deletion. A node the
+// deployment configuration owns is ErrNodeDeploymentManaged: the next API
+// server start would create it again.
 func (s *AdminConfigurationStore) Delete(ctx context.Context, id int, guard func(int64) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -256,6 +258,16 @@ func (s *AdminConfigurationStore) Delete(ctx context.Context, id int, guard func
 	}
 	if err = guard(revision); err != nil {
 		return err
+	}
+	// Checked after the guard, so a stale or missing precondition still
+	// answers as one. The row is locked, so a provisioning pass cannot adopt
+	// it between this read and the delete.
+	var managed bool
+	if err = tx.QueryRow(ctx, `SELECT deployment_managed FROM stream_nodes WHERE id = $1`, id).Scan(&managed); err != nil {
+		return err
+	}
+	if managed {
+		return ErrNodeDeploymentManaged
 	}
 	if err = NewTransactionalRepository(tx).Delete(ctx, id); err != nil {
 		return err

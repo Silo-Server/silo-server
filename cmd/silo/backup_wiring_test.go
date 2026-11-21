@@ -265,8 +265,9 @@ type storedBackupSettings map[string]string
 
 func (s storedBackupSettings) Get(_ context.Context, key string) (string, error) { return s[key], nil }
 
-// A SILO_BACKUP_* variable set in the deploy that also upgrades applies to the
-// backup taken before the migrations, which runs before startup stores it.
+// SILO_BACKUP_ENABLED set in the deploy that also upgrades applies to the
+// backup taken before the migrations, which runs before startup stores it; the
+// other SILO_BACKUP_* variables wait for startup.
 func TestEnvBackupSettingsOverlayStored(t *testing.T) {
 	values := map[string]string{"SILO_BACKUP_ENABLED": "false", "SILO_BACKUP_KEEP": "1"}
 	env, err := config.ReadEnvSettings(func(name string) string { return values[name] })

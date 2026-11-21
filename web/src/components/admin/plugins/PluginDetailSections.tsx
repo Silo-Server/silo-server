@@ -49,7 +49,7 @@ export function DetailPanel({
   children?: ReactNode;
 }) {
   return (
-    <section id={id} className="bg-card scroll-mt-4 rounded-2xl border px-5 py-5">
+    <section id={id} className="bg-card scroll-mt-24 rounded-2xl border px-5 py-5 lg:scroll-mt-4">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-base font-semibold tracking-tight">{title}</h2>
         {badge}

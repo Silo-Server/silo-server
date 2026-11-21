@@ -40,10 +40,12 @@ import {
   BACKUP_KEEP_KEY,
   BACKUP_ROWS_SHOWN,
   BACKUP_SETTING_KEYS,
+  BACKUP_TIME_KEY,
   backupRowId,
   backUpNowBlocker,
   backupErrorMessage,
   backupSchedulePhrases,
+  backupsPaused,
   defaultBackupLocation,
   isBucketLocation,
   isFinished,
@@ -64,6 +66,13 @@ import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 // The settings layout loads these field styles for its pages; this page is not one of them.
 import "@/styles/admin-settings.css";
 
+/**
+ * A header action on a phone: its own full-width row, with a label too long
+ * for the row wrapping onto a second line instead of running off the screen.
+ */
+const PHONE_HEADER_ACTION =
+  "max-sm:h-auto max-sm:basis-full max-sm:whitespace-normal max-sm:text-center";
+
 /** The current time, refreshed each minute so "today" and "tomorrow" stay right. */
 function useMinuteClock() {
   const [now, setNow] = useState(() => new Date());
@@ -72,6 +81,41 @@ function useMinuteClock() {
     return () => window.clearInterval(timer);
   }, []);
   return now;
+}
+
+/**
+ * Whether the backup task's daily trigger (`scheduledTime`) is still catching
+ * up with a Start time saved in the last 30 s. Each server moves the trigger a
+ * moment after the save, and until the server answering has, the task's next
+ * run belongs to the old schedule. Meanwhile the task is read again every 2 s,
+ * since a realtime update can come late or not at all. After 30 s the task's
+ * next run is shown anyway: a server that still hasn't moved the trigger runs
+ * the old schedule.
+ */
+function useScheduleSettling(scheduledTime: string | undefined) {
+  const queryClient = useQueryClient();
+  // A new object for each save, so saving again restarts the 30 s.
+  const [saved, setSaved] = useState<{ time: string } | null>(null);
+  const settling = saved !== null && saved.time !== scheduledTime;
+  useEffect(() => {
+    if (saved === null) return;
+    const expire = window.setTimeout(() => setSaved(null), 30_000);
+    return () => window.clearTimeout(expire);
+  }, [saved]);
+  useEffect(() => {
+    if (!settling) return;
+    const poll = window.setInterval(
+      () =>
+        // A read slower than the interval finishes instead of restarting.
+        void queryClient.invalidateQueries(
+          { queryKey: adminKeys.task("backup") },
+          { cancelRefetch: false },
+        ),
+      2_000,
+    );
+    return () => window.clearInterval(poll);
+  }, [queryClient, settling]);
+  return { settling, timeSaved: (time: string) => setSaved({ time }) };
 }
 
 function asDestination(value: string): AdminBackupDestination {
@@ -169,7 +213,12 @@ export default function AdminBackups() {
   const keep = list?.keep ?? (Number(form.getPersistedValue(BACKUP_KEEP_KEY)) || 7);
   const enabled = list?.enabled ?? form.getPersistedValue(BACKUP_ENABLED_KEY) !== "false";
   const taskNextRunAt = backupTask.data?.next_run_at;
-  const next = enabled ? nextBackupRun(now, taskNextRunAt) : null;
+  const schedule = useScheduleSettling(
+    backupTask.data?.triggers.find((trigger) => trigger.type === "daily")?.time_of_day,
+  );
+  const paused = backupsPaused(configured, warnings);
+  // A paused server's next run fails, so neither line names it.
+  const next = enabled && !paused && !schedule.settling ? nextBackupRun(now, taskNextRunAt) : null;
   // Once the scheduled time passes, read the schedule again instead of
   // showing the next run as unknown until something else refreshes it.
   useEffect(() => {
@@ -180,6 +229,7 @@ export default function AdminBackups() {
   const phrases = backupSchedulePhrases({
     lastSuccessAt: list?.last_success_at,
     enabled,
+    paused,
     busy,
     next,
     now,
@@ -245,13 +295,16 @@ export default function AdminBackups() {
     });
 
   const save = async () => {
+    const time = form.isDirty(BACKUP_TIME_KEY) ? form.getValue(BACKUP_TIME_KEY) : null;
     await form.save();
+    if (time !== null) schedule.timeSaved(time);
     void queryClient.invalidateQueries({ queryKey: adminKeys.backups() });
     void queryClient.invalidateQueries({ queryKey: adminKeys.task("backup") });
   };
 
-  const backUpNowButton = (
+  const backUpNowButton = (className?: string) => (
     <Button
+      className={className}
       onClick={backUpNow}
       disabled={blocker !== null || startBackup.isPending || !list}
       aria-describedby={blocker ? blockerId : undefined}
@@ -274,18 +327,27 @@ export default function AdminBackups() {
           subtitle={t("web.admin.backups.header.subtitle")}
           className="mb-4"
           actions={
-            <div className="flex flex-col items-end gap-1">
+            // On a phone the actions start at the left, so each takes its own
+            // row there and the reason "Back up now" can't run sits right under it.
+            <div className="flex flex-col items-end gap-1 max-sm:w-full max-sm:items-stretch">
               <div className="flex flex-wrap justify-end gap-2">
                 {uploadAvailable ? (
-                  <Button variant="outline" onClick={() => setUploading(true)}>
+                  <Button
+                    variant="outline"
+                    className={PHONE_HEADER_ACTION}
+                    onClick={() => setUploading(true)}
+                  >
                     <Upload data-icon="inline-start" aria-hidden="true" />
                     {t("web.admin.backups.header.upload")}
                   </Button>
                 ) : null}
-                {backUpNowButton}
+                {backUpNowButton(PHONE_HEADER_ACTION)}
               </div>
               {blocker ? (
-                <p id={blockerId} className="text-muted-foreground max-w-72 text-end text-xs">
+                <p
+                  id={blockerId}
+                  className="text-muted-foreground max-w-72 text-end text-xs max-sm:max-w-none max-sm:text-start"
+                >
                   {blocker}
                 </p>
               ) : null}
@@ -382,12 +444,21 @@ export default function AdminBackups() {
       ) : items.length === 0 ? (
         <div className="surface-panel space-y-3 rounded-2xl p-6">
           <p className="font-medium">{t("web.admin.backups.list.empty")}</p>
-          <p className="text-muted-foreground text-sm">
-            {configured
-              ? t("web.admin.backups.list.emptyConfigured")
-              : t("web.admin.backups.list.emptyUnconfigured")}
-          </p>
-          {configured ? backUpNowButton : null}
+          {configured ? null : (
+            <p className="text-muted-foreground text-sm">
+              {t("web.admin.backups.list.emptyUnconfigured")}
+            </p>
+          )}
+          {/* While "Back up now" can't run, don't offer it here: the reason
+              shows under the header's button. */}
+          {configured && !blocker ? (
+            <>
+              <p className="text-muted-foreground text-sm">
+                {t("web.admin.backups.list.emptyConfigured")}
+              </p>
+              {backUpNowButton()}
+            </>
+          ) : null}
         </div>
       ) : (
         <section aria-labelledby="saved-backups-heading" className="space-y-6">

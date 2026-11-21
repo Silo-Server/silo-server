@@ -13946,7 +13946,7 @@
             },
             {
               "type": 0,
-              "value": " — האוסף המוצג לא נמצא כאן ולא בגיבוי"
+              "value": " — האוסף שהפריט מציג לא נמצא כאן ולא בגיבוי"
             }
           ]
         },
@@ -13962,7 +13962,7 @@
             },
             {
               "type": 0,
-              "value": " — האוסף המוצג לא נמצא כאן ולא בגיבוי"
+              "value": " — האוסף שהפריטים מציגים לא נמצא כאן ולא בגיבוי"
             }
           ]
         },
@@ -13978,7 +13978,7 @@
             },
             {
               "type": 0,
-              "value": " — האוסף המוצג לא נמצא כאן ולא בגיבוי"
+              "value": " — האוסף שהפריטים מציגים לא נמצא כאן ולא בגיבוי"
             }
           ]
         }
@@ -14004,7 +14004,7 @@
             },
             {
               "type": 0,
-              "value": " — ההגדרות מוצפנות ב-SECRET_KEY אחר"
+              "value": " — ההגדרות של הפריט מוצפנות באמצעות SECRET_KEY אחר"
             }
           ]
         },
@@ -14020,7 +14020,7 @@
             },
             {
               "type": 0,
-              "value": " — ההגדרות מוצפנות ב-SECRET_KEY אחר"
+              "value": " — ההגדרות של הפריטים מוצפנות באמצעות SECRET_KEY אחר"
             }
           ]
         },
@@ -14036,7 +14036,7 @@
             },
             {
               "type": 0,
-              "value": " — ההגדרות מוצפנות ב-SECRET_KEY אחר"
+              "value": " — ההגדרות של הפריטים מוצפנות באמצעות SECRET_KEY אחר"
             }
           ]
         }
@@ -14178,7 +14178,7 @@
             },
             {
               "type": 0,
-              "value": " — הקבצים חסרים בשרת הזה"
+              "value": " — הקבצים של הפריט חסרים בשרת הזה"
             }
           ]
         },
@@ -14194,7 +14194,7 @@
             },
             {
               "type": 0,
-              "value": " — הקבצים חסרים בשרת הזה"
+              "value": " — הקבצים של הפריטים חסרים בשרת הזה"
             }
           ]
         },
@@ -14210,7 +14210,7 @@
             },
             {
               "type": 0,
-              "value": " — הקבצים חסרים בשרת הזה"
+              "value": " — הקבצים של הפריטים חסרים בשרת הזה"
             }
           ]
         }
@@ -14236,7 +14236,7 @@
             },
             {
               "type": 0,
-              "value": " — התיקיות לא נמצאות בשרת הזה"
+              "value": " — התיקיות של הפריט לא נמצאות בשרת הזה"
             }
           ]
         },
@@ -14252,7 +14252,7 @@
             },
             {
               "type": 0,
-              "value": " — התיקיות לא נמצאות בשרת הזה"
+              "value": " — התיקיות של הפריטים לא נמצאות בשרת הזה"
             }
           ]
         },
@@ -14268,7 +14268,7 @@
             },
             {
               "type": 0,
-              "value": " — התיקיות לא נמצאות בשרת הזה"
+              "value": " — התיקיות של הפריטים לא נמצאות בשרת הזה"
             }
           ]
         }
@@ -14294,7 +14294,7 @@
             },
             {
               "type": 0,
-              "value": " — קבוצת הגישה לא נמצאת בשרת הזה"
+              "value": " — קבוצת הגישה של הפריט לא נמצאת בשרת הזה"
             }
           ]
         },
@@ -14310,7 +14310,7 @@
             },
             {
               "type": 0,
-              "value": " — קבוצת הגישה לא נמצאת בשרת הזה"
+              "value": " — קבוצת הגישה של הפריטים לא נמצאת בשרת הזה"
             }
           ]
         },
@@ -14326,7 +14326,7 @@
             },
             {
               "type": 0,
-              "value": " — קבוצת הגישה לא נמצאת בשרת הזה"
+              "value": " — קבוצת הגישה של הפריטים לא נמצאת בשרת הזה"
             }
           ]
         }
@@ -14352,7 +14352,7 @@
             },
             {
               "type": 0,
-              "value": " — הכותר לא נמצא בקטלוג של השרת הזה"
+              "value": " — הכותר של הפריט לא נמצא בקטלוג של השרת הזה"
             }
           ]
         },
@@ -14368,7 +14368,7 @@
             },
             {
               "type": 0,
-              "value": " — הכותר לא נמצא בקטלוג של השרת הזה"
+              "value": " — הכותר של הפריטים לא נמצא בקטלוג של השרת הזה"
             }
           ]
         },
@@ -14384,7 +14384,7 @@
             },
             {
               "type": 0,
-              "value": " — הכותר לא נמצא בקטלוג של השרת הזה"
+              "value": " — הכותר של הפריטים לא נמצא בקטלוג של השרת הזה"
             }
           ]
         }
@@ -14410,7 +14410,7 @@
             },
             {
               "type": 0,
-              "value": " — השחזור היה מרחיב את הגישה, ולכן השרת הזה שומר על הערכים המחמירים יותר שלו"
+              "value": " — הפריט היה מרחיב את הגישה, ולכן השרת הזה שומר על הערכים המחמירים יותר שלו"
             }
           ]
         },
@@ -14426,7 +14426,7 @@
             },
             {
               "type": 0,
-              "value": " — השחזור היה מרחיב את הגישה, ולכן השרת הזה שומר על הערכים המחמירים יותר שלו"
+              "value": " — הפריטים היו מרחיבים את הגישה, ולכן השרת הזה שומר על הערכים המחמירים יותר שלו"
             }
           ]
         },
@@ -14442,7 +14442,7 @@
             },
             {
               "type": 0,
-              "value": " — השחזור היה מרחיב את הגישה, ולכן השרת הזה שומר על הערכים המחמירים יותר שלו"
+              "value": " — הפריטים היו מרחיבים את הגישה, ולכן השרת הזה שומר על הערכים המחמירים יותר שלו"
             }
           ]
         }
@@ -14468,7 +14468,7 @@
             },
             {
               "type": 0,
-              "value": " — הספרייה לא נמצאת בשרת הזה"
+              "value": " — הספרייה של הפריט לא נמצאת בשרת הזה"
             }
           ]
         },
@@ -14484,7 +14484,7 @@
             },
             {
               "type": 0,
-              "value": " — הספרייה לא נמצאת בשרת הזה"
+              "value": " — הספרייה של הפריטים לא נמצאת בשרת הזה"
             }
           ]
         },
@@ -14500,7 +14500,7 @@
             },
             {
               "type": 0,
-              "value": " — הספרייה לא נמצאת בשרת הזה"
+              "value": " — הספרייה של הפריטים לא נמצאת בשרת הזה"
             }
           ]
         }
@@ -14526,7 +14526,7 @@
             },
             {
               "type": 0,
-              "value": " — לא ניתן לשחזר כאן את הספרייה"
+              "value": " — לא ניתן לשחזר כאן את הספרייה של הפריט"
             }
           ]
         },
@@ -14542,7 +14542,7 @@
             },
             {
               "type": 0,
-              "value": " — לא ניתן לשחזר כאן את הספרייה"
+              "value": " — לא ניתן לשחזר כאן את הספרייה של הפריטים"
             }
           ]
         },
@@ -14558,7 +14558,7 @@
             },
             {
               "type": 0,
-              "value": " — לא ניתן לשחזר כאן את הספרייה"
+              "value": " — לא ניתן לשחזר כאן את הספרייה של הפריטים"
             }
           ]
         }
@@ -14625,6 +14625,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "לא ניתן לשחזר: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — הסביבה של השרת הזה קובעת את ההגדרות השונות, או חלק מהחיבור שלהן"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "לא ניתן לשחזר: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — הסביבה של השרת הזה קובעת את ההגדרות השונות, או חלק מהחיבור שלהן"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "לא ניתן לשחזר: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — הסביבה של השרת הזה קובעת את ההגדרות השונות, או חלק מהחיבור שלהן"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14642,7 +14700,7 @@
             },
             {
               "type": 0,
-              "value": " — הפריט מוצפן ב-SECRET_KEY אחר"
+              "value": " — הפריט מוצפן באמצעות SECRET_KEY אחר"
             }
           ]
         },
@@ -14658,7 +14716,7 @@
             },
             {
               "type": 0,
-              "value": " — הפריטים מוצפנים ב-SECRET_KEY אחר"
+              "value": " — הפריטים מוצפנים באמצעות SECRET_KEY אחר"
             }
           ]
         },
@@ -14674,7 +14732,7 @@
             },
             {
               "type": 0,
-              "value": " — הפריטים מוצפנים ב-SECRET_KEY אחר"
+              "value": " — הפריטים מוצפנים באמצעות SECRET_KEY אחר"
             }
           ]
         }
@@ -14758,7 +14816,7 @@
             },
             {
               "type": 0,
-              "value": " — יש לשחזר יחד איתם גם את הפרופיל הראשי"
+              "value": " — יש לשחזר יחד עם הפריט גם את הפרופיל הראשי שלו"
             }
           ]
         },
@@ -14774,7 +14832,7 @@
             },
             {
               "type": 0,
-              "value": " — יש לשחזר יחד איתם גם את הפרופיל הראשי"
+              "value": " — יש לשחזר יחד עם הפריטים גם את הפרופיל הראשי שלהם"
             }
           ]
         },
@@ -14790,7 +14848,7 @@
             },
             {
               "type": 0,
-              "value": " — יש לשחזר יחד איתם גם את הפרופיל הראשי"
+              "value": " — יש לשחזר יחד עם הפריטים גם את הפרופיל הראשי שלהם"
             }
           ]
         }
@@ -15048,7 +15106,7 @@
             },
             {
               "type": 0,
-              "value": " — השרת הזה היה מעניק יותר גישה מאשר בגיבוי"
+              "value": " — השרת הזה היה מעניק לפריט יותר גישה מאשר בגיבוי"
             }
           ]
         },
@@ -15064,7 +15122,7 @@
             },
             {
               "type": 0,
-              "value": " — השרת הזה היה מעניק יותר גישה מאשר בגיבוי"
+              "value": " — השרת הזה היה מעניק לפריטים יותר גישה מאשר בגיבוי"
             }
           ]
         },
@@ -15080,7 +15138,7 @@
             },
             {
               "type": 0,
-              "value": " — השרת הזה היה מעניק יותר גישה מאשר בגיבוי"
+              "value": " — השרת הזה היה מעניק לפריטים יותר גישה מאשר בגיבוי"
             }
           ]
         }
@@ -15280,7 +15338,7 @@
             },
             {
               "type": 0,
-              "value": " — לא ניתן לקרוא את העותק שבגיבוי"
+              "value": " — לא ניתן לקרוא את העותק של הפריט בגיבוי"
             }
           ]
         },
@@ -15296,7 +15354,7 @@
             },
             {
               "type": 0,
-              "value": " — לא ניתן לקרוא את העותק שבגיבוי"
+              "value": " — לא ניתן לקרוא את העותק של הפריטים בגיבוי"
             }
           ]
         },
@@ -15312,7 +15370,7 @@
             },
             {
               "type": 0,
-              "value": " — לא ניתן לקרוא את העותק שבגיבוי"
+              "value": " — לא ניתן לקרוא את העותק של הפריטים בגיבוי"
             }
           ]
         }
@@ -15483,6 +15541,56 @@
     {
       "type": 0,
       "value": "הכתובת של שירות משתנה בלי פרטי הכניסה שלו בגיבוי, ולכן השחזור מנקה כאן את פרטי הכניסה ומשבית את השירות עד שהם יוזנו שוב."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נשמר הערך הנוכחי של הגדרה אחת: הסביבה של השרת הזה קובעת אותה, או חלק מהחיבור שלה."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נשמרים הערכים הנוכחיים של "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " הגדרות: הסביבה של השרת הזה קובעת אותן, או חלק מהחיבור שלהן."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נשמרים הערכים הנוכחיים של "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " הגדרות: הסביבה של השרת הזה קובעת אותן, או חלק מהחיבור שלהן."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -16037,8 +16145,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "הסתרה"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הסתרה"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הסתרה"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הסתרה"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16223,8 +16359,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "הצגה"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגה"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגה"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגה"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -18783,6 +18947,12 @@
       "value": "חשבון אחר כאן מתחבר עם שם המשתמש או האימייל שלו."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "הסביבה של השרת הזה קובעת את ההגדרות השונות, או חלק מהחיבור שלהן, ולכן השרת הזה שומר על הערכים הנוכחיים שלו."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -20007,6 +20177,16 @@
       "value": " (נשמר: מחמיר יותר)"
     }
   ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (נשמר: סביבה)"
+    }
+  ],
   "web.admin.backups.restore.setting.now": [
     {
       "type": 0,
@@ -21179,6 +21359,20 @@
       "value": "לפי אזור הזמן של השרת."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "לפי אזור הזמן של השרת. באזור הזמן שלך זו השעה "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -22211,20 +22405,104 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "הסתרת החשבונות"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הסתרת החשבון"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הסתרת החשבונות"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הסתרת החשבונות"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "הסתרת הקבצים"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הסתרת הקובץ"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הסתרת הקבצים"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הסתרת הקבצים"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "הסתרת קבצים"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הסתרת קובץ"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הסתרת קבצים"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הסתרת קבצים"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -22665,8 +22943,36 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "הצגת החשבונות"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגת החשבון"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגת החשבונות"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגת החשבונות"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -22721,14 +23027,70 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "הצגת הקבצים"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגת הקובץ"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגת הקבצים"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגת הקבצים"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "הצגת קבצים"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגת קובץ"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגת קבצים"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגת קבצים"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -31265,6 +31627,12 @@
     {
       "type": 0,
       "value": "נכשלה"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "המשימה נכשלה. לפרטים, יש לבדוק את נתוני האבחון למנהלים."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -55709,7 +56077,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "הצומת מוגדר בתצורת הפריסה של השרת. כדי למחוק אותו כאן, יש להסיר אותו משם."
+      "value": "הצומת מוגדר בתצורת הפריסה של השרת. כדי למחוק אותו כאן, יש להסיר אותו משם ולהפעיל מחדש את שרתי ה-API."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -58445,6 +58813,122 @@
       "value": "יצירת ההמלצות הופסקה. ההמלצות השמורות יישארו גלויות בדף ”גילוי” עד שהשרת יופעל מחדש."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "מתבצע דירוג של פרופילים ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "מתבצע אחזור של רשימות TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "מתבצעת בדיקה והטמעה של פריטים ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נוקה פריט אחד שפג תוקפו"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נוקו "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פריטים שפג תוקפם"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "נוקו "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פריטים שפג תוקפם"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -58493,6 +58977,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "יש לפתור את התנגשות נעילת ההטמעה שלמטה לפני בניית המלצות הגילוי."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "יש להריץ קודם את העבודה ”הטמעות” כדי של-Silo יהיו וקטורים של הספרייה להשוואה."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "יש לחבר ספק הטמעות בדף ”שירותי AI” לפני בניית המלצות הגילוי."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "לאף פרופיל עדיין אין פרופיל טעם. יש להריץ את העבודה ”פרופילי טעם” אחרי שיהיו צפיות או דירוגים של פריטים."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -60695,6 +61203,32 @@
       "value": "השורה תישאר ריקה עד להפעלת המלצות הגילוי בניהול ← המלצות."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "השורות המומלצות יישארו ריקות עד להפעלת המלצות הגילוי בדף "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "ניהול ← המלצות"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "כבוי בדף ”המלצות”"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -62277,6 +62811,12 @@
       "value": "שורות חדשות נוספות לתחתית דף הגילוי"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "פתיחת הגדרות ההמלצות"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -62289,6 +62829,12 @@
       "value": "הפיד של MDBList לא כולל את המיון שנשמר בדף הרשימה. יש לבחור את המיון שמוצג שם."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "לפרופיל שלך עדיין אין המלצות גילוי. כדי לראות תצוגה מקדימה של השורה, אפשר להריץ את העבודה ”המלצות גילוי” או לצפות בכמה פריטים ולדרג אותם."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -62299,6 +62845,12 @@
     {
       "type": 0,
       "value": "יש לבחור רשימה או להדביק את הקישור שלה כדי לראות את הפריטים שבה."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "כדי לראות תצוגה מקדימה של השורה, יש להפעיל את המלצות הגילוי בניהול ← המלצות."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -66188,6 +66740,12 @@
       "value": "בדיקת החיבור נכשלה."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לבדוק אם סביבת השרת מגדירה את ההגדרה הזו. כדי לערוך אותה, יש לרענן את הדף."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -66750,6 +67308,30 @@
     {
       "type": 0,
       "value": "עדכון הערוץ נכשל"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "יש לבצע רענון כדי לראות את הערכים הנוכחיים. השינויים שלך בהגדרות שהשתנו, ובסיסמאות ובמפתחות השמורים יחד עם ההגדרות הקשורות אליהם, יבוטלו; שאר השינויים שלך יישמרו."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "רענון"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לטעון מחדש את ההגדרות. אפשר לנסות שוב."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "ההגדרות שונו במקום אחר"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -72340,6 +72922,24 @@
       "value": "מעבר למודל אחר מחייב איפוס של ההטמעות, שמוחק את כולן. ספק אחר שמספק את אותו המודל נכנס לתוקף אחרי הפעלה מחדש."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "הוספה לדף ”גילוי”"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה להוסיף שורות מומלצות לדף ”גילוי”."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "השורות המומלצות נוספו לדף ”גילוי”."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -72362,6 +72962,44 @@
     {
       "type": 0,
       "value": "כמה פריטים שאינם בספרייה השרת שומר כמקור להמלצות. כל פריט נבדק ב-TMDB ועובר הטמעה. ההטמעה בדרך כלל זולה, אבל מספר גבוה יותר עלול לעלות יותר או להימשך זמן רב יותר, בהתאם לספק ההטמעות שלך, ולתפוס יותר נפח אחסון."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "בדף ”גילוי” עדיין לא מוצגות שורות מסוג ”המלצות”."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "יש להפעיל את האפשרות ”הפעלת ההמלצות” שלמעלה ולהפעיל מחדש את השרת כדי שהמלצות הגילוי יוכלו לרוץ."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "הבקשות כבויות כרגע. יש להפעיל אותן בדף "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "הגדרות הבקשות"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " כדי שהצופים יוכלו לראות את דף ”גילוי”."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "פתיחת דף ”גילוי”"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -81679,6 +82317,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "לא ניתן להעביר את האחסון לכאן כל עוד הגדרות האחסון נקבעות בסביבה ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). יש קודם לבטל את הגדרת המשתנים האלה ולהפעיל מחדש את כל שרתי ה-API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -82886,6 +83538,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "לוח הזמנים הזה נקבע בהגדרות הגיבוי. אפשר לשנות אותו בדף "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "שרת ← גיבויים"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -83204,10 +83876,44 @@
       "value": "שגיאות אחרונות"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "הרענון נכשל. לפרטים, יש לבדוק את נתוני האבחון למנהלים."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "עיון בלוח הזמנים הנוכחי"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -83652,6 +84358,18 @@
     {
       "type": 0,
       "value": "ניסיון חוזר ל-webhook של Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "קריאה חוזרת של כותרות קובצי MKV עם כתוביות ASS שנסרקו לפני ש-Silo הפסיק לכלול גופנים מוטמעים בחישוב קצב הסיביות, כדי שלא תתבצע בהם המרת קידוד בגלל קצב סיביות שהם לא מזרימים בפועל."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "תיקון קצב הסיביות של קבצים עם גופנים מוטמעים"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -93990,25 +94708,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "לא ניתן היה להשלים את ההתחברות בטלוויזיה. אפשר לנסות שוב."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "יש לוודא שהאפליקציה מציגה"
+      "value": "לא ניתן היה לאשר את ההתחברות. אפשר לנסות שוב."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "יש לוודא שהטלוויזיה מציגה"
+      "value": "יש לוודא שהקוד הזה תואם"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "יש להזין את הקוד שמוצג בטלוויזיה או באפליקציה"
+      "value": "יש להזין את הקוד שמוצג במכשיר שלך"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94020,13 +94732,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "התחברות בטלוויזיה או במכשיר אחר עם החשבון שלך."
+      "value": "התחברות בטלוויזיה, באפליקציה או במכשיר אחר."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "התחברות בטלוויזיה"
+      "value": "אישור ההתחברות"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94046,13 +94758,13 @@
     },
     {
       "type": 0,
-      "value": " כדי לאשר טלוויזיה. רק מהחשבון עצמו אפשר להתחבר בטלוויזיה."
+      "value": " כדי לאשר את ההתחברות הזו. רק החשבון עצמו יכול לאשר מכשירים."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "יש להפסיק את הצפייה בתור המשתמש הזה כדי לאשר טלוויזיה. רק מהחשבון עצמו אפשר להתחבר בטלוויזיה."
+      "value": "יש להפסיק את הצפייה בתור המשתמש הזה כדי לאשר את ההתחברות הזו. רק החשבון עצמו יכול לאשר מכשירים."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94070,39 +94782,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "הקוד הזה לא נמצא. יש לבדוק את הקוד בטלוויזיה."
+      "value": "הקוד הזה לא נמצא. יש לבדוק את הקוד ולנסות שוב."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "לא עכשיו"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "אפליקציות טלוויזיה ישנות יותר מציגות במקום זאת את המילים "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "יש לאשר רק מכשיר שנמצא מולך כרגע."
+      "value": "דחייה"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "יש לאשר רק טלוויזיה שנמצאת מולך כרגע."
+      "value": "יש לאשר רק אם התחלת את ההתחברות בעצמך."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94128,7 +94820,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "כל מי שמשתמש בטלוויזיה הזו יכול לבחור מבין הפרופילים שלך. פרופילים עם PIN נשארים נעולים."
+      "value": "האישור נותן למכשיר גישה לפרופילים שלך. פרופילים עם PIN יישארו נעולים."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94175,6 +94867,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "הבקשה נשלחה "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -94188,7 +94890,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "הטלוויזיה הזו הפסיקה להמתין. יש להתחיל מחדש בטלוויזיה."
+      "value": "המכשיר הזה הפסיק להמתין. יש להתחיל את ההתחברות מחדש במכשיר."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -94197,10 +94899,38 @@
       "value": "ההתחברות הזו נדחתה."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "בוצע. המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " מתחבר."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " מחובר."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "פג תוקף הקוד הזה. בטלוויזיה שלך מוצג קוד חדש. יש להשתמש בקוד הזה במקום."
+      "value": "פג תוקף הקוד הזה. יש לקבל קוד חדש במכשיר ולנסות שוב."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -94284,25 +95014,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "הטלוויזיה כבר מחוברת."
+      "value": "המכשיר הזה כבר מחובר."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "הטלוויזיה הזו אושרה ומשלימה את ההתחברות."
+      "value": "המכשיר הזה אושר ומשלים את ההתחברות."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "בוצע. הטלוויזיה שלך מתחברת."
+      "value": "בוצע. המכשיר שלך מתחבר."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "הטלוויזיה שלך מחוברת."
+      "value": "המכשיר שלך מחובר."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -94346,7 +95076,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "לאשר את ההתחברות במכשיר "
+      "value": "לאפשר למכשיר "
     },
     {
       "type": 1,
@@ -94354,13 +95084,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " להתחבר?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "לאשר את ההתחברות במכשיר הזה?"
+      "value": "לאפשר למכשיר הזה להתחבר?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -94380,13 +95110,13 @@
     },
     {
       "type": 0,
-      "value": " כדי לאשר את הטלוויזיה הזו."
+      "value": " כדי לאשר את ההתחברות הזו."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "התחברות בטלוויזיה"
+      "value": "אישור ההתחברות"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -95436,7 +96166,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "לא ניתן היה לחבר את המכשיר. אפשר לנסות שוב."
+      "value": "לא ניתן היה לאשר את ההתחברות. אפשר לנסות שוב."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -118134,6 +118864,12 @@
       "value": "תוכן השורה"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "השורה הזו מנוהלת על ידי השרת הזה. לא ניתן לשנות כאן את התוכן שהיא מציגה; כדי לבחור מה יוצג, אפשר להוסיף שורה משלך."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -122011,6 +122747,12 @@
     {
       "type": 0,
       "value": "באנר ראשי · באתר בלבד"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "שרת"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

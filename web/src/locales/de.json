@@ -13424,7 +13424,7 @@
             },
             {
               "type": 0,
-              "value": " kann nicht wiederhergestellt werden – die Einstellungen sind mit einem anderen SECRET_KEY verschlüsselt"
+              "value": " kann nicht wiederhergestellt werden – die zugehörigen Einstellungen sind mit einem anderen SECRET_KEY verschlüsselt"
             }
           ]
         },
@@ -13436,7 +13436,7 @@
             },
             {
               "type": 0,
-              "value": " können nicht wiederhergestellt werden – die Einstellungen sind mit einem anderen SECRET_KEY verschlüsselt"
+              "value": " können nicht wiederhergestellt werden – die zugehörigen Einstellungen sind mit einem anderen SECRET_KEY verschlüsselt"
             }
           ]
         }
@@ -13594,7 +13594,7 @@
             },
             {
               "type": 0,
-              "value": " kann nicht wiederhergestellt werden – die Zugriffsgruppe ist nicht auf diesem Server"
+              "value": " kann nicht wiederhergestellt werden – die zugehörige Zugriffsgruppe ist nicht auf diesem Server"
             }
           ]
         },
@@ -13606,7 +13606,7 @@
             },
             {
               "type": 0,
-              "value": " können nicht wiederhergestellt werden – die Zugriffsgruppe ist nicht auf diesem Server"
+              "value": " können nicht wiederhergestellt werden – die zugehörige Zugriffsgruppe ist nicht auf diesem Server"
             }
           ]
         }
@@ -13628,7 +13628,7 @@
             },
             {
               "type": 0,
-              "value": " kann nicht wiederhergestellt werden – der Titel ist nicht im Katalog dieses Servers"
+              "value": " kann nicht wiederhergestellt werden – der zugehörige Titel ist nicht im Katalog dieses Servers"
             }
           ]
         },
@@ -13640,7 +13640,7 @@
             },
             {
               "type": 0,
-              "value": " können nicht wiederhergestellt werden – der Titel ist nicht im Katalog dieses Servers"
+              "value": " können nicht wiederhergestellt werden – der zugehörige Titel ist nicht im Katalog dieses Servers"
             }
           ]
         }
@@ -13662,7 +13662,7 @@
             },
             {
               "type": 0,
-              "value": " kann nicht wiederhergestellt werden – das würde den Zugriff erweitern, daher behält dieser Server seine strengeren Werte"
+              "value": " kann nicht wiederhergestellt werden – das würde den Zugriff erweitern, daher behält dieser Server seine eigenen, strengeren Werte"
             }
           ]
         },
@@ -13696,7 +13696,7 @@
             },
             {
               "type": 0,
-              "value": " kann nicht wiederhergestellt werden – die Mediathek ist nicht auf diesem Server"
+              "value": " kann nicht wiederhergestellt werden – die zugehörige Mediathek ist nicht auf diesem Server"
             }
           ]
         },
@@ -13708,7 +13708,7 @@
             },
             {
               "type": 0,
-              "value": " können nicht wiederhergestellt werden – die Mediathek ist nicht auf diesem Server"
+              "value": " können nicht wiederhergestellt werden – die zugehörige Mediathek ist nicht auf diesem Server"
             }
           ]
         }
@@ -13730,7 +13730,7 @@
             },
             {
               "type": 0,
-              "value": " kann nicht wiederhergestellt werden – die Mediathek kann hier nicht wiederhergestellt werden"
+              "value": " kann nicht wiederhergestellt werden – die zugehörige Mediathek kann hier nicht wiederhergestellt werden"
             }
           ]
         },
@@ -13742,7 +13742,7 @@
             },
             {
               "type": 0,
-              "value": " können nicht wiederhergestellt werden – die Mediathek kann hier nicht wiederhergestellt werden"
+              "value": " können nicht wiederhergestellt werden – die zugehörige Mediathek kann hier nicht wiederhergestellt werden"
             }
           ]
         }
@@ -13777,6 +13777,40 @@
             {
               "type": 0,
               "value": " können nicht wiederhergestellt werden – ein anderes Konto hier meldet sich mit dem Benutzernamen oder der E-Mail-Adresse an"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kann nicht wiederhergestellt werden – die Umgebung dieses Servers legt die abweichenden Einstellungen oder einen Teil ihrer Verbindung fest"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " können nicht wiederhergestellt werden – die Umgebung dieses Servers legt die abweichenden Einstellungen oder einen Teil ihrer Verbindung fest"
             }
           ]
         }
@@ -13866,7 +13900,7 @@
             },
             {
               "type": 0,
-              "value": " kann nicht wiederhergestellt werden – das Hauptprofil muss mit wiederhergestellt werden"
+              "value": " kann nicht wiederhergestellt werden – das zugehörige Hauptprofil muss mit wiederhergestellt werden"
             }
           ]
         },
@@ -13878,7 +13912,7 @@
             },
             {
               "type": 0,
-              "value": " können nicht wiederhergestellt werden – das Hauptprofil muss mit wiederhergestellt werden"
+              "value": " können nicht wiederhergestellt werden – das zugehörige Hauptprofil muss mit wiederhergestellt werden"
             }
           ]
         }
@@ -14307,6 +14341,40 @@
     {
       "type": 0,
       "value": "Die Adresse eines Dienstes ändert sich ohne zugehörige Zugangsdaten in der Sicherung. Daher werden sie beim Wiederherstellen hier entfernt, und der Dienst bleibt aus, bis sie erneut eingegeben werden."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Einstellung behält ihren aktuellen Wert, weil die Umgebung dieses Servers sie oder einen Teil ihrer Verbindung festlegt."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Einstellungen behalten ihre aktuellen Werte, weil die Umgebung dieses Servers sie oder einen Teil ihrer Verbindung festlegt."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14753,8 +14821,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Ausblenden"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ausblenden"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ausblenden"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14903,8 +14991,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Anzeigen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Anzeigen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Anzeigen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17103,6 +17211,12 @@
       "value": "Ein anderes Konto hier meldet sich mit demselben Benutzernamen oder derselben E-Mail-Adresse an."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Die Umgebung dieses Servers legt die abweichenden Einstellungen oder einen Teil ihrer Verbindung fest, daher behält dieser Server seine aktuellen Werte."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18177,6 +18291,16 @@
     {
       "type": 0,
       "value": " (beibehalten: strenger)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (beibehalten: Umgebung)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -19273,6 +19397,20 @@
       "value": "In der Zeitzone des Servers."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "In der Zeitzone des Servers. Bei dir ist das "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -20241,20 +20379,80 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Konten ausblenden"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Konto ausblenden"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Konten ausblenden"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Dateien ausblenden"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Datei ausblenden"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dateien ausblenden"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Dateien ausblenden"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Datei ausblenden"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dateien ausblenden"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -20611,8 +20809,28 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Konten anzeigen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Konto anzeigen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Konten anzeigen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -20659,14 +20877,54 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Dateien anzeigen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Datei anzeigen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dateien anzeigen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Dateien anzeigen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Datei anzeigen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dateien anzeigen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -28419,6 +28677,12 @@
     {
       "type": 0,
       "value": "fehlgeschlagen"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Aufgabe fehlgeschlagen. Details findest du in der Administratordiagnose."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -50267,7 +50531,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Über die Bereitstellungskonfiguration des Servers festgelegt. Entferne den Knoten dort, um ihn hier zu löschen."
+      "value": "Wird über die Bereitstellungskonfiguration des Servers festgelegt. Entferne den Knoten dort und starte die API-Server neu, um ihn hier zu löschen."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52857,6 +53121,106 @@
       "value": "Die Erstellung wurde beendet. Gespeicherte Empfehlungen bleiben unter „Entdecken“ sichtbar, bis der Server neu startet."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Profile werden eingestuft ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDB-Listen werden abgerufen ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Titel werden nachgeschlagen und eingebettet ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " abgelaufener Titel entfernt"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " abgelaufene Titel entfernt"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -52889,6 +53253,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Löse den Konflikt mit der Embedding-Sperre unten, bevor Entdecken-Empfehlungen erstellt werden."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Führe zuerst den Auftrag „Embeddings“ aus, damit Silo Vektoren der Mediathek zum Vergleich hat."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Verbinde unter „KI-Dienste“ einen Embedding-Anbieter, bevor Entdecken-Empfehlungen erstellt werden."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Noch kein Profil hat ein Geschmacksprofil. Führe „Geschmacksprofile“ aus, sobald jemand Titel geschaut oder bewertet hat."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54763,6 +55151,32 @@
       "value": "Bleibt leer, bis Entdecken-Empfehlungen unter Admin → Empfehlungen aktiviert sind."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Empfehlungsreihen bleiben leer, bis Entdecken-Empfehlungen unter "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Admin → Empfehlungen"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " aktiviert sind."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Aus in „Empfehlungen“"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56233,6 +56647,12 @@
       "value": "Neue Reihen werden unten in Entdecken angefügt"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Empfehlungen-Einstellungen öffnen"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56245,6 +56665,12 @@
       "value": "Der Feed von MDBList übernimmt die auf der Listenseite gespeicherte Sortierung nicht. Wähle die, die dort angezeigt wird."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Dein Profil hat noch keine Entdecken-Empfehlungen. Führe „Entdecken-Empfehlungen“ aus oder schaue und bewerte ein paar Titel, um eine Vorschau dieser Reihe zu sehen."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56255,6 +56681,12 @@
     {
       "type": 0,
       "value": "Wähle eine Liste oder füge ihren Link ein, um ihre Titel zu sehen."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Aktiviere Entdecken-Empfehlungen unter Admin → Empfehlungen, um eine Vorschau dieser Reihe zu sehen."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -59917,6 +60349,12 @@
       "value": "Verbindungsprüfung fehlgeschlagen."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Es konnte nicht geprüft werden, ob die Umgebung des Servers diese Einstellung festlegt. Lade die Seite neu, um sie zu bearbeiten."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60471,6 +60909,30 @@
     {
       "type": 0,
       "value": "Der Kanal konnte nicht aktualisiert werden"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Lade neu, um die aktuellen Werte zu sehen. Deine Änderungen an inzwischen geänderten Einstellungen sowie an gespeicherten Passwörtern und Schlüsseln samt den zugehörigen Einstellungen werden verworfen; deine übrigen Änderungen bleiben erhalten."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Neu laden"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Die Einstellungen konnten nicht neu geladen werden. Versuche es erneut."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Einstellungen wurden anderswo geändert"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -65945,6 +66407,24 @@
       "value": "Für einen Wechsel zu einem anderen Modell müssen die Embeddings zurückgesetzt werden, wodurch alle gelöscht werden. Ein anderer Anbieter, der dasselbe Modell bereitstellt, gilt nach einem Neustart."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Zu Entdecken hinzufügen"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Empfehlungsreihen konnten nicht zur Entdecken-Seite hinzugefügt werden."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Empfehlungsreihen zur Entdecken-Seite hinzugefügt."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -65967,6 +66447,44 @@
     {
       "type": 0,
       "value": "Wie viele Titel, die nicht in der Mediathek sind, der Server als Grundlage für Empfehlungen vorhält. Jeder wird auf TMDB nachgeschlagen und erhält ein Embedding. Embeddings sind meist günstig, aber eine höhere Zahl kann je nach Embedding-Anbieter mehr kosten oder länger dauern und belegt mehr Speicherplatz."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Deine Entdecken-Seite zeigt noch keine Empfehlungsreihen an."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Aktiviere oben „Empfehlungen aktivieren“ und starte den Server neu, bevor Entdecken-Empfehlungen ausgeführt werden können."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Anfragen sind derzeit deaktiviert. Aktiviere sie in den "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Anfrage-Einstellungen"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", damit Zuschauende die Entdecken-Seite sehen können."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Entdecken-Seite öffnen"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -75141,6 +75659,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Der Speicher kann hier nicht verschoben werden, solange die Umgebung Speichereinstellungen festlegt ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Entferne diese Variablen und starte zuerst jeden API-Server neu."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76277,6 +76809,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Dieser Zeitplan stammt aus den Sicherungseinstellungen. Ändere ihn unter "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Sicherungen"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -76587,10 +77139,44 @@
       "value": "Aktuelle Fehler"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Aktualisierung fehlgeschlagen. Details findest du in der Administratordiagnose."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Aktuellen Zeitplan prüfen"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -77035,6 +77621,18 @@
     {
       "type": 0,
       "value": "Autoscan-Webhook-Wiederholung"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Liest den Header von MKV-Dateien mit ASS-Untertiteln erneut, die gescannt wurden, bevor Silo eingebettete Schriftarten aus der Bitrate herausrechnete, damit sie nicht für eine Bitrate transkodiert werden, die sie gar nicht streamen."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Bitrate von Dateien mit eingebetteten Schriftarten korrigieren"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -86510,25 +87108,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Der Fernseher konnte nicht angemeldet werden. Versuche es erneut."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Prüfe, ob deine App diesen Code anzeigt"
+      "value": "Die Anmeldung konnte nicht genehmigt werden. Versuche es erneut."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Prüfe, ob dein Fernseher diesen Code anzeigt"
+      "value": "Prüfe, ob dieser Code übereinstimmt"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Gib den Code von deinem Fernseher oder deiner App ein"
+      "value": "Gib den Code ein, den dein Gerät anzeigt"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86540,13 +87132,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Melde einen Fernseher oder ein anderes Gerät mit deinem Konto an."
+      "value": "Melde einen Fernseher, eine App oder ein anderes Gerät an."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Fernseher anmelden"
+      "value": "Anmeldung genehmigen"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86566,13 +87158,13 @@
     },
     {
       "type": 0,
-      "value": ", um einen Fernseher zu genehmigen. Nur das Konto selbst kann einen Fernseher anmelden."
+      "value": ", um diese Anmeldung zu genehmigen. Nur das Konto selbst kann Geräte genehmigen."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Beende die Ansicht als dieser Benutzer, um einen Fernseher zu genehmigen. Nur das Konto selbst kann einen Fernseher anmelden."
+      "value": "Beende die Ansicht als dieser Benutzer, um diese Anmeldung zu genehmigen. Nur das Konto selbst kann Geräte genehmigen."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86590,39 +87182,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Dieser Code wurde nicht gefunden. Prüfe den Code auf deinem Fernseher."
+      "value": "Dieser Code wurde nicht gefunden. Prüfe den Code und versuche es erneut."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Nicht jetzt"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Ältere TV-Apps zeigen stattdessen "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " an."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Genehmige nur ein Gerät, das sich gerade vor dir befindet."
+      "value": "Ablehnen"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Genehmige nur einen Fernseher, der sich gerade vor dir befindet."
+      "value": "Genehmige dies nur, wenn du die Anmeldung selbst gestartet hast."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86648,7 +87220,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Alle, die diesen Fernseher nutzen, können aus deinen Profilen wählen. Profile mit PIN bleiben gesperrt."
+      "value": "Das Gerät erhält dadurch Zugriff auf deine Profile. Profile mit PIN bleiben gesperrt."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86695,6 +87267,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Angefragt: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86708,7 +87290,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Dieser Fernseher wartet nicht mehr. Starte den Vorgang auf dem Fernseher neu."
+      "value": "Dieses Gerät wartet nicht mehr. Starte die Anmeldung dort erneut."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86717,10 +87299,34 @@
       "value": "Diese Anmeldung wurde abgelehnt."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Fertig. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " wird angemeldet."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ist angemeldet."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Dieser Code ist abgelaufen. Dein Fernseher zeigt einen neuen an. Verwende stattdessen diesen Code."
+      "value": "Dieser Code ist abgelaufen. Lass dir auf dem Gerät einen neuen Code anzeigen und versuche es erneut."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86804,25 +87410,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Dieser Fernseher ist bereits angemeldet."
+      "value": "Dieses Gerät ist bereits angemeldet."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Dieser Fernseher wurde genehmigt und schließt die Anmeldung ab."
+      "value": "Dieses Gerät wurde genehmigt und schließt die Anmeldung ab."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Fertig. Dein Fernseher wird angemeldet."
+      "value": "Fertig. Dein Gerät wird angemeldet."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Dein Fernseher ist angemeldet."
+      "value": "Dein Gerät ist angemeldet."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86865,6 +87471,10 @@
   ],
   "web.auth.activate.signInDevice": [
     {
+      "type": 0,
+      "value": "Darf sich "
+    },
+    {
       "type": 1,
       "value": "device"
     },
@@ -86876,7 +87486,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Dieses Gerät anmelden?"
+      "value": "Darf sich dieses Gerät anmelden?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86896,13 +87506,13 @@
     },
     {
       "type": 0,
-      "value": " an, um diesen Fernseher zu genehmigen."
+      "value": " an, um diese Anmeldung zu genehmigen."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Fernseher anmelden"
+      "value": "Anmeldung genehmigen"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -87952,7 +88562,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Das Gerät konnte nicht angemeldet werden. Versuche es erneut."
+      "value": "Die Anmeldung konnte nicht genehmigt werden. Versuche es erneut."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -108636,6 +109246,12 @@
       "value": "Inhalt"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Wird von diesem Server verwaltet. Was diese Reihe anzeigt, kann hier nicht geändert werden; füge eine eigene Reihe hinzu, um selbst zu wählen, was sie anzeigt."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -112305,6 +112921,12 @@
     {
       "type": 0,
       "value": "Hero-Banner · Nur Web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Server"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

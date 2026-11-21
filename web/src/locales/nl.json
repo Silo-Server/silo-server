@@ -13630,7 +13630,7 @@
             },
             {
               "type": 0,
-              "value": " kan niet worden hersteld — de toegang zou ruimer worden, dus deze server houdt zijn strengere waarden aan"
+              "value": " kan niet worden hersteld — het zou de toegang verruimen, dus deze server houdt zijn eigen strengere waarden aan"
             }
           ]
         },
@@ -13642,7 +13642,7 @@
             },
             {
               "type": 0,
-              "value": " kunnen niet worden hersteld — de toegang zou ruimer worden, dus deze server houdt zijn strengere waarden aan"
+              "value": " kunnen niet worden hersteld — ze zouden de toegang verruimen, dus deze server houdt zijn strengere waarden aan"
             }
           ]
         }
@@ -13745,6 +13745,40 @@
             {
               "type": 0,
               "value": " kunnen niet worden hersteld — een ander account hier meldt zich aan met die gebruikersnaam of dat e-mailadres"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan niet worden hersteld — de omgeving van deze server stelt de afwijkende instellingen in, of een deel van de verbinding waar ze bij horen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kunnen niet worden hersteld — de omgeving van deze server stelt de afwijkende instellingen in, of een deel van de verbinding waar ze bij horen"
             }
           ]
         }
@@ -14004,7 +14038,7 @@
             },
             {
               "type": 0,
-              "value": " kan niet worden hersteld — deze server zou het meer toegang geven dan de back-up deed"
+              "value": " kan niet worden hersteld — deze server zou het meer toegang geven dan de back-up"
             }
           ]
         },
@@ -14016,7 +14050,7 @@
             },
             {
               "type": 0,
-              "value": " kunnen niet worden hersteld — deze server zou ze meer toegang geven dan de back-up deed"
+              "value": " kunnen niet worden hersteld — deze server zou ze meer toegang geven dan de back-up"
             }
           ]
         }
@@ -14275,6 +14309,40 @@
     {
       "type": 0,
       "value": "Het adres van een dienst verandert zonder de inloggegevens in de back-up, dus bij het herstellen worden ze hier gewist en wordt de dienst uitgeschakeld tot ze opnieuw zijn ingevoerd."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " instelling behoudt de huidige waarde omdat de omgeving van deze server die instelt, of een deel van de verbinding waar die bij hoort."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " instellingen behouden hun huidige waarden omdat de omgeving van deze server ze instelt, of een deel van de verbinding waar ze bij horen."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14729,8 +14797,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Verbergen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Verbergen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Verbergen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14879,8 +14967,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Tonen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tonen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tonen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17043,6 +17151,12 @@
       "value": "Een ander account hier meldt zich aan met dezelfde gebruikersnaam of hetzelfde e-mailadres."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "De omgeving van deze server stelt de afwijkende instellingen in, of een deel van de verbinding waar ze bij horen, dus deze server behoudt de huidige waarden."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18117,6 +18231,16 @@
     {
       "type": 0,
       "value": " (behouden: strenger)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (behouden: omgeving)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -19209,6 +19333,20 @@
       "value": "In de tijdzone van de server."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "In de tijdzone van de server. Dat is "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " in jouw tijdzone."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -20177,20 +20315,80 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "De accounts verbergen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Het account verbergen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "De accounts verbergen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "De bestanden verbergen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Het bestand verbergen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "De bestanden verbergen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Bestanden verbergen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bestand verbergen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bestanden verbergen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -20555,8 +20753,28 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "De accounts tonen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Het account tonen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "De accounts tonen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -20603,14 +20821,54 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "De bestanden tonen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Het bestand tonen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "De bestanden tonen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Bestanden tonen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bestand tonen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bestanden tonen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -28387,6 +28645,12 @@
     {
       "type": 0,
       "value": "mislukt"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Taak mislukt. Bekijk de beheerdersdiagnostiek voor details."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -50179,7 +50443,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Ingesteld door de implementatieconfiguratie van de server. Verwijder hem daar om hem hier te kunnen verwijderen."
+      "value": "Ingesteld door de implementatieconfiguratie van de server. Verwijder hem daar en herstart de API-servers om hem hier te kunnen verwijderen."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52769,6 +53033,106 @@
       "value": "Het genereren is gestopt. Opgeslagen aanbevelingen blijven zichtbaar in Ontdek totdat de server opnieuw wordt opgestart."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Profielen rangschikken ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDB-lijsten ophalen ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Titels opzoeken en embeddings maken ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " verlopen titel gewist"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " verlopen titels gewist"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -52801,6 +53165,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Los het conflict met de embeddingvergrendeling hieronder op voordat je Ontdekken-aanbevelingen opbouwt."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Voer eerst de job Embeddings uit, zodat Silo bibliotheekvectoren heeft om mee te vergelijken."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Verbind een embeddingprovider in AI-services voordat je Ontdekken-aanbevelingen opbouwt."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Nog geen enkel profiel heeft een smaakprofiel. Voer Smaakprofielen uit zodra iemand titels heeft bekeken of beoordeeld."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54639,6 +55027,32 @@
       "value": "Blijft leeg totdat Ontdekken-aanbevelingen zijn ingeschakeld in Beheer → Aanbevelingen."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Rijen met aanbevelingen blijven leeg totdat Ontdekken-aanbevelingen zijn ingeschakeld in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Beheer → Aanbevelingen"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Uit in Aanbevelingen"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56117,6 +56531,12 @@
       "value": "Nieuwe rijen komen onderaan Ontdekken"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Instellingen voor Aanbevelingen openen"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56129,6 +56549,12 @@
       "value": "De feed van MDBList bevat niet de sortering die op de pagina van de lijst is opgeslagen. Kies de sortering die daar wordt getoond."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Je profiel heeft nog geen Ontdekken-aanbevelingen. Voer Ontdekken-aanbevelingen uit of bekijk en beoordeel een paar titels om een voorbeeld van deze rij te zien."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56139,6 +56565,12 @@
     {
       "type": 0,
       "value": "Kies een lijst of plak de link om de titels te zien."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Schakel Ontdekken-aanbevelingen in via Beheer → Aanbevelingen om een voorbeeld van deze rij te zien."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -59817,6 +60249,12 @@
       "value": "Verbindingscontrole mislukt."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Kan niet controleren of de omgeving van de server dit instelt. Laad de pagina opnieuw om dit te bewerken."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60371,6 +60809,30 @@
     {
       "type": 0,
       "value": "Kan kanaal niet bijwerken"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Laad opnieuw om de huidige waarden te zien. Je wijzigingen in instellingen die zijn veranderd, en in opgeslagen wachtwoorden en sleutels met de bijbehorende instellingen, worden ongedaan gemaakt; je andere wijzigingen blijven behouden."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Opnieuw laden"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Kan de instellingen niet opnieuw laden. Probeer het opnieuw."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Instellingen elders gewijzigd"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -65825,6 +66287,24 @@
       "value": "Overschakelen naar een ander model vereist het resetten van de embeddings, waarbij ze allemaal worden verwijderd. Een andere provider die hetzelfde model levert, wordt na een herstart toegepast."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Toevoegen aan Ontdek"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Kan rijen met aanbevelingen niet toevoegen aan de pagina Ontdek."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Rijen met aanbevelingen toegevoegd aan de pagina Ontdek."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -65847,6 +66327,44 @@
     {
       "type": 0,
       "value": "Hoeveel titels die niet in de bibliotheek staan de server bewaart om uit aan te bevelen. Elke titel wordt opgezocht op TMDB en krijgt een embedding. Een embedding maken is meestal goedkoop, maar een hoger aantal kan meer kosten of langer duren, afhankelijk van je embedding-provider, en gebruikt meer opslag."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Je pagina Ontdek toont nog geen rijen met aanbevelingen."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Zet Aanbevelingen inschakelen hierboven aan en start de server opnieuw op voordat Ontdekken-aanbevelingen kunnen worden uitgevoerd."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Aanvragen staan momenteel uit. Zet ze aan in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Aanvraaginstellingen"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " zodat kijkers de pagina Ontdek kunnen zien."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Pagina Ontdek openen"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -74965,6 +75483,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Opslag kan hier niet worden verplaatst zolang de omgeving opslaginstellingen vastlegt ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Verwijder eerst die variabelen en start elke API-server opnieuw."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76101,6 +76633,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Deze planning komt uit de back-upinstellingen. Wijzig die in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Back-ups"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -76411,10 +76963,44 @@
       "value": "Recente fouten"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Vernieuwen mislukt. Bekijk de beheerdersdiagnostiek voor details."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Huidige planning bekijken"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -76859,6 +77445,18 @@
     {
       "type": 0,
       "value": "Autoscan-webhook opnieuw proberen"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Leest opnieuw de header van MKV-bestanden met ASS-ondertitels die zijn gescand voordat Silo ingesloten lettertypen niet meer meetelde in de bitrate, zodat ze niet worden getranscodeerd voor een bitrate die ze niet streamen."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Bitrate van bestanden met ingesloten lettertypen corrigeren"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -86322,25 +86920,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Inloggen van de tv is mislukt. Probeer het opnieuw."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Controleer of je app dit toont"
+      "value": "Kan het inloggen niet goedkeuren. Probeer het opnieuw."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Controleer of je tv dit toont"
+      "value": "Controleer of deze code overeenkomt"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Voer de code van je tv of app in"
+      "value": "Voer de code in die op je apparaat staat"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86352,13 +86944,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Log een tv of ander apparaat in met je account."
+      "value": "Meld een tv, app of ander apparaat aan."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Een tv inloggen"
+      "value": "Inloggen goedkeuren"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86378,13 +86970,13 @@
     },
     {
       "type": 0,
-      "value": " om een tv goed te keuren. Alleen het account zelf kan een tv inloggen."
+      "value": " om deze inlogpoging goed te keuren. Alleen het account zelf kan apparaten goedkeuren."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Stop met bekijken als deze gebruiker om een tv goed te keuren. Alleen het account zelf kan een tv inloggen."
+      "value": "Stop met bekijken als deze gebruiker om deze inlogpoging goed te keuren. Alleen het account zelf kan apparaten goedkeuren."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86402,39 +86994,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "We kunnen die code niet vinden. Controleer de code op je tv."
+      "value": "We kunnen die code niet vinden. Controleer de code en probeer het opnieuw."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Niet nu"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Oudere tv-apps tonen in plaats daarvan "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Keur alleen een apparaat goed dat nu voor je staat."
+      "value": "Weigeren"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Keur alleen een tv goed die nu voor je staat."
+      "value": "Keur dit alleen goed als je zelf bent begonnen met inloggen."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86460,7 +87032,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Iedereen die deze tv gebruikt, kan uit je profielen kiezen. Profielen met een PIN blijven vergrendeld."
+      "value": "Het apparaat krijgt zo toegang tot je profielen. Profielen met een PIN blijven vergrendeld."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86507,6 +87079,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Aangevraagd "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86520,7 +87102,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Deze tv wacht niet meer. Begin opnieuw op de tv."
+      "value": "Dit apparaat wacht niet meer. Begin op het apparaat opnieuw met inloggen."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86529,10 +87111,34 @@
       "value": "Deze inlogpoging is geweigerd."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Klaar. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " logt in."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " is ingelogd."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Deze code is verlopen. Je tv toont een nieuwe. Gebruik die code."
+      "value": "Deze code is verlopen. Vraag op het apparaat een nieuwe code aan en probeer het opnieuw."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86616,25 +87222,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Die tv is al ingelogd."
+      "value": "Dit apparaat is al ingelogd."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Deze tv is goedgekeurd en rondt het inloggen af."
+      "value": "Dit apparaat is goedgekeurd en rondt het inloggen af."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Klaar. Je tv logt in."
+      "value": "Klaar. Je apparaat logt in."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Je tv is ingelogd."
+      "value": "Je apparaat is ingelogd."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86682,13 +87288,13 @@
     },
     {
       "type": 0,
-      "value": " inloggen?"
+      "value": " laten inloggen?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Dit apparaat inloggen?"
+      "value": "Dit apparaat laten inloggen?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86708,13 +87314,13 @@
     },
     {
       "type": 0,
-      "value": " om deze tv goed te keuren."
+      "value": " om deze inlogpoging goed te keuren."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Tv inloggen"
+      "value": "Inloggen goedkeuren"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -87760,7 +88366,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Kan het apparaat niet aanmelden. Probeer het opnieuw."
+      "value": "Kan het inloggen niet goedkeuren. Probeer het opnieuw."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -108434,6 +109040,12 @@
       "value": "Toont"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Beheerd door deze server. Wat de rij toont, kun je hier niet wijzigen; voeg zelf een rij toe om te kiezen wat die toont."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -112103,6 +112715,12 @@
     {
       "type": 0,
       "value": "Herobanner · Alleen web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Server"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

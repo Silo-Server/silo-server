@@ -19300,6 +19300,8 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       created_at: string;
+      /** @description The API servers' deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE) lists this transcode node and supplies its key. issueAdminNodeKey and deleteAdminNode refuse it with node_deployment_managed until an API server starts with a document that no longer lists it (nodes: {} releases every node). An API server started with neither variable set leaves it managed. Requires the deployment_nodes node capability. */
+      deployment_managed: boolean;
       /** @description This node's own prepared-download directory; absent when inherited. */
       download_artifact_dir_override?: string;
       /**
@@ -19362,6 +19364,8 @@ export interface components {
     AdminNodeCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description API servers can create transcode nodes and their keys from their deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE): deployment_managed on node rows, and issueAdminNodeKey and deleteAdminNode refuse such a node with node_deployment_managed. An API server that starts with a document no longer listing a node releases it (nodes: {} releases every node); one started with neither variable set changes nothing. */
+      deployment_nodes: boolean;
       /** @description Transcode nodes can drain: the drain and resume operations, and drain_requested and drain_state on node rows. */
       drain: boolean;
       /** @description Nodes can declare their own configuration from their environment: env_managed on node rows names the fields a node declares, and updateAdminNode refuses a change to them with field code managed_by_environment. */
@@ -21298,6 +21302,11 @@ export interface components {
        * @example 3
        */
       needs_approval: number;
+      /**
+       * @description Whether the server-wide requests switch is on; the queue still answers while it is off
+       * @example true
+       */
+      requests_enabled: boolean;
     };
     AdminRequestEvent: {
       /**
@@ -68659,6 +68668,15 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

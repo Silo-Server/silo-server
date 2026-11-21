@@ -179,7 +179,7 @@ export function QuickConnectApproval({
           disabled={disabled || !selected || (needsPin && pin.trim() === "")}
           onClick={() => void approve()}
         >
-          {acting ? t("web.auth.login.signingIn") : t("web.auth.signIn")}
+          {acting ? t("web.auth.login.signingIn") : t("web.auth.activate.signInTv")}
         </Button>
         <Button variant="outline" className="w-full" disabled={disabled} onClick={onDeny}>
           {t("web.auth.activate.notNow")}

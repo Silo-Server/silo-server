@@ -500,7 +500,7 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                   )}
 
                   {item.type === "series" && (
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
                       <FieldRow
                         label={t("web.item.editMetadata.lastAirDate")}
                         lockIcon={renderLockIcon("last_air_date")}

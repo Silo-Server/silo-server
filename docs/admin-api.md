@@ -357,6 +357,7 @@ configuration, last health result, and last stored hardware inventory. See
 | `drain_requested` | bool | An administrator asked this transcode node to drain: it stays listed and health-checked, but new work goes to other nodes while its sessions finish. See [node drain (v2)](#node-drain-v2). Always `false` on a proxy. |
 | `drain_state` | string | What the node reported on its last health check: `none`, `draining` (after a drain request or SIGTERM, while it finishes its work) or `drained` (nothing left; safe to stop). `none` for a proxy, a node that predates draining, and a node that did not answer. |
 | `key_issued` | bool | A node key has been issued to this transcode node. The key itself is shown only in the response that issues it. Always `false` on a proxy. See [node keys (v2)](#node-keys-v2). |
+| `deployment_managed` | bool | The API servers' deployment configuration (`SILO_TRANSCODE_NODES`) lists this transcode node and supplies its key. Key issue and delete refuse it with `409 node_deployment_managed`. See [node keys (v2)](#node-keys-v2). |
 | `source_access` | string | How this transcode node reads source media: `local` through its own library mount at the API servers' paths, `core` over HTTP from the API servers. Omitted on a proxy. See [node source access (v2)](#node-source-access-v2). |
 | `active_jobs`, `egress_kbps` | int | Last health-reported load. `egress_kbps` is a rolling average and is currently non-zero for proxy nodes only. |
 | `group` | string \| null | Co-location group. A group is only eligible while every enabled member is healthy. |
@@ -887,7 +888,10 @@ answering server before the `204`, and from the other API servers and proxies
 once `node_pool_changed` reaches them: nothing signs requests to the node or
 accepts its calls, so its sessions stop serving viewers (relays answer them as
 "node unavailable" and do not move them). The call sends the node nothing. Like PUT, it needs the node's `config_etag` in
-`If-Match`: `428` without one, `412` when it is stale.
+`If-Match`: `428` without one, `412` when it is stale. A node with
+`deployment_managed` returns `409 node_deployment_managed` after those checks:
+the next API server start would create it again (see
+[node keys (v2)](#node-keys-v2)).
 
 ## `POST /api/v2/admin/nodes/{id}/check`
 
@@ -3506,7 +3510,9 @@ key, so drain it first. A disabled node can take a key. The operation requires a
 administrator, rejects demo mode, takes no body and is non_retryable: after a
 lost response, issue again rather than replaying. A proxy node returns 409 (a
 proxy takes no key), a missing node 404, a server without the data cipher 503,
-invalid IDs 422, and repository failures a private 500 problem.
+invalid IDs 422, and repository failures a private 500 problem. A node with
+`deployment_managed` returns `409 node_deployment_managed`: its key comes from
+the API servers' deployment configuration.
 
 The key is stored encrypted in `stream_nodes.node_key_ciphertext` (see
 [secret encryption](architecture/secret-encryption.md)). It is a credential, not
@@ -3514,6 +3520,15 @@ configuration: issuing it advances neither `config_etag` nor the pool
 generation. `GET /api/v2/admin/nodes/capabilities` advertises `node_keys: true`
 when this server can issue keys. The node starts with this key and the API's
 URL; see [transcode nodes](architecture/transcode-nodes.md).
+
+API servers can instead create transcode nodes and their keys from
+`SILO_TRANSCODE_NODES` or `SILO_TRANSCODE_NODES_FILE`
+([declared nodes](architecture/transcode-nodes.md#declared-nodes)). Such a
+node's row reports `deployment_managed: true`; `issueAdminNodeKey` and
+`deleteAdminNode` (after its `If-Match` check) refuse it with
+`409 node_deployment_managed` until an API server starts with a declaration
+that no longer lists it. Its other fields stay editable. The capabilities
+response advertises `deployment_nodes: true` when this server supports it.
 
 ### Force reload nodes (v2)
 
