@@ -40,6 +40,8 @@ const AUDIOBOOK_TAB_LABELS: Record<LibraryTab, MessageKey> = {
   recommended: "web.library.header.homeTab",
 };
 
+const SELECTED_TAB = '[role="tab"][data-state="active"]';
+
 /** Scroll distance (in px) at which an overlay header switches to glass. */
 const GLASS_THRESHOLD_PX = 160;
 
@@ -62,7 +64,17 @@ export default function LibraryHeader({
     edges,
     measure,
     reveal,
-  } = useScrollStrip<HTMLDivElement>(`[role="tab"][data-state="active"]`, activeTab, 24);
+  } = useScrollStrip<HTMLDivElement>(SELECTED_TAB, activeTab, 24);
+
+  // A selection that changes while focus sits on another tab (browser Back,
+  // say) takes focus along, so focus never stays on a tab scrolled out of view.
+  useEffect(() => {
+    const strip = tabStrip.current;
+    const focused = document.activeElement;
+    if (!strip || !(focused instanceof HTMLElement) || !strip.contains(focused)) return;
+    const selected = strip.querySelector<HTMLElement>(SELECTED_TAB);
+    if (selected && selected !== focused) selected.focus({ preventScroll: true });
+  }, [activeTab, tabStrip]);
 
   useEffect(() => {
     if (!overlay) return;
@@ -79,7 +91,9 @@ export default function LibraryHeader({
   return (
     <header
       data-sticky-header
-      className={cn("library-marquee-header", overlay && "is-overlay")}
+      // The eyebrow carries its own spacing (me-6), so when it hides it leaves
+      // no gap behind for the tabs to lose.
+      className={cn("library-marquee-header gap-0", overlay && "is-overlay")}
       data-scrolled={overlay ? (scrolled ? "true" : "false") : undefined}
     >
       {/* Eyebrow is hidden on mobile — the top nav already identifies the
@@ -89,10 +103,10 @@ export default function LibraryHeader({
           the "Library /" prefix goes, so the library name stays readable, then
           the whole eyebrow. */}
       <div className="@container hidden min-w-0 flex-1 items-center gap-4 sm:flex">
-        <p className="hero-eyebrow truncate @max-[6rem]:hidden">
-          <span className="@max-[14rem]:hidden">{t("web.library.header.eyebrow")}</span>
+        <p className="hero-eyebrow me-6 truncate @max-[7.5rem]:hidden">
+          <span className="@max-[15.5rem]:hidden">{t("web.library.header.eyebrow")}</span>
           {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a divider glyph, not text */}
-          <span className="hero-eyebrow-divider @max-[14rem]:hidden">/</span>
+          <span className="hero-eyebrow-divider @max-[15.5rem]:hidden">/</span>
           <span className="hero-eyebrow-strong">{libraryName}</span>
         </p>
       </div>
@@ -129,7 +143,7 @@ export default function LibraryHeader({
               // Tabbing back in lands on the selected tab, which a hand scroll
               // may have left under the fade. Arrow keys and taps select the
               // tab they focus, so the selection change reveals those.
-              if (event.target.getAttribute("data-state") === "active") reveal();
+              if (event.target.matches(SELECTED_TAB)) reveal();
             }}
             className={cn(
               "min-w-0 overflow-x-auto overflow-y-hidden rounded-full p-1 [--strip-fade:24px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
