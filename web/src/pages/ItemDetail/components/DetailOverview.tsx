@@ -85,10 +85,11 @@ export default function DetailOverview({
           description keeps its line breaks, so when a later paragraph runs the
           other way and is clamped, Firefox and WebKit cut it on the wrong side;
           no one direction suits every paragraph of one clamped block. Nor does
-          one alignment: data-clamp-cut aligns each paragraph to its own start,
-          which would move one that fits, so a cut description whose paragraphs
-          run different ways keeps the page's alignment, and Chromium can drop
-          its "…". */}
+          one alignment: data-clamp-cut aligns each paragraph to its own start.
+          When the paragraphs run different ways, that splits the description
+          between both edges and moves paragraphs that fit, so such a
+          description keeps the page's alignment, and Chromium can drop its
+          "…". */}
       <p
         ref={textRef}
         dir="auto"

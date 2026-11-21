@@ -39,7 +39,9 @@ export default function DetailTitle({
       const style = getComputedStyle(heading);
       const baseSize = parseFloat(style.fontSize);
       const baseSpacing = parseFloat(style.letterSpacing) || 0;
-      const width = heading.clientWidth;
+      // The used width, not clientWidth: that rounds to a whole pixel, and a
+      // title that wraps within half a pixel of the edge would measure as fitting.
+      const width = parseFloat(style.width);
       if (!width || !Number.isFinite(baseSize)) return;
       Object.assign(measure.style, {
         width: `${width}px`,

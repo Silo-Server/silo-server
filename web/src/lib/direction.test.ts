@@ -33,6 +33,9 @@ describe("mixesDirections", () => {
     ["Arabic with a line of digits and punctuation", "مجموعة أفلام.\n1999–2004\n***", false],
     ["English with an Arabic word inside a line", "The film was called باب الحارة.", false],
     ["Windows line endings", "A collection.\r\nFrodo and Sam set out.", false],
+    ["an RLM before an English line", "A collection.\n\u200fFrodo and Sam set out.", true],
+    ["an ALM before an English line", "A collection.\n\u061cFrodo and Sam set out.", true],
+    ["an LRM before an Arabic line", "A collection.\n\u200eيواصل فرودو وسام رحلتهما.", false],
   ])("%s", (_case, text, want) => {
     expect(mixesDirections(text)).toBe(want);
   });
