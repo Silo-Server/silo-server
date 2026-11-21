@@ -500,6 +500,7 @@ export default function ConnectionsPanel() {
                     {t("web.admin.autoscan.connections.form.baseURL")}
                   </Label>
                   <Input
+                    dir="ltr"
                     id="conn-url"
                     placeholder={BASE_URL_EXAMPLE}
                     value={dialog.baseUrl}

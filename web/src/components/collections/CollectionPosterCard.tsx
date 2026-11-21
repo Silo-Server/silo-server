@@ -141,7 +141,7 @@ function SidebarPinButton({
         className={`absolute start-2 top-2 rounded-lg p-1.5 backdrop-blur-sm transition-all ${
           pinned
             ? "bg-primary/90 text-primary-foreground"
-            : "bg-background/50 text-foreground opacity-0 group-hover/card:opacity-100"
+            : "bg-background/50 text-foreground pointer-reveal group-hover/card:opacity-100"
         }`}
         title={pinLabel}
         aria-label={pinLabel}

@@ -441,7 +441,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                   count: preview.files_moved,
                   file_count: preview.files_moved,
                   target_id: preview.target_content_id,
-                  id: (chunks) => <span className="font-mono text-xs">{chunks}</span>,
+                  id: (chunks) => <code className="font-mono text-xs">{chunks}</code>,
                 })}
                 {preview.target_created ? (
                   <Badge variant="secondary" className="ms-2 text-[10px]">

@@ -576,7 +576,7 @@ export default function Login() {
                     <span className="flex flex-col items-start text-start">
                       <span>{label}</span>
                       {owner && (
-                        <span className="text-xs font-normal opacity-80">
+                        <span className="text-xs font-(--font-weight-ui)">
                           {t("web.auth.login.network.via", { provider: entry.display_name })}
                         </span>
                       )}
@@ -713,7 +713,9 @@ export default function Login() {
                       {t("web.auth.login.device.goToAndEnter", {
                         url: deviceSession.verification_uri,
                         address: (chunks) => (
-                          <span className="text-foreground break-all">{chunks}</span>
+                          <code className="text-foreground [font-family:inherit] break-all">
+                            {chunks}
+                          </code>
                         ),
                       })}
                     </p>
