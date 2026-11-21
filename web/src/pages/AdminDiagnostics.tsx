@@ -326,7 +326,7 @@ export default function AdminDiagnostics() {
         >
           <Input
             id="diagnostics-short-id"
-            className="font-mono uppercase placeholder:normal-case"
+            className="placeholder:font-ui font-mono uppercase placeholder:normal-case"
             placeholder={t("web.admin.diagnostics.filters.shortIdPlaceholder")}
             value={filters.shortID}
             onChange={(event) => setFilter("shortID", event.target.value)}

@@ -37,7 +37,11 @@ import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
 import { useASSSubtitles } from "../hooks/useASSSubtitles";
 import { usePGSSubtitles } from "../hooks/usePGSSubtitles";
 import type { EngineCapabilities } from "../engine/capabilities";
-import { resolveOriginalPlaybackRoute, type NativeOriginalSupport } from "../engine/routing";
+import {
+  pageOriginProtocol,
+  resolveOriginalPlaybackRoute,
+  type NativeOriginalSupport,
+} from "../engine/routing";
 import type { BrowserEngineSession } from "../engine";
 import { ENGINE_READ_FAILED, ENGINE_STARTUP_TIMEOUT } from "../engine/protocol";
 import { useSubtitleSync } from "../hooks/useSubtitleSync";
@@ -3274,12 +3278,15 @@ export function VideoPlayer({
                 },
                 engine: routeInput.browserEngine,
                 audioTracks: routeInput.audioTracks,
-                navigationProtocol:
+                navigationProtocol: pageOriginProtocol(
                   (
                     performance.getEntriesByType?.("navigation")[0] as
                       | PerformanceNavigationTiming
                       | undefined
                   )?.nextHopProtocol ?? "",
+                  (performance.getEntriesByType?.("resource") ?? []) as PerformanceResourceTiming[],
+                  location.origin,
+                ),
               })
             : ({ kind: "native" } as const);
         if (route.kind === "unsupported") {

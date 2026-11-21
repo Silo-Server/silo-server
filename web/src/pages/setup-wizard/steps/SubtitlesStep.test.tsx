@@ -4,13 +4,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SubtitlesStep } from "./SubtitlesStep";
 
-const wizardMock = vi.fn();
-vi.mock("../WizardContext", () => ({ useWizardContext: () => wizardMock() }));
+const markDone = vi.fn();
+vi.mock("../WizardContext", () => ({
+  useWizardContext: () => ({ markDone, setSummary: vi.fn() }),
+}));
 
 const updateMock = vi.fn();
-// Keep `data` the same object across renders, as React Query does. A new one
-// re-runs the step's load effect, whose cleanup cancels an editor read still
-// in flight and leaves the row loading.
+// One object for every render, as React Query returns stable data; a new one
+// each time would restart the step's editor load on every re-render.
 const providersQuery = {
   data: {
     providers: [
@@ -28,21 +29,25 @@ vi.mock("@/hooks/queries/admin/subtitles", () => ({
   useTestSubtitleProvider: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
+const editorMock = vi.fn();
 vi.mock("@/api/v2/adminSubtitleProviderConfiguration", () => ({
   captureProviderEditIntent: (provider: string) => ({ provider }),
   providerIntentActive: () => true,
-  getProviderEditor: (intent: { provider: string }) =>
-    Promise.resolve({
-      intent,
-      etag: '"1"',
-      body: {
-        provider_name: intent.provider,
-        enabled: false,
-        has_api_key: false,
-        has_credentials: false,
-      },
-    }),
+  getProviderEditor: (intent: { provider: string }) => editorMock(intent),
 }));
+
+function editor(intent: { provider: string }, etag: string, enabled: boolean, hasKey: boolean) {
+  return {
+    intent,
+    etag,
+    body: {
+      provider_name: intent.provider,
+      enabled,
+      has_api_key: hasKey,
+      has_credentials: false,
+    },
+  };
+}
 
 class ResizeObserverStub {
   observe() {}
@@ -54,7 +59,7 @@ globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObse
 describe("SubtitlesStep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    wizardMock.mockReturnValue({ markDone: vi.fn(), setSummary: vi.fn() });
+    editorMock.mockImplementation((intent) => Promise.resolve(editor(intent, '"1"', false, false)));
     updateMock.mockResolvedValue({ saved_revision: "2", local_apply: "not_configured" });
   });
 
@@ -73,5 +78,50 @@ describe("SubtitlesStep", () => {
 
     await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
     expect(updateMock.mock.calls[0]![0].config).toStrictEqual({ enabled: false });
+  });
+
+  it("keeps a failed save from being sent again until the admin reloads it", async () => {
+    const user = userEvent.setup();
+    render(<SubtitlesStep />);
+
+    const toggle = screen.getByRole("switch", { name: "Enable SubDL" });
+    await waitFor(() => expect(toggle).toBeEnabled());
+    await user.click(toggle);
+    await user.type(screen.getByLabelText("API key"), "typed-key");
+
+    // Another admin saves SubDL first, so this save is refused and every
+    // later read returns their configuration.
+    updateMock.mockRejectedValueOnce(new Error("precondition failed"));
+    editorMock.mockImplementation((intent) => Promise.resolve(editor(intent, '"2"', true, true)));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
+    const continueButton = await screen.findByRole("button", { name: "Continue" });
+
+    // Continuing again must neither re-send the old draft nor finish the step.
+    await user.click(continueButton);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(markDone).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("API key")).toHaveValue("typed-key");
+
+    // A reload that fails keeps the row locked and leaves the way to try again.
+    const reload = screen.getByRole("button", {
+      name: "Reload saved configuration (discard draft)",
+    });
+    editorMock.mockRejectedValueOnce(new Error("load failed"));
+    await user.click(reload);
+    await screen.findByText("Unable to load saved configuration. Reload before editing.");
+    expect(reload).toBeEnabled();
+    expect(continueButton).toBeDisabled();
+    expect(screen.getByLabelText("API key")).toHaveValue("typed-key");
+
+    // Reloading discards the draft and shows the other admin's saved state.
+    await user.click(reload);
+    await waitFor(() => expect(screen.getByLabelText("API key")).toHaveValue(""));
+    expect(toggle).toBeChecked();
+    expect(toggle).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(markDone).toHaveBeenCalledWith("subtitles");
+    expect(updateMock).toHaveBeenCalledTimes(1);
   });
 });

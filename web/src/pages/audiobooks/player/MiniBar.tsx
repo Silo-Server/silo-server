@@ -1,4 +1,4 @@
-import { usePlaybackBarHeight } from "@/hooks/usePlaybackBarHeight";
+import { useRootHeightProperty } from "@/hooks/useRootHeightProperty";
 import { X, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useT } from "@/i18n";
 import { SeekBar } from "@/player/components/SeekBar";
@@ -40,7 +40,7 @@ export function MiniBar({
   autoFocusExpand,
 }: MiniBarProps) {
   const t = useT();
-  const barRef = usePlaybackBarHeight("audiobook");
+  const barRef = useRootHeightProperty("--audiobook-bar-height", { includeBottomInset: true });
   const hasChapters = playback.chapters.length > 0;
   const hasNextChapter =
     playback.currentChapter != null && playback.currentChapter.index + 1 < playback.chapters.length;

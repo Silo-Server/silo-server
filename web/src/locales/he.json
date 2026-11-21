@@ -13086,7 +13086,7 @@
   "web.admin.backups.key.explanation": [
     {
       "type": 0,
-      "value": "שחזור גיבוי דורש את SECRET_KEY של השרת הזה. Silo אף פעם לא מציג את המפתח ולא שומר ממנו עותק בשום מקום אחר. אם המפתח קיים רק בקובץ .env של השרת הזה והדיסק כושל, לא יהיה אפשר לשחזר את הגיבויים האלה, ואף אחד לא יוכל להציל אותם."
+      "value": "שחזור גיבוי דורש את SECRET_KEY של השרת הזה. Silo אף פעם לא מציג את המפתח ולא שומר ממנו עותק בשום מקום אחר. אם המפתח קיים רק בקובץ \u200E.env של השרת הזה והדיסק כושל, לא יהיה אפשר לשחזר את הגיבויים האלה, ואף אחד לא יוכל להציל אותם."
     }
   ],
   "web.admin.backups.key.heading": [
@@ -19579,6 +19579,162 @@
       "value": "."
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "תמונת רקע"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "פריט אחד באוסף"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פריטים באוסף"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פריטים באוסף"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "האוסף הוחלף"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "תצורה"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "תיאור"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "מצב הפעלה"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "הבלטה"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "מגבלת פריטים"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "מיון פריטים"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "ספריות"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "מיקום"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "פוסטר"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "סדר מיון"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "מקור"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "לוח זמנים לסנכרון"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "כותרת"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "תרגום הכותרת"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "סוג"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "נראות"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "באפליקציית האינטרנט בלבד"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -22395,10 +22551,10 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22406,7 +22562,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22422,17 +22578,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22440,7 +22594,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22456,17 +22610,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22474,7 +22626,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22490,9 +22642,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -22559,6 +22709,426 @@
     {
       "type": 0,
       "value": "יש אליהם הפניות במסד הנתונים, אבל הם לא נמצאו באחסון; שחזורים לא כוללים אותם."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "קובץ מיתוג אחד"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי מיתוג"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי מיתוג"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "תמונת רקע אחת של אוסף"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " תמונות רקע של אוספים"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " תמונות רקע של אוספים"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "פוסטר אחד של אוסף"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פוסטרים של אוספים"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פוסטרים של אוספים"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "קובץ כתוביות אחד שהורד"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי כתוביות שהורדו"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי כתוביות שהורדו"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "פוסטר אחד של ספרייה"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פוסטרים של ספריות"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פוסטרים של ספריות"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "תמונת שכבת-על אחת"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " תמונות שכבת-על"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " תמונות שכבת-על"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "פוסטר אחד של אוסף אישי"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פוסטרים של אוספים אישיים"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פוסטרים של אוספים אישיים"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "תמונת פרופיל אחת"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " תמונות פרופיל"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " תמונות פרופיל"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "קובץ תמונה אחד שהועלה"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי תמונה שהועלו"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי תמונה שהועלו"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "קובץ כתוביות אחד שהועלה"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי כתוביות שהועלו"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי כתוביות שהועלו"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -22931,10 +23501,10 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22942,7 +23512,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22958,9 +23528,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -23015,10 +23583,10 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -23026,7 +23594,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -23042,17 +23610,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -23060,7 +23626,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -23076,9 +23642,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -25782,7 +26346,7 @@
   "web.admin.common.connectionCheck.result.meilisearchRedirected": [
     {
       "type": 0,
-      "value": "שרת Meilisearch הפנה את הבדיקה לכתובת אחרת. יש להזין את הכתובת שאליה הוא מפנה, כמו כתובת ה-https:// שלו, ולהזין שוב את מפתח ה-API."
+      "value": "שרת Meilisearch הפנה את הבדיקה לכתובת אחרת. יש להזין את הכתובת שאליה הוא מפנה, כמו כתובת ה-https://\u200E שלו, ולהזין שוב את מפתח ה-API."
     }
   ],
   "web.admin.common.connectionCheck.result.redisConnected": [
@@ -28006,7 +28570,7 @@
   "web.admin.common.libraryEditor.metadata.localMetadataDescription": [
     {
       "type": 0,
-      "value": "קורא קובצי .nfo ותמונות שנשמרו לצד המדיה שלך. רץ ראשון בכל רמה, ולכן הערכים שלו גוברים על ספקים מרוחקים; שדות שננעלו בעריכת פריט גוברים על שניהם."
+      "value": "קורא קובצי \u200E.nfo ותמונות שנשמרו לצד המדיה שלך. רץ ראשון בכל רמה, ולכן הערכים שלו גוברים על ספקים מרוחקים; שדות שננעלו בעריכת פריט גוברים על שניהם."
     }
   ],
   "web.admin.common.libraryEditor.metadata.noProviders": [
@@ -67299,7 +67863,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "יש לבצע רענון כדי לראות את הערכים הנוכחיים. אם אחד מהשינויים שלך הוא בהגדרה שהשתנתה, או בסיסמה או במפתח שמורים, כל השינויים שלך יבוטלו; אחרת הם יישמרו."
+      "value": "יש לבצע רענון כדי לראות את הערכים הנוכחיים. אם משהו בדף הזה השתנה, או אם ערכת סיסמה או מפתח שמורים, כל השינויים שלך יבוטלו; אחרת הם יישמרו."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -68545,7 +69109,7 @@
   "web.admin.settings.libraryMetadata.ratings.description": [
     {
       "type": 0,
-      "value": "לציוני IMDb ו-TMDB אין מתג: הם מוצגים בפריט בכל פעם שתוסף מטא-נתונים נתמך או קובץ ה-.nfo של הפריט מספקים אותם. ספקי מטא-נתונים יכולים להוסיף דירוגים אחרים; אפשר להפעיל דירוג כדי להציג את הציונים שלו בדפי הפריטים בכל האפליקציות. דף פריט מציג עד שלושה דירוגים, בסדר הזה, כך שדירוג מופעל מוצג רק כשיש לפניו פחות משלושה דירוגים. ציוני Rotten Tomatoes מוצגים גם בתגים על הפוסטרים. יש לבדוק את התנאים של דירוג לפני הפעלתו: חלק מהם, כמו Rotten Tomatoes, מגבילים את האופן שבו אחרים רשאים להציג את הציונים שלהם."
+      "value": "לציוני IMDb ו-TMDB אין מתג: הם מוצגים בפריט בכל פעם שתוסף מטא-נתונים נתמך או קובץ ה-\u200E.nfo של הפריט מספקים אותם. ספקי מטא-נתונים יכולים להוסיף דירוגים אחרים; אפשר להפעיל דירוג כדי להציג את הציונים שלו בדפי הפריטים בכל האפליקציות. דף פריט מציג עד שלושה דירוגים, בסדר הזה, כך שדירוג מופעל מוצג רק כשיש לפניו פחות משלושה דירוגים. ציוני Rotten Tomatoes מוצגים גם בתגים על הפוסטרים. יש לבדוק את התנאים של דירוג לפני הפעלתו: חלק מהם, כמו Rotten Tomatoes, מגבילים את האופן שבו אחרים רשאים להציג את הציונים שלהם."
     }
   ],
   "web.admin.settings.libraryMetadata.ratings.empty": [
@@ -70977,7 +71541,7 @@
   "web.admin.settings.notifications.serverChannels.namePlaceholder": [
     {
       "type": 0,
-      "value": "קהילה #new-content"
+      "value": "קהילה \u200E#new-content"
     }
   ],
   "web.admin.settings.notifications.serverChannels.noEvents": [
@@ -79834,7 +80398,7 @@
   "web.admin.settings.security.localNetwork.description": [
     {
       "type": 0,
-      "value": "מאפשר לכל חשבון לייבא היסטוריה משרתי Plex, Emby ו-Jellyfin ולהסתנכרן איתם בכתובות של הרשת המקומית, כמו 192.168.x.x או localhost. למנהלים זה תמיד מותר."
+      "value": "מאפשר לכל חשבון לייבא היסטוריה משרתי Plex, Emby ו-Jellyfin ולהסתנכרן איתם בכתובות של הרשת המקומית, כמו \u200E192.168.x.x או localhost. למנהלים זה תמיד מותר."
     }
   ],
   "web.admin.settings.security.localNetwork.group": [
@@ -84395,13 +84959,13 @@
   "web.admin.tasks.task.backfill_hdr10_plus.description": [
     {
       "type": 0,
-      "value": "קריאת הפריים הראשון של סרטוני HDR שנסרקו לפני ש-Silo זיהה HDR10+, פעם אחת לכל קובץ, כדי שקובצי HDR10+ יסומנו HDR10+ ולא HDR10."
+      "value": "קריאת הפריים הראשון של סרטוני HDR שנסרקו לפני ש-Silo זיהה HDR10+\u200E, פעם אחת לכל קובץ, כדי שקובצי HDR10+\u200E יסומנו HDR10+\u200E ולא HDR10."
     }
   ],
   "web.admin.tasks.task.backfill_hdr10_plus.name": [
     {
       "type": 0,
-      "value": "זיהוי סרטוני HDR10+"
+      "value": "זיהוי סרטוני HDR10+\u200E"
     }
   ],
   "web.admin.tasks.task.backfill_matroska_track_numbers.description": [
@@ -94664,7 +95228,7 @@
   "web.audiobooks.player.speedTitle": [
     {
       "type": 0,
-      "value": "מהירות הפעלה (shift+. / shift+,)"
+      "value": "מהירות הפעלה (shift+\u200E. / shift+\u200E,\u200E)"
     }
   ],
   "web.audiobooks.player.startFailed": [
@@ -102778,7 +103342,7 @@
   "web.collections.copy.mdblistLinkInvalid": [
     {
       "type": 0,
-      "value": "יש להדביק קישור לרשימה ב-mdblist.com, למשל https://mdblist.com/lists/…"
+      "value": "יש להדביק קישור לרשימה ב-mdblist.com, למשל https://mdblist.com/lists/…\u200E"
     }
   ],
   "web.collections.copy.mdblistSearchOffProfile": [
@@ -124018,7 +124582,7 @@
   "web.home.rows.seasonal.listInvalid": [
     {
       "type": 0,
-      "value": "יש להשתמש בקישור לרשימה ציבורית ב-MDBList (https://mdblist.com/lists/…)."
+      "value": "יש להשתמש בקישור לרשימה ציבורית ב-MDBList (https://mdblist.com/lists/…\u200E)."
     }
   ],
   "web.home.rows.seasonal.nameMissing": [
@@ -126712,7 +127276,7 @@
   "web.item.split.imdbPlaceholder": [
     {
       "type": 0,
-      "value": "מזהה IMDb (tt…)"
+      "value": "מזהה IMDb (tt…\u200E)"
     }
   ],
   "web.item.split.loadingFiles": [
@@ -137046,6 +137610,16 @@
       "value": "חזרה לדף 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "מעבר לדף "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -137136,6 +137710,20 @@
     {
       "type": 0,
       "value": "דפי בקשה להוספה"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "דף "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " נמצא אחרי סוף התוצאות האלה."
     }
   ],
   "web.requests.toAdd.series": [
@@ -139193,7 +139781,7 @@
   "web.settings.connectApps.glance.needsPin": [
     {
       "type": 0,
-      "value": "נדרש #PIN"
+      "value": "נדרש \u200E#PIN"
     }
   ],
   "web.settings.connectApps.glance.rename": [
@@ -139519,7 +140107,7 @@
   "web.settings.connectApps.troubleshooting.hashPasswordAnswer": [
     {
       "type": 0,
-      "value": "יש להקליד אותה במלואה ולצרף בכל זאת #PIN. Silo מפצל רק לפי ה-# האחרון."
+      "value": "יש להקליד אותה במלואה ולצרף בכל זאת \u200E#PIN. Silo מפצל רק לפי ה-# האחרון."
     }
   ],
   "web.settings.connectApps.troubleshooting.hashPasswordQuestion": [
@@ -139547,7 +140135,7 @@
     },
     {
       "type": 0,
-      "value": "”, או אם בדיוק לפרופיל אחד אין PIN. הוספה של #ProfileName תמיד עובדת."
+      "value": "”, או אם בדיוק לפרופיל אחד אין PIN. הוספה של \u200E#ProfileName תמיד עובדת."
     }
   ],
   "web.settings.connectApps.troubleshooting.noProfileQuestion": [
@@ -144455,7 +145043,7 @@
   "web.settings.overlays.badge.resolutionHdr.description": [
     {
       "type": 0,
-      "value": "תג אחד שמשלב רזולוציה וטווח דינמי (לדוגמה ”4K DV”, ”4K HDR10+”, ”1080p HDR”)"
+      "value": "תג אחד שמשלב רזולוציה וטווח דינמי (לדוגמה ”4K DV”, ”4K HDR10+\u200E”, ”1080p HDR”)"
     }
   ],
   "web.settings.overlays.badge.resolutionHdr.label": [
@@ -150289,7 +150877,7 @@
   "web.settings.yourData.import.fileHint": [
     {
       "type": 0,
-      "value": "קובץ .json שנוצר באמצעות ”ייצוא הנתונים שלי”, עד "
+      "value": "קובץ \u200E.json שנוצר באמצעות ”ייצוא הנתונים שלי”, עד "
     },
     {
       "type": 1,

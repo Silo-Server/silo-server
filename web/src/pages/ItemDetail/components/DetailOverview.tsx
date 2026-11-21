@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { EyeOff, Languages } from "lucide-react";
 import { useT } from "@/i18n";
 import MachineTranslatedLabel from "./MachineTranslatedLabel";
+import TranslatingStatus from "./TranslatingStatus";
 
 const CLAMP_CLASSES = {
   3: "line-clamp-3",
@@ -75,9 +76,7 @@ export default function DetailOverview({
         ref={textRef}
         className={`bidi-text text-muted-foreground leading-7 ${
           compact ? "text-sm" : "text-foreground/72 text-sm sm:text-[0.9375rem]"
-        } ${clamp && !expanded ? CLAMP_CLASSES[clampLines] : ""} ${
-          translating ? "animate-pulse opacity-50" : ""
-        }`}
+        } ${clamp && !expanded ? CLAMP_CLASSES[clampLines] : ""}`}
       >
         {overview}
       </p>
@@ -93,10 +92,7 @@ export default function DetailOverview({
           </button>
         )}
         {translating && (
-          <span className="text-muted-foreground/70 mt-1 inline-flex items-center gap-1.5 text-xs">
-            <Languages className="h-3 w-3 animate-pulse" />
-            {t("web.detail.translation.translating")}
-          </span>
+          <TranslatingStatus label={t("web.detail.translation.translating")} className="mt-1" />
         )}
         {!translating && machineTranslated && <MachineTranslatedLabel className="mt-1" />}
         {!translating && onTranslate && (

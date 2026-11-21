@@ -22,6 +22,10 @@ var (
 	ErrAIProviderInvalid = errors.New("invalid AI provider")
 	// ErrAIProviderConflict wraps a message naming the jobs that block the change.
 	ErrAIProviderConflict = errors.New("AI provider is in use")
+	// ErrAIProviderManaged refuses a change to a provider the deployment
+	// declares (config.AIProvider.ManagedBy); it wraps a message naming the
+	// variable to change instead.
+	ErrAIProviderManaged = errors.New("AI provider is set by the deployment")
 )
 
 // AdminAIProviderView is one connected provider without its key.
@@ -33,6 +37,9 @@ type AdminAIProviderView struct {
 	HasAPIKey    bool
 	Capabilities []string
 	UsedBy       []string
+	// ManagedByEnvVar names the deployment variable that declares the
+	// provider, such as SILO_CONFIG_FILE; empty when an admin connected it.
+	ManagedByEnvVar string
 }
 
 // AdminAIProviderInput carries the editable fields. On update a nil field is
@@ -130,6 +137,9 @@ func (h *AdminHandler) UpdateAIProvider(ctx context.Context, id string, in Admin
 			return ErrAIProviderNotFound
 		}
 		provider := registry.Providers[i]
+		if err := refuseManagedAIProvider(provider); err != nil {
+			return err
+		}
 		if in.Type != "" && in.Type != string(provider.Type) {
 			return aiProviderInvalid(errors.New("a provider's type cannot change; connect a new provider instead"))
 		}
@@ -163,6 +173,9 @@ func (h *AdminHandler) DeleteAIProvider(ctx context.Context, id string) error {
 		i := aiProviderIndex(registry, id)
 		if i < 0 {
 			return ErrAIProviderNotFound
+		}
+		if err := refuseManagedAIProvider(registry.Providers[i]); err != nil {
+			return err
 		}
 		if users := config.AIProviderUsers(effective, id); len(users) > 0 {
 			return fmt.Errorf("%w: %s is used by the %s; choose another provider there first", ErrAIProviderConflict, registry.Providers[i].Name, aiJobLabels(users))
@@ -379,14 +392,24 @@ func aiProviderView(provider config.AIProvider, effective map[string]string) Adm
 		usedBy[i] = string(job)
 	}
 	return AdminAIProviderView{
-		ID:           provider.ID,
-		Type:         string(provider.Type),
-		Name:         provider.Name,
-		BaseURL:      provider.BaseURL,
-		HasAPIKey:    provider.APIKey != "",
-		Capabilities: capabilities,
-		UsedBy:       usedBy,
+		ID:              provider.ID,
+		Type:            string(provider.Type),
+		Name:            provider.Name,
+		BaseURL:         provider.BaseURL,
+		HasAPIKey:       provider.APIKey != "",
+		Capabilities:    capabilities,
+		UsedBy:          usedBy,
+		ManagedByEnvVar: provider.ManagedBy,
 	}
+}
+
+// refuseManagedAIProvider refuses to change a provider the deployment
+// declares: the next start would put the declaration back.
+func refuseManagedAIProvider(provider config.AIProvider) error {
+	if provider.ManagedBy == "" {
+		return nil
+	}
+	return fmt.Errorf("%w: %s is declared by the deployment document in %s; change it there and restart, or leave it out of the document's ai_providers section (ai_providers: {} releases them all) to release it", ErrAIProviderManaged, provider.Name, provider.ManagedBy)
 }
 
 func aiProviderIndex(registry *config.AIProviderRegistry, id string) int {

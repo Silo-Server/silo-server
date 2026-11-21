@@ -21121,6 +21121,178 @@
       "value": "."
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Ozadje"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " element zbirke"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementa zbirke"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementi zbirke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementov zbirke"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Zamenjava zbirke"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Nastavitve"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Opis"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Vklop"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Izpostavljeno"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Omejitev elementov"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Razvrščanje elementov"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Knjižnice"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Položaj"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Plakat"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Vrstni red"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Vir"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Urnik sinhronizacije"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Naslov"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Prevod naslova"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Vrsta"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Vidnost"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Samo splet"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -24159,51 +24331,22 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " račun"
+              "value": "Skrij račun"
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " računa"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " račune"
+              "value": "Skrij računa"
             }
           ]
         },
@@ -24211,69 +24354,31 @@
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " računov"
+              "value": "Skrij račune"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteko"
+              "value": "Skrij datoteko"
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteki"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteke"
+              "value": "Skrij datoteki"
             }
           ]
         },
@@ -24281,69 +24386,31 @@
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datotek"
+              "value": "Skrij datoteke"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteko"
+              "value": "Skrij datoteko"
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteki"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteke"
+              "value": "Skrij datoteki"
             }
           ]
         },
@@ -24351,20 +24418,11 @@
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datotek"
+              "value": "Skrij datoteke"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -24467,6 +24525,586 @@
     {
       "type": 0,
       "value": "Podatkovna baza se sklicuje nanje, vendar jih v shrambi ni bilo mogoče najti; obnovitve jih izpustijo."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " slika blagovne znamke"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sliki blagovne znamke"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " slike blagovne znamke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " slik blagovne znamke"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ozadje zbirke"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ozadji zbirk"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ozadja zbirk"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ozadij zbirk"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakat zbirke"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakata zbirk"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakati zbirk"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakatov zbirk"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prenesen podnapis"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prenesena podnapisa"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " preneseni podnapisi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prenesenih podnapisov"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakat knjižnice"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakata knjižnic"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakati knjižnic"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakatov knjižnic"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prekrivna slika"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prekrivni sliki"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prekrivne slike"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prekrivnih slik"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakat osebne zbirke"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakata osebnih zbirk"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakati osebnih zbirk"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakatov osebnih zbirk"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatar profila"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatarja profilov"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatarji profilov"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatarjev profilov"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naložena slikovna datoteka"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naloženi slikovni datoteki"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naložene slikovne datoteke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naloženih slikovnih datotek"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naložen podnapis"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naložena podnapisa"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naloženi podnapisi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naloženih podnapisov"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -24935,51 +25573,22 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " račun"
+              "value": "Prikaži račun"
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " računa"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " račune"
+              "value": "Prikaži računa"
             }
           ]
         },
@@ -24987,20 +25596,11 @@
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " računov"
+              "value": "Prikaži račune"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -25079,51 +25679,22 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteko"
+              "value": "Prikaži datoteko"
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteki"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteke"
+              "value": "Prikaži datoteki"
             }
           ]
         },
@@ -25131,69 +25702,31 @@
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datotek"
+              "value": "Prikaži datoteke"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteko"
+              "value": "Prikaži datoteko"
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteki"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteke"
+              "value": "Prikaži datoteki"
             }
           ]
         },
@@ -25201,20 +25734,11 @@
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datotek"
+              "value": "Prikaži datoteke"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -74707,7 +75231,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Znova naložite, da vidite trenutne vrednosti. Če se katera od vaših sprememb nanaša na nastavitev, ki se je medtem spremenila, ali na shranjeno geslo ali ključ, bodo razveljavljene vse vaše spremembe; sicer bodo ohranjene."
+      "value": "Znova naložite, da vidite trenutne vrednosti. Če se je na tej strani kaj spremenilo ali ste urejali shranjeno geslo ali ključ, bodo vse vaše spremembe razveljavljene; sicer bodo ohranjene."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -149611,6 +150135,16 @@
       "value": "Nazaj na stran 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Pojdi na stran "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -149701,6 +150235,20 @@
     {
       "type": 0,
       "value": "Strani razdelka Zahteva za dodajanje"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Stran "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " je za koncem teh rezultatov."
     }
   ],
   "web.requests.toAdd.series": [

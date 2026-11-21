@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/envutil"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
@@ -41,16 +42,21 @@ func startProxyNodeKeyRegistry(ctx context.Context, pool *pgxpool.Pool, cipher *
 // node verifies every request the core signs to it with this key.
 const envNodeKey = "SILO_NODE_KEY"
 
-// transcodeNodeKey reads and validates SILO_NODE_KEY. A transcode node refuses
-// to start without one, or with one that is not a well-formed node key: it
-// could verify nothing, so every request to it would fail.
+// transcodeNodeKey reads and validates SILO_NODE_KEY, or the file
+// SILO_NODE_KEY_FILE names. A transcode node refuses to start without one, or
+// with one that is not a well-formed node key: it could verify nothing, so
+// every request to it would fail.
 func transcodeNodeKey(getenv func(string) string) (string, error) {
-	key := strings.TrimSpace(getenv(envNodeKey))
+	key, usedVar, err := envutil.LookupSecret(getenv, envNodeKey)
+	if err != nil {
+		return "", err
+	}
+	key = strings.TrimSpace(key)
 	if key == "" {
-		return "", fmt.Errorf("%s is required: issue this node a key in the admin node settings", envNodeKey)
+		return "", fmt.Errorf("%s is required: issue this node a key in the admin node settings", usedVar)
 	}
 	if _, err := nodepool.ParseNodeKey(key); err != nil {
-		return "", fmt.Errorf("%s is malformed (%w); copy the key the admin node settings issued", envNodeKey, err)
+		return "", fmt.Errorf("%s is malformed (%w); copy the key the admin node settings issued", usedVar, err)
 	}
 	return key, nil
 }

@@ -445,6 +445,7 @@ function ChatGPTConnectionPanel({
               {t("web.admin.settings.ai.chatgptConnection.browserUrl")}
             </Label>
             <Input
+              dir="ltr"
               id={callbackID}
               type="text"
               placeholder={callbackPlaceholder}

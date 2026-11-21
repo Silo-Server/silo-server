@@ -4,7 +4,7 @@ import { toast } from "sonner";
 
 import type { AdminBackup, AdminBackupOmitted } from "@/api/v2/adminBackups";
 import { Button } from "@/components/ui/button";
-import { useT } from "@/i18n";
+import { exactAmount, useT } from "@/i18n";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
@@ -105,9 +105,12 @@ export function OmittedAccounts({
     <div className="min-w-0 space-y-1.5">
       <Headline>{headline}</Headline>
       <Disclosure open={open} onOpenChange={setOpen} controls={bodyId}>
-        {open
-          ? t("web.admin.backups.warnings.hideAccounts", { count: omitted.length })
-          : t("web.admin.backups.warnings.showAccounts", { count: omitted.length })}
+        {t(
+          open
+            ? "web.admin.backups.warnings.hideAccounts"
+            : "web.admin.backups.warnings.showAccounts",
+          { amount: exactAmount(omitted.length) },
+        )}
       </Disclosure>
       {open ? (
         <ul id={bodyId} className="space-y-3 pt-1">
@@ -132,9 +135,12 @@ function MissingGroupRow({ group }: { group: MissingFileGroup }) {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-[13px]">{missingGroupTitle(group)}</span>
         <Disclosure open={open} onOpenChange={setOpen} controls={listId}>
-          {open
-            ? t("web.admin.backups.warnings.hideGroupFiles", { count: group.keys.length })
-            : t("web.admin.backups.warnings.showGroupFiles", { count: group.keys.length })}
+          {t(
+            open
+              ? "web.admin.backups.warnings.hideGroupFiles"
+              : "web.admin.backups.warnings.showGroupFiles",
+            { amount: exactAmount(group.keys.length) },
+          )}
         </Disclosure>
       </div>
       {open ? (
@@ -160,9 +166,9 @@ function MissingFiles({ blobs, total }: { blobs: AdminBackup["missing_blobs"]; t
     <div className="min-w-0 space-y-1.5">
       <Headline>{missingHeadline(blobs.length, total)}</Headline>
       <Disclosure open={open} onOpenChange={setOpen} controls={bodyId}>
-        {open
-          ? t("web.admin.backups.warnings.hideFiles", { count: total || blobs.length })
-          : t("web.admin.backups.warnings.showFiles", { count: total || blobs.length })}
+        {t(open ? "web.admin.backups.warnings.hideFiles" : "web.admin.backups.warnings.showFiles", {
+          amount: exactAmount(blobs.length),
+        })}
       </Disclosure>
       {open ? (
         <div id={bodyId} className="space-y-2 pt-1">
