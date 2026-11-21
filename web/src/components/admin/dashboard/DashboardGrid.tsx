@@ -4,7 +4,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GripVertical, Plus, X } from "lucide-react";
 import {
   Sheet,
@@ -131,6 +131,8 @@ export function DashboardGrid({
   const [collapsedIds, setCollapsedIds] = useState<readonly WidgetId[]>([]);
   const resizeSessionRef = useRef<{
     id: WidgetId;
+    /** The resize handle the session started from. */
+    handle: Element;
     title: string;
     startX: number;
     /** 1, or -1 right to left, where the handle grows the widget leftward. */
@@ -154,34 +156,44 @@ export function DashboardGrid({
     scrollOffsetY: number;
   } | null>(null);
 
-  // The node the current gesture started from: the dragged widget or a link
-  // or image inside it, the Add widget sheet item, or the resize handle.
-  const gestureSourceRef = useRef<Node | null>(null);
+  // The node the current drag started from: the dragged widget or a link or
+  // image inside it, or the Add widget sheet item.
+  const dragSourceRef = useRef<Node | null>(null);
 
-  /** Ends whichever gesture is in progress. */
-  const endGesture = useCallback(() => {
-    gestureSourceRef.current = null;
-    resizeSessionRef.current = null;
+  const endDrag = useCallback(() => {
+    dragSourceRef.current = null;
     setDraggedId(null);
     setAddDragId(null);
     setDropIndicator(null);
-    setResizePreview(null);
   }, []);
 
-  // A re-render can take the gesture's source out of the document mid-gesture:
-  // the server layout arriving while the page loads, a Now Playing row
-  // refreshing under a dragged link, or Customize ending under a resize. Its
-  // dragend or pointerup then never reaches React, so the gesture ends here.
-  // A browser drag itself goes on, but the grid no longer accepts it.
-  useLayoutEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the gesture's source left the document, so its end event never reaches React
-    if (gestureSourceRef.current?.isConnected === false) endGesture();
-  });
+  const endResize = useCallback(() => {
+    resizeSessionRef.current = null;
+    setResizePreview(null);
+  }, []);
 
   const isResizing = resizePreview !== null;
   let autoScrollGesture: AutoScrollGesture | null = null;
   if (draggedId !== null || addDragId !== null) autoScrollGesture = "drag";
   else if (isResizing) autoScrollGesture = "pointer";
+  const gestureActive = autoScrollGesture !== null;
+
+  // Any render can take a gesture's source out of the document mid-gesture,
+  // this grid's or a widget's own: the server layout arriving while the page
+  // loads, a widget's rows refreshing under a dragged link, or Customize
+  // ending under a resize. Its dragend or pointerup then never reaches React,
+  // so the gesture ends here. A browser drag itself goes on, but the grid no
+  // longer accepts it. The check runs after each batch of DOM changes, so a
+  // node React moves (removed and inserted again) doesn't count.
+  useEffect(() => {
+    if (!gestureActive) return;
+    const observer = new MutationObserver(() => {
+      if (dragSourceRef.current?.isConnected === false) endDrag();
+      if (resizeSessionRef.current?.handle.isConnected === false) endResize();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [endDrag, endResize, gestureActive]);
 
   // Scrolls the page (or an inner scroll container) while a drag or resize
   // sits near the top or bottom edge, so a widget can be dragged to an
@@ -210,7 +222,7 @@ export function DashboardGrid({
       if (!id) return;
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", id);
-      gestureSourceRef.current = event.target as Node;
+      dragSourceRef.current = event.target as Node;
       setDraggedId(id);
     },
     [findWidgetIdFromEvent, isCustomizing],
@@ -299,7 +311,7 @@ export function DashboardGrid({
         // dataTransfer that cannot round-trip custom types.
         const payloadId = event.dataTransfer.getData(WIDGET_ADD_DRAG_TYPE) as WidgetId;
         const id = payloadId || addDragId;
-        endGesture();
+        endDrag();
         if (!id) return;
         const beforeId = resolveBeforeId(event);
         addWidget(id, beforeId);
@@ -328,13 +340,13 @@ export function DashboardGrid({
         // position for mouse users.
         moveWidget(draggedId, null);
       }
-      endGesture();
+      endDrag();
     },
     [
       addDragId,
       addWidget,
       draggedId,
-      endGesture,
+      endDrag,
       entries,
       findWidgetIdFromEvent,
       isAddDrag,
@@ -361,12 +373,12 @@ export function DashboardGrid({
       event.preventDefault();
       event.stopPropagation();
       event.currentTarget.setPointerCapture(event.pointerId);
-      gestureSourceRef.current = event.currentTarget;
       const gridWidth = gridRef.current?.getBoundingClientRect().width ?? 0;
       const gapPx = readGapPx(gridRef.current);
       const columnUnit = gridWidth > 0 ? (gridWidth + gapPx) / GRID_COLUMNS : 1;
       resizeSessionRef.current = {
         id,
+        handle: event.currentTarget,
         title: t(widget.titleKey),
         startX: event.clientX,
         inlineSign: isRightToLeft(event.currentTarget) ? -1 : 1,
@@ -454,7 +466,7 @@ export function DashboardGrid({
     (event: ReactPointerEvent<HTMLButtonElement>) => {
       const session = resizeSessionRef.current;
       if (!session) return;
-      endGesture();
+      endResize();
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
@@ -468,7 +480,7 @@ export function DashboardGrid({
         }),
       );
     },
-    [endGesture, resizeWidget, t],
+    [endResize, resizeWidget, t],
   );
 
   const handleMoveKeyDown = useCallback(
@@ -541,7 +553,7 @@ export function DashboardGrid({
         ref={gridRef}
         className="admin-widget-grid"
         onDragStart={handleDragStart}
-        onDragEnd={endGesture}
+        onDragEnd={endDrag}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
@@ -711,12 +723,12 @@ export function DashboardGrid({
                   onDragStart={(event) => {
                     event.dataTransfer.setData(WIDGET_ADD_DRAG_TYPE, widget.id);
                     event.dataTransfer.effectAllowed = "copy";
-                    gestureSourceRef.current = event.currentTarget;
+                    dragSourceRef.current = event.currentTarget;
                     setAddDragId(widget.id);
                   }}
                   // Fires for cancelled and completed drags alike; the drop
                   // handler has already applied any placement by now.
-                  onDragEnd={endGesture}
+                  onDragEnd={endDrag}
                 >
                   <span className="bg-primary/10 text-primary flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md">
                     <Plus className="h-3.5 w-3.5" />
