@@ -219,50 +219,53 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
         <div className="border-border border-b px-4 py-3">
           <h3 className="text-sm font-medium">{t("web.admin.tasks.detail.dueSamples")}</h3>
         </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-border bg-muted/40 border-b">
-              <th className="px-4 py-2 text-start font-medium">
-                {t("web.admin.tasks.detail.columns.item")}
-              </th>
-              <th className="px-4 py-2 text-start font-medium">
-                {t("web.admin.tasks.detail.columns.nextRefresh")}
-              </th>
-              <th className="px-4 py-2 text-start font-medium">
-                {t("web.admin.tasks.detail.columns.attempts")}
-              </th>
-              <th className="px-4 py-2 text-start font-medium">
-                {t("web.admin.tasks.detail.columns.lastAttempt")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {metrics.due_samples.length === 0 && (
-              <tr>
-                <td colSpan={4} className="text-muted-foreground px-4 py-4 text-center">
-                  {t("web.admin.tasks.detail.noDueItems")}
-                </td>
+        {/* A table wider than its panel scrolls instead of clipping its last column. */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-border bg-muted/40 border-b">
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.columns.item")}
+                </th>
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.columns.nextRefresh")}
+                </th>
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.columns.attempts")}
+                </th>
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.columns.lastAttempt")}
+                </th>
               </tr>
-            )}
-            {metrics.due_samples.map((entry) => (
-              <tr key={entry.content_id} className="border-border border-b last:border-b-0">
-                <td className="px-4 py-2">
-                  <div className="font-medium">{refreshSampleTitle(t, entry)}</div>
-                  <div className="text-muted-foreground text-xs">
-                    {refreshItemTypeLabel(t, entry.type)}
-                  </div>
-                </td>
-                <td className="px-4 py-2 sm:whitespace-nowrap">
-                  {formatDateTime(entry.next_refresh_at)}
-                </td>
-                <td className="px-4 py-2">{entry.attempt_count}</td>
-                <td className="px-4 py-2 sm:whitespace-nowrap">
-                  {formatOptionalDateTime(entry.last_attempt_at)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {metrics.due_samples.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="text-muted-foreground px-4 py-4 text-center">
+                    {t("web.admin.tasks.detail.noDueItems")}
+                  </td>
+                </tr>
+              )}
+              {metrics.due_samples.map((entry) => (
+                <tr key={entry.content_id} className="border-border border-b last:border-b-0">
+                  <td className="px-4 py-2">
+                    <div className="font-medium">{refreshSampleTitle(t, entry)}</div>
+                    <div className="text-muted-foreground text-xs">
+                      {refreshItemTypeLabel(t, entry.type)}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2 sm:whitespace-nowrap">
+                    {formatDateTime(entry.next_refresh_at)}
+                  </td>
+                  <td className="px-4 py-2">{entry.attempt_count}</td>
+                  <td className="px-4 py-2 sm:whitespace-nowrap">
+                    {formatOptionalDateTime(entry.last_attempt_at)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
