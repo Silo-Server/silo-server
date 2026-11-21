@@ -106,8 +106,8 @@ export function OmittedAccounts({
       <Headline>{headline}</Headline>
       <Disclosure open={open} onOpenChange={setOpen} controls={bodyId}>
         {open
-          ? t("web.admin.backups.warnings.hideAccounts")
-          : t("web.admin.backups.warnings.showAccounts")}
+          ? t("web.admin.backups.warnings.hideAccounts", { count: omitted.length })
+          : t("web.admin.backups.warnings.showAccounts", { count: omitted.length })}
       </Disclosure>
       {open ? (
         <ul id={bodyId} className="space-y-3 pt-1">
@@ -133,8 +133,8 @@ function MissingGroupRow({ group }: { group: MissingFileGroup }) {
         <span className="text-[13px]">{missingGroupTitle(group)}</span>
         <Disclosure open={open} onOpenChange={setOpen} controls={listId}>
           {open
-            ? t("web.admin.backups.warnings.hideGroupFiles")
-            : t("web.admin.backups.warnings.showGroupFiles")}
+            ? t("web.admin.backups.warnings.hideGroupFiles", { count: group.keys.length })
+            : t("web.admin.backups.warnings.showGroupFiles", { count: group.keys.length })}
         </Disclosure>
       </div>
       {open ? (
@@ -161,8 +161,8 @@ function MissingFiles({ blobs, total }: { blobs: AdminBackup["missing_blobs"]; t
       <Headline>{missingHeadline(blobs.length, total)}</Headline>
       <Disclosure open={open} onOpenChange={setOpen} controls={bodyId}>
         {open
-          ? t("web.admin.backups.warnings.hideFiles")
-          : t("web.admin.backups.warnings.showFiles")}
+          ? t("web.admin.backups.warnings.hideFiles", { count: total || blobs.length })
+          : t("web.admin.backups.warnings.showFiles", { count: total || blobs.length })}
       </Disclosure>
       {open ? (
         <div id={bodyId} className="space-y-2 pt-1">

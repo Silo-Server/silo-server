@@ -19397,6 +19397,20 @@
       "value": "Στη ζώνη ώρας του διακομιστή."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Στη ζώνη ώρας του διακομιστή. Η αντίστοιχη ώρα στη δική σας ζώνη ώρας είναι "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -20377,20 +20391,80 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Απόκρυψη των λογαριασμών"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη του λογαριασμού"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη των λογαριασμών"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Απόκρυψη των αρχείων"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη του αρχείου"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη των αρχείων"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Απόκρυψη αρχείων"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη αρχείου"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη αρχείων"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -20747,8 +20821,28 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Εμφάνιση των λογαριασμών"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση του λογαριασμού"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση των λογαριασμών"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -20795,14 +20889,54 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Εμφάνιση των αρχείων"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση του αρχείου"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση των αρχείων"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Εμφάνιση αρχείων"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση αρχείου"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση αρχείων"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -28707,6 +28841,12 @@
     {
       "type": 0,
       "value": "απέτυχε"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Η εργασία απέτυχε. Ελέγξτε τα διαγνωστικά στοιχεία διαχειριστή για λεπτομέρειες."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -61254,7 +61394,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Επιλέξτε «Ανανέωση» για να δείτε τις τρέχουσες τιμές. Οι αλλαγές σας σε ρυθμίσεις που άλλαξαν, καθώς και σε αποθηκευμένους κωδικούς πρόσβασης και κλειδιά, αναιρούνται. Οι υπόλοιπες αλλαγές σας διατηρούνται."
+      "value": "Ανανεώστε για να δείτε τις τρέχουσες τιμές. Οι αλλαγές σας σε ρυθμίσεις που άλλαξαν, καθώς και σε αποθηκευμένους κωδικούς πρόσβασης και κλειδιά μαζί με τις σχετικές ρυθμίσεις τους, αναιρούνται. Οι υπόλοιπες αλλαγές σας διατηρούνται."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -77479,10 +77619,44 @@
       "value": "Πρόσφατα σφάλματα"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Η ανανέωση απέτυχε. Ελέγξτε τα διαγνωστικά στοιχεία διαχειριστή για λεπτομέρειες."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Έλεγχος τρέχοντος προγράμματος"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -77927,6 +78101,18 @@
     {
       "type": 0,
       "value": "Νέα προσπάθεια webhook του Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Διαβάζει ξανά την κεφαλίδα των αρχείων MKV με υπότιτλους ASS που σαρώθηκαν πριν το Silo αρχίσει να εξαιρεί τις ενσωματωμένες γραμματοσειρές από τον ρυθμό μετάδοσης bit, ώστε να μην διακωδικοποιούνται εξαιτίας ενός ρυθμού μετάδοσης bit που δεν χρησιμοποιούν στη ροή."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Διόρθωση ρυθμού μετάδοσης bit αρχείων με ενσωματωμένες γραμματοσειρές"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -110062,6 +110248,12 @@
       "value": "Περιεχόμενο"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Τη διαχείριση αυτής της γραμμής κάνει αυτός ο διακομιστής. Το περιεχόμενό της δεν μπορεί να αλλάξει εδώ. Για να επιλέξετε τι θα εμφανίζεται, προσθέστε μια δική σας γραμμή."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -113787,6 +113979,12 @@
     {
       "type": 0,
       "value": "Κεντρικό banner · Μόνο web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Διακομιστής"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
