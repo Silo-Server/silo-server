@@ -1000,7 +1000,7 @@ Top-level (and each node's own report):
 
 | Field | Type | Meaning |
 |---|---|---|
-| `resolved` | string | The backend that would actually be used: `nvenc`, `qsv`, `vaapi`, or `none`. An explicitly configured backend wins even when its probe failed — read `detected_backends` for why. |
+| `resolved` | string | The backend that would actually be used: `nvenc`, `qsv`, `vaapi`, `videotoolbox`, or `none`. An explicitly configured backend wins even when its probe failed — read `detected_backends` for why. |
 | `render_devices` | string[] | Every accessible `/dev/dri/renderD*` path. |
 | `render_device_details` | object[] | One entry per device (see below). |
 | `intel_detected` | bool | An Intel GPU is present in the inventory. |
@@ -1025,7 +1025,7 @@ Top-level (and each node's own report):
 
 | Field | Type | Meaning |
 |---|---|---|
-| `backend` | string | `nvenc`, `qsv`, or `vaapi`. |
+| `backend` | string | `nvenc`, `qsv`, `vaapi`, or `videotoolbox`. |
 | `verified` | bool | At least one candidate device passed a real single-frame encode, not just an FFmpeg build-flag listing. |
 | `devices` | string[] | Every candidate considered for this backend. |
 | `device` | string | The candidate whose probe passed. Empty for NVENC, which addresses its GPU through CUDA rather than a render node. |
