@@ -191,7 +191,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">
+                    <div className="line-clamp-2 text-sm font-medium break-words">
                       {refreshSampleTitle(t, entry)}
                     </div>
                     <div className="text-muted-foreground text-xs">
@@ -252,11 +252,11 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
                     {refreshItemTypeLabel(t, entry.type)}
                   </div>
                 </td>
-                <td className="px-4 py-2 whitespace-nowrap">
+                <td className="px-4 py-2 sm:whitespace-nowrap">
                   {formatDateTime(entry.next_refresh_at)}
                 </td>
                 <td className="px-4 py-2">{entry.attempt_count}</td>
-                <td className="px-4 py-2 whitespace-nowrap">
+                <td className="px-4 py-2 sm:whitespace-nowrap">
                   {formatOptionalDateTime(entry.last_attempt_at)}
                 </td>
               </tr>
