@@ -576,6 +576,9 @@ func TestSwapCheckpointPreservesOriginalLaunchAgentState(t *testing.T) {
 	if err := n.writeSwapCheckpoint([]byte("original plist"), true); err != nil {
 		t.Fatalf("writeSwapCheckpoint: %v", err)
 	}
+	if _, err := os.Stat(n.paths.swapPending() + ".tmp"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("swap checkpoint temp file left behind: %v", err)
+	}
 	cp, ok, err := n.readSwapCheckpoint()
 	if err != nil || !ok || !cp.HasPlist || !cp.Loaded || string(cp.Plist) != "original plist" {
 		t.Fatalf("readSwapCheckpoint = %+v, %v, %v; want original plist and loaded=true", cp, ok, err)

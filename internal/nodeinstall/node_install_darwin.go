@@ -370,7 +370,15 @@ func (n nodeInstaller) writeSwapCheckpoint(oldPlist []byte, oldLoaded bool) erro
 	if err != nil {
 		return err
 	}
-	return writeNodeFile(n.paths.swapPending(), data, 0o600)
+	tmp := n.paths.swapPending() + ".tmp"
+	if err := writeNodeFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, n.paths.swapPending()); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // dropStaleBackups removes the .old files a finished run left behind, so a
