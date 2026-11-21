@@ -139,7 +139,9 @@ export function PeopleList({ room }: { room: WatchTogetherRoomSnapshot | null })
             <MemberAvatar name={member.display_name} tint={tints.get(memberKey(member))} />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 text-sm">
-                <span className="truncate font-medium">{member.display_name}</span>
+                <span dir="auto" className="truncate font-medium">
+                  {member.display_name}
+                </span>
                 {member.is_host ? (
                   <span className="text-muted-foreground rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase">
                     {t("watchParty.seat.host")}

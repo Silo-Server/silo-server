@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 
 /**
  * Drag auto-scroll for the dashboard grid.
@@ -175,7 +175,11 @@ export function useDragAutoScroll(
     [anchorRef],
   );
 
-  useEffect(() => {
+  // A layout effect, so the loop stops in the commit that ends the gesture. A
+  // gesture that ends outside an event handler (the grid's source check)
+  // commits at default priority, and React can run its passive cleanup only
+  // after another frame has scrolled.
+  useLayoutEffect(() => {
     if (gesture === null) return;
     const state = stateRef.current;
     if (gesture === "pointer") return () => pause(state);
