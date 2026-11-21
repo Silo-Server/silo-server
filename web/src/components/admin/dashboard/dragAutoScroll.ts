@@ -68,10 +68,10 @@ function findScrollContainer(start: HTMLElement | null): Element | null {
 
 /**
  * Where pinned page headers (`data-sticky-header`, such as the admin phone
- * header) end at the top of the viewport right now. The drag events over them
- * go to the header, not the grid, so the top edge zone has to start below them.
- * ItemGrid's `stickyHeaderInset` reads the same opt-in for where a header will
- * sit once stuck.
+ * header or the impersonation banner) end at the top of the viewport right
+ * now. The drag events over them go to the header, not the grid, so the top
+ * edge zone has to start below them. ItemGrid's `stickyHeaderInset` reads the
+ * same opt-in for where a header will sit once stuck.
  */
 function pinnedHeaderBottom(): number {
   let bottom = 0;

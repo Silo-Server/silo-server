@@ -429,12 +429,13 @@ export default function Layout({ children }: LayoutProps) {
           )}
         </div>
 
-        {/* Mobile header — visible below lg. Slides up on scroll-down within
-          the Calendar route to free vertical space; pulling up reveals it. */}
+        {/* Mobile header — visible below lg, pinned below any impersonation
+          banner. Slides up on scroll-down within the Calendar route to free
+          vertical space; pulling up reveals it. */}
         <div
           ref={mobileHeaderRef}
           data-sticky-header
-          className={`mobile-header glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 transition-transform duration-200 ease-out motion-reduce:transition-none lg:hidden ${
+          className={`mobile-header glass-dark border-border/70 sticky top-(--impersonation-banner-height) z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 transition-transform duration-200 ease-out motion-reduce:transition-none lg:hidden ${
             mobileHeaderHidden ? "-translate-y-[140%]" : "translate-y-0"
           }`}
         >
@@ -493,9 +494,10 @@ export default function Layout({ children }: LayoutProps) {
           </SheetContent>
         </Sheet>
 
-        {/* Desktop admin activity indicator (top-right, hidden on mobile) */}
+        {/* Desktop admin activity indicator (top-right below any impersonation
+            banner, hidden on mobile) */}
         {showAdminActivity && (
-          <div className="fixed end-5 top-6 z-40 hidden lg:block">
+          <div className="fixed end-5 top-[calc(1.5rem+var(--impersonation-banner-height))] z-40 hidden lg:block">
             <AdminActivityIndicator />
           </div>
         )}

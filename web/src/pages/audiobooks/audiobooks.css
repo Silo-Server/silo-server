@@ -112,8 +112,11 @@
       grid-template-columns: minmax(0, 1fr);
       gap: 1rem;
       position: sticky;
-      /* Clear Layout's sticky mobile header (hidden at lg). */
-      top: calc(var(--detail-header-height, 4.75rem) + 0.75rem);
+      /* Clear Layout's sticky mobile header (hidden at lg) and the
+         impersonation banner above it. */
+      top: calc(
+        var(--detail-header-height, 4.75rem) + 0.75rem + var(--impersonation-banner-height)
+      );
       align-self: start;
     }
 
@@ -140,7 +143,7 @@
       grid-template-columns: minmax(0, 1fr);
       gap: 1rem;
       position: sticky;
-      top: 1.5rem;
+      top: calc(1.5rem + var(--impersonation-banner-height));
       align-self: start;
     }
 
