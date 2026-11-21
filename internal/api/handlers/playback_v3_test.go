@@ -11070,3 +11070,42 @@ func TestHandleReplanPlaybackV3VersionSwitchWhilePausedKeepsPlayheadAndPause(t *
 		assertPausedPlayheadV3(t, f.handler, started.SessionID, pausedAt)
 	})
 }
+
+func TestNonSeekReplanPositionV3KeepsTheClientPlayheadFreshV3(t *testing.T) {
+	sessionMgr := playback.NewSessionManager(0, 0)
+	session, err := sessionMgr.StartSession(1, "profile-1", 7, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	// Progress posts arrive about every 10s. The viewer switches audio at
+	// 67.45s just after a report at 59.57s; the session position is the older
+	// sample, and preferring it rewound the replacement by ~10s.
+	if err := sessionMgr.UpdateProgress(session.ID, 59.56841, false); err != nil {
+		t.Fatalf("UpdateProgress: %v", err)
+	}
+	h := NewPlaybackHandler(sessionMgr)
+
+	cases := []struct {
+		name      string
+		requested float64
+		want      float64
+	}{
+		{name: "fresh client playhead wins over the last progress sample", requested: 67.449944, want: 67.449944},
+		{name: "a value behind the session is treated as stale", requested: 45, want: 59.56841},
+		{name: "a zero snapshot falls back to the session", requested: 0, want: 59.56841},
+		{name: "a rebuilt element at the route start falls back to the session", requested: 10, want: 59.56841},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := h.nonSeekReplanPositionV3(session.ID, tc.requested)
+			if got == nil || math.Abs(*got-tc.want) > 1e-6 {
+				t.Fatalf("position = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	// A session the client no longer names leaves the reported position intact.
+	if got := h.nonSeekReplanPositionV3("missing-session", 42.5); got == nil || *got != 42.5 {
+		t.Fatalf("missing session position = %v, want 42.5", got)
+	}
+}

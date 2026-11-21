@@ -12868,21 +12868,29 @@ func seekReanchorNoMovementV3(record *playback.AttemptRecordV3, session *playbac
 	return session == nil || math.Abs(session.Position-position) <= seekNoMovementToleranceSecondsV3
 }
 
-// nonSeekReplanPositionV3 is where a non-seek replan resumes: the session's
-// live position when it has one, else the client's reported position.
+// nonSeekReplanPositionV3 is where a non-seek replan resumes: the client's live
+// position when it is at least as far along as the session's last report, else
+// the session position.
 //
-// A track change never moves the playhead, so the server must not let the
-// client's snapshot decide it. The browser reports its position from an element
-// it may already have torn down (or has not attached yet), so a subtitle switch
-// can arrive with the route's start position and the replacement route then
-// restarts there. The session position advances with progress reports, which is
-// the only server-side evidence of where playback actually is.
+// A track change never moves the playhead, so the replacement must start where
+// the viewer is now. The session position advances only with progress reports
+// (about every 10s), so preferring it silently rewinds an audio switch by the
+// time since the last report — production measured 66.92s -> 56.97s on one
+// switch. At the click the client's position is the element's current content
+// position, which is fresher than the last report whenever playback advanced.
+//
+// A client value behind the session is still treated as a stale snapshot (a
+// rebuilt element that reported the route's start, or a position read before
+// the previous progress report). The session has advanced past it, and starting
+// the replacement there would rewind content that already played.
 func (h *PlaybackHandler) nonSeekReplanPositionV3(sessionID string, requested float64) *float64 {
 	position := requested
 	if sessionID != "" {
 		if current, err := h.sessionMgr.GetSession(sessionID); err == nil && current != nil &&
 			current.Position > 0 && (!math.IsNaN(current.Position) && !math.IsInf(current.Position, 0)) {
-			position = current.Position
+			if position <= 0 || position < current.Position {
+				position = current.Position
+			}
 		}
 	}
 	if math.IsNaN(position) || math.IsInf(position, 0) || position < 0 {

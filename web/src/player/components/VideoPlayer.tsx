@@ -382,8 +382,16 @@ interface VideoPlayerProps {
   /**
    * `seek_reanchor` replan when a seek target falls outside the seekable window.
    * Reports whether the replan landed a plan at the requested position.
+   *
+   * `autoplayIntent` is the viewer's play/pause intent at the moment the seek
+   * was issued. A seek replacement starts loading while the old transport may
+   * already be paused by its own teardown; the session uses this intent instead
+   * of reading that transient pause so the replacement keeps playing.
    */
-  onReanchorSeek?: (positionSeconds: number) => boolean | Promise<boolean>;
+  onReanchorSeek?: (
+    positionSeconds: number,
+    autoplayIntent?: boolean,
+  ) => boolean | Promise<boolean>;
   preferredSubtitleLanguage?: string | null;
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
@@ -807,11 +815,23 @@ export function VideoPlayer({
   const isMountedRef = useRef(true);
   const effectiveTransportRevision = transportRevision ?? planRevision;
   const hlsRef = useRef<HlsType | null>(null);
-  // The hls.js instance a pending-seek generation fence stopped. If the
-  // reanchor reuses that same generation, no transport effect runs, so a
-  // planRevision effect refetches its playlist (see below) instead of leaving
-  // a stopped instance behind.
-  const stoppedHlsForSeekRef = useRef<HlsType | null>(null);
+  // The hls.js instance a pending-seek generation fence stopped, with the
+  // transport identity it belongs to. If the reanchor reuses that same
+  // generation, no transport effect runs, so a planRevision effect refetches
+  // its playlist (see below) instead of leaving a stopped instance behind. A
+  // reanchor that builds a new generation must not restart the stopped one: its
+  // refetch would request the fenced segment a second time and then be aborted
+  // by the replacement.
+  const stoppedHlsForSeekRef = useRef<{
+    hls: HlsType;
+    streamUrl: string;
+    transportRevision: number;
+  } | null>(null);
+  // The viewer's play/pause intent, kept across the transient pauses a
+  // transport teardown or a seek replacement reports. A rapid sequence of
+  // backward seeks must not sample one of those pauses as "the viewer paused"
+  // and hand the next replacement shouldAutoPlay=false.
+  const viewerPlayIntentRef = useRef(shouldAutoPlay);
   // The plan's media requests, where its transport can see their bytes:
   // hls.js fragments and the browser engine's reads. The media element's own
   // loads show none.
@@ -2170,7 +2190,10 @@ export function VideoPlayer({
         : seconds;
       rememberPendingSeek(seconds);
       setCurrentTime(seconds);
-      const accepted = onReanchorSeek(seconds);
+      // Carry the viewer's intent through the replacement. The outgoing
+      // transport may already be paused by its teardown, and the session must
+      // not read that as a pause the viewer asked for.
+      const accepted = onReanchorSeek(seconds, viewerPlayIntentRef.current);
       if (typeof accepted === "boolean") {
         if (!accepted) releaseRefusedSeek(seconds);
         return accepted;
@@ -3757,7 +3780,13 @@ export function VideoPlayer({
                   // same fenced URL and answers 412 again, so stop the load
                   // before it can make one: the replan brings a generation
                   // that can serve the seek, this one cannot.
-                  stoppedHlsForSeekRef.current = hls;
+                  if (hls) {
+                    stoppedHlsForSeekRef.current = {
+                      hls,
+                      streamUrl: effectiveStreamUrl,
+                      transportRevision: effectiveTransportRevision,
+                    };
+                  }
                   hls?.stopLoad();
                   if (staleSeekReanchorTarget !== seekTarget) {
                     staleSeekReanchorTarget = seekTarget;
@@ -4315,21 +4344,32 @@ export function VideoPlayer({
   // target is inside its window), no transport effect runs and the stopped
   // instance would never load again. Refetch its playlist with the live token
   // and resume at the seek target, the same recovery ordinary playback uses.
-  // A transport that was rebuilt replaced `hlsRef`, so there is nothing to do.
+  //
+  // Only a reanchor that kept the same transport generation may do this. The
+  // transport identity is checked before the new hls.js instance even exists
+  // (its construction is asynchronous), so a reanchor that builds a new
+  // generation cannot make the stopped one refetch a playlist and request the
+  // fenced segment a second time only to be aborted by the replacement.
   useEffect(() => {
     const stopped = stoppedHlsForSeekRef.current;
     stoppedHlsForSeekRef.current = null;
     if (!stopped) return;
     const video = videoRef.current;
-    if (!video || hlsRef.current !== stopped) return;
+    if (!video || hlsRef.current !== stopped.hls) return;
+    if (
+      effectiveStreamUrl !== stopped.streamUrl ||
+      effectiveTransportRevision !== stopped.transportRevision
+    ) {
+      return;
+    }
     const target = pendingSeekTimeRef.current;
     const resume =
       target !== null ? toPlayerTime(target, timelineOffsetRef.current) : video.currentTime;
     recoverFromStaleGeneration(
-      stopped as unknown as Parameters<typeof recoverFromStaleGeneration>[0],
+      stopped.hls as unknown as Parameters<typeof recoverFromStaleGeneration>[0],
       resume,
     );
-  }, [planRevision]);
+  }, [effectiveStreamUrl, effectiveTransportRevision, planRevision]);
 
   // -- Video event listeners --
   useEffect(() => {
@@ -4356,6 +4396,9 @@ export function VideoPlayer({
         video.pause();
         return;
       }
+      // Playback started, whether from autoplay or a viewer control: the
+      // intent is to play.
+      viewerPlayIntentRef.current = true;
       setPlaying(true);
       setAutoplayBlocked(false);
       const idleSince = transportIdleSinceRef.current;
@@ -4367,6 +4410,9 @@ export function VideoPlayer({
     const onPause = () => {
       resetRoomCatchupRate();
       setPlaying(false);
+      // Do not record this as viewer intent. A teardown, a seek replacement or
+      // a translation handoff pauses the element without the viewer asking;
+      // `setPlayback` records the controls' own play/pause intent.
       // Only a stream that played or has opened. The pause a teardown queues
       // arrives after the next transport has started over, before it has
       // metadata.
@@ -5725,6 +5771,11 @@ export function VideoPlayer({
         showWatchTogetherNotice("Joining room playback. Try again in a moment.", "info");
         return;
       }
+
+      // The viewer's intent, not the element's transient state. A seek
+      // replacement pauses the outgoing transport while it loads; a later
+      // reanchor must still know the viewer meant to keep playing.
+      viewerPlayIntentRef.current = shouldPlay;
 
       if (watchTogether.room) {
         watchTogetherSync.requestTransport(

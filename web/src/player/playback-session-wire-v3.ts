@@ -127,6 +127,13 @@ export interface ReplanOptions {
    * this replan with the decision it is holding without a heuristic.
    */
   answersPlanInvalidation?: string;
+  /**
+   * Client-only: the viewer's play/pause intent for this replan, when the
+   * caller sampled it before the request. A seek replacement in particular is
+   * issued while the outgoing transport may be torn down, so the session must
+   * not re-read that transient pause. Never sent on the wire.
+   */
+  autoplayIntent?: boolean;
 }
 
 export interface StartRequestInput {
