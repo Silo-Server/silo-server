@@ -126,8 +126,9 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   list draws in reverse order. When the field can show a translated placeholder or
   message instead, set it only while it shows the value
   (`dir={value ? "ltr" : undefined}`).
-  `dir="auto"` leaves an empty field's example in the page's direction, and
-  `type="url"` rejects addresses without a scheme.
+  `dir="auto"` doesn't do this: an empty field resolves to left to right, so a
+  translated placeholder lands on the wrong side. `type="url"` rejects addresses
+  without a scheme.
 - A name that can be in either script and is cut with `truncate` (a username, say) takes
   `dir="auto"`: it reads in the direction of its first strong character (a letter, or
   right-to-left punctuation such as `؟`), and left to right when it has none, as a name
