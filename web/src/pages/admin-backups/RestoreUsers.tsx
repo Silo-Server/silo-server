@@ -187,7 +187,8 @@ export const AccountRow = memo(function AccountRow({
   ]
     .filter(Boolean)
     .join(" · ");
-  const destination = account.local_username || account.username;
+  // With no username on either side, the name is the email the row is labelled with.
+  const destination = account.local_username || account.username || item.label;
   const status = !item.selectable
     ? null
     : merges
