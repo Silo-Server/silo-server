@@ -1109,7 +1109,7 @@ function ViewerCell({
               type="button"
               onClick={() => onIPLookup(clientIP)}
               title={t("web.admin.activity.ipLookup.heading")}
-              className={`${ROW_LINK_CLASS} shrink-0 tabular-nums`}
+              className={`${ROW_LINK_CLASS} truncate tabular-nums`}
             >
               {clientIP}
             </button>
