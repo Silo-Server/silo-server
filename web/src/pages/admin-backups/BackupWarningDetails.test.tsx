@@ -54,20 +54,26 @@ function backup(count: number): AdminBackup {
   } as AdminBackup;
 }
 
-/** The accounts, files, and file-group toggle labels, with the files section open. */
+/**
+ * Every toggle label, closed then opened: accounts, missing files, and the one
+ * group of missing files (which appears once the files are open).
+ */
 function toggleLabels(tag: string, messages: Messages, count: number): string[] {
   const intl = createAppIntl(tag, messages);
   function Wrapper({ children }: { children: ReactNode }) {
     return <AppIntlProvider intl={intl}>{children}</AppIntlProvider>;
   }
   render(<BackupWarningDetails backup={backup(count)} />, { wrapper: Wrapper });
-  const [, files] = screen.getAllByRole("button", { expanded: false });
-  if (!files) throw new Error("no missing-files toggle");
+  const [accounts, files] = screen.getAllByRole("button", { expanded: false });
+  if (!accounts || !files) throw new Error("missing a toggle");
+  const labels = [accounts.textContent ?? "", files.textContent ?? ""];
   fireEvent.click(files);
-  const labels = screen
-    .getAllByRole("button")
-    .filter((button) => button.hasAttribute("aria-expanded"))
-    .map((button) => button.textContent ?? "");
+  const group = screen.getAllByRole("button", { expanded: false }).at(-1);
+  if (!group || group === accounts) throw new Error("no file-group toggle");
+  labels.push(group.textContent ?? "", files.textContent ?? "");
+  fireEvent.click(accounts);
+  fireEvent.click(group);
+  labels.push(accounts.textContent ?? "", group.textContent ?? "");
   cleanup();
   return labels;
 }
@@ -78,15 +84,15 @@ describe("BackupWarningDetails toggles", () => {
   it("use the singular only for exactly one", () => {
     const messages = pseudo as unknown as Messages;
     const several = toggleLabels("ru", messages, 5);
-    expect(several).toHaveLength(3);
-    expect(toggleLabels("ru", messages, 1)).not.toEqual(several);
+    const one = toggleLabels("ru", messages, 1);
+    one.forEach((label, i) => expect(label).not.toBe(several[i]));
     expect(toggleLabels("ru", messages, 21)).toEqual(several);
     expect(toggleLabels("ru", messages, 101)).toEqual(several);
   });
 
   it("pass exactly two for a language's dual", () => {
-    expect(toggleLabels("ar", dualCatalog(), 1)).toEqual(["one", "one", "one"]);
-    expect(toggleLabels("ar", dualCatalog(), 2)).toEqual(["two", "two", "two"]);
-    expect(toggleLabels("ar", dualCatalog(), 5)).toEqual(["many", "many", "many"]);
+    expect(toggleLabels("ar", dualCatalog(), 1)).toEqual(Array(6).fill("one"));
+    expect(toggleLabels("ar", dualCatalog(), 2)).toEqual(Array(6).fill("two"));
+    expect(toggleLabels("ar", dualCatalog(), 5)).toEqual(Array(6).fill("many"));
   });
 });
