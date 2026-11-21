@@ -215,7 +215,7 @@ func TestNVENCSDRBaseGraphsDownloadBeforeSubtitleComposition(t *testing.T) {
 			convert := strings.Index(graph, "zscale=p=bt709")
 			compose := strings.Index(graph, "subtitles=")
 			if codec == "hdmv_pgs_subtitle" {
-				compose = strings.Index(graph, "overlay=eof_action=pass")
+				compose = strings.Index(graph, "overlay=x=(main_w-overlay_w)/2:y=main_h-overlay_h:eof_action=pass")
 			}
 			upload := strings.LastIndex(graph, "hwupload_cuda")
 			if download < 0 || convert <= download || compose <= convert || upload <= compose {
@@ -662,7 +662,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 			SoftwareVideoDecode: true, TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "qsv",
 			TargetResolution: "720p", SubtitleTrackIndex: 2, SubtitleBurnIn: true, SubtitleCodec: "hdmv_pgs_subtitle",
 		},
-		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]format=yuv420p[vmain];[vmain][0:s:2]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv[vout]"},
+		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]format=yuv420p[vmain];[vmain][0:s:2]overlay=x=(main_w-overlay_w)/2:y=main_h-overlay_h:eof_action=pass,scale=-2:720,format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv[vout]"},
 		forbid: []string{"overlay_vaapi", "hwdownload", "-hwaccel vaapi"},
 	},
 	{
@@ -675,7 +675,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "none", TargetResolution: "1080p",
 			SubtitleTrackIndex: 2, SubtitleBurnIn: true, SubtitleCodec: "hdmv_pgs_subtitle",
 		},
-		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint][0:s:2]overlay=eof_action=pass,scale=-2:1080[vout]", "-map [vout]", "-c:v libx264"},
+		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint][0:s:2]overlay=x=(main_w-overlay_w)/2:y=main_h-overlay_h:eof_action=pass,scale=-2:1080[vout]", "-map [vout]", "-c:v libx264"},
 		forbid: []string{"-map 0:v:0", "-vf ", "subtitles="},
 	},
 	{
@@ -714,7 +714,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 			SourceVideoProfile: "main10", SourceVideoBitDepth: 10, TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
 			HWAccel: "nvenc", TargetResolution: "720p", SubtitleTrackIndex: 0, SubtitleBurnIn: true, SubtitleCodec: "hdmv_pgs_subtitle",
 		},
-		want:   []string{"-filter_complex [0:v:0]hwdownload,format=p010le,format=yuv420p[vmain];[vmain][0:s:0]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload_cuda[vout]"},
+		want:   []string{"-filter_complex [0:v:0]hwdownload,format=p010le,format=yuv420p[vmain];[vmain][0:s:0]overlay=x=(main_w-overlay_w)/2:y=main_h-overlay_h:eof_action=pass,scale=-2:720,format=nv12,hwupload_cuda[vout]"},
 		forbid: []string{"hwdownload,format=yuv420p"},
 	},
 	textBurnInDepth("NVENC8Bit", "nvenc", 8, "hwdownload,format=nv12,format=yuv420p,scale=-2:720,subtitles="),
@@ -751,7 +751,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 	{
 		name:  "tone map orders bitmap subtitles after color conversion",
 		opts:  withSubtitle(toneMapSubtitleBase, "hdmv_pgs_subtitle"),
-		order: []string{"tonemapx=tonemap=bt2390", "overlay=eof_action=pass", "scale=-2:1080"},
+		order: []string{"tonemapx=tonemap=bt2390", "overlay=x=(main_w-overlay_w)/2:y=main_h-overlay_h:eof_action=pass", "scale=-2:1080"},
 	},
 	{
 		// VideoToolbox decode outputs software frames and takes no x264 preset.
@@ -823,7 +823,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 		name:         "VideoToolbox tone map downloads before bitmap subtitles",
 		opts:         withSubtitle(videoToolboxToneMapSubtitleBase, "hdmv_pgs_subtitle"),
 		videoToolbox: true,
-		order:        []string{"scale_vt=w=-2:h=1080", "hwdownload,format=p010le,format=nv12", "overlay=eof_action=pass", "sidedata=mode=delete"},
+		order:        []string{"scale_vt=w=-2:h=1080", "hwdownload,format=p010le,format=nv12", "overlay=x=(main_w-overlay_w)/2:y=main_h-overlay_h:eof_action=pass", "sidedata=mode=delete"},
 		forbid:       []string{"scale=-2:1080"},
 	},
 	{
@@ -851,7 +851,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 		name:   "NVENC mixed stage bitmap burn-in uploads without download",
 		opts:   nvencMixedOpts("1", "hdmv_pgs_subtitle"),
 		stage:  nvencMixedStageOpts,
-		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]format=yuv420p[vmain];[vmain][0:s:1]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload[vout]", "-init_hw_device cuda=cu:1 -filter_hw_device cu", "-c:v h264_nvenc"},
+		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]format=yuv420p[vmain];[vmain][0:s:1]overlay=x=(main_w-overlay_w)/2:y=main_h-overlay_h:eof_action=pass,scale=-2:720,format=nv12,hwupload[vout]", "-init_hw_device cuda=cu:1 -filter_hw_device cu", "-c:v h264_nvenc"},
 		forbid: []string{"hwdownload", "hwupload_cuda"},
 	},
 	{

@@ -1795,7 +1795,7 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 	var graph string
 	if opts.ToneMapMode == tonemap.ModeSoftware {
 		filters := tonemap.SoftwareFilter(opts.ToneMapSourceKind, opts.ToneMapFilter)
-		graph = "[0:v:0]" + filters + "[vmain];[vmain]" + subInput + "overlay=eof_action=pass"
+		graph = "[0:v:0]" + filters + "[vmain];[vmain]" + subInput + bitmapSubtitleOverlay
 		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
 			graph += "," + scale
 		}
@@ -1822,10 +1822,10 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 		}
 	case transcodeHWNVENC:
 		if tonemap.IsSDRSource(opts.ToneMapSourceKind) {
-			graph = "[0:v:0]" + nvencSDRFallbackDownload(opts) + "," + tonemap.SoftwareFilter(opts.ToneMapSourceKind, "") + "[vmain];[vmain]" + subInput + "overlay=eof_action=pass"
+			graph = "[0:v:0]" + nvencSDRFallbackDownload(opts) + "," + tonemap.SoftwareFilter(opts.ToneMapSourceKind, "") + "[vmain];[vmain]" + subInput + bitmapSubtitleOverlay
 		} else {
 			graph = "[0:v:0]" + tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12[vmain];[vmain]" +
-				subInput + "overlay=eof_action=pass"
+				subInput + bitmapSubtitleOverlay
 		}
 		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
 			graph += "," + scale
@@ -1833,7 +1833,7 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 		graph += ",format=nv12,hwupload_cuda," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
 	case transcodeHWVideoToolbox:
 		graph = "[0:v:0]" + videoToolboxToneMapCPUFilter(opts) + "[vmain];[vmain]" +
-			subInput + "overlay=eof_action=pass," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+			subInput + bitmapSubtitleOverlay + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
 	}
 	if graph == "" {
 		return args
@@ -2040,6 +2040,17 @@ func hwSurfaceToCPUFilter(opts TranscodeOpts) string {
 	return "hwdownload,format=" + tonemap.SurfaceDownloadPixelFormat(opts.SourceVideoBitDepth) + ",format=yuv420p"
 }
 
+// bitmapSubtitleOverlay composites a decoded bitmap subtitle onto CPU frames.
+// A PGS canvas keeps the disc's frame size, usually 1920x1080, while many
+// encodes crop the black bars, so the canvas is centred horizontally and
+// anchored to the bottom of the frame: dialogue near the canvas bottom stays
+// inside a cropped picture. A canvas the size of the frame lands at 0,0. The
+// canvas is placed, not resized: on a frame narrower than the canvas, such as
+// one a tone map scaled before the overlay, wide lines are clipped at the
+// sides. The GPU composites (overlay_vaapi, overlay_opencl) still place at 0,0
+// because moving them needs a check on Intel hardware.
+const bitmapSubtitleOverlay = "overlay=x=(main_w-overlay_w)/2:y=main_h-overlay_h:eof_action=pass"
+
 // appendBitmapSubtitleBurnInArgs adds burn-in arguments for BITMAP subtitle
 // codecs (PGS/VOBSUB/DVB). libass's subtitles= filter cannot render bitmap
 // tracks, so the decoded subtitle stream is composited onto the video with an
@@ -2092,7 +2103,7 @@ func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string 
 		// NVENC and CPU: software overlay on CPU frames. Build the overlay
 		// fragment (subtitle input + optional post-scale) once, then wire it into
 		// the encode-specific pipeline.
-		cpuFilters := subInput + "overlay=eof_action=pass"
+		cpuFilters := subInput + bitmapSubtitleOverlay
 		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
 			cpuFilters += "," + scale
 		}
@@ -2117,7 +2128,7 @@ func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string 
 // the finished NV12 frames for the hardware encoder. It is the Hi10 AVC
 // counterpart of the all-hardware overlay_vaapi graph above.
 func softwareDecodedBitmapBurnInGraph(opts TranscodeOpts, subInput string, qsv bool) string {
-	filters := subInput + "overlay=eof_action=pass"
+	filters := subInput + bitmapSubtitleOverlay
 	if scale := resolutionToScale(opts.TargetResolution); scale != "" {
 		filters += "," + scale
 	}
