@@ -2616,9 +2616,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      already hidden the sidebar (#1816).                               */
   :root {
     --app-sidebar-offset: 0px;
-    /* How far fixed page chrome (the collection editor's save bar) rises to
-       clear whichever background playback bar shows. useRootHeightProperty
-       measures each bar, bottom inset included, on the root while it shows. */
+    /* How far fixed chrome at the foot of a page rises, and how much the admin
+       shell pads the end of its pages, to clear whichever background playback
+       bar shows. useRootHeightProperty measures each bar, bottom inset
+       included, on the root while it shows. */
     --playback-bar-clearance: max(var(--watch-bar-height, 0px), var(--audiobook-bar-height, 0px));
     /* The impersonation banner pins to the top of the viewport above every
        route, and ImpersonationBanner measures its height here while it shows.
