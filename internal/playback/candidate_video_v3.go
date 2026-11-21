@@ -61,7 +61,7 @@ func (p *candidatePlannerV3) planVideo() PlannerResultV3 {
 	if p.video.transcodeStage {
 		exhausted = exhaustedV3()
 	}
-	result := p.selectCandidateV3(p.videoCandidates(), p.enterVideoRoute, p.evaluateVideo, exhausted)
+	result := p.selectCandidateV3(p.videoCandidates(), p.enterVideoRoute, p.copyOnceEvaluator(), exhausted)
 	result.AdaptationReasons = p.videoAdaptationReasonsV3(result)
 	return result
 }
@@ -198,7 +198,7 @@ func (p *candidatePlannerV3) routeFacts(evidenceInsufficient bool) {
 	f.mustAdapt = f.quality.RequiresTranscode || !f.videoOK || !f.anyCopyRange() || !anySubtitle
 	// A remux maps only the base layer, so Profile 7 is never copied as is.
 	remuxRangeOK := f.rangeOK && source.DVProfile != 7 || f.serverDV81
-	f.remuxActive = !f.mustAdapt && !source.VideoCopyUnsafe && (remuxRangeOK || f.stripProgressive || f.stripHLS) &&
+	f.remuxActive = !f.mustAdapt && (remuxRangeOK || f.stripProgressive || f.stripHLS) &&
 		(f.remuxSubtitleOK || f.hlsSubtitleOK)
 	if f.remuxActive {
 		p.remuxAudioFacts()
@@ -327,6 +327,33 @@ func (p *candidatePlannerV3) enterVideoRoute(route candidateRouteV3) *PlannerRes
 func (p *candidatePlannerV3) progressiveAACOK() bool {
 	return p.video.remuxAudio.progressiveConverts && deliveryAvailableV3(p.input.Request, DeliveryClassProgressiveV3) &&
 		p.input.progressiveRemuxRegistry().Available(TransformationAudioToAACV3)
+}
+
+// copyOnceEvaluator gives a copy-unsafe source (H.264 that redefines its
+// parameter sets in-band) one stream copy per recovery. Decoders that apply
+// in-band parameter sets play the copy, but decoders that use only the sample
+// entry's fail every copy of it alike, so once one copy has failed the next
+// route is the encode rather than another copy delivery. Other sources try
+// each copy delivery as before.
+func (p *candidatePlannerV3) copyOnceEvaluator() func(candidateV3) (*PlannerResultV3, *PlannerResultV3) {
+	if !p.source.VideoCopyUnsafe {
+		return p.evaluateVideo
+	}
+	output := p.input.Request.ClientPlaybackContext.Output.OutputContextID
+	copyFailed := false
+	return func(c candidateV3) (*PlannerResultV3, *PlannerResultV3) {
+		if c.route != candidateRemuxV3 {
+			return p.evaluateVideo(c)
+		}
+		if copyFailed {
+			return nil, nil
+		}
+		result, stop := p.evaluateVideo(c)
+		if result != nil && planAttemptedV3(*result.Plan, output, p.input.AttemptedKeys) {
+			copyFailed = true
+		}
+		return result, stop
+	}
 }
 
 func (p *candidatePlannerV3) evaluateVideo(c candidateV3) (*PlannerResultV3, *PlannerResultV3) {

@@ -138,15 +138,6 @@ type PlaybackProbeEnsurer interface {
 // *playback.CopySafetyRace implements it.
 type PlaybackCopySafetyRacer interface {
 	RaceScanForPlan(fileID int, plan *playback.PlanV3)
-	// RaceScan re-engages the race for a file whose verdict is still open. The
-	// serve paths use it when they revive a stream-copy transport: the replica
-	// that planned it may be gone, and only a race running *here* can withdraw
-	// the route from the session this replica just rebuilt.
-	RaceScan(fileID int)
-	// VideoCopyUnsafeKnown answers, without ffmpeg and without waiting, whether
-	// this replica can already condemn a video stream-copy of the file —
-	// including from a verdict whose write to the row failed.
-	VideoCopyUnsafeKnown(ctx context.Context, file *models.MediaFile) bool
 }
 
 type PlaybackChapterThumbnailQueuer interface {
@@ -260,7 +251,8 @@ type PlaybackHandler struct {
 	ProbeEnsurer       PlaybackProbeEnsurer       // optional; repairs missing probe metadata on demand
 	// CopySafetyRacer resolves an unknown H.264 copy-safety verdict behind an
 	// already-issued stream-copy plan. Optional: without it an unknown verdict
-	// simply stays unknown and the copy route is never withdrawn.
+	// stays unknown, and a failed copy of a copy-unsafe source walks to the
+	// next copy delivery before the encode.
 	CopySafetyRacer        PlaybackCopySafetyRacer
 	ChapterThumbnailQueuer PlaybackChapterThumbnailQueuer
 	IntroAnalyzer          PlaybackEpisodeAnalyzer
@@ -505,6 +497,20 @@ func semanticPlayMethod(s *playback.Session) playback.PlayMethod {
 	return s.PlayMethod
 }
 
+// reconstructTransportForServe rebuilds a lost local transport from the token
+// recipe for the manifest and segment serve routes. A nil card yields a nil
+// result, which is the caller's not-found: to a client, a recipe it cannot
+// present and a recipe that no longer rebuilds are the same thing.
+// The returned error carries a tone-map execution failure so the serve handler
+// can render it as a 422 instead of a generic not-found; it is nil for every
+// other rebuild outcome, including a plain miss.
+func (h *PlaybackHandler) reconstructTransportForServe(ctx context.Context, sessionID string, requestedSegment int, card *playback.RecipeCard) (*playback.TranscodeSession, error) {
+	if card == nil {
+		return nil, nil
+	}
+	return h.tm.ReconstructTranscodeWithError(ctx, sessionID, requestedSegment, *card)
+}
+
 // ensurePlaybackProbe repairs probe metadata and stamps the H.264 copy-safety
 // verdict when it is already known. It never runs the bitstream scan: an
 // unknown verdict plans optimistically (the planner reads nil MultiplePPS as
@@ -628,9 +634,6 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 				return session, playback.SessionLoaded, nil, nil, nil
 			}
 			if card != nil {
-				if videoCopyReconstructRefused(r.Context(), h.fileResolver, h.CopySafetyRacer, card) {
-					return nil, playback.SessionMissing, nil, nil, nil
-				}
 				session, _, status, reconstructErr := h.tm.LoadOrReconstructTranscodeWithError(r.Context(), h.sessionMgr.GetSession, sessionID, requestUserID, requestedSegment, card)
 				return session, status, card, claims, reconstructErr
 			}
@@ -655,18 +658,6 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 		if routeStatus := nativeAPIEgressStatusV3(card.RoutingWorkload, card.RoutingExecution, card.RoutingEgress); routeStatus != 0 {
 			return nil, playback.SessionUnavailable, card, claims, &nativeRouteBindingErrorV3{status: routeStatus}
 		}
-	}
-	// The copy-safety verdict gates the revival before it happens, not after.
-	// Reconstruction registers the playback session against the user's stream
-	// caps, so a refusal that ran later would leave a session nobody serves
-	// holding an admission slot the client's fresh attempt needs — and a
-	// remote-node recipe never reaches the local transport reconstruct at all
-	// (the serve handlers proxy to the node instead), so a gate down there would
-	// miss it entirely. A revival the verdict does not condemn re-engages the
-	// race here, so the session about to be rebuilt is covered by a race this
-	// replica owns. See playback_copy_safety.go.
-	if videoCopyReconstructRefused(r.Context(), h.fileResolver, h.CopySafetyRacer, card) {
-		return nil, playback.SessionMissing, nil, nil, nil
 	}
 	// A tone-mapped or keyframe-planned rebuild can fail for a reason the
 	// player has to hear (a terminal tone-map verdict, a playlist that can no

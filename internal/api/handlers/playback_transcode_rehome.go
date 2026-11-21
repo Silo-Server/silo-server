@@ -47,10 +47,7 @@ import (
 // node, so nothing was written to the client.
 var errTranscodeNodeUnreachable = errors.New("transcode node unreachable")
 
-var (
-	errRehomeRecipeUnavailable = errors.New("no recipe to rebuild the transcode from")
-	errRehomeCopyUnsafe        = errors.New("stream-copy recipe is no longer safe to revive")
-)
+var errRehomeRecipeUnavailable = errors.New("no recipe to rebuild the transcode from")
 
 // maxRehomeAttemptsV3 bounds how many executors one move tries. Each failed
 // executor is excluded from the next selection, so the bound only matters in a
@@ -184,11 +181,7 @@ func (h *PlaybackHandler) relayOrRehomeTranscode(
 	moveErr := h.tm.RehomeTranscode(r.Context(), session.ID, func(ctx context.Context) error {
 		return h.moveTranscodeOffNodeV3(ctx, session.ID, dead, card, requestedSegment)
 	})
-	switch {
-	case errors.Is(moveErr, errRehomeCopyUnsafe):
-		writePlaybackSessionNotFound(w)
-		return nil, true
-	case errors.Is(moveErr, errPlaybackSessionEnded):
+	if errors.Is(moveErr, errPlaybackSessionEnded) {
 		writePlaybackSessionEnded(w)
 		return nil, true
 	}
@@ -249,12 +242,6 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 	if card == nil {
 		return errRehomeRecipeUnavailable
 	}
-	// Moving a stream-copy recipe revives it on a new executor, so it answers
-	// to the same persisted copy-safety verdict as any other revival.
-	if videoCopyReconstructRefused(ctx, h.fileResolver, h.CopySafetyRacer, card) {
-		return errRehomeCopyUnsafe
-	}
-
 	workload, delivery := noderouting.WorkloadVideoTranscode, noderouting.DeliveryHLSVideo
 	if card.VideoStreamCopy() {
 		workload, delivery = noderouting.WorkloadRemux, noderouting.DeliveryHLSRemux
