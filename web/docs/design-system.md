@@ -142,9 +142,9 @@ Colors are organized as semantic layers. `app.css` provides the actual values; c
 - `--primary-text`: the primary color as text, which `text-primary` uses. An admin accent sets it to the accent, lightened only as far as needed to read at 4.5:1 on Cinema Dark's surfaces; without one it is `--primary`. Draw accent-colored text with `text-primary`, never `var(--primary)`
 - `--secondary`: secondary element backgrounds
 - `--accent`: highlighted and active backgrounds
-- `--destructive`: danger and error text, icons, borders, and status dots
+- `--destructive`: danger and error text, icons, borders, and status dots. Themes set it as `--destructive-base`; high contrast lightens it toward `--contrast-boost` so red text keeps 4.5:1 on every surface high contrast lightens
 - `--destructive-fill`: solid danger background for destructive buttons and badges, labelled with `--destructive-foreground`. A white label on `--destructive` doesn't reach 4.5:1, so don't fill with it
-- `--success-label`, `--warning-label`, `--info-label`, `--destructive-label`: a status-coloured label on a 10% tint of its own colour, such as the play-method tags (`bg-destructive/10 text-destructive-label`). Red mixes toward `--contrast-boost`, and in high contrast every label does, so each stays above 4.5:1 on a hovered row, where the plain status colour doesn't
+- `--success-label`, `--warning-label`, `--info-label`, `--destructive-label`: a status-coloured label on a 10% tint of its own colour, such as the play-method tags (`bg-destructive/10 text-destructive-label`). Red mixes toward `--contrast-boost`, and in high contrast every label does (red's is the lightened `--destructive`), so each stays above 4.5:1 on a hovered row, where the plain status colour doesn't
 - `--ring`: focus ring
 
 ### Ambient Tokens
