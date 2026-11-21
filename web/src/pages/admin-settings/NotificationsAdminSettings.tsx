@@ -877,9 +877,6 @@ export default function NotificationsAdminSettings() {
   const isOn = (key: string) => toggleValue(key) === "true";
   const setToggle = (key: string) => (value: boolean) =>
     form.setValue(key, value ? "true" : "false");
-  // Numeric settings fall back to their server-side defaults when unset;
-  // surface the effective default instead of an empty input.
-  const numberValue = (key: string, fallback: string) => form.getValue(key) || fallback;
   const needsRestart = (key: string) => restartKeys.has(key);
   const anyDirty = (keys: string[]) => keys.some(form.isDirty);
 
@@ -1107,7 +1104,7 @@ export default function NotificationsAdminSettings() {
                   description={t("web.admin.settings.notifications.digestHourDescription")}
                   unit={t("web.admin.common.units.hourRange")}
                   type="number"
-                  value={numberValue("notifications.email.digest_hour", "8")}
+                  value={form.getValue("notifications.email.digest_hour")}
                   onChange={(v) => form.setValue("notifications.email.digest_hour", v)}
                   restartRequired={needsRestart("notifications.email.digest_hour")}
                 />
@@ -1184,7 +1181,7 @@ export default function NotificationsAdminSettings() {
                   description={t("web.admin.settings.notifications.digestHourDescription")}
                   unit={t("web.admin.common.units.hourRange")}
                   type="number"
-                  value={numberValue("notifications.discord.digest_hour", "8")}
+                  value={form.getValue("notifications.discord.digest_hour")}
                   onChange={(v) => form.setValue("notifications.discord.digest_hour", v)}
                   restartRequired={needsRestart("notifications.discord.digest_hour")}
                 />
@@ -1214,7 +1211,7 @@ export default function NotificationsAdminSettings() {
               <SettingField
                 label={t("web.admin.settings.notifications.webhooks.perPerson")}
                 type="number"
-                value={numberValue("notifications.webhooks.max_per_profile", "10")}
+                value={form.getValue("notifications.webhooks.max_per_profile")}
                 onChange={(v) => form.setValue("notifications.webhooks.max_per_profile", v)}
                 restartRequired={needsRestart("notifications.webhooks.max_per_profile")}
               />
@@ -1226,10 +1223,7 @@ export default function NotificationsAdminSettings() {
                 description={t("web.admin.settings.notifications.webhooks.deliveriesDescription")}
                 unit={t("web.admin.settings.notifications.webhooks.perMinute")}
                 type="number"
-                value={numberValue(
-                  "notifications.webhooks.deliveries_per_minute_per_profile",
-                  "60",
-                )}
+                value={form.getValue("notifications.webhooks.deliveries_per_minute_per_profile")}
                 onChange={(v) =>
                   form.setValue("notifications.webhooks.deliveries_per_minute_per_profile", v)
                 }
@@ -1299,7 +1293,7 @@ export default function NotificationsAdminSettings() {
                   )}
                   unit={t("web.admin.settings.notifications.unit.seconds")}
                   type="number"
-                  value={numberValue("notifications.server_channels.batch_seconds", "300")}
+                  value={form.getValue("notifications.server_channels.batch_seconds")}
                   onChange={(v) => form.setValue("notifications.server_channels.batch_seconds", v)}
                   restartRequired={needsRestart("notifications.server_channels.batch_seconds")}
                 />

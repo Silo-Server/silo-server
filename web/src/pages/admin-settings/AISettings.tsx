@@ -54,9 +54,10 @@ const SPEECH_AI_KEYS = ["ai.speech_provider_id", "ai.asr_model"] as const;
 const EMBEDDING_KEYS = ["recommendations.embedding_provider_id", "recommendations.embedding_model"];
 /**
  * Pre-`ai.*` keys still read as a fallback, so a server configured before the
- * rename keeps its model and job limit until the modern key is saved.
+ * rename keeps its model until the modern key is saved. The server already
+ * reports the job limit under `ai.max_concurrent_jobs`.
  */
-const LEGACY_AI_KEYS = ["subtitle_ai.chat_model", "subtitle_ai.max_concurrent_jobs"] as const;
+const LEGACY_AI_KEYS = ["subtitle_ai.chat_model"] as const;
 
 const AI_FEATURE_KEYS = [
   "subtitle_ai.enabled",
@@ -671,10 +672,6 @@ export default function AISettings() {
   }
 
   const value = (key: string, fallback = "") => form.getValue(key) || fallback;
-  // Legacy `subtitle_ai.*` values stay authoritative until the modern `ai.*`
-  // key holds something, exactly as the old AI Services tab read them.
-  const effectiveValue = (key: string, legacyKey: string, fallback: string) =>
-    value(key, value(legacyKey, fallback));
 
   const providers = providerList.data?.providers ?? [];
   const providerTypes = providerList.data?.types ?? [];
@@ -801,13 +798,19 @@ export default function AISettings() {
   }
 
   async function save() {
-    const batchSize = parseStrictInteger(value("subtitle_ai.batch_size", "40"));
-    const contextLines = parseStrictInteger(value("subtitle_ai.context_neighbors", "2"));
-    const chunkSeconds = parseStrictInteger(value("subtitle_ai.asr_chunk_seconds", "600"));
-    const quotaJobs = parseStrictInteger(value("subtitle_ai.transcribe_quota_jobs", "0"));
-    const maxConcurrent = parseStrictInteger(
-      effectiveValue("ai.max_concurrent_jobs", "subtitle_ai.max_concurrent_jobs", "2"),
-    );
+    // With no settings loaded there is nothing to save over, and the form's
+    // own save says to reload; checking the fields first would hide that.
+    if (!form.loaded) {
+      await form.save();
+      return;
+    }
+    // Only a value this save sends is checked: an untouched field holds what
+    // the server has.
+    const invalidCount = (key: string, min: number, max = Number.MAX_SAFE_INTEGER) => {
+      if (!form.isDirty(key)) return false;
+      const parsed = parseStrictInteger(value(key));
+      return parsed === null || parsed < min || parsed > max;
+    };
 
     // None releases the text provider; it saves while nothing translates.
     const textCleared = authMode !== "chatgpt" && textProviderID === "";
@@ -830,23 +833,23 @@ export default function AISettings() {
       toast.error(t("web.admin.settings.ai.page.chooseReasoning"));
       return;
     }
-    if (maxConcurrent === null || maxConcurrent < 1) {
+    if (invalidCount("ai.max_concurrent_jobs", 1)) {
       toast.error(t("web.admin.settings.ai.page.maxConcurrentInvalid"));
       return;
     }
-    if (batchSize === null || batchSize < 1) {
+    if (invalidCount("subtitle_ai.batch_size", 1)) {
       toast.error(t("web.admin.settings.ai.page.batchSizeInvalid"));
       return;
     }
-    if (contextLines === null || contextLines < 0) {
+    if (invalidCount("subtitle_ai.context_neighbors", 0)) {
       toast.error(t("web.admin.settings.ai.page.contextLinesInvalid"));
       return;
     }
-    if (chunkSeconds === null || chunkSeconds < 60 || chunkSeconds > 600) {
+    if (invalidCount("subtitle_ai.asr_chunk_seconds", 60, 600)) {
       toast.error(t("web.admin.settings.ai.page.chunkInvalid"));
       return;
     }
-    if (quotaJobs === null || quotaJobs < 0) {
+    if (invalidCount("subtitle_ai.transcribe_quota_jobs", 0)) {
       toast.error(t("web.admin.settings.ai.page.quotaInvalid"));
       return;
     }
@@ -1033,11 +1036,7 @@ export default function AISettings() {
             <SettingField
               label={t("web.admin.settings.ai.tuning.jobsAtOnce")}
               type="number"
-              value={effectiveValue(
-                "ai.max_concurrent_jobs",
-                "subtitle_ai.max_concurrent_jobs",
-                "2",
-              )}
+              value={value("ai.max_concurrent_jobs")}
               onChange={(next) => setValue("ai.max_concurrent_jobs", next)}
               // Each server process builds its own dispatch semaphore at start
               // (internal/api/router.go), so a cluster runs this many per process.
@@ -1047,14 +1046,14 @@ export default function AISettings() {
             <SettingField
               label={t("web.admin.settings.ai.tuning.batchSize")}
               type="number"
-              value={value("subtitle_ai.batch_size", "40")}
+              value={value("subtitle_ai.batch_size")}
               onChange={(next) => setValue("subtitle_ai.batch_size", next)}
               restartRequired={restartKeys.has("subtitle_ai.batch_size")}
             />
             <SettingField
               label={t("web.admin.settings.ai.tuning.contextLines")}
               type="number"
-              value={value("subtitle_ai.context_neighbors", "2")}
+              value={value("subtitle_ai.context_neighbors")}
               onChange={(next) => setValue("subtitle_ai.context_neighbors", next)}
               restartRequired={restartKeys.has("subtitle_ai.context_neighbors")}
             />
@@ -1062,7 +1061,7 @@ export default function AISettings() {
               label={t("web.admin.settings.ai.tuning.audioPerRequest")}
               type="number"
               unit={t("web.admin.settings.ai.unit.seconds")}
-              value={value("subtitle_ai.asr_chunk_seconds", "600")}
+              value={value("subtitle_ai.asr_chunk_seconds")}
               onChange={(next) => setValue("subtitle_ai.asr_chunk_seconds", next)}
               description={t("web.admin.settings.ai.tuning.audioPerRequestRange")}
               restartRequired={restartKeys.has("subtitle_ai.asr_chunk_seconds")}
@@ -1074,7 +1073,7 @@ export default function AISettings() {
           >
             <LimitField
               label={t("web.admin.settings.ai.tuning.transcriptions")}
-              value={value("subtitle_ai.transcribe_quota_jobs", "0")}
+              value={value("subtitle_ai.transcribe_quota_jobs")}
               onChange={(next) => setValue("subtitle_ai.transcribe_quota_jobs", next)}
               fallbackValue="10"
               hint={t("web.admin.settings.ai.tuning.transcriptionsHint")}
