@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -132,7 +133,11 @@ func OpenSegmentWithRecovery(
 		// that sometimes leaves the player one segment away from stalling while
 		// FFmpeg catches up. Briefly wait for a single lookahead fragment when
 		// available so the first resumed playback window is less brittle.
-		nextSegmentName := fmt.Sprintf("seg_%05d%s", segNum+1, filepath.Ext(segmentName))
+		suffix := filepath.Ext(segmentName)
+		if opts.SegmentNumberName != "" && strings.HasPrefix(segmentName, opts.SegmentNumberName) {
+			suffix = strings.TrimPrefix(segmentName, opts.SegmentNumberName)
+		}
+		nextSegmentName := fmt.Sprintf("seg_%05d%s", segNum+1, suffix)
 		if nextSegment, nextErr := session.WaitForOpenSegmentContext(ctx, nextSegmentName, opts.CopyLookaheadTimeout); nextErr == nil {
 			_ = nextSegment.Close()
 		}

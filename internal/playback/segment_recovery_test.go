@@ -124,6 +124,12 @@ func TestOpenSegmentWithRecovery_WaitTimeoutRestartAndPostRestartOpen(t *testing
 		var gotSeenGen time.Time
 		start := time.Now()
 		var restartedAt time.Time
+		var producerDone chan struct{}
+		defer func() {
+			if producerDone != nil {
+				<-producerDone
+			}
+		}()
 		const (
 			targetDelay    = 30 * time.Millisecond
 			lookaheadDelay = 40 * time.Millisecond
@@ -139,7 +145,10 @@ func TestOpenSegmentWithRecovery_WaitTimeoutRestartAndPostRestartOpen(t *testing
 				gotSegNum = segNum
 				gotSeenGen = seenGeneration
 				restartedAt = time.Now()
+				done := make(chan struct{})
+				producerDone = done
 				go func() {
+					defer close(done)
 					time.Sleep(targetDelay) //nolint:forbidigo // synctest advances virtual time to simulate post-restart segment production
 					writeRecoverySegmentFile(t, dir, "seg_00002.m4s", "restarted-segment-2")
 					time.Sleep(lookaheadDelay) //nolint:forbidigo // synctest advances virtual time to simulate copy-video lookahead segment
