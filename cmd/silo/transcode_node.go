@@ -102,8 +102,8 @@ func loadTranscodeNodeEnv(getenv func(string) string) (transcodeNodeEnv, error) 
 	if env.coreURL == "" {
 		return transcodeNodeEnv{}, fmt.Errorf("%s is required: the URL this node reaches the main server at", envCoreURL)
 	}
-	parsed, err := url.Parse(env.coreURL)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+	parsed, ok := parseCoreURL(env.coreURL)
+	if !ok {
 		return transcodeNodeEnv{}, fmt.Errorf("%s must be an absolute http or https URL", envCoreURL)
 	}
 	env.insecureCoreURL = parsed.Scheme == "http" && !loopbackHost(parsed.Hostname())
@@ -126,6 +126,16 @@ func loadTranscodeNodeEnv(getenv func(string) string) (transcodeNodeEnv, error) 
 		}
 	}
 	return env, nil
+}
+
+// parseCoreURL parses raw as SILO_CORE_URL must be: an absolute http or https
+// URL.
+func parseCoreURL(raw string) (*url.URL, bool) {
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return nil, false
+	}
+	return parsed, true
 }
 
 // loopbackHost reports whether host names this machine's loopback.

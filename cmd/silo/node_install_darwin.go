@@ -1,0 +1,803 @@
+//go:build darwin
+
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"golang.org/x/sys/unix"
+	"golang.org/x/term"
+
+	"github.com/Silo-Server/silo-server/internal/buildinfo"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/transcodenode"
+)
+
+const launchctlPath = "/bin/launchctl"
+
+// launchctlNotFound is launchctl print's exit status for a service its domain
+// does not have. Any other failure is an error, never "not loaded".
+const launchctlNotFound = 113
+
+// launchctlTimeout bounds each launchctl call on its own.
+const launchctlTimeout = 30 * time.Second
+
+// nodeServerReadyTimeout bounds the server's readiness probe before an install.
+const nodeServerReadyTimeout = 5 * time.Second
+
+// nodeReadyTimeout bounds the wait for a new node's health answer. The node
+// opens its port only once the server took its key.
+const nodeReadyTimeout = 60 * time.Second
+
+// nodeStopTimeout bounds the wait for a running node to drain and exit.
+const nodeStopTimeout = nodeExitTimeout + time.Minute
+
+// nodePollInterval is how often the installer looks at launchd and health.
+const nodePollInterval = 500 * time.Millisecond
+
+// nodeImageCopyHint is how to get the node binary that matches the server.
+const nodeImageCopyHint = "docker compose cp silo:/usr/share/silo/nodes/silo-darwin-arm64 ./silo"
+
+// errNodeStillLoaded is a stop whose deadline passed while launchd still had
+// the job, so the job is still there.
+var errNodeStillLoaded = errors.New("launchd still has the node's job")
+
+// nodeInstaller installs, upgrades and removes the per-user LaunchAgent.
+type nodeInstaller struct {
+	paths   nodeInstallPaths
+	service string // gui/<uid>/org.siloserver.node
+	domain  string // gui/<uid>
+	out     io.Writer
+}
+
+func newNodeInstaller(out io.Writer) (nodeInstaller, error) {
+	if os.Geteuid() == 0 {
+		return nodeInstaller{}, errors.New("run this as your own user, without sudo: the node is a LaunchAgent for that user")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nodeInstaller{}, err
+	}
+	domain := "gui/" + strconv.Itoa(os.Getuid())
+	return nodeInstaller{paths: nodeInstallPathsIn(home), domain: domain, service: domain + "/" + nodeLaunchdLabel, out: out}, nil
+}
+
+// nodeSignalContext ends at SIGINT or SIGTERM. After the first signal the
+// default handling is back, so a second one ends the process at once.
+func nodeSignalContext() (context.Context, context.CancelFunc) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	context.AfterFunc(ctx, stop)
+	return ctx, stop
+}
+
+func installNode(args []string, in io.Reader, out io.Writer) error {
+	given, help, err := parseNodeInstallFlags(args)
+	if err != nil {
+		return err
+	}
+	if help {
+		_, err := fmt.Fprintln(out, nodeInstallUsage)
+		return err
+	}
+	if !nodeBuild {
+		return errors.New("this silo build links Homebrew libraries, so a Homebrew upgrade can stop it from starting. " +
+			"Install the node binary from the server image instead:\n  " + nodeImageCopyHint + "\n  ./silo node install --server <URL> --key <KEY>")
+	}
+	n, err := newNodeInstaller(out)
+	if err != nil {
+		return err
+	}
+	// Everything is checked, and the key asked for once, before anything is
+	// written or locked, so a refused run leaves nothing behind.
+	stored, _, err := n.stored()
+	if err != nil {
+		return err
+	}
+	if merged := mergeNodeInstall(stored, given); merged.key == "" {
+		if err := merged.validateAllButKey(); err != nil {
+			return err
+		}
+		if given.key, err = promptNodeKey(in, out); err != nil {
+			return err
+		}
+	}
+	settings, err := resolveNodeInstall(stored, given)
+	if err != nil {
+		return err
+	}
+	if !playback.HomebrewFFmpegFull(playback.ResolveFFmpegPath("")) {
+		return errors.New("ffmpeg-full from Homebrew is not installed: run `brew install ffmpeg-full`, then run this again")
+	}
+	ctx, stopSignals := nodeSignalContext()
+	defer stopSignals()
+	if err := checkServerReady(ctx, settings.server); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(n.paths.dir, 0o700); err != nil {
+		return err
+	}
+	unlock, err := lockNodeInstall(n.paths.lock)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return n.installLocked(ctx, given, settings.server)
+}
+
+// installLocked reads the install again under the lock, since another run may
+// have changed it, and installs.
+func (n nodeInstaller) installLocked(ctx context.Context, given nodeInstallSettings, checkedServer string) error {
+	stored, extra, err := n.stored()
+	if err != nil {
+		return err
+	}
+	settings, err := resolveNodeInstall(stored, given)
+	if err != nil {
+		return err
+	}
+	if settings.server != checkedServer {
+		if err := checkServerReady(ctx, settings.server); err != nil {
+			return err
+		}
+	}
+	loaded, err := n.loaded(ctx)
+	if err != nil {
+		return err
+	}
+	if ours := loaded && stored.port == settings.port; !ours && nodePortTaken(ctx, settings.port) {
+		return fmt.Errorf("another program listens on port %d; choose a free one with --port", settings.port)
+	}
+	return n.install(ctx, settings, stored.port, extra)
+}
+
+// resolveNodeInstall lays the flags given over the stored install and
+// validates the result.
+func resolveNodeInstall(stored, given nodeInstallSettings) (nodeInstallSettings, error) {
+	settings := mergeNodeInstall(stored, given)
+	return settings, settings.validate()
+}
+
+// validate refuses settings the node would refuse at startup.
+func (s nodeInstallSettings) validate() error {
+	if err := s.validateAllButKey(); err != nil {
+		return err
+	}
+	if s.key == "" {
+		return errors.New("--key is required the first time: the key Admin > Nodes issued for this node")
+	}
+	if _, err := nodepool.ParseNodeKey(s.key); err != nil {
+		return fmt.Errorf("the node key is malformed (%w); copy the key Admin > Nodes issued", err)
+	}
+	return nil
+}
+
+func (s nodeInstallSettings) validateAllButKey() error {
+	if s.server == "" {
+		return errors.New("--server is required the first time: the Silo server's URL as this Mac reaches it, such as http://localhost:8090")
+	}
+	if _, ok := parseCoreURL(s.server); !ok {
+		return errors.New("--server must be an absolute http or https URL")
+	}
+	if _, err := quoteNodeEnv(s.server); err != nil {
+		return fmt.Errorf("--server: %w", err)
+	}
+	if s.port < 1 || s.port > 65535 {
+		return errors.New("--port must be between 1 and 65535")
+	}
+	return nil
+}
+
+// checkServerReady asks the server's readiness probe before anything
+// changes, so a run while the server restarts or migrates stops here.
+func checkServerReady(ctx context.Context, server string) error {
+	ctx, cancel := context.WithTimeout(ctx, nodeServerReadyTimeout)
+	defer cancel()
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	reason := ""
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(server, "/")+"/api/v1/ready", nil)
+	if err == nil {
+		var resp *http.Response
+		if resp, err = client.Do(req); err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+			reason = "its readiness check answered " + resp.Status
+		}
+	}
+	var urlErr *url.Error
+	switch {
+	case reason != "":
+	case errors.Is(err, context.Canceled):
+		return errors.New("interrupted")
+	case errors.Is(err, context.DeadlineExceeded):
+		reason = fmt.Sprintf("no answer within %d seconds", int(nodeServerReadyTimeout/time.Second))
+	case errors.As(err, &urlErr):
+		reason = urlErr.Err.Error()
+	default:
+		reason = err.Error()
+	}
+	return fmt.Errorf("the server at %s isn't ready yet (%s); run this again once it is", server, reason)
+}
+
+// stored reads the existing install's settings, all zero without one, and the
+// other variables its node.env carries.
+func (n nodeInstaller) stored() (nodeInstallSettings, map[string]string, error) {
+	env, err := os.ReadFile(n.paths.env)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nodeInstallSettings{}, nil, nil
+	}
+	if err != nil {
+		return nodeInstallSettings{}, nil, err
+	}
+	key, err := os.ReadFile(n.paths.key)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nodeInstallSettings{}, nil, err
+	}
+	return storedNodeInstall(env, key)
+}
+
+// install stages the new binary and settings beside the old ones, stops the
+// old job, swaps the files in and starts the new job. When the new job does
+// not start or become ready, or the run is interrupted, the previous files
+// and job come back.
+func (n nodeInstaller) install(ctx context.Context, settings nodeInstallSettings, oldPort int, extra map[string]string) error {
+	env, err := renderNodeEnv(settings, n.paths.key, extra)
+	if err != nil {
+		return err
+	}
+	for _, file := range []string{n.paths.log, n.paths.plist} {
+		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+			return err
+		}
+	}
+	swaps, err := n.stage(env, settings.key)
+	if err != nil {
+		discardStaged(swaps)
+		return err
+	}
+	oldPlist, err := os.ReadFile(n.paths.plist)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		discardStaged(swaps)
+		return err
+	}
+	if err := n.stopRunning(ctx, oldPlist != nil); err != nil {
+		discardStaged(swaps)
+		return err
+	}
+	logStart := fileSize(n.paths.log)
+	err = swapIn(swaps)
+	if err == nil {
+		err = writeNodeFile(n.paths.plist, renderNodePlist(n.paths), 0o644)
+	}
+	if err == nil {
+		err = n.bootstrap(ctx)
+	}
+	drained := false
+	if err == nil {
+		drained, err = waitNodeReady(ctx, settings)
+	}
+	if err != nil {
+		return n.failInstall(ctx, err, swaps, oldPlist, logStart)
+	}
+	for _, s := range swaps {
+		if s.hadOld {
+			_ = os.Remove(s.old())
+		}
+	}
+	return n.reportInstalled(settings, oldPort, drained)
+}
+
+// failInstall rolls back an install whose new job did not come up, with a
+// context of its own so an interrupted run still puts the previous node back.
+func (n nodeInstaller) failInstall(ctx context.Context, err error, swaps []nodeInstallSwap, oldPlist []byte, logStart int64) error {
+	if ctx.Err() != nil {
+		err = errors.New("interrupted")
+		_, _ = fmt.Fprintln(n.out, "Interrupted: putting the previous node back. Interrupt again to stop at once.")
+	}
+	tail := nodeLogTail(n.paths.log, logStart)
+	restoreCtx, cancel := context.WithTimeout(context.Background(), nodeStopTimeout)
+	defer cancel()
+	restored := "The previous node was restored."
+	if rollbackErr := n.rollback(restoreCtx, swaps, oldPlist); rollbackErr != nil {
+		restored = "Restoring the previous node failed: " + rollbackErr.Error()
+	} else if oldPlist == nil {
+		restored = "Nothing was installed."
+	}
+	return fmt.Errorf("%w\n%s\nLast lines of %s:\n%s", err, restored, n.paths.log, tail)
+}
+
+func (n nodeInstaller) reportInstalled(settings nodeInstallSettings, oldPort int, drained bool) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Installed the Silo transcode node (build %s).\nLog: %s\n", nodeVersion(buildinfo.Current()), n.paths.log)
+	if drained {
+		b.WriteString("The node is drained: an administrator resumes it in Admin > Nodes.\n")
+	}
+	if oldPort != 0 && oldPort != settings.port {
+		fmt.Fprintf(&b, "The port changed from %d to %d, so the node's URL in Admin > Nodes must change to port %d, "+
+			"such as http://host.docker.internal:%d for a server in Docker Desktop on this Mac.\n", oldPort, settings.port, settings.port, settings.port)
+	} else {
+		fmt.Fprintf(&b, "In Admin > Nodes, the node's URL must be one the server can reach. "+
+			"For a server in Docker Desktop on this Mac, use http://host.docker.internal:%d.\n", settings.port)
+	}
+	_, err := io.WriteString(n.out, b.String())
+	return err
+}
+
+// nodeInstallSwap is one installed file: its staged replacement and the
+// previous file, kept until the new node is ready.
+type nodeInstallSwap struct {
+	path   string
+	hadOld bool // the previous file is at old()
+	placed bool // the staged file is at path
+}
+
+func (s nodeInstallSwap) staged() string { return s.path + ".new" }
+func (s nodeInstallSwap) old() string    { return s.path + ".old" }
+
+// stage writes the new files beside the installed ones. The binary is copied
+// only when this is not already the installed binary.
+func (n nodeInstaller) stage(env []byte, key string) ([]nodeInstallSwap, error) {
+	var swaps []nodeInstallSwap
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	if !sameFile(exe, n.paths.binary) {
+		swaps = append(swaps, nodeInstallSwap{path: n.paths.binary})
+		if err := copyFile(exe, swaps[0].staged(), 0o755); err != nil {
+			return swaps, err
+		}
+	}
+	for _, file := range []struct {
+		path string
+		data []byte
+	}{{n.paths.env, env}, {n.paths.key, []byte(key + "\n")}} {
+		swaps = append(swaps, nodeInstallSwap{path: file.path})
+		if err := writeNodeFile(swaps[len(swaps)-1].staged(), file.data, 0o600); err != nil {
+			return swaps, err
+		}
+	}
+	return swaps, nil
+}
+
+// swapIn moves each previous file aside and its staged file into place,
+// recording how far it got for a rollback.
+func swapIn(swaps []nodeInstallSwap) error {
+	for i := range swaps {
+		s := &swaps[i]
+		if err := os.Rename(s.path, s.old()); err == nil {
+			s.hadOld = true
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		if err := os.Rename(s.staged(), s.path); err != nil {
+			return err
+		}
+		s.placed = true
+	}
+	return nil
+}
+
+func discardStaged(swaps []nodeInstallSwap) {
+	for _, s := range swaps {
+		_ = os.Remove(s.staged())
+	}
+}
+
+// rollback stops the new job, puts the previous files back, and starts the
+// previous job again; without one, it removes what the install added.
+func (n nodeInstaller) rollback(ctx context.Context, swaps []nodeInstallSwap, oldPlist []byte) error {
+	_, stopErr := n.stop(ctx, io.Discard)
+	errs := []error{stopErr}
+	for _, s := range swaps {
+		if !s.placed {
+			_ = os.Remove(s.staged())
+		}
+		switch {
+		case s.hadOld:
+			errs = append(errs, os.Rename(s.old(), s.path))
+		case s.placed:
+			errs = append(errs, os.Remove(s.path))
+		}
+	}
+	if oldPlist == nil {
+		if err := os.Remove(n.paths.plist); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			errs = append(errs, err)
+		}
+		return errors.Join(errs...)
+	}
+	errs = append(errs, writeNodeFile(n.paths.plist, oldPlist, 0o644))
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	return n.bootstrap(ctx)
+}
+
+func uninstallNode(out io.Writer) error {
+	n, err := newNodeInstaller(out)
+	if err != nil {
+		return err
+	}
+	ctx, stopSignals := nodeSignalContext()
+	defer stopSignals()
+	_, dirErr := os.Stat(n.paths.dir)
+	_, plistErr := os.Stat(n.paths.plist)
+	loaded, err := n.loaded(ctx)
+	if err != nil {
+		return err
+	}
+	if errors.Is(dirErr, fs.ErrNotExist) && errors.Is(plistErr, fs.ErrNotExist) && !loaded {
+		_, err := fmt.Fprintln(out, "No Silo transcode node is installed.")
+		return err
+	}
+	if dirErr == nil {
+		unlock, err := lockNodeInstall(n.paths.lock)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+	}
+	if err := n.stopRunning(ctx, plistErr == nil); err != nil {
+		return err
+	}
+	if err := os.Remove(n.paths.plist); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := os.RemoveAll(n.paths.dir); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(out, "Removed the Silo transcode node. Its log stays at %s.\n", n.paths.log)
+	return err
+}
+
+// launchctl runs one launchctl call with its own timeout, in a process group
+// of its own so a terminal's Ctrl-C does not cut it short; ctx still cancels
+// it. A canceled ctx is the error then.
+func (n nodeInstaller) launchctl(ctx context.Context, args ...string) ([]byte, error) {
+	callCtx, cancel := context.WithTimeout(ctx, launchctlTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(callCtx, launchctlPath, args...) //nolint:gosec // G204: launchctl on this user's own domain, job and plist.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	output, err := cmd.CombinedOutput()
+	switch {
+	case err == nil:
+		return output, nil
+	case ctx.Err() != nil:
+		return output, ctx.Err()
+	case callCtx.Err() != nil:
+		// Not an exit status: launchctl gave no answer in time.
+		return output, fmt.Errorf("launchctl %s gave no answer within %d seconds: %w", args[0], int(launchctlTimeout/time.Second), callCtx.Err())
+	default:
+		return output, fmt.Errorf("launchctl %s failed (%w): %s", args[0], err, strings.TrimSpace(string(output)))
+	}
+}
+
+// loaded reports whether launchd has the node's job. Only launchctl's "not
+// found" status means it does not; any other failure is an error.
+func (n nodeInstaller) loaded(ctx context.Context) (bool, error) {
+	_, err := n.launchctl(ctx, "print", n.service)
+	var exitErr *exec.ExitError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &exitErr) && exitErr.ExitCode() == launchctlNotFound:
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// stop boots the job out, if launchd has it, and waits until launchd no
+// longer has it. The node drains on SIGTERM, so this can take as long as its
+// streams. sent reports that the bootout went out, so the job may be on its
+// way down even when stop returns an error.
+func (n nodeInstaller) stop(ctx context.Context, out io.Writer) (sent bool, err error) {
+	loaded, err := n.loaded(ctx)
+	if err != nil || !loaded {
+		return false, err
+	}
+	if _, err := fmt.Fprintf(out, "Stopping the running node. It lets active streams finish first, which can take up to %d minutes.\n",
+		int(defaultNodeDrainTimeout/time.Minute)); err != nil {
+		return false, err
+	}
+	// The bootout is not canceled with ctx: once it starts it may have gone
+	// out, and its own timeout bounds it.
+	_, bootoutErr := n.launchctl(context.WithoutCancel(ctx), "bootout", n.service)
+	var exitErr *exec.ExitError
+	if errors.As(bootoutErr, &exitErr) {
+		// launchctl refused it: the job is gone, or it was left as it is.
+		if loaded, err := n.loaded(ctx); err != nil || loaded {
+			return false, errors.Join(bootoutErr, err)
+		}
+		return true, nil
+	}
+	// Sent, or still waiting for an answer when its timeout cut it off.
+	if err := n.waitGone(ctx, time.Now().Add(nodeStopTimeout)); err != nil {
+		if errors.Is(err, errNodeStillLoaded) {
+			err = fmt.Errorf("the running node did not stop within %d minutes: %w", int(nodeStopTimeout/time.Minute), err)
+		}
+		return true, err
+	}
+	return true, nil
+}
+
+// waitGone polls launchd until it no longer has the job. At deadline it
+// reports errNodeStillLoaded.
+func (n nodeInstaller) waitGone(ctx context.Context, deadline time.Time) error {
+	ticker := time.NewTicker(nodePollInterval)
+	defer ticker.Stop()
+	for {
+		loaded, err := n.loaded(ctx)
+		switch {
+		case err != nil:
+			return err
+		case !loaded:
+			return nil
+		case !time.Now().Before(deadline):
+			return errNodeStillLoaded
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// stopRunning stops the job for an install or uninstall. When the stop ends
+// early after the bootout went out, interrupted or on a launchctl error, the
+// job is started again from the plist still in place, so the node is not left
+// stopped.
+func (n nodeInstaller) stopRunning(ctx context.Context, hasPlist bool) error {
+	sent, err := n.stop(ctx, n.out)
+	if err == nil {
+		return nil
+	}
+	stillLoaded := errors.Is(err, errNodeStillLoaded)
+	if ctx.Err() != nil {
+		err = errors.New("interrupted")
+	}
+	if !sent || !hasPlist || stillLoaded {
+		return err
+	}
+	if ctx.Err() != nil {
+		_, _ = fmt.Fprintln(n.out, "Interrupted: the previous node starts again once it has stopped. "+
+			"Interrupt again to leave it stopped until the next login.")
+	}
+	restartCtx, cancel := context.WithTimeout(context.Background(), nodeStopTimeout)
+	defer cancel()
+	restartErr := n.waitGone(restartCtx, time.Now().Add(nodeStopTimeout))
+	if restartErr == nil {
+		restartErr = n.bootstrap(restartCtx)
+	}
+	if restartErr != nil {
+		return fmt.Errorf("%w\n%s", err, "Starting the previous node again failed: "+restartErr.Error())
+	}
+	return fmt.Errorf("%w\n%s", err, "The previous node is running again.")
+}
+
+func (n nodeInstaller) bootstrap(ctx context.Context) error {
+	if _, err := n.launchctl(ctx, "bootstrap", n.domain, n.paths.plist); err != nil {
+		return fmt.Errorf("%w; the node needs a logged-in user session", err)
+	}
+	return nil
+}
+
+// waitNodeReady polls the new node's health until it answers 200 as a
+// transcode node (node_control_version set) whose key the server took.
+// drained reports a node an administrator drained, which stays drained
+// across restarts and is ready all the same.
+func waitNodeReady(ctx context.Context, settings nodeInstallSettings) (drained bool, err error) {
+	ctx, cancel := context.WithTimeout(ctx, nodeReadyTimeout)
+	defer cancel()
+	client := &http.Client{Timeout: 2 * time.Second}
+	healthURL := "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(settings.port)) + "/api/v1/health"
+	ticker := time.NewTicker(nodePollInterval)
+	defer ticker.Stop()
+	var last string
+	for {
+		health, err := fetchNodeHealth(ctx, client, healthURL)
+		switch {
+		case err != nil:
+			last = err.Error()
+		case health.NodeControlVersion < 1:
+			last = "something other than a Silo transcode node answers on the port"
+		case health.KeyRejected:
+			return false, fmt.Errorf("the server at %s refused this node's key. Check that it is the key Admin > Nodes on that server last issued "+
+				"for this node, and that this Mac's clock is within 30 seconds of the server's", settings.server)
+		default:
+			return health.Status == transcodenode.HealthStatusDraining || health.Status == transcodenode.HealthStatusDrained, nil
+		}
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return false, ctx.Err()
+			}
+			return false, fmt.Errorf("the node was not ready within %d seconds (%s). It opens its port only once the server accepts its key, "+
+				"so check the key, that this Mac reaches the server at %s, and that this Mac's clock is right",
+				int(nodeReadyTimeout/time.Second), last, settings.server)
+		case <-ticker.C:
+		}
+	}
+}
+
+func fetchNodeHealth(ctx context.Context, client *http.Client, healthURL string) (transcodenode.HealthResponse, error) {
+	var health transcodenode.HealthResponse
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+	if err != nil {
+		return health, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return health, errors.New("no answer on the node's port")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return health, fmt.Errorf("health answered %d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&health); err != nil {
+		return health, errors.New("health answer unreadable")
+	}
+	return health, nil
+}
+
+// nodePortTaken reports whether something answers on port at this Mac's
+// loopback, which a port Docker Desktop publishes does. It connects rather
+// than binds, since a bind on every interface can raise the firewall's prompt.
+func nodePortTaken(ctx context.Context, port int) bool {
+	dialer := net.Dialer{Timeout: time.Second}
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		if conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port))); err == nil {
+			_ = conn.Close()
+			return true
+		}
+	}
+	return false
+}
+
+// promptNodeKey asks for the key, without echoing it, when stdin is a
+// terminal; otherwise it returns "" and validation asks for --key. An
+// interrupt at the prompt restores the terminal before the process ends.
+func promptNodeKey(in io.Reader, out io.Writer) (string, error) {
+	file, ok := in.(*os.File)
+	if !ok {
+		return "", nil
+	}
+	fd := int(file.Fd())
+	if !term.IsTerminal(fd) {
+		return "", nil
+	}
+	state, err := term.GetState(fd)
+	if err != nil {
+		return "", err
+	}
+	done := make(chan struct{})
+	defer close(done)
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	go func() {
+		select {
+		case <-signals:
+			_ = term.Restore(fd, state)
+			_, _ = fmt.Fprintln(out)
+			os.Exit(130)
+		case <-done:
+		}
+	}()
+	if _, err := fmt.Fprint(out, "Node key from Admin > Nodes (not shown): "); err != nil {
+		return "", err
+	}
+	key, err := term.ReadPassword(fd)
+	_, _ = fmt.Fprintln(out)
+	return strings.TrimSpace(string(key)), err
+}
+
+// lockNodeInstall holds an exclusive lock on path until the returned func
+// runs, so two installs cannot overlap.
+func lockNodeInstall(path string) (func(), error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // G304: the installer's own lock file.
+	if err != nil {
+		return nil, err
+	}
+	if err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		_ = file.Close()
+		if errors.Is(err, unix.EWOULDBLOCK) {
+			return nil, errors.New("another silo node install or uninstall is running")
+		}
+		return nil, err
+	}
+	return func() { _ = file.Close() }, nil
+}
+
+// writeNodeFile writes data to path with mode, whatever mode an existing file
+// had.
+func writeNodeFile(path string, data []byte, mode os.FileMode) error {
+	return writeNodeFileFrom(path, bytes.NewReader(data), mode)
+}
+
+func writeNodeFileFrom(path string, src io.Reader, mode os.FileMode) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode) //nolint:gosec // G304: a path under the user's own Library.
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(file, src)
+	err = errors.Join(err, file.Chmod(mode), file.Sync(), file.Close())
+	if err != nil {
+		_ = os.Remove(path)
+	}
+	return err
+}
+
+func copyFile(from, to string, mode os.FileMode) error {
+	src, err := os.Open(from) //nolint:gosec // G304: this process's own executable.
+	if err != nil {
+		return err
+	}
+	defer func() { _ = src.Close() }()
+	return writeNodeFileFrom(to, src, mode)
+}
+
+// sameFile reports whether a and b name one existing file.
+func sameFile(a, b string) bool {
+	aInfo, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bInfo, err := os.Stat(b)
+	return err == nil && os.SameFile(aInfo, bInfo)
+}
+
+func fileSize(path string) int64 {
+	if info, err := os.Stat(path); err == nil {
+		return info.Size()
+	}
+	return 0
+}
+
+// nodeLogTail returns the last lines the log gained after offset from, or the
+// log's last lines when it gained none.
+func nodeLogTail(path string, from int64) string {
+	const maxLines, maxBytes = 20, 64 << 10
+	file, err := os.Open(path) //nolint:gosec // G304: the node's own log.
+	if err != nil {
+		return "  (no log)"
+	}
+	defer func() { _ = file.Close() }()
+	size := fileSize(path)
+	if from >= size {
+		from = 0
+	}
+	from = max(from, size-maxBytes)
+	data, err := io.ReadAll(io.NewSectionReader(file, from, size-from))
+	if err != nil {
+		return "  (log unreadable)"
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	if len(lines) == 1 && lines[0] == "" {
+		return "  (empty)"
+	}
+	return "  " + strings.Join(lines, "\n  ")
+}

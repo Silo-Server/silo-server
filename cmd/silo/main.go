@@ -801,6 +801,11 @@ func addRedisBootstrapSettings(redisURL, redisURLVar string, configured map[stri
 
 // main starts the Silo server or a requested maintenance command.
 func main() {
+	// A node build has no image processing or web app, so it runs no
+	// subcommand but its own; flags still reach the transcode node.
+	if nodeBuild && len(os.Args) > 1 && os.Args[1] != "node" && !strings.HasPrefix(os.Args[1], "-") {
+		log.Fatal(nodeBuildOnly)
+	}
 	var storageAdmission *pglock.NodeAdmission
 	// The admission session is detached from the pool and lives until process
 	// exit. Worker Stop methods do not all wait for in-flight writes, so closing
@@ -872,6 +877,14 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "node" {
+		if err := runNodeCommand(os.Args[2:], os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "silo node: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	envFile := flag.String("env", ".env", "path to .env bootstrap file")
 	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
 	migrateStatus := flag.Bool("migrate-status", false, "show database migration status and exit")
@@ -904,6 +917,9 @@ func main() {
 	if !*migrateOnly && !*migrateStatus && *migrateDownTo < 0 && transcodeNodeMode(*envFile) {
 		runTranscodeNode()
 		return
+	}
+	if nodeBuild {
+		log.Fatal(nodeBuildOnly)
 	}
 
 	// Step 1: Bootstrap from .env
