@@ -147,7 +147,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        {/* min-w-0 lets a long sample title truncate instead of widening the page. */}
+        {/* min-w-0 lets a long sample title wrap inside the panels instead of widening the page. */}
         <div className="surface-panel min-w-0 rounded-2xl border-0 p-4">
           <h3 className="text-sm font-medium">{t("web.admin.tasks.detail.reasonBreakdown")}</h3>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -220,50 +220,56 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
         <div className="border-border border-b px-4 py-3">
           <h3 className="text-sm font-medium">{t("web.admin.tasks.detail.dueSamples")}</h3>
         </div>
-        <Table className="w-full">
-          <thead>
-            <tr className="border-border bg-muted/40 border-b">
-              <th className="px-4 py-2 text-start font-medium">
-                {t("web.admin.tasks.detail.columns.item")}
-              </th>
-              <th className="px-4 py-2 text-start font-medium">
-                {t("web.admin.tasks.detail.columns.nextRefresh")}
-              </th>
-              <th className="px-4 py-2 text-start font-medium">
-                {t("web.admin.tasks.detail.columns.attempts")}
-              </th>
-              <th className="px-4 py-2 text-start font-medium">
-                {t("web.admin.tasks.detail.columns.lastAttempt")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {metrics.due_samples.length === 0 && (
-              <tr>
-                <td colSpan={4} className="text-muted-foreground px-4 py-4 text-center">
-                  {t("web.admin.tasks.detail.noDueItems")}
-                </td>
+        {/* A plain wrapper, so the table's scroll container doesn't take the panel's
+            rounded corners under the header bar. */}
+        <div>
+          <Table>
+            <thead>
+              <tr className="border-border bg-muted/40 border-b">
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.columns.item")}
+                </th>
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.columns.nextRefresh")}
+                </th>
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.columns.attempts")}
+                </th>
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.columns.lastAttempt")}
+                </th>
               </tr>
-            )}
-            {metrics.due_samples.map((entry) => (
-              <tr key={entry.content_id} className="border-border border-b last:border-b-0">
-                <td className="px-4 py-2">
-                  <div className="font-medium wrap-anywhere">{refreshSampleTitle(t, entry)}</div>
-                  <div className="text-muted-foreground text-xs">
-                    {refreshItemTypeLabel(t, entry.type)}
-                  </div>
-                </td>
-                <td className="px-4 py-2 md:whitespace-nowrap">
-                  {formatDateTime(entry.next_refresh_at)}
-                </td>
-                <td className="px-4 py-2">{entry.attempt_count}</td>
-                <td className="px-4 py-2 md:whitespace-nowrap">
-                  {formatOptionalDateTime(entry.last_attempt_at)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {metrics.due_samples.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="text-muted-foreground px-4 py-4 text-center">
+                    {t("web.admin.tasks.detail.noDueItems")}
+                  </td>
+                </tr>
+              )}
+              {metrics.due_samples.map((entry) => (
+                <tr key={entry.content_id} className="border-border border-b last:border-b-0">
+                  <td className="px-4 py-2">
+                    <div className="min-w-32 font-medium wrap-anywhere">
+                      {refreshSampleTitle(t, entry)}
+                    </div>
+                    <div className="text-muted-foreground text-xs">
+                      {refreshItemTypeLabel(t, entry.type)}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2 md:whitespace-nowrap">
+                    {formatDateTime(entry.next_refresh_at)}
+                  </td>
+                  <td className="px-4 py-2">{entry.attempt_count}</td>
+                  <td className="px-4 py-2 md:whitespace-nowrap">
+                    {formatOptionalDateTime(entry.last_attempt_at)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
       </div>
     </div>
   );
