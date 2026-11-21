@@ -86,10 +86,12 @@ function ProfileRow({
         onCheckedChange={(value) => onToggle(keys(value === true), value === true)}
       />
       <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-baseline gap-2">
+        {/* When the name and detail don't fit on one line, the detail moves under the
+            name, and a name wider than the row wraps. */}
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <Label
             htmlFor={controlId}
-            className={cn("shrink-0 text-sm", !selectable && "text-muted-foreground")}
+            className={cn("text-sm wrap-anywhere", !selectable && "text-muted-foreground")}
           >
             {profile.name}
           </Label>
