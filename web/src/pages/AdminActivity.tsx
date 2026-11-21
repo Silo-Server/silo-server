@@ -1024,8 +1024,8 @@ function ProgressLine({ session }: { session: AdminSession }) {
       ) : null}
       <span className="max-w-full shrink-0 tabular-nums">{formatPlaybackPosition(session)}</span>
       {session.is_paused ? (
-        <span className="text-warning inline-flex shrink-0 items-center gap-1 font-medium">
-          <Pause aria-hidden="true" className="h-3 w-3" />
+        <span className="text-warning inline-flex max-w-full shrink-0 items-center gap-1 font-medium">
+          <Pause aria-hidden="true" className="h-3 w-3 shrink-0" />
           {t("web.admin.activity.row.paused")}
         </span>
       ) : (
