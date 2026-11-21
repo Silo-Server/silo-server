@@ -24261,10 +24261,10 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -24272,15 +24272,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Skrýt účty"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -24296,17 +24288,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -24314,15 +24304,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Skrýt soubory"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -24338,17 +24320,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -24356,15 +24336,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Skrýt soubory"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -24380,9 +24352,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -25003,10 +24973,10 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -25014,15 +24984,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Zobrazit účty"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -25038,9 +25000,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -25119,10 +25079,10 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -25130,15 +25090,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Zobrazit soubory"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -25154,17 +25106,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -25172,15 +25122,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Zobrazit soubory"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -25196,9 +25138,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -74866,7 +74806,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Znovu načtěte aktuální hodnoty. Zruší se vaše úpravy nastavení, která se změnila, a také úpravy uložených hesel a klíčů i nastavení, která s nimi souvisejí; ostatní úpravy zůstanou zachovány."
+      "value": "Načtením znovu zobrazíte aktuální hodnoty. Pokud se na této stránce něco změnilo nebo se některá z vašich úprav týká uloženého hesla či klíče, všechny vaše úpravy se zruší; jinak zůstanou zachovány."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -91676,6 +91616,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"

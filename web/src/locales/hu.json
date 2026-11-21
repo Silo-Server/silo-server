@@ -20451,14 +20451,22 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Fiók elrejtése"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Fiókok elrejtése"
             }
           ]
         },
@@ -20470,21 +20478,27 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Fájl elrejtése"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Fájlok elrejtése"
             }
           ]
         },
@@ -20496,21 +20510,27 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Fájl elrejtése"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Fájlok elrejtése"
             }
           ]
         },
@@ -20522,9 +20542,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -20877,14 +20895,22 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Fiók megjelenítése"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Fiókok megjelenítése"
             }
           ]
         },
@@ -20896,9 +20922,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -20945,14 +20969,22 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Fájl megjelenítése"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Fájlok megjelenítése"
             }
           ]
         },
@@ -20964,21 +20996,27 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Fájl megjelenítése"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Fájlok megjelenítése"
             }
           ]
         },
@@ -20990,9 +21028,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -60938,7 +60974,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Az aktuális értékek megtekintéséhez töltse be újra a beállításokat. A közben módosult beállításokon, valamint a mentett jelszavakon, kulcsokon és a hozzájuk tartozó beállításokon végzett változtatásai elvesznek; a többi változtatása megmarad."
+      "value": "Az aktuális értékek megtekintéséhez töltse be újra a beállításokat. Ha az oldalon valami megváltozott, vagy módosított egy mentett jelszót vagy kulcsot, az összes módosítása elvész; ellenkező esetben megmaradnak."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -77136,6 +77172,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"
