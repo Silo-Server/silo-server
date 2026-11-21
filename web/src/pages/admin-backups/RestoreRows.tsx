@@ -375,18 +375,21 @@ export const ItemRow = memo(function ItemRow({
         />
         <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
           {/* block: Label is a flex box, which would clip the name without an ellipsis.
-              Beside a detail, a one-line row stops the name at 60% and ends it in "…";
-              Chromium breaks at <wbr> even under nowrap, so that row hides them. A name
-              with nothing beside it wraps instead, so it is never cut short. A name
-              clips sideways only while part of it can't wrap to fit, such as one long
-              run of joined emoji; a one-line row with a detail truncates instead. */}
+              Beside a detail, a one-line row shares its width 3:2 between the name and
+              the detail, each no wider than its text, so either takes the room the other
+              doesn't need. Only when both are longer than their shares does the name
+              stop at 60% and end in "…"; Chromium breaks at <wbr> even under nowrap, so
+              that row hides them. A name with nothing beside it wraps instead, so it is
+              never cut short. A name clips sideways only while part of it can't wrap to
+              fit, such as one long run of joined emoji; a one-line row with a detail
+              truncates instead. */}
           <Label
             ref={nameRef}
             htmlFor={controlId}
             title={label}
             className={cn(
               "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
-              secondary && "@2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden",
+              secondary && "@2xl:max-w-max @2xl:flex-3 @2xl:truncate @2xl:[&_wbr]:hidden",
               nameOverflows && (secondary ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
               !item.selectable && "text-muted-foreground",
             )}
@@ -395,13 +398,13 @@ export const ItemRow = memo(function ItemRow({
           </Label>
           {secondary ? (
             // A library's line is its folder paths, which read left to right in any
-            // language, so they keep their start when cut short. w-fit keeps a short
-            // line under the name, on the page's start side; max-w-full stops a long
-            // one at the column's width so it is still cut short.
+            // language, so they keep their start when cut short. In a narrow row, w-fit
+            // keeps a short line under the name, on the page's start side; max-w-full
+            // stops a long one at the column's width so it is still cut short.
             <span
               title={secondary}
               dir={paths ? "ltr" : undefined}
-              className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs"
+              className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs @2xl:max-w-max @2xl:flex-2"
             >
               {paths ? <FolderPaths paths={paths} /> : secondary}
             </span>
