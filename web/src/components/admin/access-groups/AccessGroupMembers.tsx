@@ -335,7 +335,11 @@ export function AccessGroupMembers({
                 to={`/admin/users/${member.id}`}
                 className="hover:bg-accent/40 focus-visible:ring-ring/50 flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-md px-2 py-1.5 outline-none focus-visible:ring-[3px]"
               >
-                <span className="truncate font-medium">{member.username}</span>
+                {/* A cut username keeps its start in either script; w-fit keeps a short
+                    one on the page's start side. */}
+                <span dir="auto" className="w-fit max-w-full truncate font-medium">
+                  {member.username}
+                </span>
                 {/* Left to right unless it starts in a right-to-left script, so a cut
                     email keeps its start; w-fit keeps it on the page's start side. */}
                 {member.email ? (
@@ -520,7 +524,10 @@ function AddUsersDialog({
                         })
                       }
                     />
-                    <span className="min-w-0 truncate font-medium">{user.username}</span>
+                    {/* A cut username keeps its start in either script. */}
+                    <span dir="auto" className="min-w-0 truncate font-medium">
+                      {user.username}
+                    </span>
                     <span className="text-muted-foreground ms-auto shrink-0 truncate text-xs">
                       {user.access_group_id == null
                         ? t("web.admin.access.groups.addUsers.noGroup")

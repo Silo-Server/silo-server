@@ -497,7 +497,7 @@ export default function ConnectAppsSettings() {
                     login_url: `${siloURL}/login?local=1`,
                     activate_url: `${siloURL}/activate`,
                     url: (chunks) => (
-                      <span className="text-foreground font-mono break-all">{chunks}</span>
+                      <code className="text-foreground font-mono break-all">{chunks}</code>
                     ),
                   })
                 : t("web.settings.connectApps.noSiloSignIn.body")}
@@ -570,7 +570,7 @@ export default function ConnectAppsSettings() {
                   {t("web.settings.connectApps.provider.tvCode", {
                     activate_url: `${siloURL}/activate`,
                     url: (chunks) => (
-                      <span className="text-foreground font-mono break-all">{chunks}</span>
+                      <code className="text-foreground font-mono break-all">{chunks}</code>
                     ),
                   })}
                 </span>

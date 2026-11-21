@@ -1,6 +1,11 @@
 import { Fragment, memo, useId, useState, type ReactNode } from "react";
 
-import type { RestoreItem, RestoreSectionId, RestoreSetting } from "@/api/v2/adminBackupRestore";
+import type {
+  RestoreChange,
+  RestoreItem,
+  RestoreSectionId,
+  RestoreSetting,
+} from "@/api/v2/adminBackupRestore";
 import { RestartBadge } from "@/components/settings/RestartBadge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -94,11 +99,11 @@ function settingValues(t: Translate, setting: RestoreSetting): { now: string; ba
 /**
  * A setting key or dotted name that may break after its dots and underscores,
  * so a narrow column wraps "playback.watched_threshold" or "silo.tmdb 1.2.3"
- * between words, not inside one. A dot before a digit stays, keeping a version
- * number whole.
+ * between words, not inside one. A dot before a digit, another dot or a space
+ * stays, keeping a version number and an ellipsis whole.
  */
 export function BreakableKey({ value }: { value: string }) {
-  const parts = value.replace(/(_|\.(?=\D))/g, "$1\u0000").split("\u0000");
+  const parts = value.replace(/(_|\.(?=[^\d.\s]))/g, "$1\u0000").split("\u0000");
   return (
     <>
       {parts.map((part, position) => (
@@ -175,6 +180,40 @@ function SettingsDiff({ item }: { item: RestoreItem }) {
   );
 }
 
+/** The label of each change code but collection_items, which carries a count. */
+const CHANGE_LABELS: Record<Exclude<RestoreChange, "collection_items">, MessageKey> = {
+  type: "web.admin.backups.restore.rows.change.type",
+  title: "web.admin.backups.restore.rows.change.title",
+  title_translation: "web.admin.backups.restore.rows.change.titleTranslation",
+  position: "web.admin.backups.restore.rows.change.position",
+  featured: "web.admin.backups.restore.rows.change.featured",
+  item_limit: "web.admin.backups.restore.rows.change.itemLimit",
+  enabled: "web.admin.backups.restore.rows.change.enabled",
+  web_only: "web.admin.backups.restore.rows.change.webOnly",
+  collection_replaced: "web.admin.backups.restore.rows.change.collectionReplaced",
+  configuration: "web.admin.backups.restore.rows.change.configuration",
+  description: "web.admin.backups.restore.rows.change.description",
+  visibility: "web.admin.backups.restore.rows.change.visibility",
+  sort_order: "web.admin.backups.restore.rows.change.sortOrder",
+  item_sort: "web.admin.backups.restore.rows.change.itemSort",
+  source: "web.admin.backups.restore.rows.change.source",
+  sync_schedule: "web.admin.backups.restore.rows.change.syncSchedule",
+  poster: "web.admin.backups.restore.rows.change.poster",
+  backdrop: "web.admin.backups.restore.rows.change.backdrop",
+  libraries: "web.admin.backups.restore.rows.change.libraries",
+};
+
+/** One entry of a row's change list in the interface language. */
+function changeLabel(t: Translate, item: RestoreItem, change: RestoreChange): string {
+  if (change === "collection_items") {
+    const count = item.home_section?.missing_collection_items ?? 0;
+    return t("web.admin.backups.restore.rows.change.collectionItems", { count, count_text: count });
+  }
+  // Response enums are additive: a code this build has no label for, or an
+  // older server's English word, shows as sent rather than blank.
+  return Object.hasOwn(CHANGE_LABELS, change) ? t(CHANGE_LABELS[change]) : change;
+}
+
 /** Whether a row has anything for its chevron to open; cheap, unlike building it. */
 function hasItemDetails(item: RestoreItem): boolean {
   return Boolean(
@@ -192,15 +231,18 @@ function hasItemDetails(item: RestoreItem): boolean {
 /** What a row's chevron opens; null when there is nothing more to say. */
 function itemDetails(t: Translate, item: RestoreItem): ReactNode {
   const why = item.message || (item.reason ? t(REASON_SENTENCES[item.reason]) : undefined);
-  const changes = item.home_section?.changes ?? item.collection?.changes ?? [];
+  const changes: readonly RestoreChange[] =
+    item.home_section?.changes ?? item.collection?.changes ?? [];
   const settings = (item.settings ?? []).some((setting) => setting.status !== "on_this_server");
   const paths = item.library && item.library.paths.length > 1 ? item.library.paths : [];
   const missingPaths = item.library?.missing_paths ?? [];
+  // A status gets a block of its own: SettingFieldStatus is inline, so two in a
+  // row would share a line.
   const parts = [
     why ? (
-      <SettingFieldStatus key="why" tone={item.selectable ? "muted" : "warn"}>
-        {why}
-      </SettingFieldStatus>
+      <div key="why">
+        <SettingFieldStatus tone={item.selectable ? "muted" : "warn"}>{why}</SettingFieldStatus>
+      </div>
     ) : null,
     paths.length > 0 ? (
       // Paths read left to right in any language; w-fit keeps the list on the
@@ -212,20 +254,25 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
       </ul>
     ) : null,
     missingPaths.length > 0 ? (
-      <p key="missing-paths" className="text-xs text-amber-600 dark:text-amber-400">
+      <p key="missing-paths" className="text-xs wrap-anywhere text-amber-600 dark:text-amber-400">
         {t("web.admin.backups.restore.rows.cantOpen", { paths: missingPaths.join(", ") })}
       </p>
     ) : null,
     item.missing_blobs.length > 0 ? (
-      <SettingFieldStatus key="files" tone="warn">
-        {t("web.admin.backups.restore.rows.filesMissing", {
-          count: item.missing_blobs.length,
-          count_text: item.missing_blobs.length,
-        })}
-      </SettingFieldStatus>
+      <div key="files">
+        <SettingFieldStatus tone="warn">
+          {t("web.admin.backups.restore.rows.filesMissing", {
+            count: item.missing_blobs.length,
+            count_text: item.missing_blobs.length,
+          })}
+        </SettingFieldStatus>
+      </div>
     ) : null,
     item.restart_required ? (
-      <p key="restart" className="text-muted-foreground flex items-baseline gap-2 text-xs">
+      <p
+        key="restart"
+        className="text-muted-foreground flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-balance"
+      >
         <RestartBadge /> {t("web.admin.backups.restore.rows.restart")}
       </p>
     ) : null,
@@ -234,7 +281,7 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
         <p className="text-muted-foreground">{t("web.admin.backups.restore.rows.changes")}</p>
         <ul className="text-muted-foreground list-disc ps-5">
           {changes.map((change) => (
-            <li key={change}>{change}</li>
+            <li key={change}>{changeLabel(t, item, change)}</li>
           ))}
         </ul>
       </div>
@@ -275,8 +322,10 @@ export const ItemRow = memo(function ItemRow({
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
+        {/* Named from the plain label: Chromium reads a <wbr> in it as a space. */}
         <Checkbox
           id={controlId}
+          aria-label={label}
           checked={checked}
           disabled={!item.selectable}
           onCheckedChange={(value) => onToggle(toggleKeys(sectionId, item), value === true)}

@@ -170,6 +170,7 @@ function CopyField({
           and checked against the provider's form. */}
       <textarea
         id={valueId}
+        dir="ltr"
         readOnly
         rows={Math.max(1, Math.ceil(value.length / 34))}
         value={value}

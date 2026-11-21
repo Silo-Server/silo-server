@@ -72,7 +72,11 @@ function Dialog({ row }: { row: HomeRow }) {
   it by a data attribute instead.
 - **Right to left:** in an RTL language every printed string placeholder is
   wrapped in Unicode isolates, so a left-to-right title keeps its punctuation in
-  place. `select` and `plural` arguments are not. English bytes never change.
+  place. `select` and `plural` arguments are not, and neither is a placeholder
+  printed only as the whole content of a `code`, `url`, `address`, `mono` or `id`
+  tag (`<code>{command}</code>`), so it copies without invisible characters.
+  Render those tags as `<code>` elements, which app.css isolates (add
+  `[font-family:inherit]` for text that isn't monospace). English bytes never change.
 - **Web-only keys** may use `select` and rich-text tags:
   `"Read the <link>guide</link>"` with
   `t(id, { link: (chunks) => <a href={url}>{chunks}</a> })`, which returns React nodes.
@@ -114,7 +118,25 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   `env(safe-area-inset-*)` edges. Those files are in `PHYSICAL_DIRECTION` in
   `web/eslint.config.js`; a single line takes an `eslint-disable-next-line` with its
   reason; a `dir="ltr"` box keeps flex order and text there left to right. `pre` is
-  always left to right; inline `code`, `kbd` and `samp` take their text's direction.
+  always left to right; inline `code`, `kbd` and `samp` take their text's direction
+  unless they carry a `dir`.
+- An input or read-only field that holds a URL or server path sets `dir="ltr"`
+  (`SettingField` takes a `dir` prop); otherwise trailing `/` or `…` moves to the
+  start. When the field can show a translated placeholder or message instead, set
+  it only while it shows the URL or path (`dir={value ? "ltr" : undefined}`).
+  `dir="auto"` leaves an empty field's example in the page's direction, and
+  `type="url"` rejects addresses without a scheme.
+- A name that can be in either script and is cut with `truncate` (a username, say) takes
+  `dir="auto"`: it reads in the direction of its first strong character (a letter, or
+  right-to-left punctuation such as `؟`), and left to right when it has none, as a name
+  made only of digits does. A name in one script then keeps its start. In a name that
+  mixes directions, a part that runs the other way, such as a long run of digits before
+  Arabic letters, can still lose its own start; no `dir` avoids that for every name.
+  Where the box would stretch (a block, a `flex-col` child), size it to its text with
+  `w-fit max-w-full` so a short name stays on the page's start side. A `flex-1` item
+  can't be sized that way: keep `flex-1` on a wrapper and put the name in a
+  `block w-fit max-w-full` span inside it. Don't use `.bidi-text` for this: its
+  `unicode-bidi: plaintext` drops the "…" in Firefox and cuts the start in WebKit.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also

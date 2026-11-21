@@ -36,6 +36,21 @@ export function emailDir(email: string): "ltr" | undefined {
   return first !== undefined && RTL_CHAR.test(first) ? undefined : "ltr";
 }
 
+// A letter, or a directional mark (LRM, RLM, ALM), which also sets direction.
+const LETTER_OR_MARK = /[\p{L}\u200E\u200F\u061C]/u;
+const RIGHT_TO_LEFT = /[\p{Script=Arabic}\p{Script=Hebrew}\u200F\u061C]/u;
+
+/**
+ * Whether text reads right to left, judged by its first letter or directional
+ * mark as `dir="auto"` does (digits, spaces and punctuation don't count). For
+ * text the browser can't judge itself, such as an empty field's placeholder,
+ * which `dir="auto"` ignores.
+ */
+export function startsRightToLeft(text: string): boolean {
+  const strong = LETTER_OR_MARK.exec(text);
+  return strong !== null && RIGHT_TO_LEFT.test(strong[0]);
+}
+
 /**
  * The arrow key as it reads along the element's direction: right to left,
  * ArrowLeft and ArrowRight swap, so "ArrowRight" always means forward (the

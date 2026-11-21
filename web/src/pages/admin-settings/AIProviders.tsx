@@ -179,6 +179,9 @@ function ProviderRow({
   const type = types.find((candidate) => candidate.type === provider.type);
   const [monogram, monogramClass] = TYPE_MONOGRAMS[provider.type];
   const inUse = provider.used_by.length > 0;
+  // A declared provider's open panel edits nothing, so its row keeps its
+  // usage status rather than saying it is being edited.
+  const editing = expanded && provider.managed_by_env_var == null;
   return (
     <ProviderTile
       name={provider.name}
@@ -199,9 +202,9 @@ function ProviderRow({
           ? t("web.admin.settings.ai.providers.usedBy", { jobs: usedByLabel(t, provider.used_by) })
           : t("web.admin.settings.ai.providers.notUsed")
       }
-      state={expanded ? "editing" : inUse ? "connected" : "not_connected"}
+      state={editing ? "editing" : inUse ? "connected" : "not_connected"}
       statePill={
-        expanded
+        editing
           ? undefined
           : inUse
             ? t("web.admin.settings.ai.tile.inUse")
@@ -211,7 +214,10 @@ function ProviderRow({
       primaryAction={{ label: t("web.admin.settings.ai.tile.manage"), onClick: onExpand }}
     >
       {expanded && type ? (
+        // Remounted when the deployment takes the provider over or releases
+        // it, so no draft or test result from before carries across.
         <ProviderPanel
+          key={provider.managed_by_env_var ?? ""}
           provider={provider}
           type={type}
           initial={draftOf(provider)}
@@ -445,7 +451,7 @@ function ProviderPanel({
   onCreated?: (provider: AIProvider) => void;
 }) {
   const t = useT();
-  const [draft, setDraft] = useState<AIProviderDraft>(initial);
+  const [editDraft, setDraft] = useState<AIProviderDraft>(initial);
   const [test, setTest] = useState<ProviderTestState | undefined>();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const create = useCreateAIProvider();
@@ -453,6 +459,12 @@ function ProviderPanel({
   const remove = useDeleteAIProvider();
   const check = useCheckAIProvider();
   const custom = type.capabilities.length === 0;
+  // The deployment declares this provider; the server refuses edits to it.
+  const managedByEnv = provider?.managed_by_env_var;
+  const locked = managedByEnv != null;
+  // A locked panel shows and tests the stored provider, including one the
+  // deployment took over while an admin had edits open here.
+  const draft = locked ? initial : editDraft;
   const keyCleared = draft.api_key === "" && provider?.has_api_key === true;
   const dirty =
     !provider ||
@@ -529,17 +541,29 @@ function ProviderPanel({
 
   return (
     <div>
+      {managedByEnv ? (
+        // A row of its own, spaced and divided like the fields, so the note
+        // reads as covering the whole panel rather than the name.
+        <div className="border-border/60 border-b py-3.5">
+          <SettingFieldStatus tone="muted">
+            {t("web.admin.settings.fields.managedByEnv", { env: managedByEnv })}
+          </SettingFieldStatus>
+        </div>
+      ) : null}
       <SettingField
         label={t("web.admin.settings.ai.providers.name")}
         value={draft.name}
         onChange={(name) => change({ name })}
+        disabled={locked}
       />
       <SettingField
         label={t("web.admin.settings.ai.providers.baseUrl")}
         value={draft.base_url}
         onChange={(base_url) => change({ base_url })}
+        disabled={locked}
         // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
         hint={type.default_base_url || "https://llm.example.net/v1"}
+        dir="ltr"
         description={
           custom
             ? t("web.admin.settings.ai.providers.baseUrlCustom")
@@ -563,7 +587,16 @@ function ProviderPanel({
         onKeep={() => change({ api_key: undefined })}
         onClear={provider?.has_api_key ? () => change({ api_key: "" }) : undefined}
         cleared={keyCleared}
-        hint={type.key_required ? undefined : t("web.admin.settings.ai.providers.apiKeyOptional")}
+        // A declared provider's key can't be replaced here, so it gets no
+        // editing hint; an empty hint replaces the field's default one.
+        hint={
+          locked
+            ? ""
+            : type.key_required
+              ? undefined
+              : t("web.admin.settings.ai.providers.apiKeyOptional")
+        }
+        disabled={locked}
       />
       {custom ? (
         <SettingFieldRow
@@ -582,6 +615,7 @@ function ProviderPanel({
                   key={capability}
                   type="button"
                   aria-pressed={on}
+                  disabled={locked}
                   onClick={() =>
                     change({
                       capabilities: on
@@ -593,6 +627,7 @@ function ProviderPanel({
                   }
                   className={cn(
                     "border-border hover:bg-accent rounded-md border px-3 py-1.5 text-xs transition-colors",
+                    "disabled:pointer-events-none disabled:opacity-50",
                     on && "border-primary bg-primary/5 text-primary",
                   )}
                 >
@@ -609,7 +644,7 @@ function ProviderPanel({
             {t("common.back")}
           </Button>
         ) : null}
-        {provider ? (
+        {provider && !locked ? (
           <Button
             type="button"
             size="sm"
@@ -642,20 +677,20 @@ function ProviderPanel({
         <Button type="button" size="sm" variant="outline" onClick={onDone} disabled={busy}>
           {dirty ? t("common.cancel") : t("web.admin.settings.ai.tile.close")}
         </Button>
-        {dirty ? (
+        {dirty && !locked ? (
           <Button type="button" size="sm" onClick={() => void save()} disabled={busy}>
             {provider ? t("common.save") : t("web.admin.settings.ai.providers.addSubmit")}
           </Button>
         ) : null}
       </ProviderPanelActions>
-      {provider && provider.used_by.length > 0 ? (
+      {provider && !locked && provider.used_by.length > 0 ? (
         <p className="text-muted-foreground mt-2 text-xs">
           {t("web.admin.settings.ai.providers.usedByNote", {
             jobs: usedByLabel(t, provider.used_by),
           })}
         </p>
       ) : null}
-      {provider ? (
+      {provider && !locked ? (
         <ConfirmDialog
           open={confirmDelete}
           onOpenChange={setConfirmDelete}
@@ -675,9 +710,11 @@ function ProviderPanel({
 // Embedding provider
 // ---------------------------------------------------------------------------
 
-const ADD_PROVIDER = "add";
+// The select's own choices use underscores, which no provider id can contain
+// (a deployment chooses its providers' ids), so they never collide with one.
+const ADD_PROVIDER = "__add__";
 /** Releases the embedding provider, so it can be removed once nothing uses it. */
-const NO_EMBEDDING_PROVIDER = "none";
+const NO_EMBEDDING_PROVIDER = "__none__";
 
 /**
  * Chooses the provider recommendation embeddings use, and connects a new one
@@ -689,11 +726,14 @@ export function EmbeddingProviderField({
   onChange,
   disabled,
   restartRequired,
+  managedByEnv,
 }: {
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
   restartRequired?: boolean;
+  /** The variable that sets the embedding provider; locks the choice. */
+  managedByEnv?: string;
 }) {
   const t = useT();
   const list = useAIProviders();
@@ -717,6 +757,7 @@ export function EmbeddingProviderField({
         value={value || NO_EMBEDDING_PROVIDER}
         disabled={disabled || list.isLoading}
         restartRequired={restartRequired}
+        managedByEnv={managedByEnv}
         description={t("web.admin.settings.ai.embeddingProvider.description")}
         onChange={(next) => {
           if (next === ADD_PROVIDER) setAdding(true);
