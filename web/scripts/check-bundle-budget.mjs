@@ -163,7 +163,8 @@ function measure() {
     webkitOnlyBackdropRules(readFileSync(path.join(distDir, file), "utf8")).map(
       (selector) =>
         `${file}: ${selector} sets -webkit-backdrop-filter without backdrop-filter, ` +
-        "so Chrome and Firefox draw it without blur. Put -webkit-backdrop-filter first in the source.",
+        "so Chrome and Firefox draw it without blur. " +
+        "Declare backdrop-filter after -webkit-backdrop-filter in the source.",
     ),
   );
   return {
