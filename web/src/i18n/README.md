@@ -127,12 +127,16 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   `dir="auto"` leaves an empty field's example in the page's direction, and
   `type="url"` rejects addresses without a scheme.
 - A path or URL shown as text (a `code` block, a list of folders) also sets `dir="ltr"`,
-  and the block that holds it takes `align-with-page` (in `app.css`). Its lines, wrapped or
-  not, then align the way its parent's lines do: on the page's start side when the parent
-  is start-aligned, like the text around them. Without the class, an inherited `start`
-  resolves against the block's own direction and puts every line at its left edge.
-  Firefox and Safari don't show this inside a list item, where they right-align the lines
-  anyway, so check in Chromium.
+  and the block that holds it takes `align-with-page` (in `app.css`). The class gives the
+  block its parent's `text-align`, with `start` and `end` resolved in the parent's
+  direction, so under a start-aligned parent that runs in the page's direction every line,
+  wrapped or not, sits on the page's start side. Without it, an inherited `start` resolves
+  against the block's own direction and puts every line at its left edge. Chromium shows
+  that wherever it happens; Firefox and Safari give `li` `text-align: match-parent`, so
+  inside a right-to-left list item they right-align the lines anyway. Where the block
+  would stretch, also give it `w-fit`, without `max-w-full`: a folder name that can't
+  wrap, such as one long emoji sequence, then widens the block toward the page's end side,
+  as it would in English, instead of running past its start edge.
 - A name that can be in either script and is cut with `truncate` (a username, say) takes
   `dir="auto"`: it reads in the direction of its first strong character (a letter, or
   right-to-left punctuation such as `؟`), and left to right when it has none, as a name
@@ -146,9 +150,12 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   `max-w-max` can't stretch, so it can take `dir="auto"` itself unless it also carries
   a logical margin, padding or border (`ms-auto`, `pe-2`, `border-s`): those follow
   the element's own direction, so keep them on the outer element and put the name in
-  a `block` span inside it. `.bidi-text` alone doesn't keep the start: its
-  `unicode-bidi: plaintext` leaves the box in the page's direction, so Firefox drops
-  the "…" and WebKit cuts the start.
+  a `block` span inside it. A name that can also wrap takes `align-with-page`, so its
+  wrapped lines stay on the page's start side in every browser; Chromium otherwise puts
+  them on the name's own start side. A clip, or a measurement of whether the name
+  overflows, goes on the name's own box, since it overflows toward its own end.
+  `.bidi-text` alone doesn't keep the start: its `unicode-bidi: plaintext` leaves the box
+  in the page's direction, so Firefox drops the "…" and WebKit cuts the start.
 - A name inside a longer line (a name and "(you)", a sentence that names someone, a
   name and a device) takes `dir="auto"` on its own element, never on the line, where
   the name's script would set the direction of the translated words too. Pass that
@@ -178,7 +185,8 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   own direction; without it, folders named in Arabic swap places. An email cut with
   `truncate` takes `dir={emailDir(email)}` (`src/lib/direction.ts`), which keeps one
   with an Arabic name part in the page's direction; `dir="auto"` would turn it right
-  to left on a left-to-right page. Size either element as for a name, above.
+  to left on a left-to-right page. Size a cut one as for a name, above; a path that
+  wraps instead follows the path or URL rule above.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also

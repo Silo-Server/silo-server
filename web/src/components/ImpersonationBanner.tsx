@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 
 import { useRootHeightProperty } from "@/hooks/useRootHeightProperty";
 import { useT } from "@/i18n";
+import { getInitial } from "@/lib/text";
 
 /**
  * A message part split into its edge spaces and the words between them. A
@@ -60,7 +61,7 @@ export default function ImpersonationBanner({
     }
   }
 
-  const initial = userName.charAt(0).toUpperCase() || "?";
+  const initial = getInitial(userName) || "?";
   // The authorizing name keeps at least a letter and "…" before the words around
   // it give way. A short name is kept whole instead: a fixed floor wider than
   // the name would leave a gap after it.

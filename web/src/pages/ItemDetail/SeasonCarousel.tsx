@@ -108,7 +108,7 @@ export default function SeasonCarousel({ seasons, libraryId }: SeasonCarouselPro
                 onPrefetch={() => prefetchSeason(season.content_id)}
                 className="block px-0.5 pt-2.5"
               >
-                <div className="truncate text-[0.8125rem] font-semibold">
+                <div dir="auto" className="bidi-text truncate text-[0.8125rem] font-semibold">
                   {getSeasonDisplayTitle(season)}
                 </div>
                 <div className="text-muted-foreground text-xs">

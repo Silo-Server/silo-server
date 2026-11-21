@@ -167,7 +167,9 @@ export function CuratedTitlesEditor({
         ) : null}
       </div>
 
-      <div className="grid gap-2">
+      {/* grid-cols-1 holds the column to the editor's width. An implicit auto
+          column grows to fit the longest title instead of cutting it. */}
+      <div className="grid grid-cols-1 gap-2">
         <span id={listId} className="text-muted-foreground text-[13px]">
           {t("web.home.addRow.curated.inOrder", { titles: titleCount(itemIds.length) })}
         </span>
@@ -182,7 +184,13 @@ export function CuratedTitlesEditor({
           >
             {itemIds.map((id, index) => (
               <li key={id} className="flex items-center gap-1 py-1.5 ps-3 pe-1.5 text-sm">
-                <span className="min-w-0 flex-1 truncate">{nameOf(id)}</span>
+                {/* A cut title keeps its start in either script; w-fit keeps a
+                    short one on the page's start side. */}
+                <span className="min-w-0 flex-1">
+                  <span dir="auto" className="block w-fit max-w-full truncate">
+                    {nameOf(id)}
+                  </span>
+                </span>
                 <Button
                   type="button"
                   size="icon"

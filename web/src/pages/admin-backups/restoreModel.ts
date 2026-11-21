@@ -1,5 +1,6 @@
 import { t, type MessageKey, type TextValues } from "@/i18n";
 import { appLanguage } from "@/lib/appLocale";
+import { emailDir } from "@/lib/direction";
 import { DATA_TYPE_IDS, DATA_TYPE_PHRASES, pendingCount } from "@/lib/profileDataTypes";
 import type {
   RestoreDataTypeId,
@@ -207,6 +208,23 @@ function brandingName(key: string): string {
 /** An item's name for display: branding items carry a setting key as their label. */
 export function displayLabel(item: { kind: RestoreItem["kind"]; label: string }): string {
   return item.kind === "branding" ? capitalize(brandingName(item.label)) : item.label;
+}
+
+/**
+ * The `dir` for an item's name in a restore row. A name reads in its own direction,
+ * so one cut short keeps its start in either script. An account named by its email
+ * (an invited account, or one with no username) reads as emails do in the other admin
+ * lists (`emailDir`); an account the backup can't restore carries no `account`, so a
+ * label with an `@` after its first character counts as its email. A branding item's
+ * name is interface text, so it follows the page.
+ */
+export function nameDir(item: Pick<RestoreItem, "kind" | "label" | "account">) {
+  if (item.kind === "branding") return undefined;
+  if (item.kind !== "account") return "auto";
+  const namedByEmail = item.account
+    ? item.label === item.account.email
+    : item.label.indexOf("@") > 0;
+  return namedByEmail ? emailDir(item.label) : "auto";
 }
 
 function itemName(entry: IndexEntry): string {

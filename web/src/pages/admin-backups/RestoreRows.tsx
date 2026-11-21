@@ -23,7 +23,7 @@ import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 
 import { RowDisclosure } from "./Disclosure";
 import { itemState, type ItemState } from "./restoreGroups";
-import { REASON_SENTENCES, displayLabel, toggleKeys } from "./restoreModel";
+import { REASON_SENTENCES, displayLabel, nameDir, toggleKeys } from "./restoreModel";
 import { useOverflowsInline } from "./useOverflowsInline";
 
 /** Toggles item keys; stable for the page's life so memoized rows don't re-render. */
@@ -273,12 +273,14 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
     ) : null,
     paths.length > 0 ? (
       // Paths read left to right in any language; align-with-page keeps each line,
-      // a short path's or a wrapped one's, on the page's start side.
+      // a short path's or a wrapped one's, on the page's start side. w-fit lets a
+      // folder name that can't wrap widen the list toward the page's end side
+      // instead of running past its start edge.
       <ul
         key="paths"
         dir="ltr"
         className={cn(
-          "text-muted-foreground align-with-page font-mono text-xs break-all",
+          "text-muted-foreground align-with-page w-fit font-mono text-xs break-all",
           KEEP_SPACES,
         )}
       >
@@ -357,7 +359,7 @@ export const ItemRow = memo(function ItemRow({
   const details = open ? itemDetails(t, item) : null;
   const hasDetails = hasItemDetails(item);
   const label = displayLabel(item);
-  const [nameRef, nameOverflows] = useOverflowsInline<HTMLLabelElement>(label);
+  const [nameRef, nameOverflows] = useOverflowsInline<HTMLSpanElement>(label);
   const paths = item.kind === "library" ? item.library?.paths : undefined;
   // The row is its own container, since its width depends on the admin sidebar and
   // restore summary as much as on the viewport. A narrow row wraps the whole name
@@ -374,27 +376,40 @@ export const ItemRow = memo(function ItemRow({
           onCheckedChange={(value) => onToggle(toggleKeys(sectionId, item), value === true)}
         />
         <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
-          {/* block: Label is a flex box, which would clip the name without an ellipsis.
-              Beside a detail, a one-line row shares its width 3:2 between the name and
+          {/* Beside a detail, a one-line row shares its width 3:2 between the name and
               the detail, each no wider than its text, so either takes the room the other
               doesn't need. Only when both are longer than their shares does the name
               stop at 60% and end in "…"; Chromium breaks at <wbr> even under nowrap, so
               that row hides them. A name with nothing beside it wraps instead, so it is
               never cut short. A name clips sideways only while part of it can't wrap to
               fit, such as one long run of joined emoji; a one-line row with a detail
-              truncates instead. */}
+              truncates instead. The label spans a narrow row's column, so a click
+              anywhere on it toggles the row, and min-w-0 lets it shrink to its share of
+              a one-line row. The name inside reads in its own direction and is sized to
+              its text: a short one stays on the page's start side, and a cut or clipped
+              one keeps its start in either script. Its lines line up with the page's
+              (align-with-page), so a wrapped one stays beside the checkbox. It is the box
+              that's cut, measured and clipped, since it overflows toward its own end. */}
           <Label
-            ref={nameRef}
             htmlFor={controlId}
             title={label}
             className={cn(
               "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
-              secondary && "@2xl:max-w-max @2xl:flex-3 @2xl:truncate @2xl:[&_wbr]:hidden",
-              nameOverflows && (secondary ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
+              secondary && "@2xl:max-w-max @2xl:min-w-0 @2xl:flex-3",
               !item.selectable && "text-muted-foreground",
             )}
           >
-            <BreakableKey value={label} />
+            <span
+              ref={nameRef}
+              dir={nameDir(item)}
+              className={cn(
+                "align-with-page block w-fit max-w-full",
+                secondary && "@2xl:truncate @2xl:[&_wbr]:hidden",
+                nameOverflows && (secondary ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
+              )}
+            >
+              <BreakableKey value={label} />
+            </span>
           </Label>
           {secondary ? (
             // A library's line is its folder paths, which read left to right in any
@@ -458,9 +473,12 @@ export const SameRow = memo(function SameRow({
   const label = displayLabel(item);
   return (
     <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-[13px]">
+      {/* The name reads in its own direction, so a part that can't wrap is clipped
+          at the name's end rather than its start; its lines line up with the page's. */}
       <span
         title={label}
-        className="-mx-[0.25em] block min-w-0 overflow-x-clip px-[0.25em] text-pretty wrap-anywhere"
+        dir={nameDir(item)}
+        className="align-with-page -mx-[0.25em] block min-w-0 overflow-x-clip px-[0.25em] text-pretty wrap-anywhere"
       >
         <BreakableKey value={label} />
       </span>

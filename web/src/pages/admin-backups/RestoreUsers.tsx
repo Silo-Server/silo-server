@@ -14,6 +14,7 @@ import { itemState } from "./restoreGroups";
 import { BreakableKey, StateTag, type ToggleKeys } from "./RestoreRows";
 import {
   REASON_SENTENCES,
+  nameDir,
   policyDifferenceSentence,
   profileKey,
   requiredPrimary,
@@ -105,17 +106,19 @@ function ProfileRow({
       <div className="min-w-0 flex-1">
         {/* When the name and detail don't fit on one line, the detail moves under the
             name, and a name wider than the row wraps; as a block, its words wrap at the
-            row's width. A name that still overflows is clipped sideways at the row's end
-            edge, and its title shows it in full. The start padding, offset by a negative
-            margin, keeps a first letter whole whose ink reaches before its box, such as
-            a leading "j". */}
+            row's width. A name that still overflows is clipped sideways at its end edge,
+            and its title shows it in full. It reads in its own direction, so the clipped
+            end is the name's end in either script, and its lines line up with the
+            page's. The start padding, offset by a negative margin, keeps a first letter
+            whole whose ink reaches before its box, such as a leading "j". */}
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <Label
             ref={nameRef}
             htmlFor={controlId}
             title={profile.name}
+            dir="auto"
             className={cn(
-              "block min-w-0 text-sm wrap-anywhere",
+              "align-with-page block min-w-0 text-sm wrap-anywhere",
               nameOverflows && "-ms-[0.25em] overflow-x-clip ps-[0.25em]",
               !selectable && "text-muted-foreground",
             )}
@@ -180,7 +183,7 @@ export const AccountRow = memo(function AccountRow({
   const controlId = useId();
   const detailsId = useId();
   const [open, setOpen] = useState(false);
-  const [nameRef, nameOverflows] = useOverflowsInline<HTMLLabelElement>(item.label);
+  const [nameRef, nameOverflows] = useOverflowsInline<HTMLSpanElement>(item.label);
   // The merge line exists only while the details are open, so opening them measures it.
   const [mergeRef, mergeOverflows] = useOverflowsInline<HTMLParagraphElement>(open && item);
   const account = item.account;
@@ -227,7 +230,7 @@ export const AccountRow = memo(function AccountRow({
   // names another account; the details show the admin role and the status. The badge
   // can cut a long merge destination short, so the details show a merge in full at
   // every width. As in ItemRow, a name clips sideways only while part of it can't wrap
-  // to fit: in the label, and in the merge status, which names the account it merges
+  // to fit: in the name, and in the merge status, which names the account it merges
   // into.
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
@@ -241,22 +244,29 @@ export const AccountRow = memo(function AccountRow({
           onCheckedChange={(value) => onToggle(toggleKeys("users", item), value === true)}
         />
         <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
+          {/* As in ItemRow: the label spans a narrow row's column, and the name inside
+              reads in its own direction and is sized to its text. That also keeps an
+              address that starts with digits in order on a right-to-left page. */}
           <Label
-            ref={nameRef}
             htmlFor={controlId}
             title={item.label}
             className={cn(
               "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
-              contact && "@2xl:max-w-max @2xl:flex-9 @2xl:truncate @2xl:[&_wbr]:hidden",
-              nameOverflows && (contact ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
+              contact && "@2xl:max-w-max @2xl:min-w-0 @2xl:flex-9",
               !item.selectable && "text-muted-foreground",
             )}
           >
-            {/* <bdi> reads the name in its own direction, so an address that starts
-                with digits stays in order on a right-to-left page. */}
-            <bdi>
+            <span
+              ref={nameRef}
+              dir={nameDir(item)}
+              className={cn(
+                "align-with-page block w-fit max-w-full",
+                contact && "@2xl:truncate @2xl:[&_wbr]:hidden",
+                nameOverflows && (contact ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
+              )}
+            >
               <BreakableKey value={item.label} />
-            </bdi>
+            </span>
           </Label>
           {contact ? (
             // Without the pending summary the line is the email (the label is the
