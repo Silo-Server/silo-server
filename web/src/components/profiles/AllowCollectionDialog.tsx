@@ -88,8 +88,12 @@ function ProfileLabel({ profile, note }: { profile: Profile; note?: string }) {
         {profile.avatar_url ? <AvatarImage src={profile.avatar_url} alt="" /> : null}
         <AvatarFallback>{profile.name.slice(0, 1).toUpperCase()}</AvatarFallback>
       </Avatar>
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm font-medium">{profile.name}</span>
+      <span className="flex min-w-0 flex-1 basis-24 flex-col">
+        {/* A cut name keeps its start in either script; w-fit keeps a short one
+            on the page's start side. */}
+        <span dir="auto" className="w-fit max-w-full truncate text-sm font-medium">
+          {profile.name}
+        </span>
         <span className="text-muted-foreground text-xs">
           {[limit && t("web.profiles.allow.limit", { limit }), note].filter(Boolean).join(" · ")}
         </span>
@@ -128,7 +132,9 @@ function CopyRow({ profile, collectionId }: { profile: Profile; collectionId: st
   const copy = useAllowCollectionTitles();
   const [added, setAdded] = useState<number | null>(null);
   return (
-    <li className="flex items-center gap-3 rounded-md px-2 py-2">
+    // Wraps: the button moves to its own line before it squeezes the name below
+    // ProfileLabel's basis-24.
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md px-2 py-2">
       <ProfileLabel
         profile={profile}
         note={
