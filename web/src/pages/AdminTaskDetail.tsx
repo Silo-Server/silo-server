@@ -345,6 +345,7 @@ function TaskSchedulePanel({
             <Button
               variant="outline"
               size="sm"
+              className="h-auto min-h-8 max-w-full py-1 text-start whitespace-normal"
               onClick={() => {
                 setDraft([...draft, { type: "interval", interval_ms: 3_600_000 }]);
                 setDraftKeys([...draftKeys, nextDraftKey.current++]);
