@@ -28,6 +28,7 @@ const tracked = new Set<HTMLElement>();
 let pending: Set<HTMLElement> | null = null;
 let resize: ResizeObserver | null = null;
 let typography: MutationObserver | null = null;
+let awaitingFonts = false;
 
 function flush() {
   const elements = [...(pending ?? [])].filter((element) => tracked.has(element));
@@ -70,8 +71,15 @@ function track(element: HTMLElement) {
   }
   tracked.add(element);
   resize?.observe(element);
-  // `ready` covers a font load already under way (WebKit fires no "loadingdone").
-  if (document.fonts?.status === "loading") void document.fonts.ready.then(scheduleAll);
+  // `ready` covers a font load already under way (WebKit fires no "loadingdone"). One
+  // wait serves every element tracked while it lasts.
+  if (!awaitingFonts && document.fonts?.status === "loading") {
+    awaitingFonts = true;
+    void document.fonts.ready.then(() => {
+      awaitingFonts = false;
+      scheduleAll();
+    });
+  }
   schedule(element);
 }
 
