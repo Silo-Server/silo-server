@@ -317,9 +317,11 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
 
         {/* Tags. Capped at one line so every card has the same height and
             the widget's rows stay even: tags that would wrap are clipped
-            whole. The 12px line height (inherited by the pills) plus their
-            padding and border makes the 18px line. */}
-        <div className="mb-1.5 flex max-h-[18px] flex-wrap gap-1 overflow-hidden leading-3">
+            whole. The cap is the pills' height: the 0.75rem line height
+            each pill is given here (overriding its own), their 0.25rem of
+            padding, and 2px of border. Keep it in rem so it grows with
+            Text Size. */}
+        <div className="mb-1.5 flex max-h-[calc(1rem+2px)] flex-wrap gap-1 overflow-hidden leading-3 [&>*]:leading-3">
           <span
             className={`inline-flex rounded border px-1.5 py-0.5 text-[0.5625rem] font-semibold ${methodMeta.badgeClass}`}
           >

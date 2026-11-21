@@ -57,6 +57,7 @@
   /* ── Interactive ─────────────────────────────────────────── */
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
   /* Text in the primary color. An admin accent sets --primary-text to a
      variant that reads on Cinema Dark's surfaces (lib/accentColor.ts); fills,
      borders, and rings keep the accent itself. */
@@ -558,6 +559,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      --surface-raised   Elevated surface (modals, floating panels)
      --card             Card background (usually = surface)
      --primary          Primary accent/action color
+     --primary-hover    Hovered solid primary fill under --primary-foreground
      --secondary        Secondary element backgrounds
      --muted            Muted backgrounds
      --accent           Active/highlighted element backgrounds
@@ -641,6 +643,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     /* Primary: white — for play buttons, key CTAs, active indicators */
     --primary: #e8e8ec;
     --primary-foreground: #141417;
+    /* The solid primary fill on hover: the primary faded a tenth toward the
+       page. An admin accent sets its own (web/src/lib/accentColor.ts), which
+       lightens instead when this fade would take its label below 4.5:1. */
+    --primary-hover: color-mix(in srgb, var(--primary) 90%, var(--background));
 
     /* Secondary & Muted: subtle surface variations */
     --secondary: #232328;
@@ -1286,8 +1292,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
   }
 
+  /* An empty star's outline is a control boundary, so it needs 3:1 against
+     the pill: 3.7:1 on Cinema Dark, 5.6:1 in high contrast. It stays dimmer
+     than a filled star, which also differs in colour and fill. The removal
+     preview below dims every star on purpose while the pointer is on it. */
   .star-rating-star {
-    color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
+    color: color-mix(in srgb, var(--muted-foreground) 65%, transparent);
   }
 
   /* The stored rating is the resting state, so it survives a pointer that is
@@ -1310,7 +1320,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   :where(:root[data-fine-pointer="true"])
     .star-rating:not([data-suppress-preview]):has(.star-rating-star:hover)
     .star-rating-star {
-    color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
+    color: color-mix(in srgb, var(--muted-foreground) 65%, transparent);
   }
 
   :where(:root[data-fine-pointer="true"])
@@ -1754,8 +1764,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     box-shadow: 0 16px 36px -20px color-mix(in srgb, var(--primary) 60%, transparent);
   }
   .pill-primary:hover {
-    filter: brightness(0.96);
     transform: translateY(-1px);
+  }
+  /* Mouse only, like the `hover:` variant: a tap leaves :hover stuck on touch. */
+  :where(:root[data-fine-pointer="true"]) .pill-primary:hover {
+    background-color: var(--primary-hover);
   }
   .pill-secondary {
     background-color: var(--secondary);

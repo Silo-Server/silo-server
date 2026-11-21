@@ -348,11 +348,13 @@ export const ItemRow = memo(function ItemRow({
           </Label>
           {secondary ? (
             // A library's line is its folder paths, which read left to right in any
-            // language, so they keep their start when cut short.
+            // language, so they keep their start when cut short. w-fit keeps a short
+            // line under the name, on the page's start side; max-w-full stops a long
+            // one at the column's width so it is still cut short.
             <span
               title={secondary}
               dir={item.kind === "library" ? "ltr" : undefined}
-              className="text-muted-foreground min-w-0 truncate text-xs"
+              className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs"
             >
               {secondary}
             </span>
@@ -390,8 +392,10 @@ export const ItemRow = memo(function ItemRow({
 
 /**
  * A row of the "match this server" list: no choice to make, so just the name.
- * The name is never cut short, so names that differ only at the end stay apart;
- * the detail moves under it when the two don't fit on one line.
+ * The name wraps rather than being cut short, so names that differ only at the
+ * end stay apart; the detail moves under it when the two don't fit on one line.
+ * Part of a name that can't wrap is clipped at the row's edge, as in ProfileRow
+ * (RestoreUsers.tsx), so the scrolling list never scrolls sideways.
  */
 export const SameRow = memo(function SameRow({
   item,
@@ -404,7 +408,10 @@ export const SameRow = memo(function SameRow({
   const label = displayLabel(item);
   return (
     <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-[0.8125rem]">
-      <span className="text-pretty wrap-anywhere">
+      <span
+        title={label}
+        className="-mx-[0.25em] block min-w-0 overflow-x-clip px-[0.25em] text-pretty wrap-anywhere"
+      >
         <BreakableKey value={label} />
       </span>
       {secondary ? (
