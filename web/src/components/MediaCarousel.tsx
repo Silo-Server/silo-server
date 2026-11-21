@@ -287,14 +287,16 @@ export default function MediaCarousel({
         } as CSSProperties
       }
     >
-      <div className={`${headerGap} flex items-end justify-between gap-4${headerPadX}`}>
+      <div
+        className={`${headerGap} flex flex-wrap items-end justify-end gap-x-4 gap-y-2${headerPadX}`}
+      >
         {/* Inline flow puts the actions right after the heading's last word, or
             at the start of the next line when they don't fit; in a flex row, a
             wrapped heading keeps its full width and leaves them at the far edge.
             The heading inherits the size here, so min-h-lh is one heading line.
-            The column stacks above "Explore all", so an action squeezed under it
-            on a very narrow header still takes its own taps. */}
-        <div className={`relative z-10 min-w-0 ${titleSize}`}>
+            The column fills the row but never gets narrower than an action, so
+            "Explore all" moves to its own line before it would crowd the pin. */}
+        <div className={`min-w-10 grow basis-0 ${titleSize}`}>
           {titleHref ? (
             <Link to={titleHref} className="group/title">
               {/* The heading and "View" set their own colors, so without "View"
