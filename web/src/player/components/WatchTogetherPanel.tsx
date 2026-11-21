@@ -109,7 +109,9 @@ export function WatchTogetherPanel({
                   <MemberName name={member.display_name} />
                 )}
               </span>
-              <span className="shrink-0 text-white/60">
+              {/* A long status ("Mise en mémoire tampon") is cut at half the row, so
+                  the name and "(you)" always keep the other half. */}
+              <span className="max-w-1/2 shrink-0 truncate text-white/60">
                 {member.is_buffering
                   ? t("web.player.watchTogether.member.buffering")
                   : member.is_syncing
