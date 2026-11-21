@@ -52,12 +52,25 @@ export default function DetailOverview({
   useLayoutEffect(() => {
     const text = textRef.current;
     if (!clamp || expanded || !text) return;
-    const measure = () => setOverflowing(text.scrollHeight > text.clientHeight + 1);
+    let active = true;
+    const measure = () => {
+      if (active) setOverflowing(text.scrollHeight > text.clientHeight + 1);
+    };
     measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(text);
-    return () => observer.disconnect();
+    // A web font that loads after the first measure can change the line count
+    // while the clamped box keeps its height, so the resize observer never
+    // fires. `ready` covers a load already under way (WebKit fires no
+    // "loadingdone"); the event covers later ones.
+    const fonts = "fonts" in document ? document.fonts : undefined;
+    void fonts?.ready.then(measure);
+    fonts?.addEventListener("loadingdone", measure);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(text);
+    return () => {
+      active = false;
+      observer?.disconnect();
+      fonts?.removeEventListener("loadingdone", measure);
+    };
   }, [clamp, clampLines, expanded, overview, hidden]);
 
   if (hidden) {
