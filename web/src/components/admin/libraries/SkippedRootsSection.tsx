@@ -172,7 +172,10 @@ export function SkippedRootsSection() {
                     </TableRow>
                     {isExpanded && (
                       <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={6} className="bg-muted/30 border-b px-4 py-3">
+                        <TableCell
+                          colSpan={6}
+                          className="bg-muted/30 border-b px-4 py-3 whitespace-normal"
+                        >
                           <SkippedRootDetails root={root} />
                         </TableCell>
                       </TableRow>
