@@ -260,7 +260,7 @@ export function RestoreRun({
     return (
       <div className="max-w-[70rem] space-y-5">
         <div className="surface-panel space-y-3 rounded-2xl p-5" role="status">
-          <div className="flex items-start gap-2 text-sm font-medium">
+          <div className="flex items-start gap-2 text-sm font-medium wrap-anywhere">
             <span className="flex h-lh shrink-0 items-center">
               <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />
             </span>
