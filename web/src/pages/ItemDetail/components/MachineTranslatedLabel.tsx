@@ -20,7 +20,7 @@ export default function MachineTranslatedLabel({
   if (compact) {
     return (
       <span
-        className={`text-muted-foreground/70 inline-flex items-center ${className}`}
+        className={`text-foreground/80 inline-flex items-center ${className}`}
         title={description}
       >
         <Languages className="h-3 w-3" aria-hidden="true" />
@@ -29,9 +29,7 @@ export default function MachineTranslatedLabel({
     );
   }
   return (
-    <span
-      className={`text-muted-foreground/70 inline-flex items-center gap-1.5 text-xs ${className}`}
-    >
+    <span className={`text-foreground/80 inline-flex items-center gap-1.5 text-xs ${className}`}>
       <Languages className="h-3 w-3" aria-hidden="true" />
       {description}
     </span>
