@@ -12,11 +12,12 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/Silo-Server/silo-server/internal/envutil"
 )
 
 // MaxBytes bounds a document, a file it is read from, and the secrets it
@@ -26,34 +27,13 @@ const MaxBytes = 1 << 20
 // ReadFile reads a regular file of at most MaxBytes. Its errors never include
 // the file's content.
 func ReadFile(path string) ([]byte, error) {
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
-		return nil, errors.New("expected a readable regular file")
-	}
-	f, err := os.Open(path) //nolint:gosec // The deployment selects its declaration and mounted credential paths.
-	if err != nil {
-		return nil, errors.New("could not open file")
-	}
-	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, MaxBytes+1))
-	if err != nil || len(data) > MaxBytes {
-		return nil, errors.New("could not read file within the 1 MiB limit")
-	}
-	return data, nil
+	return envutil.ReadRegularFile(path)
 }
 
 // ReadSecretFile reads a secret from a mounted file, without the one line
 // ending most secret stores and editors leave after the value.
 func ReadSecretFile(path string) (string, error) {
-	data, err := ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	secret := string(data)
-	if line, ended := strings.CutSuffix(secret, "\n"); ended {
-		secret = strings.TrimSuffix(line, "\r")
-	}
-	return secret, nil
+	return envutil.ReadSecretFile(path)
 }
 
 // ErrExpandedSize reports a YAML document whose aliases expand past the limit.

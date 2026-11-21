@@ -6,11 +6,12 @@ import type { ItemDetail } from "@/api/types";
 import { sectionKeys } from "@/hooks/queries/keys";
 import { useMetadataAIStatus } from "@/hooks/queries/metadataAI";
 
-// Give up shimmering after this long; the original text stays and the
-// server-side cooldown keeps a failing endpoint from being re-hit per view.
+// Stop showing the translating status after this long; the original text
+// stays and the server-side cooldown keeps a failing endpoint from being
+// re-hit per view.
 const TRANSLATE_TIMEOUT_MS = 45_000;
 const POLL_INTERVAL_MS = 2_000;
-// A season job can outlast the shimmer. After it, keep refreshing slowly for
+// A season job can outlast that wait. After it, keep refreshing slowly for
 // a while so episodes that land later still reach the open page.
 const SLOW_POLL_INTERVAL_MS = 10_000;
 const SLOW_POLL_LIMIT_MS = 5 * 60_000;
@@ -41,8 +42,8 @@ export interface OnViewTranslationOptions {
  * When the detail response carries `pending_translation_language` (the
  * description is not in this profile's language and no localization exists),
  * the server's `metadata_ai.on_view` mode decides the UX:
- *   - "auto": fire the translation on view (once per item+language) and pulse
- *     the description until the refetched detail comes back localized.
+ *   - "auto": fire the translation on view (once per item+language) and show
+ *     the translating status until the refetched detail comes back localized.
  *   - "button": expose a translate trigger for the chip under the overview.
  * Completion is observed as the flag clearing on refetch. An item's own
  * overview lands in seconds; a season's flag clears only once its episodes
@@ -65,8 +66,8 @@ export function useOnViewTranslation(
   // Translations in flight, keyed by item and language. A surface that
   // switches items (the Featured hero rotating its slides) shows each item's
   // own progress and keeps polling for an earlier slide's job.
-  // An entry past the wait stops pulsing but stays, settling, while the
-  // language is still pending.
+  // An entry past the wait stops showing the translating status but stays,
+  // settling, while the language is still pending.
   const [running, setRunning] = useState<ReadonlyMap<string, RunningTranslation>>(new Map());
   const entry = key ? running.get(key) : undefined;
   const translating = entry !== undefined && entry.settlingSince === undefined;
@@ -127,8 +128,8 @@ export function useOnViewTranslation(
   }, [mode, pendingLanguage, trigger]);
 
   // While translating, poll; the localized overview replaces the text and
-  // clears the pending flag, which ends the shimmer below. Once every entry is
-  // settling, poll slowly instead.
+  // clears the pending flag, which ends the translating status below. Once
+  // every entry is settling, poll slowly instead.
   const allSettling = [...running.values()].every((entry) => entry.settlingSince !== undefined);
   useEffect(() => {
     if (running.size === 0) return;
@@ -226,7 +227,7 @@ export function useOnViewTranslation(
   }, [finishedOffScreen, pendingContentIds, markSectionRowsStale]);
 
   return {
-    /** Pulse the description text. */
+    /** A translation is running: show the translating status. */
     translating,
     /** Render the explicit translate chip: in button mode, or after a failed auto run. */
     onTranslate:

@@ -79,7 +79,7 @@ function ProviderRow({ provider }: { provider: WatchProviderStats }) {
         )}
       </span>
       {errors > 0 ? (
-        <span className="bg-destructive/10 text-destructive flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums">
+        <span className="bg-destructive/10 text-destructive-label flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums">
           {t("web.admin.dashboard.widgets.watchProviders.errorCount", {
             count: errors,
             count_text: errors.toLocaleString(formatLocale()),
