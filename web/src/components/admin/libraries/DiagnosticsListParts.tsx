@@ -266,11 +266,18 @@ export function CardField({ label, children }: { label: string; children: ReactN
   );
 }
 
-/** A filesystem path in a card: monospace, wrapping anywhere, never scrolling. */
+/**
+ * A filesystem path in a card: monospace, wrapping anywhere, never scrolling.
+ * It reads left to right in any language, and its lines line up with the page,
+ * so the path sits under the card's heading on the page's start side.
+ */
 export function CardPath({ path, className }: { path: string; className?: string }) {
   return (
     <code
-      className={cn("text-muted-foreground block font-mono text-xs break-all", className)}
+      className={cn(
+        "text-muted-foreground align-with-page block font-mono text-xs break-all",
+        className,
+      )}
       dir="ltr"
     >
       {path}
