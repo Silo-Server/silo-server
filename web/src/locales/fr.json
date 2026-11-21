@@ -21206,6 +21206,20 @@
       "value": "Dans le fuseau horaire du serveur."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Dans le fuseau horaire du serveur, soit "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " dans le vôtre."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -31480,6 +31494,12 @@
     {
       "type": 0,
       "value": "échouée"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "La tâche a échoué. Consultez les diagnostics d’administration pour plus de détails."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -67430,7 +67450,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Rechargez pour afficher les valeurs actuelles. Vos modifications des paramètres qui ont changé, ainsi que des mots de passe et clés enregistrés, sont annulées ; vos autres modifications sont conservées."
+      "value": "Rechargez pour afficher les valeurs actuelles. Vos modifications des paramètres qui ont changé, ainsi que des mots de passe et clés enregistrés et des paramètres qui leur sont associés, sont annulées ; vos autres modifications sont conservées."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -83863,10 +83883,44 @@
       "value": "Erreurs récentes"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "L’actualisation a échoué. Consultez les diagnostics d’administration pour plus de détails."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Consulter la planification actuelle"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -84311,6 +84365,18 @@
     {
       "type": 0,
       "value": "Nouvelle tentative des webhooks Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Relit l’en-tête des fichiers MKV avec sous-titres ASS analysés avant que Silo n’exclue les polices intégrées du débit, afin qu’ils ne soient pas transcodés pour un débit qu’ils ne diffusent pas."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Corriger le débit des fichiers avec polices intégrées"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -119223,6 +119289,12 @@
       "value": "Contenu"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Gérée par ce serveur. Ce qu’elle affiche ne peut pas être modifié ici ; ajoutez votre propre rangée pour choisir ce qu’elle affiche."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -123126,6 +123198,12 @@
     {
       "type": 0,
       "value": "Bannière principale · Web uniquement"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Serveur"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

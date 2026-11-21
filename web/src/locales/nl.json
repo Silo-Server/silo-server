@@ -19333,6 +19333,20 @@
       "value": "In de tijdzone van de server."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "In de tijdzone van de server. Dat is "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " in jouw tijdzone."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -28511,6 +28525,12 @@
     {
       "type": 0,
       "value": "mislukt"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Taak mislukt. Bekijk de beheerdersdiagnostiek voor details."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -60674,7 +60694,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Laad opnieuw om de huidige waarden te zien. Je wijzigingen in instellingen die zijn veranderd en in opgeslagen wachtwoorden en sleutels worden ongedaan gemaakt; je andere wijzigingen blijven behouden."
+      "value": "Laad opnieuw om de huidige waarden te zien. Je wijzigingen in instellingen die zijn veranderd, en in opgeslagen wachtwoorden en sleutels met de bijbehorende instellingen, worden ongedaan gemaakt; je andere wijzigingen blijven behouden."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -76823,10 +76843,44 @@
       "value": "Recente fouten"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Vernieuwen mislukt. Bekijk de beheerdersdiagnostiek voor details."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Huidige planning bekijken"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -77271,6 +77325,18 @@
     {
       "type": 0,
       "value": "Autoscan-webhook opnieuw proberen"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Leest opnieuw de header van MKV-bestanden met ASS-ondertitels die zijn gescand voordat Silo ingesloten lettertypen niet meer meetelde in de bitrate, zodat ze niet worden getranscodeerd voor een bitrate die ze niet streamen."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Bitrate van bestanden met ingesloten lettertypen corrigeren"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -108854,6 +108920,12 @@
       "value": "Toont"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Beheerd door deze server. Wat de rij toont, kun je hier niet wijzigen; voeg zelf een rij toe om te kiezen wat die toont."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -112523,6 +112595,12 @@
     {
       "type": 0,
       "value": "Herobanner · Alleen web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Server"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

@@ -23163,6 +23163,20 @@
       "value": "У часовому поясі сервера."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "За часовим поясом сервера. У вашому часовому поясі це "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -34453,6 +34467,12 @@
     {
       "type": 0,
       "value": "помилка"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Не вдалося виконати завдання. Подробиці дивіться в діагностиці адміністратора."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -74385,7 +74405,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Перезавантажте, щоб побачити поточні значення. Ваші зміни в налаштуваннях, які змінилися, а також у збережених паролях і ключах буде скасовано; інші ваші зміни буде збережено."
+      "value": "Перезавантажте, щоб побачити поточні значення. Ваші зміни в налаштуваннях, які змінилися, а також у збережених паролях і ключах та пов’язаних із ними налаштуваннях буде скасовано; інші ваші зміни буде збережено."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -91162,10 +91182,44 @@
       "value": "Нещодавні помилки"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Не вдалося оновити. Подробиці дивіться в діагностиці адміністратора."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Переглянути поточний розклад"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -91610,6 +91664,18 @@
     {
       "type": 0,
       "value": "Повтор вебхуків Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Повторно зчитує заголовок MKV-файлів із субтитрами ASS, просканованих до того, як у Silo вбудовані шрифти перестали враховуватися в бітрейті, щоб ці файли не транскодувалися через бітрейт, з яким вони насправді не транслюються."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Виправлення бітрейту файлів із вбудованими шрифтами"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -129750,6 +129816,12 @@
       "value": "Показує"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Цим рядом керує цей сервер. Його вміст тут змінити не можна; додайте власний ряд, щоб вибрати, що він показуватиме."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -133939,6 +134011,12 @@
     {
       "type": 0,
       "value": "Великий банер · Лише веб"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Сервер"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

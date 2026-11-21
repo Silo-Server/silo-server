@@ -17564,6 +17564,20 @@
       "value": "Dalam zon waktu pelayan."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Dalam zon waktu pelayan. Bersamaan pukul "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " di tempat anda."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -25770,6 +25784,12 @@
     {
       "type": 0,
       "value": "gagal"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Tugas gagal. Periksa diagnostik pentadbir untuk butiran."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -54397,7 +54417,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Muat semula untuk melihat nilai semasa. Suntingan anda pada tetapan yang berubah, serta pada kata laluan dan kunci yang disimpan, dibatalkan; suntingan anda yang lain dikekalkan."
+      "value": "Muat semula untuk melihat nilai semasa. Suntingan anda pada tetapan yang berubah, serta pada kata laluan dan kunci yang disimpan berserta tetapan yang berkaitan dengannya, dibatalkan; suntingan anda yang lain dikekalkan."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -70238,10 +70258,44 @@
       "value": "Ralat terkini"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Muat semula gagal. Periksa diagnostik pentadbir untuk butiran."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Semak jadual semasa"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -70686,6 +70740,18 @@
     {
       "type": 0,
       "value": "Cuba semula webhook Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Membaca semula pengepala fail MKV yang mempunyai sari kata ASS dan diimbas sebelum Silo mengecualikan fon terbenam daripada kadar bit, supaya fail itu tidak ditranskod untuk kadar bit yang sebenarnya tidak distrim."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Betulkan kadar bit fail yang mempunyai fon terbenam"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -99509,6 +99575,12 @@
       "value": "Memaparkan"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Diurus oleh pelayan ini. Kandungan baris ini tidak boleh diubah di sini; tambah baris anda sendiri untuk memilih kandungan yang dipaparkan."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -102964,6 +103036,12 @@
     {
       "type": 0,
       "value": "Sepanduk utama · Web sahaja"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Pelayan"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

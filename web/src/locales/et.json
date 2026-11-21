@@ -19745,6 +19745,20 @@
       "value": "Serveri ajavööndis."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Serveri ajavööndis. Teie ajavööndis on see "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -29011,6 +29025,12 @@
     {
       "type": 0,
       "value": "ebaõnnestunud"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Ülesanne ebaõnnestus. Üksikasju vaadake administraatori diagnostikast."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -61578,7 +61598,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Praeguste väärtuste nägemiseks laadige leht uuesti. Teie muudatused vahepeal muutunud seadistustes ning salvestatud paroolides ja võtmetes tühistatakse; teie ülejäänud muudatused jäävad alles."
+      "value": "Praeguste väärtuste nägemiseks laadige leht uuesti. Teie muudatused seadistustes, mis vahepeal muutusid, samuti salvestatud paroolides ja võtmetes ning nendega seotud seadistustes tühistatakse; teie ülejäänud muudatused jäävad alles."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -77835,10 +77855,44 @@
       "value": "Hiljutised vead"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Värskendamine ebaõnnestus. Üksikasju vaadake administraatori diagnostikast."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Vaata praegust ajakava"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -78271,6 +78325,18 @@
     {
       "type": 0,
       "value": "Autoscani webhooki kordus"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Loeb uuesti nende ASS-subtiitritega MKV-failide päise, mis skanniti enne, kui Silo hakkas manustatud fonte bitikiirusest välja jätma, et neid ei transkooditaks bitikiiruse tõttu, millega neid tegelikult ei voogedastata."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Manustatud fontidega failide bitikiiruse parandamine"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -110318,6 +110384,12 @@
       "value": "Näitab"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Seda rida haldab see server. Seda, mida rida näitab, ei saa siin muuta; lisage oma rida, et ise valida, mida see näitab."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 1,
@@ -114039,6 +114111,12 @@
     {
       "type": 0,
       "value": "Suur bänner · ainult veebis"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Server"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

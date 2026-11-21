@@ -23799,6 +23799,20 @@
       "value": "В часовом поясе сервера."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "В часовом поясе сервера. По вашему времени это "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -35211,6 +35225,12 @@
     {
       "type": 0,
       "value": "ошибка"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Задача завершилась с ошибкой. Подробности смотрите в диагностике администратора."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -75475,7 +75495,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Перезагрузите, чтобы увидеть текущие значения. Ваши правки изменившихся настроек, а также сохранённых паролей и ключей будут отменены; остальные правки сохранятся."
+      "value": "Перезагрузите настройки, чтобы увидеть текущие значения. Ваши правки изменившихся настроек, сохранённых паролей и ключей, а также связанных с ними настроек будут отменены; остальные правки сохранятся."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -92352,10 +92372,44 @@
       "value": "Недавние ошибки"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Не удалось обновить. Подробности смотрите в диагностике администратора."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Посмотреть текущее расписание"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " — "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -92800,6 +92854,18 @@
     {
       "type": 0,
       "value": "Повтор вебхуков Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Повторно считывает заголовок MKV-файлов с субтитрами ASS, отсканированных до того, как Silo перестал учитывать встроенные шрифты в битрейте, чтобы эти файлы не транскодировались из-за битрейта, который при стриминге на самом деле не передаётся."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Исправление битрейта файлов со встроенными шрифтами"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -131088,6 +131154,12 @@
       "value": "Показывает"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Управляется этим сервером. Содержимое этого ряда здесь изменить нельзя; чтобы самостоятельно выбрать содержимое, добавьте собственный ряд."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -135313,6 +135385,12 @@
     {
       "type": 0,
       "value": "Главный баннер · Только веб"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Сервер"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

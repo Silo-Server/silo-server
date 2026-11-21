@@ -19333,6 +19333,20 @@
       "value": "Sunucunun saat diliminde."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Sunucunun saat dilimine göre. Sizin saat diliminizde: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -28419,6 +28433,12 @@
     {
       "type": 0,
       "value": "başarısız"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Görev başarısız oldu. Ayrıntılar için yönetici tanılamalarını inceleyin."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -60438,7 +60458,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Güncel değerleri görmek için yeniden yükleyin. Değişen ayarlarda ve kayıtlı parolalarla anahtarlarda yaptığınız düzenlemeler geri alınır; diğer düzenlemeleriniz korunur."
+      "value": "Güncel değerleri görmek için yeniden yükleyin. Değişen ayarlarda, kayıtlı parola ve anahtarlarda ve bunlarla ilişkili ayarlarda yaptığınız düzenlemeler geri alınır; diğer düzenlemeleriniz korunur."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -76563,10 +76583,44 @@
       "value": "Son hatalar"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Yenileme başarısız oldu. Ayrıntılar için yönetici tanılamalarını inceleyin."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Geçerli zamanlamayı incele"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -76999,6 +77053,18 @@
     {
       "type": 0,
       "value": "Autoscan webhook yeniden denemesi"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Silo gömülü yazı tiplerini bit hızına katmamaya başlamadan önce taranmış, ASS altyazılı MKV dosyalarının üst bilgisini yeniden okur; böylece bu dosyaların kodu, akışta kullanılmayan bir bit hızı yüzünden dönüştürülmez."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Gömülü yazı tipli dosyaların bit hızını düzelt"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -108416,6 +108482,12 @@
       "value": "Gösterilen"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Bu sunucu tarafından yönetilir. Satırın gösterdikleri burada değiştirilemez; ne gösterileceğini seçmek için kendi satırınızı ekleyin."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -112057,6 +112129,12 @@
     {
       "type": 0,
       "value": "Ana afiş · Yalnızca web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Sunucu"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

@@ -21594,6 +21594,20 @@
       "value": "No fuso horário do servidor."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "No fuso horário do servidor. No seu fuso horário, isso é às "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -31816,6 +31830,12 @@
     {
       "type": 0,
       "value": "com falha"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Falha na tarefa. Consulte os diagnósticos do administrador para ver os detalhes."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -67738,7 +67758,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Recarregue para ver os valores atuais. Suas edições nas configurações que mudaram e nas senhas e chaves salvas serão desfeitas; suas outras edições serão mantidas."
+      "value": "Recarregue para ver os valores atuais. Suas edições nas configurações que mudaram, bem como nas senhas e chaves salvas e nas configurações relacionadas a elas, serão desfeitas; suas outras edições serão mantidas."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -84187,10 +84207,44 @@
       "value": "Erros recentes"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Falha na atualização. Consulte os diagnósticos do administrador para ver os detalhes."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Revisar agendamento atual"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -84635,6 +84689,18 @@
     {
       "type": 0,
       "value": "Nova tentativa de webhook do Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Lê novamente o cabeçalho dos arquivos MKV com legendas ASS verificados antes de o Silo deixar as fontes incorporadas fora da taxa de bits, para que não sejam transcodificados para uma taxa de bits que não transmitem."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Corrigir taxa de bits de arquivos com fontes incorporadas"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -119469,6 +119535,12 @@
       "value": "Mostra"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Gerenciada por este servidor. O que ela mostra não pode ser alterado aqui; adicione uma fileira sua para escolher o que ela mostra."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -123372,6 +123444,12 @@
     {
       "type": 0,
       "value": "Banner principal · Só na web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Servidor"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

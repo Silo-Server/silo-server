@@ -27009,6 +27009,20 @@
       "value": "بالمنطقة الزمنية للخادم."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "حسب المنطقة الزمنية للخادم. يوافق ذلك الساعة "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " في منطقتك الزمنية."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -40139,6 +40153,12 @@
     {
       "type": 0,
       "value": "فاشلة"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "فشلت المهمة. راجع تشخيصات المسؤول للاطلاع على التفاصيل."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -86391,7 +86411,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "أعد التحميل لعرض القيم الحالية. تُلغى تعديلاتك على الإعدادات التي تغيّرت وعلى كلمات المرور والمفاتيح المحفوظة؛ ويُحتفظ بتعديلاتك الأخرى."
+      "value": "أعد التحميل لعرض القيم الحالية. تُلغى تعديلاتك على الإعدادات التي تغيّرت، وعلى كلمات المرور والمفاتيح المحفوظة مع الإعدادات المرتبطة بها؛ ويُحتفظ بتعديلاتك الأخرى."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -103712,10 +103732,44 @@
       "value": "الأخطاء الحديثة"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "فشل التحديث. راجع تشخيصات المسؤول للاطلاع على التفاصيل."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "مراجعة الجدولة الحالية"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -104160,6 +104214,18 @@
     {
       "type": 0,
       "value": "إعادة محاولة webhook في Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "يعيد قراءة ترويسة ملفات MKV ذات ترجمة ASS التي فُحصت قبل أن يستبعد Silo الخطوط المضمّنة من معدل البت، لكي لا يُعاد ترميزها بسبب معدل بت لا تبثّه فعليًا."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "تصحيح معدل البت للملفات ذات الخطوط المضمّنة"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -147554,6 +147620,12 @@
       "value": "يعرض"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "يديره هذا الخادم. لا يمكن تغيير ما يعرضه من هنا؛ أضف صفًا خاصًا بك لتختار ما يعرضه."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -152088,6 +152160,12 @@
     {
       "type": 0,
       "value": "اللافتة البارزة · الويب فقط"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "الخادم"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

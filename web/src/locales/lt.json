@@ -23443,6 +23443,20 @@
       "value": "Serverio laiko juostoje."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Serverio laiko juostoje. Jūsų laiku tai "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -34901,6 +34915,12 @@
     {
       "type": 0,
       "value": "nepavyko"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Užduotis nepavyko. Išsamią informaciją rasite administratoriaus diagnostikoje."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -75313,7 +75333,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Įkelkite iš naujo, kad matytumėte dabartines reikšmes. Pakeitimai, kuriuos atlikote pasikeitusiuose nustatymuose ir išsaugotuose slaptažodžiuose bei raktuose, atšaukiami; kiti jūsų pakeitimai išlaikomi."
+      "value": "Įkelkite iš naujo, kad matytumėte dabartines reikšmes. Jūsų pakeitimai pasikeitusiuose nustatymuose, išsaugotuose slaptažodžiuose ir raktuose bei su jais susijusiuose nustatymuose atšaukiami; kiti jūsų pakeitimai išlaikomi."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -92234,10 +92254,44 @@
       "value": "Naujausios klaidos"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko atnaujinti. Išsamią informaciją rasite administratoriaus diagnostikoje."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Peržiūrėti dabartinį tvarkaraštį"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -92682,6 +92736,18 @@
     {
       "type": 0,
       "value": "„Autoscan“ webhook pakartojimas"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Iš naujo perskaito MKV failų su ASS subtitrais antraštę, jei failai nuskaityti anksčiau, nei „Silo“ ėmė neįtraukti įterptų šriftų į bitų spartą, kad jie nebūtų perkoduojami dėl bitų spartos, kurios jie iš tikrųjų netransliuoja."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Failų su įterptais šriftais bitų spartos taisymas"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -131394,6 +131460,12 @@
       "value": "Rodoma"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Šią eilutę tvarko šis serveris. Čia negalima pakeisti, ką ji rodo; pridėkite savo eilutę, kad pasirinktumėte, ką ji rodys."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 1,
@@ -135615,6 +135687,12 @@
     {
       "type": 0,
       "value": "Didžioji reklamjuostė · Tik žiniatinklyje"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Serveris"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

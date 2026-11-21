@@ -21359,6 +21359,20 @@
       "value": "לפי אזור הזמן של השרת."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "לפי אזור הזמן של השרת. באזור הזמן שלך זו השעה "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -31445,6 +31459,12 @@
     {
       "type": 0,
       "value": "נכשלה"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "המשימה נכשלה. לפרטים, יש לבדוק את נתוני האבחון למנהלים."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -67125,7 +67145,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "יש לבצע רענון כדי לראות את הערכים הנוכחיים. השינויים שלך בהגדרות שהשתנו ובסיסמאות ובמפתחות השמורים יבוטלו; שאר השינויים שלך יישמרו."
+      "value": "יש לבצע רענון כדי לראות את הערכים הנוכחיים. השינויים שלך בהגדרות שהשתנו, ובסיסמאות ובמפתחות השמורים יחד עם ההגדרות הקשורות אליהם, יבוטלו; שאר השינויים שלך יישמרו."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -83688,10 +83708,44 @@
       "value": "שגיאות אחרונות"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "הרענון נכשל. לפרטים, יש לבדוק את נתוני האבחון למנהלים."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "עיון בלוח הזמנים הנוכחי"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -84136,6 +84190,18 @@
     {
       "type": 0,
       "value": "ניסיון חוזר ל-webhook של Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "קריאה חוזרת של כותרות קובצי MKV עם כתוביות ASS שנסרקו לפני ש-Silo הפסיק לכלול גופנים מוטמעים בחישוב קצב הסיביות, כדי שלא תתבצע בהם המרת קידוד בגלל קצב סיביות שהם לא מזרימים בפועל."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "תיקון קצב הסיביות של קבצים עם גופנים מוטמעים"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -118630,6 +118696,12 @@
       "value": "תוכן השורה"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "השורה הזו מנוהלת על ידי השרת הזה. לא ניתן לשנות כאן את התוכן שהיא מציגה; כדי לבחור מה יוצג, אפשר להוסיף שורה משלך."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -122507,6 +122579,12 @@
     {
       "type": 0,
       "value": "באנר ראשי · באתר בלבד"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "שרת"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

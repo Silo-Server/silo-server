@@ -19461,6 +19461,20 @@
       "value": "A szerver időzónájában."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "A szerver időzónája szerint. Az Ön időzónájában ez "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -28659,6 +28673,12 @@
     {
       "type": 0,
       "value": "sikertelen"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "A feladat sikertelen. A részletekért tekintse meg a rendszergazdai diagnosztikát."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -60798,7 +60818,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Az aktuális értékek megtekintéséhez töltse be újra a beállításokat. A közben módosult beállításokon, valamint a mentett jelszavakon és kulcsokon végzett változtatásai elvesznek; a többi változtatása megmarad."
+      "value": "Az aktuális értékek megtekintéséhez töltse be újra a beállításokat. A közben módosult beállításokon, valamint a mentett jelszavakon, kulcsokon és a hozzájuk tartozó beállításokon végzett változtatásai elvesznek; a többi változtatása megmarad."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -76983,10 +77003,44 @@
       "value": "Friss hibák"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "A frissítés sikertelen. A részletekért tekintse meg a rendszergazdai diagnosztikát."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Jelenlegi ütemezés áttekintése"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -77419,6 +77473,18 @@
     {
       "type": 0,
       "value": "Autoscan-webhookok újrapróbálása"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Újra beolvassa azoknak az ASS-feliratot tartalmazó MKV-fájloknak a fejlécét, amelyeket még azelőtt vizsgált át a szerver, hogy a Silo kihagyta volna a beágyazott betűtípusokat a bitsebességből, így a szerver nem kódolja át őket olyan bitsebesség miatt, amely streameléskor nem is jelentkezik."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Beágyazott betűtípusokat tartalmazó fájlok bitsebességének javítása"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -109160,6 +109226,12 @@
       "value": "Tartalom"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Ezt a sort ez a szerver kezeli. Hogy mit jelenít meg, az itt nem módosítható; ha saját maga szeretné kiválasztani, mit jelenítsen meg, adjon hozzá egy saját sort."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 1,
@@ -112841,6 +112913,12 @@
     {
       "type": 0,
       "value": "Kiemelt banner · Csak web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Szerver"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

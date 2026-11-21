@@ -21246,6 +21246,20 @@
       "value": "U vremenskoj zoni poslužitelja."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "U vremenskoj zoni poslužitelja. Po vašem vremenu to je "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -31552,6 +31566,12 @@
     {
       "type": 0,
       "value": "neuspjelo"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Zadatak nije uspio. Pojedinosti potražite u administratorskoj dijagnostici."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -67766,7 +67786,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Ponovno učitajte da biste vidjeli trenutačne vrijednosti. Vaše izmjene postavki koje su se promijenile te spremljenih lozinki i ključeva poništavaju se; ostale izmjene ostaju."
+      "value": "Ponovno učitajte da biste vidjeli trenutačne vrijednosti. Poništavaju se vaše izmjene postavki koje su se promijenile te spremljenih lozinki i ključeva zajedno s njihovim povezanim postavkama; ostale izmjene zadržavaju se."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -84259,10 +84279,44 @@
       "value": "Nedavne pogreške"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Osvježavanje nije uspjelo. Pojedinosti potražite u administratorskoj dijagnostici."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Pregledaj trenutačni raspored"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -84707,6 +84761,18 @@
     {
       "type": 0,
       "value": "Ponovni pokušaj Autoscan webhooka"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Ponovno čita zaglavlje MKV datoteka s ASS titlovima skeniranih prije nego što je Silo počeo izostavljati ugrađene fontove iz brzine prijenosa, kako se te datoteke ne bi transkodirale zbog brzine prijenosa koja se zapravo ne streama."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Ispravak brzine prijenosa datoteka s ugrađenim fontovima"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -119833,6 +119899,12 @@
       "value": "Prikazuje"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Njime upravlja ovaj poslužitelj. Ovdje se ne može promijeniti što prikazuje; dodajte vlastiti redak da biste sami odabrali što prikazuje."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -123789,6 +123861,12 @@
     {
       "type": 0,
       "value": "Glavni banner · Samo web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Poslužitelj"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

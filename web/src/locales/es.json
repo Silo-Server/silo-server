@@ -21274,6 +21274,20 @@
       "value": "En la zona horaria del servidor."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "En la zona horaria del servidor. En tu zona horaria son las "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -31544,6 +31558,12 @@
     {
       "type": 0,
       "value": "fallida"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "La tarea falló. Consulta los diagnósticos de administrador para ver los detalles."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -67654,7 +67674,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Recarga para ver los valores actuales. Se deshacen tus cambios en las opciones que cambiaron y en las contraseñas y claves guardadas; se conservan tus demás cambios."
+      "value": "Recarga para ver los valores actuales. Se deshacen tus cambios en los ajustes que cambiaron y en las contraseñas y claves guardadas junto con sus ajustes relacionados; se conservan tus demás cambios."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -84131,10 +84151,44 @@
       "value": "Errores recientes"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "No se pudo actualizar. Consulta los diagnósticos de administrador para ver los detalles."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Revisar programación actual"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -84579,6 +84633,18 @@
     {
       "type": 0,
       "value": "Reintento de webhooks de Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Vuelve a leer el encabezado de los archivos MKV con subtítulos ASS analizados antes de que Silo dejara de incluir las fuentes incrustadas en la tasa de bits, para que no se transcodifiquen por una tasa de bits que no transmiten."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Corregir tasa de bits de archivos con fuentes incrustadas"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -119527,6 +119593,12 @@
       "value": "Muestra"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Administrada por este servidor. Lo que muestra no se puede cambiar aquí; añade una fila propia para elegir lo que muestra."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -123434,6 +123506,12 @@
     {
       "type": 0,
       "value": "Banner principal · Solo web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Servidor"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

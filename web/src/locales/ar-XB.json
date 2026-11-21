@@ -20529,6 +20529,20 @@
       "value": "\u200F\u202EIn the server's time zone.\u202C"
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIn the server's time zone. That's \u202C"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "\u202E where you are.\u202C"
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -30215,6 +30229,12 @@
     {
       "type": 0,
       "value": "\u200F\u202Efailed\u202C"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETask failed. Inspect administrator diagnostics for details.\u202C"
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -64394,7 +64414,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "\u200F\u202EReload to see the current values. Your edits to settings that changed, and to saved passwords and keys, are undone; your other edits are kept.\u202C"
+      "value": "\u200F\u202EReload to see the current values. Your edits to settings that changed, and to saved passwords and keys with their related settings, are undone; your other edits are kept.\u202C"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -81051,10 +81071,52 @@
       "value": "\u200F\u202ERecent errors\u202C"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERefresh failed. Inspect administrator diagnostics for details.\u202C"
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "\u200F\u202EReview current schedule\u202C"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": "\u202E - \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -81523,6 +81585,18 @@
     {
       "type": 0,
       "value": "\u200F\u202EAutoscan webhook retry\u202C"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERe-reads the header of MKV files with ASS subtitles scanned before Silo left embedded fonts out of the bitrate, so they are not transcoded for a bitrate they do not stream.\u202C"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECorrect Bitrate of Files with Embedded Fonts\u202C"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -115134,6 +115208,12 @@
       "value": "\u200F\u202EShows\u202C"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EManaged by this server. What it shows can’t be changed here; add a row of your own to choose what it shows.\u202C"
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -118959,6 +119039,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EHero banner · Web only\u202C"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EServer\u202C"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

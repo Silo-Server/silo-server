@@ -21870,6 +21870,20 @@
       "value": "Servera laika joslā."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Servera laika joslā. Jūsu laika joslā tas ir plkst. "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -32276,6 +32290,12 @@
     {
       "type": 0,
       "value": "neizdevās"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Uzdevums neizdevās. Sīkāku informāciju skatiet administratora diagnostikā."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -68797,7 +68817,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Ielādējiet iestatījumus vēlreiz, lai redzētu pašreizējās vērtības. Jūsu labojumi iestatījumos, kas ir mainījušies, kā arī saglabātajās parolēs un atslēgās tiks atsaukti; pārējie jūsu labojumi tiks saglabāti."
+      "value": "Ielādējiet iestatījumus vēlreiz, lai redzētu pašreizējās vērtības. Jūsu labojumi iestatījumos, kas ir mainījušies, kā arī saglabātajās parolēs un atslēgās un ar tām saistītajos iestatījumos tiks atsaukti; pārējie jūsu labojumi tiks saglabāti."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -85346,10 +85366,44 @@
       "value": "Nesenās kļūdas"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Atsvaidzināšana neizdevās. Sīkāku informāciju skatiet administratora diagnostikā."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Pārskatīt pašreizējo grafiku"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -85794,6 +85848,18 @@
     {
       "type": 0,
       "value": "Autoscan webhook atkārtošana"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Atkārtoti nolasa galveni MKV failiem ar ASS subtitriem, kas skenēti, pirms Silo sāka neieskaitīt iegultos fontus bitu pārraides ātrumā, lai šie faili netiktu pārkodēti bitu pārraides ātruma dēļ, ko tie nemaz nestraumē."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Bitu pārraides ātruma labošana failiem ar iegultiem fontiem"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -121387,6 +121453,12 @@
       "value": "Rāda"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Šo rindu pārvalda šis serveris. Šeit nevar mainīt, ko tā rāda; pievienojiet savu rindu, lai izvēlētos, ko tajā rādīt."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 1,
@@ -125387,6 +125459,12 @@
     {
       "type": 0,
       "value": "Galvenais baneris · Tikai tīmeklī"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Serveris"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

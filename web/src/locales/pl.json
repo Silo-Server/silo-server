@@ -23767,6 +23767,20 @@
       "value": "W strefie czasowej serwera."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "W strefie czasowej serwera. U ciebie to "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -35163,6 +35177,12 @@
     {
       "type": 0,
       "value": "niepowodzenie"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Zadanie nie powiodło się. Sprawdź szczegóły w diagnostyce administratora."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -75252,7 +75272,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Wczytaj ponownie, aby zobaczyć bieżące wartości. Twoje zmiany w ustawieniach, które się zmieniły, oraz w zapisanych hasłach i kluczach zostaną cofnięte; pozostałe zmiany zostaną zachowane."
+      "value": "Wczytaj ponownie, aby zobaczyć bieżące wartości. Twoje zmiany w ustawieniach, które się zmieniły, oraz w zapisanych hasłach i kluczach wraz z powiązanymi z nimi ustawieniami zostaną cofnięte; pozostałe zmiany zostaną zachowane."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -92097,10 +92117,44 @@
       "value": "Ostatnie błędy"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się odświeżyć. Sprawdź szczegóły w diagnostyce administratora."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Przejrzyj bieżący harmonogram"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -92545,6 +92599,18 @@
     {
       "type": 0,
       "value": "Ponawianie webhooków Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Ponownie odczytuje nagłówek plików MKV z napisami ASS zeskanowanych przed wprowadzeniem w Silo pomijania osadzonych czcionek w przepływności, aby pliki te nie były transkodowane ze względu na przepływność, której w rzeczywistości nie przesyłają."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Korygowanie przepływności plików z osadzonymi czcionkami"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -130602,6 +130668,12 @@
       "value": "Wyświetla"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Tym rzędem zarządza ten serwer. Jego zawartości nie można tu zmienić; dodaj własny rząd, aby wybrać, co ma pokazywać."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -134783,6 +134855,12 @@
     {
       "type": 0,
       "value": "Baner główny · Tylko web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Serwer"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
