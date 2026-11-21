@@ -251,10 +251,11 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
         onClick={() => toggleLock(metadataField)}
         className={cn(
           "inline-flex items-center gap-1 text-[10px] transition-colors",
-          // Unlocked stays quieter than the amber locked state but keeps 3:1
-          // on the dialog surface: the icon is the only visible sign it's a control.
+          // Unlocked keeps 3:1 on the dialog surface (the icon is the only visible
+          // sign it's a control) and stays quieter than locked amber, also in high
+          // contrast mode, which brightens the muted colour.
           isLocked
-            ? "text-amber-500/80 hover:text-amber-500"
+            ? "text-amber-500 hover:text-amber-400"
             : "text-muted-foreground/70 hover:text-muted-foreground",
         )}
         title={
