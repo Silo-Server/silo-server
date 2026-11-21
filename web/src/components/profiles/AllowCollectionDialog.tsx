@@ -133,10 +133,11 @@ function CopyRow({ profile, collectionId }: { profile: Profile; collectionId: st
   const copy = useAllowCollectionTitles();
   const [added, setAdded] = useState<number | null>(null);
   return (
-    // Wraps: when the name doesn't fit beside the button, the button moves to the
-    // end of its own line, and its label wraps when even that line is too narrow.
+    // Wraps: when the name, or 8rem for the limit line beneath it, doesn't fit beside
+    // the button, the button moves to the end of its own line, and its label wraps
+    // when even that line is too narrow.
     <li className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md px-2 py-2">
-      <span className="flex min-w-0 flex-auto items-center gap-3">
+      <span className="flex min-w-[min(8rem,100%)] flex-auto items-center gap-3">
         <ProfileLabel
           profile={profile}
           note={
