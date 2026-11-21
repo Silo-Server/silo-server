@@ -29,6 +29,7 @@ import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 
 import { OmittedAccounts } from "./BackupWarningDetails";
 import { Disclosure } from "./Disclosure";
+import { PlanSentences } from "./RestoreReview";
 import { ItemRow, SameRow, type ToggleKeys } from "./RestoreRows";
 import { AccountRow, DataTypesPanel } from "./RestoreUsers";
 import {
@@ -240,13 +241,20 @@ function LibraryGroupRows({
         open={open}
         onOpenChange={setOpen}
         controls={listId}
-        className="text-foreground gap-1.5 text-[13px] font-medium"
+        className="text-foreground max-w-full gap-1.5 text-[13px] font-medium"
       >
         {/* One run of text, so the count follows the name's last word. A name
             with no spaces still breaks to fit. The name keeps its own direction,
             so a name in another script can't pull the count across it. The count
-            is an inline block, so it moves to the next line whole. */}
-        <span className="wrap-anywhere">
+            is an inline block, so it moves to the next line whole. The button and
+            the text stay within the row, which clips sideways the part of a name
+            that can't wrap, such as one long run of joined emoji. The 0.25em of
+            padding, offset by a negative margin, keeps letters whole whose ink
+            reaches past their edge. */}
+        <span
+          title={name}
+          className="-mx-[0.25em] min-w-0 overflow-x-clip px-[0.25em] wrap-anywhere"
+        >
           {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
           <span className="bidi-text me-1">{name}</span>{" "}
           <span className="text-muted-foreground inline-block font-normal tabular-nums">
@@ -426,7 +434,7 @@ function SectionBlock({
     ) : null;
 
   return (
-    <div id={sectionAnchor(section.id)} className="scroll-mt-24 lg:scroll-mt-6">
+    <div id={sectionAnchor(section.id)} className="scroll-mt-24 lg:scroll-mt-16">
       <SettingsGroup
         title={t(SECTION_TITLES[section.id])}
         description={
@@ -537,6 +545,30 @@ export interface RestoreChooseProps {
   onReview: () => void;
 }
 
+/**
+ * A callback ref and whether its box currently scrolls. It watches the box and
+ * its first child, so it measures again when the box resizes or the content
+ * inside a capped box grows. Chromium and Firefox let the keyboard focus a box
+ * that scrolls; WebKit doesn't, so the box asks for focus itself, and only
+ * while it has something to scroll.
+ */
+function useScrolls() {
+  const [scrolls, setScrolls] = useState(false);
+  const ref = useCallback((element: HTMLElement | null) => {
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() =>
+      setScrolls(element.scrollHeight > element.clientHeight),
+    );
+    observer.observe(element);
+    if (element.firstElementChild) observer.observe(element.firstElementChild);
+    return () => {
+      observer.disconnect();
+      setScrolls(false);
+    };
+  }, []);
+  return [ref, scrolls] as const;
+}
+
 /** Step 1: what differs, and what to bring back, with the plan so far beside it. */
 export function RestoreChoose({
   set,
@@ -549,6 +581,7 @@ export function RestoreChoose({
   const t = useT();
   const index = useMemo(() => indexItems(set), [set]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeRef, noticeScrolls] = useScrolls();
   const libraries = useAdminLibraries();
   const names = useMemo(() => libraryNames(set, libraries.data ?? []), [set, libraries.data]);
   const plan = restorePlan(set, selection, dataTypes);
@@ -639,40 +672,61 @@ export function RestoreChoose({
         ))}
       </div>
 
+      {/* Pinned below the admin shell's activity control and any
+          impersonation banner. The height cap leaves room for both, for any
+          background playback bar, and for the 6rem of page padding below this
+          grid: without that, the end of the page pushes the panel back up
+          under the control. A longer summary scrolls on its own, above
+          Review. min-w-0: on a narrow screen the summary shares the sections'
+          column, so a sentence it can't wrap would otherwise widen every
+          section past the screen. */}
       <aside
         aria-labelledby="restore-summary-heading"
-        className="surface-panel-subtle h-fit space-y-4 rounded-xl p-5 lg:sticky lg:top-6"
+        className="surface-panel-subtle h-fit min-w-0 space-y-4 rounded-xl p-5 lg:sticky lg:top-[calc(4rem+var(--impersonation-banner-height))] lg:flex lg:max-h-[calc(100dvh-10rem-var(--impersonation-banner-height)-var(--playback-bar-clearance,0px))] lg:flex-col"
       >
-        <SectionIndex sections={set.sections} selection={selection} variant="list" />
-        <h2 id="restore-summary-heading" className="text-[15px] font-semibold tracking-tight">
-          {t("web.admin.backups.restore.choose.summaryHeading")}
-        </h2>
-        {plan.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            {t("web.admin.backups.restore.choose.nothingChosen")}
+        {/* The 4px inset keeps the section buttons' focus rings clear of this
+            box's clipping edge. The fade covers only the box's bottom padding,
+            so it shows just while more of the summary scrolls on below. Its
+            outsized shrink factor makes it give up its height before the
+            notice does; flexbox shares overflow by weight, and a smaller one
+            still trims the notice by a fraction of a pixel, enough to scroll. */}
+        <div className="overlay-scroll space-y-4 lg:-mx-1 lg:-mt-1 lg:mb-0 lg:min-h-0 lg:shrink-[100000] lg:overflow-y-auto lg:[mask-image:linear-gradient(to_bottom,black_calc(100%_-_1rem),transparent)] lg:px-1 lg:pt-1 lg:pb-4">
+          <SectionIndex sections={set.sections} selection={selection} variant="list" />
+          <h2 id="restore-summary-heading" className="text-[15px] font-semibold tracking-tight">
+            {t("web.admin.backups.restore.choose.summaryHeading")}
+          </h2>
+          {plan.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              {t("web.admin.backups.restore.choose.nothingChosen")}
+            </p>
+          ) : (
+            <PlanSentences sentences={plan.flatMap((group) => group.sentences)} />
+          )}
+          <p className="text-muted-foreground text-[13px] leading-relaxed">
+            {t("web.admin.backups.restore.choose.recoveryPoint")}
           </p>
-        ) : (
-          <ul className="list-disc space-y-1.5 ps-5 text-sm">
-            {plan.flatMap((group) =>
-              group.sentences.map((sentence, position) => (
-                <li key={`${group.section}-${position}`}>
-                  {t("web.admin.backups.restore.plan.sentence", { sentence })}
-                </li>
-              )),
-            )}
-          </ul>
-        )}
-        {notice ? (
-          <p role="status" className="text-[13px] text-amber-600 dark:text-amber-400">
-            {notice}
-          </p>
-        ) : null}
-        <p className="text-muted-foreground text-[13px] leading-relaxed">
-          {t("web.admin.backups.restore.choose.recoveryPoint")}
-        </p>
-        <Button className="w-full" disabled={selection.size === 0} onClick={onReview}>
-          {t("web.admin.backups.restore.choose.review")}
-        </Button>
+        </div>
+        {/* Outside the scrolling box, so the notice shows beside Review however
+            far the summary is scrolled. The rule marks where the summary ends.
+            A long notice scrolls within 8rem, so the summary keeps its room; in
+            a window too short for both, it shrinks further and Review keeps
+            its row. */}
+        <div className="lg:border-border/60 space-y-4 lg:flex lg:min-h-0 lg:flex-col lg:border-t lg:pt-4">
+          {notice ? (
+            <p
+              ref={noticeRef}
+              role="status"
+              tabIndex={noticeScrolls ? 0 : undefined}
+              className="overlay-scroll focus-visible:outline-ring rounded-sm text-[13px] text-amber-600 focus-visible:outline-2 focus-visible:outline-offset-2 lg:max-h-32 lg:min-h-0 lg:overflow-y-auto dark:text-amber-400"
+            >
+              {/* A block child, so useScrolls sees the text grow. */}
+              <span className="block">{notice}</span>
+            </p>
+          ) : null}
+          <Button className="w-full lg:shrink-0" disabled={selection.size === 0} onClick={onReview}>
+            {t("web.admin.backups.restore.choose.review")}
+          </Button>
+        </div>
       </aside>
     </div>
   );

@@ -874,12 +874,16 @@ function Requesters({ prep }: { prep: AdminDownloadPreparation }) {
       <div className="flex min-w-0 items-center gap-1.5">
         <Link
           to={`/admin/users/${first.user_id}`}
+          dir="auto"
           className="hover:text-primary truncate font-medium transition-colors hover:underline"
         >
           {requesterName(first)}
         </Link>
         {first.profile_name && (
-          <span className="border-primary/30 bg-primary/15 text-primary max-w-[6rem] truncate rounded border px-1.5 py-0.5 text-[10px] leading-none">
+          <span
+            dir="auto"
+            className="border-primary/30 bg-primary/15 text-primary max-w-[6rem] truncate rounded border px-1.5 py-0.5 text-[10px] leading-none"
+          >
             {first.profile_name}
           </span>
         )}

@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
+import { cn } from "@/lib/utils";
 
 /** Keep mobile titles readable; fit desktop titles into a bounded line budget. */
 export default function DetailTitle({
@@ -101,7 +102,12 @@ export default function DetailTitle({
   }, [bounded, title, className]);
 
   return (
-    <h1 ref={titleRef} title={bounded ? title : undefined} className={className}>
+    <h1
+      ref={titleRef}
+      dir="auto"
+      title={bounded ? title : undefined}
+      className={cn("bidi-text", className)}
+    >
       {title}
     </h1>
   );

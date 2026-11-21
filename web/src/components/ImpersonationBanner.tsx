@@ -55,7 +55,10 @@ export default function ImpersonationBanner({
           <span className="impersonation-chip flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[11px] font-bold">
             {initial}
           </span>
-          <span className="text-foreground truncate text-sm font-semibold tracking-tight">
+          <span
+            dir="auto"
+            className="text-foreground truncate text-sm font-semibold tracking-tight"
+          >
             {userName}
           </span>
         </div>

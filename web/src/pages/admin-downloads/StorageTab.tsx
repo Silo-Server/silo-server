@@ -555,7 +555,7 @@ function StatusPill({ location }: { location: AdminDownloadStorageLocation }) {
   const t = useT();
   if (location.kind === "server" || location.online) {
     return (
-      <span className="text-success bg-success/10 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium">
+      <span className="text-success-label bg-success/10 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium">
         <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
         {t("web.admin.downloads.storage.status.online")}
       </span>

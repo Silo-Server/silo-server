@@ -38,7 +38,7 @@ vi.mock("@/api/v2/request", async () => {
 });
 
 vi.mock("@/components/realtimeEventsContext", () => ({
-  useRealtimeEvents: () => ({ awaitAdminJob: vi.fn() }),
+  useRealtimeEventsActions: () => ({ awaitAdminJob: vi.fn() }),
 }));
 
 vi.mock("@/pages/ItemDetail/watchedState", async () => {
