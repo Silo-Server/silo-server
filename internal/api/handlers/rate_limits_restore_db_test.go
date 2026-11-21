@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/backup"
-	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 // TestRestoredRateLimitsUseTheirWritePathDB: restored rate limits are
@@ -50,7 +50,7 @@ func TestRestoredRateLimitsUseTheirWritePathDB(t *testing.T) {
 	if _, err := pool.Exec(ctx, `CREATE TABLE server_settings (key text PRIMARY KEY, value text NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
-	h := NewRateLimitHandler(catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), nil), nil, nil, nil)
+	h := NewRateLimitHandler(serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), nil), nil, nil, nil)
 	apply := func(values map[string]string) error {
 		tx, err := pool.Begin(ctx)
 		if err != nil {

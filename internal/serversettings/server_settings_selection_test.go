@@ -1,4 +1,4 @@
-package catalog
+package serversettings
 
 import (
 	"context"
