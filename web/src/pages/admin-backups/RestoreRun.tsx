@@ -164,7 +164,7 @@ function AccountReport({
                   />
                   <span className="min-w-0 wrap-anywhere">
                     {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
-                    <span className="font-medium">{profile.label}</span>{" "}
+                    <bdi className="font-medium">{profile.label}</bdi>{" "}
                     <span className="text-muted-foreground">
                       {keepSeparatorsWithNext(
                         t("web.admin.backups.restore.run.profileOutcome", {
