@@ -161,3 +161,42 @@ func TestMeilisearchCheckUsesOnlyBoundDraftCredentials(t *testing.T) {
 		t.Fatalf("check exposed provider detail: %+v, %v", result, err)
 	}
 }
+
+// A failed text model check names what went wrong in authored words, with the
+// status of a request the provider rejected, and never the provider's text.
+func TestTextAICheckNamesProviderFailure(t *testing.T) {
+	original := newAdminAISettingsCheckClient
+	t.Cleanup(func() { newAdminAISettingsCheckClient = original })
+	registry := `{"providers":[{"id":"custom-1","type":"custom","name":"Local","base_url":"http://llm.example.test/v1","api_key":"SYNTHETIC_KEY","capabilities":["chat"]}]}`
+	store := &fakeServerSettingsStore{values: map[string]string{"ai.providers": registry, "ai.text_provider_id": "custom-1", "ai.chat_model": "local-chat"}}
+	h := &AdminHandler{SettingsRepo: store}
+	for _, tc := range []struct {
+		name     string
+		err      error
+		wantKey  string
+		wantArgs map[string]string
+	}{
+		{name: "rejected key", err: &llm.HTTPError{StatusCode: 401}, wantKey: "textAIUnauthorized"},
+		{name: "rejected request", err: &llm.HTTPError{StatusCode: 400, Code: "SYNTHETIC_PROVIDER_DETAIL"}, wantKey: "textAIRejected", wantArgs: map[string]string{"status": "400"}},
+		{name: "unknown model", err: &llm.HTTPError{StatusCode: 404}, wantKey: "textAINotFound"},
+		{name: "unclassified", err: errors.New("SYNTHETIC_PROVIDER_DETAIL"), wantKey: "textAIFailed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			newAdminAISettingsCheckClient = func(llm.Config) aiSettingsCheckClient {
+				return &fakeAISettingsCheckClient{chat: func(context.Context, []llm.Message, bool) (string, error) {
+					return "", fmt.Errorf("SYNTHETIC_PROVIDER_DETAIL: %w", tc.err)
+				}}
+			}
+			result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_chat", nil, nil)
+			if err != nil || result.Success {
+				t.Fatalf("check=%+v, %v", result, err)
+			}
+			if result.MessageKey != checkMessageKeyPrefix+tc.wantKey || !maps.Equal(result.MessageArgs, tc.wantArgs) {
+				t.Fatalf("message key=%q args=%v, want %q %v", result.MessageKey, result.MessageArgs, tc.wantKey, tc.wantArgs)
+			}
+			if strings.Contains(result.Message, "SYNTHETIC") {
+				t.Fatalf("check exposed provider detail: %q", result.Message)
+			}
+		})
+	}
+}

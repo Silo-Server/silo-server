@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
@@ -202,7 +204,7 @@ func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, con
 	if connection != nil {
 		checkConfig, err := connection.CheckTextConfig(ctx)
 		if err != nil {
-			return checkFailed(checkMessageTextAIFailed)
+			return textCheckFailed(ctx, err, "")
 		}
 		checkConfig.ChatModel = clientCfg.ChatModel
 		checkConfig.ReasoningEffort = clientCfg.ReasoningEffort
@@ -215,12 +217,61 @@ func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, con
 		{Role: "system", Content: "Return a JSON object with status set to ok."},
 		{Role: "user", Content: "Check this Silo text translation connection."},
 	}, true); err != nil {
-		response := checkFailed(checkMessageTextAIFailed)
-		response.Message = fmt.Sprintf("Text AI connection check failed: %v", err)
-		return response
+		return textCheckFailed(ctx, err, clientCfg.APIKey)
 	}
 
 	return checkPassed(newCheckMessage("textAIConnected", "Text AI connection successful."))
+}
+
+// textCheckFailed explains a failed text model check in authored words and
+// logs the provider's error, which can carry response bodies, for the
+// administrator to read in the server log. A provider that echoes the API key
+// in its error body does not get it into the log.
+func textCheckFailed(ctx context.Context, err error, apiKey string) connectionCheckResponse {
+	detail := err.Error()
+	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
+		detail = strings.ReplaceAll(detail, apiKey, "[redacted]")
+	}
+	slog.WarnContext(ctx, "text AI connection check failed", "component", "api", "error", logredact.SanitizeText(detail))
+	return checkFailed(textCheckFailureMessage(err))
+}
+
+// textCheckFailureMessage explains a classified provider failure, or falls
+// back to the general text check failure.
+func textCheckFailureMessage(err error) checkMessage {
+	switch {
+	case errors.Is(err, chatgpt.ErrSignInRequired):
+		return checkMessageChatGPTSignInRequired
+	case errors.Is(err, llm.ErrPlanIneligible):
+		return newCheckMessage("textAIPlanIneligible", "The connected ChatGPT account can't share its plan usage. Check ChatGPT usage settings, or connect another account.")
+	}
+	switch llm.Classify(err) {
+	case llm.FailureQuotaExhausted, llm.FailurePaymentRequired:
+		return newCheckMessage("textAIBilling", "Text AI provider has no available credit or has reached its spending limit. Check your provider balance and limits.")
+	case llm.FailureUnauthorized:
+		return newCheckMessage("textAIUnauthorized", "Text AI provider rejected the credentials. Replace the provider's API key, or sign in with ChatGPT again.")
+	case llm.FailureForbidden:
+		return newCheckMessage("textAIForbidden", "Text AI access was denied. Check that the API key may use this model.")
+	case llm.FailureNotFound:
+		return newCheckMessage("textAINotFound", "Text AI endpoint or model is unavailable. Check the provider's base URL and the model.")
+	case llm.FailureRateLimited:
+		return newCheckMessage("textAIRateLimited", "Text AI provider is rate limiting requests. Try again later.")
+	case llm.FailureUnavailable:
+		return newCheckMessage("textAIUnavailable", "Text AI provider is temporarily unavailable. Try again later.")
+	case llm.FailureTimeout:
+		return newCheckMessage("textAITimedOut", "Text AI connection check timed out. Check provider availability and try again.")
+	case llm.FailureUnreachable:
+		return newCheckMessage("textAIUnreachable", "Silo could not reach the text AI provider. Check the provider's base URL and that this server can connect to it.")
+	case llm.FailureUnusableResponse:
+		return newCheckMessage("textAIUnusableResponse", "Text model returned a response Silo cannot use. Choose another model.")
+	case llm.FailureRejected:
+		if status, ok := errors.AsType[*llm.HTTPError](err); ok {
+			m := newCheckMessage("textAIRejected", fmt.Sprintf("Text AI provider rejected the check request with HTTP status %d. Check the model, reasoning level, and service tier.", status.StatusCode))
+			m.args = map[string]string{"status": strconv.Itoa(status.StatusCode)}
+			return m
+		}
+	}
+	return checkMessageTextAIFailed
 }
 
 func checkAITranscriptionConnection(ctx context.Context, cfg *config.Config) connectionCheckResponse {
