@@ -174,6 +174,17 @@ it("lets a refused settings save through after a reload, keeping the edits only 
   expect(result.current.dirtyCount).toBe(0);
   expect(result.current.getValue("branding.login_subtitle")).toBe("Changed again");
   expect(result.current.getValue("download.artifact_dir")).toBe("/srv/artifacts");
+
+  // The same goes for a setting the page shows without managing it.
+  expect(result.current.getValue("server.log_level")).toBe("error");
+  act(() => result.current.setValue("branding.server_name", "Villa"));
+  stored = { ...stored, "server.log_level": "debug" };
+  tag = '"tagF"';
+  await act(async () => {
+    await expect(result.current.save()).rejects.toBeInstanceOf(Error);
+  });
+  await reloadAfterRefusal();
+  expect(result.current.dirtyCount).toBe(0);
 });
 
 it("keeps every edit when a reload after a refused save can't read which secrets are set, and checks the page from before it on a retry", async () => {

@@ -143,6 +143,13 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     () => (keySignature === "" ? [] : keySignature.split("\u0000")),
     [keySignature],
   );
+  // Every setting the page shows: its keys, including ones it adds later, and
+  // any other it reads through the form. A reload after a refused save checks
+  // all of them.
+  const shownKeys = useRef(new Set<string>());
+  useEffect(() => {
+    for (const key of stableKeys) shownKeys.current.add(key);
+  }, [stableKeys]);
 
   // Sync from server when settings load
   useEffect(() => {
@@ -165,11 +172,20 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   }, [settings, stableKeys]);
 
   const getValue = useCallback(
-    (key: string) => localValues[key] ?? settings?.[key] ?? "",
+    (key: string) => {
+      shownKeys.current.add(key);
+      return localValues[key] ?? settings?.[key] ?? "";
+    },
     [localValues, settings],
   );
 
-  const getPersistedValue = useCallback((key: string) => settings?.[key] ?? "", [settings]);
+  const getPersistedValue = useCallback(
+    (key: string) => {
+      shownKeys.current.add(key);
+      return settings?.[key] ?? "";
+    },
+    [settings],
+  );
 
   /**
    * Stages a value. A value equal to the saved one undoes the edit instead,
@@ -372,7 +388,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       // the secret status from then, the page can't be vouched for.
       const pageChanged =
         !secretsThen ||
-        stableKeys.some(
+        [...shownKeys.current].some(
           (key) =>
             !dirtyRef.current.has(key) &&
             (valueIn(baseline, key) !== valueIn(fresh, key) ||
@@ -401,7 +417,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     } finally {
       reloading.current = false;
     }
-  }, [dismissConflict, refetch, refetchSensitiveStatus, stableKeys]);
+  }, [dismissConflict, refetch, refetchSensitiveStatus]);
 
   const save = useCallback(
     async (selectedKeys?: string[]) => {
