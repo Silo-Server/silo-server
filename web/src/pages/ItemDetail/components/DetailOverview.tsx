@@ -64,11 +64,13 @@ export default function DetailOverview({
     const fonts = "fonts" in document ? document.fonts : undefined;
     void fonts?.ready.then(measure);
     fonts?.addEventListener("loadingdone", measure);
-    // The text weight preference does the same (DetailTitle watches it too).
+    // So do the text weight preference and the interface language, which
+    // changes how text such as Japanese breaks into lines (DetailTitle watches
+    // both too).
     const typography = new MutationObserver(measure);
     typography.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-text-weight"],
+      attributeFilter: ["data-text-weight", "lang"],
     });
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(text);
