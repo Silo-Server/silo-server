@@ -24225,51 +24225,22 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " račun"
+              "value": "Skrij račun"
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " računa"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " račune"
+              "value": "Skrij računa"
             }
           ]
         },
@@ -24277,69 +24248,31 @@
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " računov"
+              "value": "Skrij račune"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteko"
+              "value": "Skrij datoteko"
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteki"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteke"
+              "value": "Skrij datoteki"
             }
           ]
         },
@@ -24347,69 +24280,31 @@
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datotek"
+              "value": "Skrij datoteke"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteko"
+              "value": "Skrij datoteko"
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteki"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteke"
+              "value": "Skrij datoteki"
             }
           ]
         },
@@ -24417,20 +24312,11 @@
           "value": [
             {
               "type": 0,
-              "value": "Skrij "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datotek"
+              "value": "Skrij datoteke"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -25015,51 +24901,22 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " račun"
+              "value": "Prikaži račun"
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " računa"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " račune"
+              "value": "Prikaži računa"
             }
           ]
         },
@@ -25067,20 +24924,11 @@
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " računov"
+              "value": "Prikaži račune"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -25159,51 +25007,22 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteko"
+              "value": "Prikaži datoteko"
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteki"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteke"
+              "value": "Prikaži datoteki"
             }
           ]
         },
@@ -25211,69 +25030,31 @@
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datotek"
+              "value": "Prikaži datoteke"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteko"
+              "value": "Prikaži datoteko"
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteki"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datoteke"
+              "value": "Prikaži datoteki"
             }
           ]
         },
@@ -25281,20 +25062,11 @@
           "value": [
             {
               "type": 0,
-              "value": "Prikaži "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " datotek"
+              "value": "Prikaži datoteke"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -74797,7 +74569,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Znova naložite, da vidite trenutne vrednosti. Vaše spremembe nastavitev, ki so se medtem spremenile, ter spremembe shranjenih gesel in ključev skupaj z njihovimi povezanimi nastavitvami so razveljavljene; druge spremembe so ohranjene."
+      "value": "Znova naložite, da vidite trenutne vrednosti. Če se je na tej strani kaj spremenilo ali ste urejali shranjeno geslo ali ključ, bodo vse vaše spremembe razveljavljene; sicer bodo ohranjene."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -91639,6 +91411,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"

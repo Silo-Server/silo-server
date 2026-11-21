@@ -213,6 +213,7 @@ function S3Fields({
         label={t("web.setup.storage.endpointLabel")}
         // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
         hint="https://s3.amazonaws.com"
+        dir="ltr"
         value={form.getValue(key("endpoint"))}
         onChange={(v) => form.setValue(key("endpoint"), v)}
         managedByEnv={form.envVar(key("endpoint"))}
@@ -291,6 +292,7 @@ function S3Fields({
               dirty={keptForEdit("s3.public_read_endpoint")}
               // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
               hint="https://cdn.example.com"
+              dir="ltr"
               value={form.getValue("s3.public_read_endpoint")}
               onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
               managedByEnv={form.envVar("s3.public_read_endpoint")}
@@ -525,6 +527,7 @@ export function StorageStep() {
             label={t("web.setup.storage.localPathLabel")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="/var/lib/silo/artwork"
+            dir="ltr"
             value={form.getValue("artwork.local_path")}
             onChange={(value) => form.setValue("artwork.local_path", value)}
             disabled={locationStatusUnavailable || artworkLocked}

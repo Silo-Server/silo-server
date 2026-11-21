@@ -142,6 +142,7 @@ Colors are organized as semantic layers. `app.css` provides the actual values; c
 - `--accent`: highlighted and active backgrounds
 - `--destructive`: danger and error text, icons, borders, and status dots
 - `--destructive-fill`: solid danger background for destructive buttons and badges, labelled with `--destructive-foreground`. A white label on `--destructive` doesn't reach 4.5:1, so don't fill with it
+- `--success-label`, `--warning-label`, `--info-label`, `--destructive-label`: a status-coloured label on a 10% tint of its own colour, such as the play-method tags (`bg-destructive/10 text-destructive-label`). Red mixes toward `--contrast-boost`, and in high contrast every label does, so each stays above 4.5:1 on a hovered row, where the plain status colour doesn't
 - `--ring`: focus ring
 
 ### Ambient Tokens

@@ -127,6 +127,7 @@ export function PathMappingEditor({
                     </Label>
                     <Input
                       id={`${idPrefix}-from-${index}`}
+                      dir="ltr"
                       placeholder={copy.fromPlaceholder}
                       className="font-mono text-xs"
                       value={row.from}
@@ -146,6 +147,7 @@ export function PathMappingEditor({
                     </Label>
                     <Input
                       id={`${idPrefix}-to-${index}`}
+                      dir="ltr"
                       placeholder={TO_PLACEHOLDER}
                       className="font-mono text-xs"
                       value={row.to}

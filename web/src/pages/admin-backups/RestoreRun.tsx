@@ -141,15 +141,25 @@ function AccountReport({
             const outcome = OUTCOME[profile.outcome];
             return (
               <li key={profile.id}>
-                <p className="flex items-center gap-1.5 text-[13px]">
-                  <outcome.Icon aria-hidden="true" className={cn("size-3.5", outcome.tone)} />
-                  <span className="font-medium">{profile.label}</span>
-                  <span className="text-muted-foreground">
-                    {t("web.admin.backups.restore.run.profileOutcome", {
-                      outcome: profile.created
-                        ? t("web.admin.backups.restore.outcome.created")
-                        : t(outcome.label),
-                    })}
+                {/* rem text with a unitless line height keeps the line taller than the
+                    rem-sized icon at any browser font size, so the icon stays centered on it. */}
+                <p className="flex items-start gap-1.5 text-[0.8125rem] leading-normal">
+                  <span className="flex min-h-lh shrink-0 items-center">
+                    <outcome.Icon aria-hidden="true" className={cn("size-3.5", outcome.tone)} />
+                  </span>
+                  <span>
+                    {/* The outcome moves to the next line as a unit, so its "·" stays with the
+                        word it introduces, and wraps inside itself only when it can't fit on a
+                        line. The gap is the name's margin, left behind at the end of the line. */}
+                    <span className="me-1.5 font-medium">{profile.label}</span>
+                    <wbr />
+                    <span className="text-muted-foreground inline-block">
+                      {t("web.admin.backups.restore.run.profileOutcome", {
+                        outcome: profile.created
+                          ? t("web.admin.backups.restore.outcome.created")
+                          : t(outcome.label),
+                      })}
+                    </span>
                   </span>
                 </p>
                 {[
@@ -260,8 +270,10 @@ export function RestoreRun({
     return (
       <div className="max-w-[70rem] space-y-5">
         <div className="surface-panel space-y-3 rounded-2xl p-5" role="status">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />
+          <div className="flex items-start gap-2 text-sm font-medium wrap-anywhere">
+            <span className="flex min-h-lh shrink-0 items-center">
+              <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />
+            </span>
             {stopping
               ? t("web.admin.backups.restore.run.stopping")
               : job.state === "queued"

@@ -105,13 +105,18 @@ export function RestoreReview({
       {!set.authenticated ? (
         <div className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
           <p>{t("web.admin.backups.restore.review.unauthenticated")}</p>
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="restore-accept-unauthenticated"
-              checked={acceptUnauthenticated}
-              onCheckedChange={(value) => onAcceptUnauthenticated(value === true)}
-            />
-            <Label htmlFor="restore-accept-unauthenticated">
+          {/* The label's text-sm replaces Label's leading-none with the box's own unitless
+              line height, which the row inherits too, so the checkbox's one-line box stays
+              on the label's first line when it wraps. */}
+          <div className="flex items-start gap-2">
+            <span className="flex min-h-lh shrink-0 items-center">
+              <Checkbox
+                id="restore-accept-unauthenticated"
+                checked={acceptUnauthenticated}
+                onCheckedChange={(value) => onAcceptUnauthenticated(value === true)}
+              />
+            </span>
+            <Label htmlFor="restore-accept-unauthenticated" className="text-sm">
               {t("web.admin.backups.restore.review.trust")}
             </Label>
           </div>

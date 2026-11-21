@@ -291,7 +291,9 @@ export default function ImageSelectorTab({ item, enabled, onImageApplied }: Imag
               )}
             >
               {p.id === null ? t("web.item.images.allProviders") : p.id.toUpperCase()}
-              <span className="tabular-nums opacity-60">{numberText(p.count)}</span>
+              <span className="text-muted-foreground font-(--font-weight-ui) tabular-nums">
+                {numberText(p.count)}
+              </span>
             </button>
           ))}
         </div>
@@ -367,7 +369,7 @@ export default function ImageSelectorTab({ item, enabled, onImageApplied }: Imag
 
                   {/* Current indicator */}
                   {isCurrent && (
-                    <div className="bg-primary/90 text-primary-foreground absolute start-1 top-1 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-semibold">
+                    <div className="bg-primary text-primary-foreground absolute start-1 top-1 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-semibold">
                       <Check className="size-2.5" />
                       {t("web.item.images.current")}
                     </div>

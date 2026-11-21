@@ -83,7 +83,9 @@ function ServerLocationInfo({
           <dt className="text-muted-foreground text-xs">
             {t("web.admin.downloads.location.directory")}
           </dt>
-          <dd className="font-mono text-xs break-all">{location.dir}</dd>
+          <dd className="font-mono text-xs break-all">
+            <span dir="ltr">{location.dir}</span>
+          </dd>
         </div>
         <div>
           <dt className="text-muted-foreground text-xs">
@@ -262,6 +264,8 @@ function NodeLocationFields({
           <Label htmlFor={dirId}>{t("web.admin.downloads.location.directory")}</Label>
           <Input
             id={dirId}
+            // A path reads left to right; the translated placeholder keeps the page's direction.
+            dir={dir || clusterDir ? "ltr" : undefined}
             value={dir}
             onChange={(event) => setDir(event.target.value)}
             // No sentence as a placeholder: an input can't wrap it, so longer

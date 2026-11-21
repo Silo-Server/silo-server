@@ -88,6 +88,8 @@ export function WebhookEndpointSection({ source }: { source: AutoscanSource }) {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
               id={`webhook-url-${source.id}`}
+              // The URL reads left to right; a translated status message keeps the page's direction.
+              dir={active && !uncertain && url ? "ltr" : undefined}
               readOnly
               value={notice ?? url}
               // Monospace only for the URL: a monospace font draws Arabic letters unjoined.
