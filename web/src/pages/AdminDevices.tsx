@@ -629,6 +629,7 @@ function FleetPulse({
           {t("web.admin.devices.groupBy.label")}
         </span>
         <SegmentedControl
+          label={t("web.admin.devices.groupBy.label")}
           value={groupBy}
           onChange={onGroupByChange}
           options={[
@@ -662,9 +663,7 @@ function DeviceScopeControl({
         aria-pressed={!overridesOnly}
         className={cn(
           "inline-flex items-center gap-2 px-3.5 py-2 text-[13px] font-medium transition-colors",
-          !overridesOnly
-            ? "bg-surface-hover/70 text-foreground"
-            : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
+          segmentClass(!overridesOnly),
         )}
       >
         <span>{t("web.admin.devices.scope.allDevices")}</span>
@@ -678,9 +677,7 @@ function DeviceScopeControl({
         aria-pressed={overridesOnly}
         className={cn(
           "border-border/60 inline-flex items-center gap-2 border-s px-3.5 py-2 text-[13px] font-medium transition-colors",
-          overridesOnly
-            ? "bg-surface-hover/70 text-foreground"
-            : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
+          segmentClass(overridesOnly),
         )}
       >
         <span>{t("web.admin.devices.scope.withOverrides")}</span>
@@ -733,9 +730,7 @@ function SettingsScopeControl({
         aria-pressed={showAllSettings}
         className={cn(
           "inline-flex items-center gap-1.5 px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-not-allowed",
-          showAllSettings
-            ? "bg-surface-hover/70 text-foreground"
-            : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
+          segmentClass(showAllSettings),
         )}
       >
         <span>{t("web.admin.devices.settingsScope.allSettings")}</span>
@@ -752,9 +747,7 @@ function SettingsScopeControl({
         aria-pressed={!showAllSettings}
         className={cn(
           "border-border/60 inline-flex items-center gap-1.5 border-s px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-          !showAllSettings
-            ? "bg-surface-hover/70 text-foreground"
-            : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
+          segmentClass(!showAllSettings),
         )}
       >
         <span>{t("web.admin.devices.settingsScope.overrides")}</span>
@@ -823,30 +816,48 @@ function Histogram({ counts, max }: { counts: number[]; max: number }) {
   );
 }
 
+/**
+ * A segment of one of the page's segmented controls. The chosen one carries a
+ * foreground bar along its bottom edge: a fill alone sits within 1.5:1 of its
+ * neighbours, and in high contrast every label is the same colour. Forced
+ * colors drops the shadow, so there the label is underlined instead.
+ */
+function segmentClass(selected: boolean) {
+  return selected
+    ? "bg-surface-hover text-foreground shadow-[inset_0_-2px_0_var(--foreground)] forced-colors:underline forced-colors:decoration-2 forced-colors:underline-offset-2"
+    : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground";
+}
+
 function SegmentedControl<T extends string>({
+  label,
   value,
   onChange,
   options,
 }: {
+  /** The group's accessible name. */
+  label: string;
   value: T;
   onChange: (v: T) => void;
   options: { value: T; label: string }[];
 }) {
   return (
-    <div className="border-border/70 bg-background/40 inline-flex overflow-hidden rounded-md border">
+    <div
+      role="group"
+      aria-label={label}
+      className="border-border/70 bg-background/40 inline-flex overflow-hidden rounded-md border"
+    >
       {options.map((opt, i) => {
         const active = value === opt.value;
         return (
           <button
             key={opt.value}
             type="button"
+            aria-pressed={active}
             onClick={() => onChange(opt.value)}
             className={cn(
               "px-2.5 py-1 text-[11.5px] transition-colors",
               i > 0 && "border-border/60 border-s",
-              active
-                ? "bg-surface-hover/70 text-foreground"
-                : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
+              segmentClass(active),
             )}
           >
             {opt.label}
