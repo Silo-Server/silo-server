@@ -112,9 +112,10 @@ export function StaleIDsSection() {
               {pag.rows.map((s) => (
                 <TableRow key={staleIDKey(s)}>
                   {/* The title and library name wrap, so a long one can't push the
-                      table past its section. */}
+                      table past its section. The title keeps a minimum width, so a
+                      long library name can't squeeze it to a few letters a line. */}
                   <TableCell className="font-medium whitespace-normal">
-                    <span className="bidi-text block wrap-anywhere">{s.title}</span>
+                    <span className="bidi-text block min-w-32 wrap-anywhere">{s.title}</span>
                   </TableCell>
                   <TableCell className="tabular-nums">{numberText(s.year)}</TableCell>
                   <TableCell className="text-sm whitespace-normal">
