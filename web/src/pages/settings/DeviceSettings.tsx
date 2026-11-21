@@ -604,12 +604,16 @@ function DeviceDetail({
         canReset={appearanceChangedHere}
         onReset={() => {
           appearance.discardQueued();
-          clearValue.mutate(
-            { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, identity },
-            {
-              onError: (error) =>
-                toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed"))),
-            },
+          // A save already on the wire would land after the override was
+          // removed and write it back, so the removal waits for it to settle.
+          void appearance.whenIdle().then(() =>
+            clearValue.mutate(
+              { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, identity },
+              {
+                onError: (error) =>
+                  toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed"))),
+              },
+            ),
           );
           setAppearanceOpen(false);
         }}

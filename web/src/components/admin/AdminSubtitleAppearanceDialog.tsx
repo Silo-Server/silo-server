@@ -54,7 +54,9 @@ export function AdminSubtitleAppearanceDialog({
 
   const handleReset = () => {
     draft.discardQueued();
-    onReset(setting);
+    // A save already on the wire would land after the override was removed
+    // and write it back, so the removal waits for that save to settle.
+    void draft.whenIdle().then(() => onReset(setting));
     onClose();
   };
 

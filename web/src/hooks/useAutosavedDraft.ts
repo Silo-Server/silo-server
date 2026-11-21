@@ -10,6 +10,15 @@ interface Machine<T> {
   /** Edits made while a save was in flight, merged, with the save to send them. */
   queued: Partial<T> | null;
   queuedSave: Save<T> | null;
+  /** Resolvers of whenIdle() promises waiting for the save in flight. */
+  idle: Array<() => void>;
+}
+
+/** Wake every whenIdle() waiter; only call while no save is in flight. */
+function settleIdle<T>(m: Machine<T>) {
+  const settled = m.idle;
+  m.idle = [];
+  for (const resolve of settled) resolve();
 }
 
 /** Send one patch; when it settles, send whatever queued up meanwhile. */
@@ -34,6 +43,7 @@ function send<T>(
       m.queued = null;
       m.queuedSave = null;
       if (queued && queuedSave) send(m, queued, queuedSave, publish);
+      else settleIdle(m);
       publish(m);
     });
 }
@@ -54,7 +64,8 @@ function send<T>(
  * Unmounting drops edits that haven't been sent, so nothing goes out after
  * the editor is gone (where a reset or a reopened editor couldn't stop it);
  * a save already in flight still completes. Call `discardQueued` before
- * clearing the stored value while the editor is mounted.
+ * clearing the stored value while the editor is mounted, and `whenIdle` to
+ * wait out that in-flight save before the clear.
  */
 export function useAutosavedDraft<T extends object>(initial: T) {
   const machine = useRef<Machine<T>>({
@@ -62,6 +73,7 @@ export function useAutosavedDraft<T extends object>(initial: T) {
     sending: null,
     queued: null,
     queuedSave: null,
+    idle: [],
   });
   const [view, setView] = useState({ value: initial, saving: false });
 
@@ -118,5 +130,20 @@ export function useAutosavedDraft<T extends object>(initial: T) {
     publish(m);
   }, [publish]);
 
-  return { value: view.value, saving: view.saving, edit, reset, discardQueued };
+  /**
+   * Resolves once no save is in flight. Pairs with `discardQueued`: after it,
+   * nothing new can go out, so work done when this settles (clearing the
+   * stored value) can't be undone by a save that was already on the wire.
+   */
+  const whenIdle = useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        const m = machine.current;
+        if (m.sending === null) resolve();
+        else m.idle.push(resolve);
+      }),
+    [],
+  );
+
+  return { value: view.value, saving: view.saving, edit, reset, discardQueued, whenIdle };
 }
