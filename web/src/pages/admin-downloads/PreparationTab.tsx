@@ -37,6 +37,7 @@ import { formatCodecLabel, formatFileSize } from "@/lib/mediaFormat";
 import { cn } from "@/lib/utils";
 import { activityMethodMeta } from "@/pages/adminActivityPresentation";
 import { CHECKBOX } from "./controls";
+import { downloadEntryStatus } from "./downloadStoragePresentation";
 import {
   cancelPreparationsPrompt,
   canPausePreparation,
@@ -722,7 +723,10 @@ function WorkerBadge({ prep }: { prep: AdminDownloadPreparation }) {
   }
   return (
     <span className="border-primary/20 bg-primary/10 text-primary inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold">
-      <span className="text-foreground/75 font-normal">{worker.label}</span>
+      {/* Same label treatment as the playback route badges (PlaybackRouteBadges). */}
+      <span className="text-foreground/75 [html[data-high-contrast=true]_&]:text-muted-foreground font-normal">
+        {worker.label}
+      </span>
       <span className="truncate">{worker.name}</span>
     </span>
   );
@@ -1053,21 +1057,22 @@ function PreparationDetails({
             prep.requesters.map((r, i) => (
               <div
                 key={`${r.user_id}-${r.device_id ?? "web"}-${i}`}
-                className="grid min-w-0 grid-cols-[1fr_auto] gap-2"
+                className="grid min-w-0 grid-cols-[1fr_auto] items-baseline gap-x-2"
               >
-                <span className="min-w-0 truncate font-medium text-[var(--terminal-fg)]">
+                <span className="min-w-0 font-medium wrap-anywhere text-[var(--terminal-fg)]">
                   {r.profile_name
                     ? t(`${K}.details.requesterProfile`, {
                         name: requesterName(r),
                         profile: r.profile_name,
                       })
                     : requesterName(r)}
-                  <span className="block truncate text-[10px] font-normal text-[var(--terminal-muted)]">
-                    {requesterDevice(r)}
-                  </span>
                 </span>
-                <span className="text-[10px] text-[var(--terminal-muted)] capitalize">
-                  {r.status === "preparing" ? t(`${K}.details.requesterWaiting`) : r.status}
+                <span className="text-[10px] text-[var(--terminal-muted)]">
+                  {downloadEntryStatus(r.status).label}
+                </span>
+                {/* Full width: a long translated status only shares a line with the name, which wraps. */}
+                <span className="col-span-2 truncate text-[10px] text-[var(--terminal-muted)]">
+                  {requesterDevice(r)}
                 </span>
               </div>
             ))

@@ -57,6 +57,10 @@
   /* ── Interactive ─────────────────────────────────────────── */
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  /* Text in the primary color. An admin accent sets --primary-text to a
+     variant that reads on Cinema Dark's surfaces (lib/accentColor.ts); fills,
+     borders, and rings keep the accent itself. */
+  --text-color-primary: var(--primary-text, var(--primary));
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -179,6 +183,10 @@
 
   /* ── Font Family ───────────────────────────────────────────── */
   --font-family-display: var(--font-display, var(--font-body));
+  /* The interface font, as `font-ui`. Tailwind's own `font-sans` is the system
+     stack. A `font-mono` field whose placeholder is translated prose adds
+     `placeholder:font-ui`: monospace fonts draw Arabic letters unjoined. */
+  --font-ui: var(--font-body);
 
   /* ── Hero Backdrop Defaults ─────────────────────────────────── */
   --hero-backdrop-brightness: 0.9;
@@ -1910,7 +1918,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     /* Mobile: non-sticky so the tabs scroll with the hero instead of hovering
        over it — stacking a sticky tab bar under the sticky top nav eats too
        much vertical space on narrow viewports. At lg+ the mobile top nav is
-       hidden, so we promote this header to sticky at top:0 there. */
+       hidden, so we promote this header to sticky at the top there, below the
+       impersonation banner when one shows. */
     position: relative;
     z-index: 20;
     display: flex;
@@ -1933,7 +1942,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   @media (min-width: 1024px) {
     .library-marquee-header {
       position: sticky;
-      top: 0;
+      top: var(--impersonation-banner-height);
       z-index: 30;
     }
   }
@@ -2565,9 +2574,19 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   :root {
     --app-sidebar-offset: 0px;
     /* How far fixed page chrome (the collection editor's save bar) rises to
-       clear whichever background playback bar shows. usePlaybackBarHeight
+       clear whichever background playback bar shows. useRootHeightProperty
        measures each bar, bottom inset included, on the root while it shows. */
     --playback-bar-clearance: max(var(--watch-bar-height, 0px), var(--audiobook-bar-height, 0px));
+    /* The impersonation banner pins to the top of the viewport above every
+       route, and ImpersonationBanner measures its height here while it shows.
+       Anything else pinned near the top of the viewport (the phone headers,
+       the library tabs, sticky side columns, fixed corner controls) adds this
+       to its offset so the banner never covers it. The 0px default keeps
+       `top: var(--impersonation-banner-height)` valid without a banner. */
+    --impersonation-banner-height: 0px;
+    /* In-page jumps (skip links, scrollIntoView) land below the banner; each
+       target's own scroll margin still clears the header under it. */
+    scroll-padding-top: var(--impersonation-banner-height);
   }
   @media (min-width: 64rem) {
     :root[data-app-shell] {

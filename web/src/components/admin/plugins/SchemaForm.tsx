@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Loader2 } from "lucide-react";
+import { Direction } from "radix-ui";
 
 import type { PluginAdminForm, PluginAdminFormField, PluginAdminFormSection } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { startsRightToLeft } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -54,10 +56,16 @@ type Props = {
    * shown under the control (e.g. why a server's type cannot change).
    */
   lockedKeys?: Readonly<Record<string, string>>;
+  /**
+   * Fields that hold server paths. On a right-to-left page their values stay
+   * left to right, even when a path starts with a right-to-left folder name.
+   */
+  pathKeys?: readonly string[];
 };
 
 const NO_HIDDEN_KEYS: readonly string[] = [];
 const NO_LOCKED_KEYS: Readonly<Record<string, string>> = {};
+const NO_PATH_KEYS: readonly string[] = [];
 
 function optionsFor(
   field: PluginAdminFormField,
@@ -102,6 +110,27 @@ function SelectSkeleton() {
 // renderers.
 function FieldDescription({ text }: { text?: string }) {
   return text ? <p className="text-muted-foreground text-xs leading-relaxed">{text}</p> : null;
+}
+
+// The direction of a text control on a right-to-left page. Typed values are
+// mostly machine strings (paths, URLs, LDAP filters, client IDs) that would
+// draw backwards there (`/mnt/media` as `mnt/media/`). "auto" takes the
+// direction from the value's first letter, so those read left to right while
+// text typed in Arabic or Hebrew stays right to left. A masked value keeps one
+// edge whatever its text, and a known path field reads left to right like the
+// other path inputs. "auto" ignores the placeholder, so an empty field
+// takes its placeholder's direction: usually an untranslated path or URL from
+// the schema, but a host can pass translated text (a saved secret's hint).
+// A left-to-right page already draws these values in order and is left alone.
+function textDirection(
+  pageDir: "ltr" | "rtl",
+  text: string,
+  placeholder: string | undefined,
+  alwaysLeftToRight: boolean,
+): "auto" | "ltr" | "rtl" | undefined {
+  if (pageDir !== "rtl") return undefined;
+  if (!text) return startsRightToLeft(placeholder ?? "") ? "rtl" : "ltr";
+  return alwaysLeftToRight ? "ltr" : "auto";
 }
 
 // Loading placeholder for a dynamic MULTI_SELECT (tags): a few shimmer chips.
@@ -173,8 +202,10 @@ export function SchemaForm({
   hiddenKeys = NO_HIDDEN_KEYS,
   expandSections = false,
   lockedKeys = NO_LOCKED_KEYS,
+  pathKeys = NO_PATH_KEYS,
 }: Props) {
   const t = useT();
+  const pageDir = Direction.useDirection();
   const hidden = useMemo(() => new Set(hiddenKeys), [hiddenKeys]);
   const byKey = useMemo(() => {
     const map = new Map<string, PluginAdminFormField>();
@@ -311,13 +342,19 @@ export function SchemaForm({
       );
     }
 
+    const text = String(effectiveValue(field, values) ?? "");
+    const masked = field.control === "PASSWORD" || field.secret;
+    const alwaysLeftToRight = masked || pathKeys.includes(field.key);
+    const textDir = textDirection(pageDir, text, field.placeholder, alwaysLeftToRight);
+
     if (field.control === "TEXTAREA" || field.multiline) {
       return (
         <textarea
           id={id}
+          dir={textDir}
           className="border-input bg-background min-h-24 w-full rounded-md border px-3 py-2 text-sm"
           rows={field.rows && field.rows > 0 ? field.rows : 4}
-          value={String(effectiveValue(field, values) ?? "")}
+          value={text}
           placeholder={field.placeholder}
           onChange={(event) => setField(field.key, event.target.value)}
           disabled={locked}
@@ -331,14 +368,9 @@ export function SchemaForm({
         id={id}
         disabled={locked}
         aria-describedby={describedBy}
-        type={
-          field.control === "PASSWORD" || field.secret
-            ? "password"
-            : field.control === "NUMBER"
-              ? "number"
-              : "text"
-        }
-        value={String(effectiveValue(field, values) ?? "")}
+        type={masked ? "password" : field.control === "NUMBER" ? "number" : "text"}
+        dir={textDir}
+        value={text}
         placeholder={field.placeholder}
         onChange={(event) => setField(field.key, event.target.value)}
       />

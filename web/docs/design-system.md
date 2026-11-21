@@ -60,6 +60,7 @@ Examples:
 - Hero titles are the largest and heaviest text on the page.
 - Section headers are clearly smaller than page and hero titles.
 - Metadata stays small and muted.
+- Secondary text on the solid accent (a pressed pill, a default button) keeps the label's own color and steps down in size and weight. Opacity there can drop it below 4.5:1 with some admin accents.
 - Primary actions should be the most visually prominent controls.
 
 ### 5. Ambient Immersion
@@ -138,6 +139,7 @@ Colors are organized as semantic layers. `app.css` provides the actual values; c
 
 - `--primary`: primary action color
 - `--primary-foreground`: text on primary elements
+- `--primary-text`: the primary color as text, which `text-primary` uses. An admin accent sets it to the accent, lightened only as far as needed to read at 4.5:1 on Cinema Dark's surfaces; without one it is `--primary`. Draw accent-colored text with `text-primary`, never `var(--primary)`
 - `--secondary`: secondary element backgrounds
 - `--accent`: highlighted and active backgrounds
 - `--destructive`: danger and error text, icons, borders, and status dots

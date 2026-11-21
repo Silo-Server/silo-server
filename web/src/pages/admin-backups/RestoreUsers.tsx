@@ -107,24 +107,34 @@ function ProfileRow({
             {detail}
           </span>
         </div>
+        {/* Each status is a block of its own: SettingFieldStatus is inline, so
+            two side by side would share a line. */}
         {why ? (
-          <SettingFieldStatus tone={profile.selectable ? "muted" : "warn"}>
-            {why}
-          </SettingFieldStatus>
+          <div>
+            <SettingFieldStatus tone={profile.selectable ? "muted" : "warn"}>
+              {why}
+            </SettingFieldStatus>
+          </div>
         ) : null}
         {locked ? (
-          <SettingFieldStatus tone="muted">
-            {t("web.admin.backups.restore.users.lockedPrimary")}
-          </SettingFieldStatus>
+          <div>
+            <SettingFieldStatus tone="muted">
+              {t("web.admin.backups.restore.users.lockedPrimary")}
+            </SettingFieldStatus>
+          </div>
         ) : null}
         {profile.no_library_access ? (
-          <SettingFieldStatus tone="warn">
-            {t("web.admin.backups.restore.users.noLibraryAccess")}
-          </SettingFieldStatus>
+          <div>
+            <SettingFieldStatus tone="warn">
+              {t("web.admin.backups.restore.users.noLibraryAccess")}
+            </SettingFieldStatus>
+          </div>
         ) : profile.libraries_left_out > 0 ? (
-          <SettingFieldStatus tone="warn">
-            {droppedLibraries(t, profile.libraries_left_out)}
-          </SettingFieldStatus>
+          <div>
+            <SettingFieldStatus tone="warn">
+              {droppedLibraries(t, profile.libraries_left_out)}
+            </SettingFieldStatus>
+          </div>
         ) : null}
       </div>
     </li>
@@ -263,10 +273,15 @@ export const AccountRow = memo(function AccountRow({
               {t("web.admin.backups.restore.users.administrator")}
             </p>
           ) : null}
+          {/* One block per status, as in ProfileRow. */}
           {why ? (
-            <SettingFieldStatus tone={item.selectable || item.reason === "same" ? "muted" : "warn"}>
-              {why}
-            </SettingFieldStatus>
+            <div>
+              <SettingFieldStatus
+                tone={item.selectable || item.reason === "same" ? "muted" : "warn"}
+              >
+                {why}
+              </SettingFieldStatus>
+            </div>
           ) : null}
           {!item.selectable
             ? account.policy_differences.map((difference) => (
@@ -278,19 +293,23 @@ export const AccountRow = memo(function AccountRow({
               ))
             : null}
           {account.libraries_left_out > 0 ? (
-            <SettingFieldStatus tone="warn">
-              {droppedLibraries(t, account.libraries_left_out)}
-            </SettingFieldStatus>
+            <div>
+              <SettingFieldStatus tone="warn">
+                {droppedLibraries(t, account.libraries_left_out)}
+              </SettingFieldStatus>
+            </div>
           ) : null}
           {item.selectable && newProfiles > account.profile_room ? (
-            <SettingFieldStatus tone="warn">
-              {account.profile_room === 0
-                ? t("web.admin.backups.restore.users.noRoom")
-                : t("web.admin.backups.restore.users.room", {
-                    count: account.profile_room,
-                    count_text: account.profile_room,
-                  })}
-            </SettingFieldStatus>
+            <div>
+              <SettingFieldStatus tone="warn">
+                {account.profile_room === 0
+                  ? t("web.admin.backups.restore.users.noRoom")
+                  : t("web.admin.backups.restore.users.room", {
+                      count: account.profile_room,
+                      count_text: account.profile_room,
+                    })}
+              </SettingFieldStatus>
+            </div>
           ) : null}
           {account.profiles.length > 0 ? (
             <ul aria-label={t("web.admin.backups.restore.users.profilesOf", { name: item.label })}>
