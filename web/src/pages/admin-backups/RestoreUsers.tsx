@@ -175,8 +175,9 @@ export const AccountRow = memo(function AccountRow({
         })
       : t("web.admin.backups.restore.users.newAccount");
   // Laid out like ItemRow (RestoreRows.tsx): a narrow row wraps the name above the
-  // contact line, and the admin badge, profile count and merge status move into
-  // the details, so they never squeeze the name.
+  // contact line and leaves out the admin badge, profile count and merge status, so
+  // they never squeeze the name. Its details show the merge status, the admin role
+  // and the profiles.
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">

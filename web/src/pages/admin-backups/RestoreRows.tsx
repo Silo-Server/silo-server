@@ -98,7 +98,7 @@ function settingValues(t: Translate, setting: RestoreSetting): { now: string; ba
  * number whole.
  */
 export function BreakableKey({ value }: { value: string }) {
-  const parts = value.replace(/([._])(?=\D)/g, "$1\u0000").split("\u0000");
+  const parts = value.replace(/(_|\.(?=\D))/g, "$1\u0000").split("\u0000");
   return (
     <>
       {parts.map((part, position) => (
