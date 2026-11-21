@@ -290,6 +290,7 @@ Full-bleed backdrop image that commands the viewport. Gradient overlays dissolve
 
 Implementation cues:
 - Use `.hero-gradient` for the bottom-to-top fade, `.hero-gradient-radial` for vignette, `.hero-gradient-left` for sidebar-edge fade.
+- Text over hero artwork must keep 4.5:1 over the brightest artwork, at every width. Percentage fades can't promise that where the text block spans the hero, so the item detail hero draws a shade behind its text block instead (`.detail-hero-copy::before` in `app.css`). Its 85% strength is derived from the dimmest hero text colour; dimmer hero text needs a stronger shade.
 - Use display typography (`--font-display`) at `text-5xl` to `text-7xl` for the title.
 - Keep metadata compact and secondary (badges, small text).
 - Apply Ken Burns motion to the backdrop image for ambient life.

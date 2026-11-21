@@ -137,9 +137,11 @@ export default function DetailHero({
     }
   })();
 
+  // overflow-clip, not -hidden: the copy's scrim (app.css) reaches past the
+  // hero, and a hidden-overflow box would let focus or find scroll the hero.
   return (
     <section
-      className="item-detail-hero border-border/10 relative isolate overflow-hidden border-b"
+      className="item-detail-hero border-border/10 relative isolate overflow-clip border-b"
       data-variant={variant}
       data-viewport-bounded={isViewportBounded || undefined}
     >
@@ -183,8 +185,9 @@ export default function DetailHero({
           >
             {/* Poster */}
             {showPoster && (
+              // z-[1] keeps the poster above the copy's scrim (app.css).
               <div
-                className={`media-card-image border-border/20 relative border shadow-[var(--shadow-md)] ${posterSizeClass}`}
+                className={`media-card-image border-border/20 relative z-[1] border shadow-[var(--shadow-md)] ${posterSizeClass}`}
               >
                 {posterUrl ? (
                   <>

@@ -1091,8 +1091,52 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      hero copy itself does not move at desktop widths, so repainting it for
      every intermediate viewport size only stalls the browser UI animation. */
   .detail-hero-copy {
+    position: relative;
+    isolation: isolate;
     transform: translateZ(0);
     backface-visibility: hidden;
+  }
+
+  /* A shade behind the hero's text, so it keeps 4.5:1 over any artwork. The
+     hero's own fades sit at fixed percentages of its size and can't follow
+     copy that ends mid-hero on a desktop and fills it on a phone. 85% of
+     --background is the least that keeps every hero text colour, down to
+     --muted-foreground and `text-foreground/60`, at 4.5:1 over pure white.
+     It runs out to the hero's start edge and bottom (the hero clips it) and
+     eases out over 10rem above the copy and 8rem past its end edge, so the
+     rest of the artwork keeps its brightness. The copy's position and
+     isolation keep it between the hero's artwork and the copy's text. A hero
+     without artwork needs no shade. */
+  .item-detail-hero:has(> .hero-backdrop-artwork) .detail-hero-copy::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset-block: -10rem -4rem;
+    /* A fixed length, not 100vw, reaches past the start edge of any screen
+       (the page shell is at most 1520px wide) and keeps the layer the same
+       size while the viewport resizes. */
+    inset-inline: -200rem -8rem;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      color-mix(in srgb, var(--background) 5%, transparent) 2rem,
+      color-mix(in srgb, var(--background) 20%, transparent) 4rem,
+      color-mix(in srgb, var(--background) 44%, transparent) 6rem,
+      color-mix(in srgb, var(--background) 68%, transparent) 8rem,
+      color-mix(in srgb, var(--background) 85%, transparent) 10rem
+    );
+    --detail-hero-copy-end-fade: linear-gradient(
+      calc(-90deg * var(--dir-sign)),
+      transparent,
+      rgb(0 0 0 / 6%) 1.6rem,
+      rgb(0 0 0 / 24%) 3.2rem,
+      rgb(0 0 0 / 52%) 4.8rem,
+      rgb(0 0 0 / 80%) 6.4rem,
+      #000 8rem
+    );
+    -webkit-mask-image: var(--detail-hero-copy-end-fade);
+    mask-image: var(--detail-hero-copy-end-fade);
+    pointer-events: none;
   }
 
   /* Item artwork stays on the browser's inexpensive image/composite path. */
