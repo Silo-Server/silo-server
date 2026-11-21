@@ -712,19 +712,67 @@ func (s *Service) align(ctx context.Context, r *run) (Outcome, error) {
 		return outcome, err
 	}
 	r.report(ctx, PhaseMatching, matchingStart)
+	runtime := time.Duration(plan.Runtime * float64(time.Second))
 	alignment, err := Align(windows, cues)
-	if errors.Is(err, ErrNoSpeech) {
+	if err != nil && !errors.Is(err, ErrNoSpeech) {
+		return outcome, err
+	}
+	noSpeech := err != nil
+	if noSpeech || Decide(alignment, subj.timing, runtime) == StatusNoMatch {
+		// The planned stream may be a dub the subtitle does not follow;
+		// before reporting no_match, listen to the file's other streams.
+		other, executedOn, ok, err := s.alignOtherStreams(ctx, file, plan, cues, subj.timing, job.Trigger == TriggerAuto)
+		if err != nil {
+			return outcome, err
+		}
+		if ok {
+			alignment, noSpeech = other, false
+			outcome.ExecutedOn = executedOn
+		}
+	}
+	if noSpeech {
 		outcome.Status = string(StatusNoMatch)
 		outcome.Confidence = new(0.0)
 		return outcome, nil
 	}
-	if err != nil {
-		return outcome, err
-	}
-	outcome.Status = string(Decide(alignment, subj.timing, time.Duration(plan.Runtime*float64(time.Second))))
+	outcome.Status = string(Decide(alignment, subj.timing, runtime))
 	outcome.Confidence = &alignment.Confidence
 	outcome.Result = &alignment.Timing
 	return outcome, nil
+}
+
+// alignOtherStreams aligns the cues against the file's other audio streams,
+// in file order, and returns the first alignment that matches. A stream the
+// file itself can't decode is skipped. Any other read failure (no node, a
+// busy host, a canceled run, a storage error loading cached speech) means
+// the subtitle was never heard against that stream, so when no stream
+// matches, the first such error is returned and the job fails with it rather
+// than ending no_match. Progress stays where matching left it.
+func (s *Service) alignOtherStreams(ctx context.Context, file *models.MediaFile, used speechPlan, cues []subtitles.SubtitleCue, current subtitles.Timing, background bool) (Alignment, string, bool, error) {
+	runtime := time.Duration(used.Runtime * float64(time.Second))
+	var unread error
+	for _, stream := range fallbackAudioStreams(file.AudioTracks, used.AudioStream) {
+		if err := ctx.Err(); err != nil {
+			return Alignment{}, "", false, err
+		}
+		plan, err := planSpeechStream(file, stream)
+		if err != nil {
+			break
+		}
+		windows, _, executedOn, err := s.speechForPlan(ctx, file, plan, background, nil)
+		if err != nil {
+			if unread == nil && failureOf(err) != FailureNoAudio {
+				unread = err
+			}
+			continue
+		}
+		alignment, err := Align(windows, cues)
+		if err != nil || Decide(alignment, current, runtime) == StatusNoMatch {
+			continue
+		}
+		return alignment, executedOn, true, nil
+	}
+	return Alignment{}, "", false, unread
 }
 
 // Causes failureOf tells apart.
@@ -766,6 +814,11 @@ func (s *Service) speech(ctx context.Context, file *models.MediaFile, language s
 	if err != nil {
 		return nil, plan, "", fmt.Errorf("%w: %w", errNoUsableAudio, err)
 	}
+	return s.speechForPlan(ctx, file, plan, background, decoded)
+}
+
+// speechForPlan returns the speech levels of one planned stream, as speech does.
+func (s *Service) speechForPlan(ctx context.Context, file *models.MediaFile, plan speechPlan, background bool, decoded func(done, total int)) ([]mediasample.SpeechLevels, speechPlan, string, error) {
 	plans := []speechPlan{plan}
 	if plan.CenterChannel {
 		downmix := plan
