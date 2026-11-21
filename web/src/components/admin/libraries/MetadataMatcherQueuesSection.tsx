@@ -390,7 +390,9 @@ function MatcherQueueDetail({
                       touch && "break-words",
                     )}
                   >
-                    <span className="text-foreground font-medium">{candidateTitle(candidate)}</span>
+                    <span dir="auto" className="text-foreground font-medium">
+                      {candidateTitle(candidate)}
+                    </span>
                     <span className="tabular-nums">
                       {bar === undefined
                         ? t("web.admin.common.libraryEditor.matcher.score", {
