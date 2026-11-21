@@ -260,7 +260,7 @@ function NodeDriftBadge({ node }: { node: StreamNode }) {
   return (
     <Badge
       variant="outline"
-      className="bg-warning/10 text-warning border-warning/15"
+      className="bg-warning/10 text-warning-label border-warning/15"
       title={drift.title}
     >
       {drift.label}
@@ -454,10 +454,7 @@ function GroupChip({
       )}
       <span className={cn(active && "font-medium")}>{label}</span>
       <span
-        className={cn(
-          "font-mono text-[10px] tabular-nums",
-          active ? "opacity-70" : "text-muted-foreground",
-        )}
+        className={cn("font-mono text-[10px] tabular-nums", !active && "text-muted-foreground")}
       >
         {count}
       </span>

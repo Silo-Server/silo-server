@@ -40,10 +40,17 @@ interface TriggerFormRowProps {
 
 // The trigger's type, weekday, and time fields share one width. 10rem holds the
 // widest time format measured (Amharic, 159 px at 16 px text) and the longest
-// weekday name ("Segunda-feira"). min-w-fit widens a field whose text needs more:
+// weekday name ("Segunda-feira"). A field whose text needs more grows to fit it:
 // a longer label ("Przy uruchomieniu"), or a minimum font size larger than the
-// browser's default font size, which rem follows.
-const TRIGGER_FIELD_WIDTH = "w-full sm:w-40 sm:min-w-fit";
+// browser's default font size, which rem follows. It stops at the column's width,
+// so one long label can't push the Remove button out of view.
+const TRIGGER_FIELD_WIDTH = "w-full sm:w-fit sm:min-w-40 sm:max-w-full";
+
+// In em so the box grows with its own text size. 11.5em holds the widest "None"
+// placeholder measured, Croatian "Bez ograničenja" (167 px at 16 px text and
+// 152 px at 14 px in Firefox), beside the number spinners Firefox and Safari
+// always draw.
+const MAX_RUNTIME_INPUT_WIDTH = "w-full sm:w-[11.5em]";
 
 type IntervalUnit = "seconds" | "minutes" | "hours";
 
@@ -98,7 +105,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
 
   return (
     <div className="surface-panel-subtle flex flex-col gap-3 rounded-xl p-3 sm:flex-row sm:items-start">
-      <div className="flex-1 space-y-2">
+      <div className="min-w-0 flex-1 space-y-2">
         <Select
           value={trigger.type}
           onValueChange={(v) => {
@@ -125,7 +132,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
         </Select>
 
         {trigger.type === "interval" && (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <Input
               type="number"
               min={1}
@@ -138,7 +145,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
               value={intervalDraft.unit}
               onValueChange={(u) => updateInterval(intervalDraft.text, u as IntervalUnit)}
             >
-              <SelectTrigger className="w-full sm:w-30 sm:min-w-fit">
+              <SelectTrigger className="w-full sm:w-fit sm:max-w-full sm:min-w-30">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -191,15 +198,17 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
           </div>
         )}
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <label className="text-muted-foreground text-xs whitespace-nowrap">
+        {/* Wraps at large text sizes, so the label, box, and unit stack instead of
+            widening the row past its panel. */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <label className="text-muted-foreground text-xs text-balance">
             {t("web.admin.tasks.detail.maxRuntimeLabel")}
           </label>
           <Input
             type="number"
             min={0}
             step="any"
-            className="w-full sm:w-[100px]"
+            className={MAX_RUNTIME_INPUT_WIDTH}
             placeholder={t("web.admin.tasks.detail.maxRuntimeNone")}
             value={trigger.max_runtime_ms != null ? trigger.max_runtime_ms / 60_000 : ""}
             onChange={(e) => {

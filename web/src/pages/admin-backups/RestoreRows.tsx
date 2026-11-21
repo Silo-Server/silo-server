@@ -1,6 +1,11 @@
 import { Fragment, memo, useId, useState, type ReactNode } from "react";
 
-import type { RestoreItem, RestoreSectionId, RestoreSetting } from "@/api/v2/adminBackupRestore";
+import type {
+  RestoreChange,
+  RestoreItem,
+  RestoreSectionId,
+  RestoreSetting,
+} from "@/api/v2/adminBackupRestore";
 import { RestartBadge } from "@/components/settings/RestartBadge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -175,6 +180,40 @@ function SettingsDiff({ item }: { item: RestoreItem }) {
   );
 }
 
+/** The label of each change code but collection_items, which carries a count. */
+const CHANGE_LABELS: Record<Exclude<RestoreChange, "collection_items">, MessageKey> = {
+  type: "web.admin.backups.restore.rows.change.type",
+  title: "web.admin.backups.restore.rows.change.title",
+  title_translation: "web.admin.backups.restore.rows.change.titleTranslation",
+  position: "web.admin.backups.restore.rows.change.position",
+  featured: "web.admin.backups.restore.rows.change.featured",
+  item_limit: "web.admin.backups.restore.rows.change.itemLimit",
+  enabled: "web.admin.backups.restore.rows.change.enabled",
+  web_only: "web.admin.backups.restore.rows.change.webOnly",
+  collection_replaced: "web.admin.backups.restore.rows.change.collectionReplaced",
+  configuration: "web.admin.backups.restore.rows.change.configuration",
+  description: "web.admin.backups.restore.rows.change.description",
+  visibility: "web.admin.backups.restore.rows.change.visibility",
+  sort_order: "web.admin.backups.restore.rows.change.sortOrder",
+  item_sort: "web.admin.backups.restore.rows.change.itemSort",
+  source: "web.admin.backups.restore.rows.change.source",
+  sync_schedule: "web.admin.backups.restore.rows.change.syncSchedule",
+  poster: "web.admin.backups.restore.rows.change.poster",
+  backdrop: "web.admin.backups.restore.rows.change.backdrop",
+  libraries: "web.admin.backups.restore.rows.change.libraries",
+};
+
+/** One entry of a row's change list in the interface language. */
+function changeLabel(t: Translate, item: RestoreItem, change: RestoreChange): string {
+  if (change === "collection_items") {
+    const count = item.home_section?.missing_collection_items ?? 0;
+    return t("web.admin.backups.restore.rows.change.collectionItems", { count, count_text: count });
+  }
+  // Response enums are additive: a code this build has no label for, or an
+  // older server's English word, shows as sent rather than blank.
+  return Object.hasOwn(CHANGE_LABELS, change) ? t(CHANGE_LABELS[change]) : change;
+}
+
 /** Whether a row has anything for its chevron to open; cheap, unlike building it. */
 function hasItemDetails(item: RestoreItem): boolean {
   return Boolean(
@@ -192,15 +231,18 @@ function hasItemDetails(item: RestoreItem): boolean {
 /** What a row's chevron opens; null when there is nothing more to say. */
 function itemDetails(t: Translate, item: RestoreItem): ReactNode {
   const why = item.message || (item.reason ? t(REASON_SENTENCES[item.reason]) : undefined);
-  const changes = item.home_section?.changes ?? item.collection?.changes ?? [];
+  const changes: readonly RestoreChange[] =
+    item.home_section?.changes ?? item.collection?.changes ?? [];
   const settings = (item.settings ?? []).some((setting) => setting.status !== "on_this_server");
   const paths = item.library && item.library.paths.length > 1 ? item.library.paths : [];
   const missingPaths = item.library?.missing_paths ?? [];
+  // A status gets a block of its own: SettingFieldStatus is inline, so two in a
+  // row would share a line.
   const parts = [
     why ? (
-      <SettingFieldStatus key="why" tone={item.selectable ? "muted" : "warn"}>
-        {why}
-      </SettingFieldStatus>
+      <div key="why">
+        <SettingFieldStatus tone={item.selectable ? "muted" : "warn"}>{why}</SettingFieldStatus>
+      </div>
     ) : null,
     paths.length > 0 ? (
       // Paths read left to right in any language; w-fit keeps the list on the
@@ -212,17 +254,19 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
       </ul>
     ) : null,
     missingPaths.length > 0 ? (
-      <p key="missing-paths" className="text-xs text-amber-600 dark:text-amber-400">
+      <p key="missing-paths" className="text-xs wrap-anywhere text-amber-600 dark:text-amber-400">
         {t("web.admin.backups.restore.rows.cantOpen", { paths: missingPaths.join(", ") })}
       </p>
     ) : null,
     item.missing_blobs.length > 0 ? (
-      <SettingFieldStatus key="files" tone="warn">
-        {t("web.admin.backups.restore.rows.filesMissing", {
-          count: item.missing_blobs.length,
-          count_text: item.missing_blobs.length,
-        })}
-      </SettingFieldStatus>
+      <div key="files">
+        <SettingFieldStatus tone="warn">
+          {t("web.admin.backups.restore.rows.filesMissing", {
+            count: item.missing_blobs.length,
+            count_text: item.missing_blobs.length,
+          })}
+        </SettingFieldStatus>
+      </div>
     ) : null,
     item.restart_required ? (
       <p
@@ -237,7 +281,7 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
         <p className="text-muted-foreground">{t("web.admin.backups.restore.rows.changes")}</p>
         <ul className="text-muted-foreground list-disc ps-5">
           {changes.map((change) => (
-            <li key={change}>{change}</li>
+            <li key={change}>{changeLabel(t, item, change)}</li>
           ))}
         </ul>
       </div>
@@ -288,12 +332,15 @@ export const ItemRow = memo(function ItemRow({
         />
         <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
           {/* block: Label is a flex box, which would clip the name without an ellipsis.
-              Chromium breaks at <wbr> even under nowrap, so a one-line row hides them. */}
+              Beside a detail, a one-line row stops the name at 60% and ends it in "…";
+              Chromium breaks at <wbr> even under nowrap, so that row hides them. A name
+              with nothing beside it wraps instead, so it is never cut short. */}
           <Label
             htmlFor={controlId}
             title={label}
             className={cn(
-              "block shrink-0 text-sm font-medium @max-2xl:wrap-anywhere @2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden",
+              "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
+              secondary && "@2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden",
               !item.selectable && "text-muted-foreground",
             )}
           >
@@ -301,11 +348,13 @@ export const ItemRow = memo(function ItemRow({
           </Label>
           {secondary ? (
             // A library's line is its folder paths, which read left to right in any
-            // language, so they keep their start when cut short.
+            // language, so they keep their start when cut short. w-fit keeps a short
+            // line under the name, on the page's start side; max-w-full stops a long
+            // one at the column's width so it is still cut short.
             <span
               title={secondary}
               dir={item.kind === "library" ? "ltr" : undefined}
-              className="text-muted-foreground min-w-0 truncate text-xs"
+              className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs"
             >
               {secondary}
             </span>
@@ -341,7 +390,13 @@ export const ItemRow = memo(function ItemRow({
   );
 });
 
-/** A row of the "match this server" list: no choice to make, so just the name. */
+/**
+ * A row of the "match this server" list: no choice to make, so just the name.
+ * The name wraps rather than being cut short, so names that differ only at the
+ * end stay apart; the detail moves under it when the two don't fit on one line.
+ * Part of a name that can't wrap is clipped at the row's edge, as in ProfileRow
+ * (RestoreUsers.tsx), so the scrolling list never scrolls sideways.
+ */
 export const SameRow = memo(function SameRow({
   item,
   secondary,
@@ -352,9 +407,12 @@ export const SameRow = memo(function SameRow({
   useT();
   const label = displayLabel(item);
   return (
-    <li className="flex min-w-0 items-baseline gap-2 py-1 text-[13px]">
-      <span title={label} className="max-w-[60%] shrink-0 truncate">
-        {label}
+    <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-[13px]">
+      <span
+        title={label}
+        className="-mx-[0.25em] block min-w-0 overflow-x-clip px-[0.25em] text-pretty wrap-anywhere"
+      >
+        <BreakableKey value={label} />
       </span>
       {secondary ? (
         <span title={secondary} className="text-muted-foreground min-w-0 truncate text-xs">

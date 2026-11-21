@@ -126,6 +126,15 @@ interface TableLayout {
   panel: string;
   /** Classes that rule off the second and third details columns. */
   panelColumn: string;
+  /**
+   * Classes for the rows' container. In the table layout a control focused
+   * while under the pinned header (Shift+Tab back up the table) scrolls to
+   * 4rem, clear of the header and of the shell's activity control beside it.
+   * `[data-row-scroller]` marks boxes that scroll on their own, which
+   * Chromium and Firefox let the keyboard focus. A root scroll-padding would
+   * also scroll the page when the header's own buttons take focus.
+   */
+  rows: string;
 }
 
 const TABLE_LAYOUT: TableLayout = {
@@ -135,6 +144,7 @@ const TABLE_LAYOUT: TableLayout = {
   stacked: "@min-[62rem]:hidden",
   panel: "@min-[62rem]:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,1fr)]",
   panelColumn: "@min-[62rem]:border-border/40 @min-[62rem]:border-s @min-[62rem]:ps-5",
+  rows: "@min-[62rem]:[&_:is(a,button,[tabindex],[data-row-scroller])]:scroll-mt-16",
 };
 
 const TABLE_LAYOUT_WITH_ROUTE: TableLayout = {
@@ -144,6 +154,7 @@ const TABLE_LAYOUT_WITH_ROUTE: TableLayout = {
   stacked: "@min-[70rem]:hidden",
   panel: "@min-[70rem]:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,1fr)]",
   panelColumn: "@min-[70rem]:border-border/40 @min-[70rem]:border-s @min-[70rem]:ps-5",
+  rows: "@min-[70rem]:[&_:is(a,button,[tabindex],[data-row-scroller])]:scroll-mt-16",
 };
 
 const STACKED_SORT_FIELDS: [SortField, MessageKey][] = [
@@ -627,9 +638,10 @@ export default function AdminActivity() {
             )}
           </div>
 
-          {/* Table header, which stays in view while the page scrolls */}
+          {/* Table header, which stays in view while the page scrolls, below any
+              impersonation banner */}
           <div
-            className={`border-border bg-card/95 sticky top-0 z-10 ${layout.table} ${layout.columns} items-center gap-3 border-b px-3 py-2 backdrop-blur`}
+            className={`border-border bg-card/95 sticky top-(--impersonation-banner-height) z-10 ${layout.table} ${layout.columns} items-center gap-3 border-b px-3 py-2 backdrop-blur`}
           >
             <span />
             <SortHeader field="media" current={sortField} dir={sortDir} onClick={toggleSort}>
@@ -662,7 +674,7 @@ export default function AdminActivity() {
           </div>
 
           {/* Rows */}
-          <div>
+          <div className={layout.rows}>
             {filtered.map((session) => (
               <StreamRow
                 key={session.session_id}
@@ -986,16 +998,20 @@ function MediaCell({ session }: { session: AdminSession }) {
   );
 }
 
-/** Position through the title, with a bar, and whether the viewer paused. */
+/**
+ * Position through the title, with a bar, and whether the viewer paused. The
+ * bar narrows before anything wraps; past that the line wraps, so its end
+ * (usually the pause label) never paints over the next column.
+ */
 function ProgressLine({ session }: { session: AdminSession }) {
   const t = useT();
   const progress = getPlaybackProgress(session);
   return (
-    <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-[11px]">
+    <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
       {progress !== null ? (
         <span
           aria-hidden="true"
-          className="bg-border h-1 w-14 shrink-0 overflow-hidden rounded-full"
+          className="bg-border h-1 max-w-14 min-w-9 flex-1 overflow-hidden rounded-full"
         >
           <span
             className={`block h-full rounded-full ${session.is_paused ? "bg-warning" : "bg-primary"}`}
@@ -1569,7 +1585,7 @@ function FFmpegConsole({
             {t("web.admin.activity.panel.noFfmpegRows")}
           </div>
         ) : (
-          <div className="max-h-64 overflow-y-auto">
+          <div data-row-scroller className="max-h-64 overflow-y-auto">
             {rows.map((row) => (
               <div
                 key={row.id}
@@ -1667,7 +1683,7 @@ function IPLookupDialog({
             aria-label={t("web.admin.activity.ipLookup.placeholder")}
             value={ipSearch}
             onChange={(e) => setIPSearch(e.target.value)}
-            className="max-w-xs font-mono text-sm"
+            className="placeholder:font-ui max-w-xs font-mono text-sm"
           />
           <Button type="submit" variant="outline" size="sm" disabled={!ipSearch.trim()}>
             <Search className="me-1 h-3.5 w-3.5" />

@@ -91,7 +91,17 @@ export function PillSwitcher({
                       // The space keeps "Movies 14" two words for a screen reader; flex hides it.
                       <>
                         {" "}
-                        <span className="text-[12.5px] opacity-60">{numberText(option.count)}</span>
+                        <span
+                          className={cn(
+                            "text-[12.5px] font-(--font-weight-ui)",
+                            // On the accent fill only the label's own color is sure to read.
+                            // Off it, a step below the label's /80. Not muted-foreground:
+                            // high contrast pins that brighter than the label.
+                            !pressed && "text-foreground/65",
+                          )}
+                        >
+                          {numberText(option.count)}
+                        </span>
                       </>
                     ) : null}
                   </button>
