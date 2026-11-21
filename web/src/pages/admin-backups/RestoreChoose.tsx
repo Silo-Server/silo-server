@@ -652,7 +652,7 @@ export function RestoreChoose({
             {t("web.admin.backups.restore.choose.nothingChosen")}
           </p>
         ) : (
-          <ul className="list-disc space-y-1.5 ps-5 text-sm">
+          <ul className="list-disc space-y-1.5 ps-5 text-sm wrap-anywhere">
             {plan.flatMap((group) =>
               group.sentences.map((sentence, position) => (
                 <li key={`${group.section}-${position}`}>
@@ -663,7 +663,7 @@ export function RestoreChoose({
           </ul>
         )}
         {notice ? (
-          <p role="status" className="text-[13px] text-amber-600 dark:text-amber-400">
+          <p role="status" className="text-[13px] wrap-anywhere text-amber-600 dark:text-amber-400">
             {notice}
           </p>
         ) : null}
