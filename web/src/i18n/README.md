@@ -169,6 +169,16 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   with an Arabic name part in the page's direction; `dir="auto"` would turn it right
   to left on a left-to-right page. Size a cut one as for a name, above; a path that
   wraps instead follows the path or URL rule above.
+- A cut line that joins translated text with a name or email (`<summary> · <email>`)
+  can't be one `truncate` span: the "…" falls at the line's end, so the part there loses
+  its start. Render each part as its own truncating `flex` item, the translated part in
+  the page's direction and the other in its own (`dir="auto"`, or `emailDir` for an
+  email), each with its own `title` so the tooltip reads that way too. Let the line wrap,
+  so a part that doesn't fit moves to a line of its own instead of cutting both, and hide
+  the separator that would open that line, as `UserDetailHeader` does. A part that
+  carries the separator's negative margin keeps the page's direction and takes its `dir`
+  on an inner span, as above. `AccountRow` in `src/pages/admin-backups/RestoreUsers.tsx`
+  does this.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also
