@@ -22997,7 +22997,7 @@
             "type": "string"
           },
           "episode_number": {
-            "description": "Episode number for an episode; absent otherwise",
+            "description": "Episode number for an episode that still exists; absent otherwise",
             "format": "int64",
             "type": "integer"
           },
@@ -23023,12 +23023,12 @@
             "type": "integer"
           },
           "season_number": {
-            "description": "Season number for a season or episode; absent otherwise",
+            "description": "Season number for a season or episode that still exists; absent otherwise",
             "format": "int64",
             "type": "integer"
           },
           "series_title": {
-            "description": "Series title for a season or episode; absent otherwise",
+            "description": "Series title for a season or episode that still exists; absent otherwise",
             "type": "string"
           },
           "target_type": {

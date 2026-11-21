@@ -22,9 +22,9 @@ type AdminTaskDebtSample struct {
 	ContentID     ID       `json:"content_id"`
 	Title         string   `json:"title" doc:"The target's own title as stored: the item's, the season's or the episode's, without its series. Empty when the target no longer exists"`
 	Type          string   `json:"type"`
-	SeriesTitle   string   `json:"series_title,omitempty" doc:"Series title for a season or episode; absent otherwise"`
-	SeasonNumber  *int     `json:"season_number,omitempty" doc:"Season number for a season or episode; absent otherwise"`
-	EpisodeNumber *int     `json:"episode_number,omitempty" doc:"Episode number for an episode; absent otherwise"`
+	SeriesTitle   string   `json:"series_title,omitempty" doc:"Series title for a season or episode that still exists; absent otherwise"`
+	SeasonNumber  *int     `json:"season_number,omitempty" doc:"Season number for a season or episode that still exists; absent otherwise"`
+	EpisodeNumber *int     `json:"episode_number,omitempty" doc:"Episode number for an episode that still exists; absent otherwise"`
 	ReasonMask    int64    `json:"reason_mask"`
 	NextRefreshAt Instant  `json:"next_refresh_at"`
 	LastAttemptAt *Instant `json:"last_attempt_at,omitempty"`
