@@ -74,6 +74,7 @@ export default function DetailOverview({
     <div className="detail-hero-description max-w-2xl">
       <p
         ref={textRef}
+        dir="auto"
         className={`bidi-text text-muted-foreground leading-7 ${
           compact ? "text-sm" : "text-foreground/72 text-sm sm:text-[0.9375rem]"
         } ${clamp && !expanded ? CLAMP_CLASSES[clampLines] : ""}`}

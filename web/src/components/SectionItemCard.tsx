@@ -133,7 +133,7 @@ export default memo(function SectionItemCard({
         />
       </div>
       <div className={MEDIA_CARD_CAPTION_CLASS}>
-        <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
+        <ViewTransitionLink to={headingHref} dir="auto" className={MEDIA_CARD_TITLE_CLASS}>
           {displayTitle}
         </ViewTransitionLink>
         {upcomingEvent ? (
@@ -153,7 +153,10 @@ export default memo(function SectionItemCard({
         ) : episodeLabels ? (
           <ViewTransitionLink to={itemHref} className="block hover:underline">
             {episodeLabels.episodeTitle ? (
-              <div className="bidi-text text-muted-foreground mt-1 truncate text-[0.75rem] font-medium">
+              <div
+                dir="auto"
+                className="bidi-text text-muted-foreground mt-1 truncate text-[0.75rem] font-medium"
+              >
                 {episodeLabels.episodeTitle}
               </div>
             ) : null}

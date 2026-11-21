@@ -101,7 +101,7 @@ export default function DetailTitle({
   }, [bounded, title, className]);
 
   return (
-    <h1 ref={titleRef} title={bounded ? title : undefined} className={className}>
+    <h1 ref={titleRef} dir="auto" title={bounded ? title : undefined} className={className}>
       {title}
     </h1>
   );

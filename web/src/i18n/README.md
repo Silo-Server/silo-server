@@ -145,6 +145,10 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   counterpart (`rtl:bg-gradient-to-l`, `rtl:-translate-x-…`), multiply by
   `var(--dir-sign)` in CSS, or read keys through `readingArrowKey`. `rtl:` is
   redefined in `app.css` so that, like the icon rule, it stops at a `dir="ltr"` box.
+- Titles, names, taglines and overviews from metadata use `.bidi-text` (`app.css`).
+  Where such text is cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
+  stylesheet), it also takes `dir="auto"`, or Firefox and WebKit cut it and draw the
+  "…" at the page's end of the line instead of the text's.
 - Check a change under `ar-XB` (above).
 
 ## Tests
