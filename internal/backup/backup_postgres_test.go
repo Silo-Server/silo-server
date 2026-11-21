@@ -26,13 +26,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/backup/backuptest"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/s3client/s3test"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 // testDB opens SILO_TEST_DATABASE_URL, a migrated database other tests share.
@@ -91,7 +91,7 @@ func createDatabase(t *testing.T, pool *pgxpool.Pool, dsn string) string {
 // setSetting writes a setting for the test and puts the previous state back.
 // Other packages' tests share the database, so the keys a test sets are ones
 // nothing else reads.
-func setSetting(t *testing.T, pool *pgxpool.Pool, settings *catalog.EncryptedSettingsRepo, key, value string) {
+func setSetting(t *testing.T, pool *pgxpool.Pool, settings *serversettings.EncryptedSettingsRepo, key, value string) {
 	t.Helper()
 	ctx := t.Context()
 	var previous string
@@ -128,7 +128,7 @@ type roundTripSeed struct {
 // branding asset, a library with a poster, a library whose poster is gone,
 // and a profile with an uploaded avatar, all removed again when the test
 // ends.
-func seedRoundTrip(t *testing.T, pool *pgxpool.Pool, settings *catalog.EncryptedSettingsRepo, store blobstore.Store) roundTripSeed {
+func seedRoundTrip(t *testing.T, pool *pgxpool.Pool, settings *serversettings.EncryptedSettingsRepo, store blobstore.Store) roundTripSeed {
 	t.Helper()
 	ctx := t.Context()
 	suffix := randomHex(t, 4)
@@ -222,7 +222,7 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifestKey := manifestKeyOf(t, masterKey)
-	settings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)
+	settings := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), cipher)
 	root := t.TempDir()
 	store, err := blobstore.NewFilesystem(root)
 	if err != nil {
@@ -298,7 +298,7 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 		defer restoredPool.Close()
 		checkRestoredFiles(t, seed, blobsInto, restoredPool)
 		checkCredentials(t, loader, pool, dsn, into, restoredPool, seed.userID)
-		restoredSettings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(restoredPool), cipher)
+		restoredSettings := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(restoredPool), cipher)
 		if got, err := restoredSettings.Get(ctx, seed.secretKey); err != nil || got != seed.secretValue {
 			t.Fatalf("restored encrypted setting = %q, %v; want %q", got, err, seed.secretValue)
 		}
@@ -1232,7 +1232,7 @@ func checkAnotherKey(t *testing.T, src *Source, loader PGLoader, pool *pgxpool.P
 		t.Fatalf("%d encrypted settings left, want only the new signing keys; output %q must name %s and not the signing key", left, out.String(), secretKey)
 	}
 	// The signing key is a new one, encrypted with this server's key.
-	jwt, err := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(restored), other).Get(ctx, settingJWTSecret)
+	jwt, err := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(restored), other).Get(ctx, settingJWTSecret)
 	if err != nil || jwt == "" || strings.HasPrefix(jwt, "backup-jwt-") {
 		t.Fatalf("restored signing key = %q, %v; want a new one", jwt, err)
 	}
@@ -1471,7 +1471,7 @@ func TestBackupAndDeleteWithOnePoolConnectionDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)
+	settings := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), cipher)
 	// The stores as the server opens them: the first write records the
 	// storage identity through the settings, and so through the pool.
 	stores, _, err := blobstore.Open(ctx, blobstore.Options{Backend: blobstore.BackendLocal, LocalPath: t.TempDir(), Settings: settings})
@@ -1508,7 +1508,7 @@ func TestBackupAndDeleteWithOnePoolConnectionDB(t *testing.T) {
 
 // setBackupBucket gives the test server a backup bucket of its own, which a
 // copy restored from its backup must not use.
-func setBackupBucket(t *testing.T, pool *pgxpool.Pool, settings *catalog.EncryptedSettingsRepo) {
+func setBackupBucket(t *testing.T, pool *pgxpool.Pool, settings *serversettings.EncryptedSettingsRepo) {
 	t.Helper()
 	setSetting(t, pool, settings, config.BackupDestinationSettingKey, DestinationS3)
 	setSetting(t, pool, settings, config.BackupS3SecretKeySettingKey, "bucket-secret")
@@ -1516,7 +1516,7 @@ func setBackupBucket(t *testing.T, pool *pgxpool.Pool, settings *catalog.Encrypt
 
 // checkNoBackupBucket fails unless a restored copy has no backup bucket
 // settings, so it never writes to the original's bucket.
-func checkNoBackupBucket(t *testing.T, settings *catalog.EncryptedSettingsRepo) {
+func checkNoBackupBucket(t *testing.T, settings *serversettings.EncryptedSettingsRepo) {
 	t.Helper()
 	bucket, err := settings.GetMany(t.Context(), config.BackupDestinationSettingKey, config.BackupS3SecretKeySettingKey)
 	if err != nil || len(bucket) != 0 {
@@ -1551,7 +1551,7 @@ func TestEncryptedS3RoundTripDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)
+	settings := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), cipher)
 	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1632,7 +1632,7 @@ func TestEncryptedS3RoundTripDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restoredPool.Close()
-	restoredSettings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(restoredPool), cipher)
+	restoredSettings := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(restoredPool), cipher)
 	if got, err := restoredSettings.Get(ctx, seed.secretKey); err != nil || got != seed.secretValue {
 		t.Fatalf("restored encrypted setting = %q, %v; want %q", got, err, seed.secretValue)
 	}
