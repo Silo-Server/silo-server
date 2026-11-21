@@ -96,18 +96,23 @@ export default function PlaybackSettings() {
   const inventoriesDiverge = nodeInventoriesDiverge(hwDetection.data);
   // A device choice staged before switching acceleration keeps the picker in
   // view, so Save never writes a value the admin can't see. Under a mode the
-  // picker doesn't apply to, it only takes devices back to their saved state:
-  // NVENC reads the setting as a CUDA device, not a render path.
+  // picker doesn't apply to, it only takes the list back toward the saved one:
+  // any device can be switched off, and only saved devices on. NVENC reads the
+  // setting as a CUDA device, so render paths can't be added there.
   const devicePickerApplies = hwAccel !== "none" && !isNvenc;
-  const showDevicePicker =
-    deviceRows.length > 0 && (devicePickerApplies || form.isDirty("playback.hw_device"));
+  const hwDeviceDirty = form.isDirty("playback.hw_device");
+  const showDevicePicker = deviceRows.length > 0 && (devicePickerApplies || hwDeviceDirty);
   const deviceChanged = (path: string) =>
     selectedDevices.includes(path) !== savedDevices.includes(path);
-  // Kept under such a mode, a row marks a device whose switch differs from
-  // the saved list, and only those switches stay unlocked.
-  const deviceKeptForEdit = (path: string) => !devicePickerApplies && deviceChanged(path);
+  // A staged list can match the saved devices and differ only in order, as
+  // after a refresh; its selected rows then carry the change.
+  const orderOnlyDraft = hwDeviceDirty && !deviceRows.some((row) => deviceChanged(row.path));
+  const deviceKeptForEdit = (path: string) =>
+    !devicePickerApplies &&
+    (deviceChanged(path) || (orderOnlyDraft && selectedDevices.includes(path)));
   const deviceSwitchLocked = (path: string) =>
-    hwDeviceEnv != null || (!devicePickerApplies && !deviceChanged(path));
+    hwDeviceEnv != null ||
+    (!devicePickerApplies && !selectedDevices.includes(path) && !savedDevices.includes(path));
 
   const nodes = useAdminNodes();
   const trickplayExecution =
