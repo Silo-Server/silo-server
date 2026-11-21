@@ -589,6 +589,32 @@ func TestFilesystemStreamSeesSpaceTakenByOthers(t *testing.T) {
 	}
 }
 
+// A free-space reading that fails partway through a stream does not leave
+// the rest of it unlimited: the next reading still stops it.
+func TestFilesystemStreamRechecksAfterAFailedReading(t *testing.T) {
+	s, err := NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const total, reserve = 100 << 30, 2 << 30
+	var written, others atomic.Int64
+	var reads atomic.Int32
+	realStat := statSpace
+	statSpace = func(string) (int64, int64, error) {
+		if reads.Add(1) == 2 {
+			return 0, 0, errors.New("statfs: interrupted")
+		}
+		return reserve + 4*streamRecheckBytes - written.Load() - others.Load(), total, nil
+	}
+	t.Cleanup(func() { statSpace = realStat })
+	// The first recheck fails; another writer then takes the room, which
+	// the second recheck sees.
+	src := &countingReader{n: 3 * streamRecheckBytes, written: &written, onPast: streamRecheckBytes, past: func() { others.Store(3 * streamRecheckBytes) }}
+	if err = s.PutStream(t.Context(), "backups/archive.tar", src, ""); !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("stream after a failed reading: %v", err)
+	}
+}
+
 // countingReader yields n zero bytes, counting them in written, and calls
 // past once more than onPast bytes have been read.
 type countingReader struct {

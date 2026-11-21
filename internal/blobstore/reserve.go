@@ -73,19 +73,17 @@ var statSpace = func(path string) (available, total int64, err error) {
 	return int64(st.Bavail) * size, int64(st.Blocks) * size, nil
 }
 
-// FreeForWrites reports how many bytes a local store at root can still take
-// before it reaches its free-space reserve, for a preflight such as a
-// backup's that should refuse up front rather than stop partway. ok is false
-// when the filesystem reports no size, which the reserve does not limit.
-func FreeForWrites(root string) (free int64, ok bool, err error) {
+// FreeSpace reports the bytes available on the filesystem holding a local
+// store at root and the free-space reserve its writes stop at, for a
+// preflight such as a backup's that should refuse up front rather than stop
+// partway. ok is false when the filesystem reports no size, which the
+// reserve does not limit.
+func FreeSpace(root string) (available, reserve int64, ok bool, err error) {
 	available, total, err := statSpace(root)
-	if err != nil {
-		return 0, false, err
+	if err != nil || total <= 0 {
+		return 0, 0, false, err
 	}
-	if total <= 0 {
-		return 0, false, nil
-	}
-	return max(available-reserveFor(total), 0), true, nil
+	return max(available, 0), reserveFor(total), true, nil
 }
 
 // reserveFor is the free space a store keeps on a filesystem of total bytes.
@@ -253,11 +251,20 @@ type budgetWriter struct {
 	// sinceRead is how many bytes the stream has written since budget was
 	// read.
 	sinceRead int64
+	// unchecked passes writes straight through: a write of known size,
+	// which claimed its bytes before it started, or one exempt from the
+	// reserve.
+	unchecked bool
 }
 
 func (b *budgetWriter) Write(p []byte) (int, error) {
+	if b.unchecked {
+		return b.w.Write(p)
+	}
 	n := int64(len(p))
-	if b.budget.limit >= 0 && b.sinceRead >= streamRecheckBytes {
+	// Also when the last reading was unavailable, so a passing statfs error
+	// does not leave the rest of the stream unlimited.
+	if b.sinceRead >= streamRecheckBytes {
 		if err := b.refresh(); err != nil {
 			return 0, err
 		}
@@ -275,12 +282,17 @@ func (b *budgetWriter) Write(p []byte) (int, error) {
 	return b.w.Write(p)
 }
 
-// refresh reads free space again for the rest of the stream.
+// refresh reads free space again for the rest of the stream. A reading that
+// fails keeps the last one, so a passing statfs error does not leave the
+// rest of a limited stream unlimited.
 func (b *budgetWriter) refresh() error {
 	fresh, err := b.f.writeBudget()
 	if err != nil {
 		return err
 	}
-	b.budget, b.sinceRead = fresh, 0
+	if fresh.limit >= 0 || b.budget.limit < 0 {
+		b.budget = fresh
+	}
+	b.sinceRead = 0
 	return nil
 }

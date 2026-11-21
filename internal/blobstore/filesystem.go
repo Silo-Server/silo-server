@@ -255,13 +255,13 @@ func (f *Filesystem) publish(ctx context.Context, key string, size int64, exclus
 	}
 	// A write of known size claims its bytes before creating anything; a
 	// stream claims them as it writes.
-	writer := &budgetWriter{f: f, budget: budget}
+	writer := &budgetWriter{f: f, budget: budget, unchecked: reserveExempt(ctx)}
 	if size >= 0 {
 		if err = f.claim(size, budget); err != nil {
 			return err
 		}
 		defer f.settle(size, budget)
-		writer.budget = spaceBudget{limit: -1}
+		writer.unchecked = true
 	}
 	created, err := mkdirAllTracked(root, path.Dir(key))
 	if err != nil {
