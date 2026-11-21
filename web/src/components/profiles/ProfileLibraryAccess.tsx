@@ -66,10 +66,12 @@ export function ProfileLibraryAccess({
               libraries.map((library) => (
                 <div
                   key={library.id}
-                  className="border-border flex items-center justify-between rounded-md border px-3 py-2"
+                  className="border-border flex items-center justify-between gap-3 rounded-md border px-3 py-2"
                 >
-                  <div className="space-y-0.5">
-                    <div className="text-sm font-medium">{library.name}</div>
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    {/* wrap-anywhere breaks a long one-word name instead of
+                        widening the list past the dialog. */}
+                    <div className="text-sm font-medium wrap-anywhere">{library.name}</div>
                     <div className="text-muted-foreground text-xs capitalize">{library.type}</div>
                   </div>
                   <Switch

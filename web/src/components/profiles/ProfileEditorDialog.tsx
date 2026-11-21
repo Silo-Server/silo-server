@@ -397,7 +397,8 @@ function ProfileEditorForm({
               </AvatarFallback>
             </Avatar>
             <div className="text-center">
-              <div className="text-sm font-medium">
+              {/* wrap-anywhere breaks a long one-word name instead of widening the dialog. */}
+              <div className="text-sm font-medium wrap-anywhere">
                 {draft.name.trim() || t("web.profiles.editor.preview")}
               </div>
               <div className="text-muted-foreground text-xs">
@@ -508,8 +509,10 @@ function ProfileEditorForm({
               );
             })}
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-muted-foreground text-xs">
+          {/* The hint shrinks first; flex-wrap puts the button under it only when
+              the hint would get narrower than 12rem, instead of past the edge. */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-muted-foreground min-w-0 flex-[1_1_12rem] text-xs">
               {t("web.profiles.editor.presetsShowing", {
                 count: visiblePresets.length,
                 count_text: visiblePresets.length,
@@ -611,7 +614,9 @@ function ProfileEditorForm({
           />
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        {/* grid-cols-1 holds the column to the section's width below sm. An
+            implicit auto column grows to fit the longest rating label instead. */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor={contentRatingId}>{t("web.profiles.editor.maxContentRating")}</Label>
             <Select
@@ -621,7 +626,11 @@ function ProfileEditorForm({
                 updateDraft("maxContentRating", value === ANY_CONTENT_RATING_VALUE ? "" : value);
               }}
             >
-              <SelectTrigger id={contentRatingId} className="w-full">
+              {/* The chosen value wraps instead of being cut on a narrow phone. */}
+              <SelectTrigger
+                id={contentRatingId}
+                className="w-full text-start whitespace-normal data-[size=default]:h-auto *:data-[slot=select-value]:line-clamp-none"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -707,7 +716,10 @@ function ProfileEditorForm({
                 updateDraft("maxPlaybackQuality", value as PlaybackQualityPreset)
               }
             >
-              <SelectTrigger id={playbackQualityId} className="w-full">
+              <SelectTrigger
+                id={playbackQualityId}
+                className="w-full text-start whitespace-normal data-[size=default]:h-auto *:data-[slot=select-value]:line-clamp-none"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
