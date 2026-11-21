@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 )
@@ -16,8 +17,8 @@ func TestListMarkerEditAuditClientIPHasNoNetmaskDB(t *testing.T) {
 	var fileID int
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO media_files (media_folder_id, file_path, file_size)
-		VALUES ($1, '/media/marker-audit-client-ip.mkv', 1024)
-		RETURNING id`, folderID).Scan(&fileID); err != nil {
+		VALUES ($1, $2, 1024)
+		RETURNING id`, folderID, fmt.Sprintf("/media/marker-audit-client-ip-%d.mkv", folderID)).Scan(&fileID); err != nil {
 		t.Fatalf("seed file: %v", err)
 	}
 	// The folder's cleanup deletes the file, and its audit rows cascade.

@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -221,4 +222,23 @@ func TestAdminLogsSocketV2RefusesProfileLessAdminOnHouseholdRequiringProfile(t *
 		t.Fatal("ticket minted before the household gained a PIN still connected")
 	}
 	_ = resp.Body.Close()
+}
+
+// A live audit event carries the bare client address, and a client_ip filter
+// written as a single-host prefix matches it, as the inet comparison does for
+// stored rows.
+func TestAuditSocketClientIPFilterMatchesBareAddress(t *testing.T) {
+	for _, tc := range []struct{ filter, entry string }{
+		{"192.0.2.10", "192.0.2.10"},
+		{"192.0.2.10/32", "192.0.2.10"},
+		{"2001:db8::7348/128", "2001:db8::7348"},
+	} {
+		opts, err := parseAuditLogOptionsFromRequest(httptest.NewRequest("GET", "/api/v2/admin/logs/ws?client_ip="+url.QueryEscape(tc.filter), nil))
+		if err != nil {
+			t.Fatalf("filter %q: %v", tc.filter, err)
+		}
+		if !matchesAuditLog(opts, activitylog.AuditEntry{ClientIP: tc.entry}) {
+			t.Errorf("filter %q does not match a live event from %q", tc.filter, tc.entry)
+		}
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -67,11 +68,22 @@ func parseOperationalLogOptionsFromRequest(r *http.Request) (opslog.ListOptions,
 	return opts, nil
 }
 
+// hostAddress turns a single-host prefix (192.0.2.10/32, 2001:db8::1/128) into
+// the bare address that audit rows and live events carry, so a client_ip filter
+// matches live events the same way the inet comparison matches stored rows.
+// Anything else is returned unchanged.
+func hostAddress(value string) string {
+	if prefix, err := netip.ParsePrefix(value); err == nil && prefix.IsSingleIP() {
+		return prefix.Addr().String()
+	}
+	return value
+}
+
 func parseAuditLogOptionsFromRequest(r *http.Request) (activitylog.ListOptions, error) {
 	opts := activitylog.ListOptions{
 		Method:            strings.TrimSpace(r.URL.Query().Get("method")),
 		PathPrefix:        strings.TrimSpace(r.URL.Query().Get("path_prefix")),
-		ClientIP:          strings.TrimSpace(r.URL.Query().Get("client_ip")),
+		ClientIP:          hostAddress(strings.TrimSpace(r.URL.Query().Get("client_ip"))),
 		RequestID:         strings.TrimSpace(r.URL.Query().Get("request_id")),
 		SessionID:         strings.TrimSpace(r.URL.Query().Get("session_id")),
 		PlaybackSessionID: strings.TrimSpace(r.URL.Query().Get("playback_session_id")),
