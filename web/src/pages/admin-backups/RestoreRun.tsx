@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import {
   CircleCheck,
@@ -57,6 +57,16 @@ const OUTCOME = {
   },
 } satisfies Record<RestoreReportItem["outcome"], { label: MessageKey; [key: string]: unknown }>;
 
+/**
+ * Lets a muted "· Users · Restored" run wrap only before a "·", so a separator never
+ * ends a line and a short label after it ("· Left out") stays whole. A label wider than
+ * the line still breaks, through the line's `wrap-anywhere`.
+ */
+function breakBeforeSeparators(node: ReactNode): ReactNode {
+  if (typeof node === "string") return node.replace(/ (?!·)/g, "\u00a0");
+  return Array.isArray(node) ? node.map(breakBeforeSeparators) : node;
+}
+
 function ReportRow({ item }: { item: RestoreReportItem }) {
   const t = useT();
   const outcome = OUTCOME[item.outcome];
@@ -81,13 +91,15 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
     <li className="border-border/60 flex items-start gap-3 border-b py-3 last:border-b-0">
       <outcome.Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", outcome.tone)} />
       <div className="min-w-0 flex-1">
-        <p className="text-sm">
+        <p className="text-sm wrap-anywhere">
           {t("web.admin.backups.restore.run.itemLine", {
             label: displayLabel(item),
             section: t(SECTION_TITLES[item.section]),
             outcome: t(outcome.label),
             b: (chunks) => <span className="font-medium">{chunks}</span>,
-            muted: (chunks) => <span className="text-muted-foreground">{chunks}</span>,
+            muted: (chunks) => (
+              <span className="text-muted-foreground">{breakBeforeSeparators(chunks)}</span>
+            ),
           })}
         </p>
         {details.map((detail, position) => (
@@ -141,15 +153,23 @@ function AccountReport({
             const outcome = OUTCOME[profile.outcome];
             return (
               <li key={profile.id}>
-                <p className="flex items-center gap-1.5 text-[13px]">
-                  <outcome.Icon aria-hidden="true" className={cn("size-3.5", outcome.tone)} />
-                  <span className="font-medium">{profile.label}</span>
-                  <span className="text-muted-foreground">
-                    {t("web.admin.backups.restore.run.profileOutcome", {
-                      outcome: profile.created
-                        ? t("web.admin.backups.restore.outcome.created")
-                        : t(outcome.label),
-                    })}
+                <p className="flex items-start gap-1.5 text-[13px]">
+                  <outcome.Icon
+                    aria-hidden="true"
+                    className={cn("mt-[calc((1lh-0.875rem)/2)] size-3.5 shrink-0", outcome.tone)}
+                  />
+                  <span className="min-w-0 wrap-anywhere">
+                    {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
+                    <span className="font-medium">{profile.label}</span>{" "}
+                    <span className="text-muted-foreground">
+                      {breakBeforeSeparators(
+                        t("web.admin.backups.restore.run.profileOutcome", {
+                          outcome: profile.created
+                            ? t("web.admin.backups.restore.outcome.created")
+                            : t(outcome.label),
+                        }),
+                      )}
+                    </span>
                   </span>
                 </p>
                 {[
