@@ -1274,11 +1274,14 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
   /* ── Glass Surfaces ──────────────────────────────────────── */
   /* Frosted glass effect for floating controls, overlay panels.
-     Usage: <div class="glass">...</div>                        */
+     Usage: <div class="glass">...</div>
+     Put -webkit-backdrop-filter before backdrop-filter. The production
+     build's CSS minifier merges the pair and keeps only the later one, so
+     the reverse order leaves Chrome and Firefox with no blur. */
   .glass {
     background: color-mix(in srgb, var(--surface) 70%, transparent);
-    backdrop-filter: blur(20px) saturate(1.2);
     -webkit-backdrop-filter: blur(20px) saturate(1.2);
+    backdrop-filter: blur(20px) saturate(1.2);
     border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.06),
@@ -1287,8 +1290,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
   .glass-subtle {
     background: color-mix(in srgb, var(--surface) 40%, transparent);
-    backdrop-filter: blur(12px) saturate(1.1);
     -webkit-backdrop-filter: blur(12px) saturate(1.1);
+    backdrop-filter: blur(12px) saturate(1.1);
     border: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
   }
@@ -1329,8 +1332,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      an opaque color blend instead of sampling and blurring the backdrop. */
   .detail-action-bar .glass-subtle {
     background: color-mix(in srgb, var(--surface) 82%, var(--background));
-    backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   /* The detail overflow menu opens without an entrance transition so it is
@@ -1423,8 +1426,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      (manga count/status pills) so the label stays legible. */
   .glass-chip {
     background: color-mix(in srgb, var(--surface) 78%, transparent);
-    backdrop-filter: blur(12px) saturate(1.1);
     -webkit-backdrop-filter: blur(12px) saturate(1.1);
+    backdrop-filter: blur(12px) saturate(1.1);
     border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
   }
@@ -1441,8 +1444,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
   .glass-dark {
     background: color-mix(in srgb, var(--background) 80%, transparent);
-    backdrop-filter: blur(24px) saturate(1.3);
     -webkit-backdrop-filter: blur(24px) saturate(1.3);
+    backdrop-filter: blur(24px) saturate(1.3);
     border: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.04),
@@ -1480,8 +1483,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     background: rgb(255 255 255 / 0.06);
     color: rgb(255 255 255 / 0.92);
     border: 1px solid rgb(255 255 255 / 0.1);
-    backdrop-filter: blur(14px) saturate(1.1);
     -webkit-backdrop-filter: blur(14px) saturate(1.1);
+    backdrop-filter: blur(14px) saturate(1.1);
     box-shadow:
       0 10px 30px -14px rgb(0 0 0 / 0.6),
       inset 0 1px 0 rgb(255 255 255 / 0.08);
@@ -1796,8 +1799,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
     color: color-mix(in srgb, var(--foreground) 72%, var(--muted-foreground));
     border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-    backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
   }
 
   /* ── Pill Button ─────────────────────────────────────────── */
@@ -1838,8 +1841,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     background: color-mix(in srgb, var(--foreground) 12%, transparent);
     color: var(--foreground);
     border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
-    backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
   }
   .pill-glass:hover {
     background: color-mix(in srgb, var(--foreground) 18%, transparent);
@@ -1947,8 +1950,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     padding: 0.9rem 1rem;
     border-bottom: 1px solid transparent;
     background: color-mix(in srgb, var(--background) 82%, transparent);
-    backdrop-filter: blur(18px) saturate(1.15);
     -webkit-backdrop-filter: blur(18px) saturate(1.15);
+    backdrop-filter: blur(18px) saturate(1.15);
     border-bottom-color: color-mix(in srgb, var(--border) 55%, transparent);
     transition:
       background var(--duration-normal) var(--ease-default),
@@ -1964,14 +1967,14 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   }
   .library-marquee-header.is-overlay {
     background: transparent;
-    backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    backdrop-filter: none;
     border-bottom-color: transparent;
   }
   .library-marquee-header.is-overlay[data-scrolled="true"] {
     background: color-mix(in srgb, var(--background) 72%, transparent);
-    backdrop-filter: blur(18px) saturate(1.15);
     -webkit-backdrop-filter: blur(18px) saturate(1.15);
+    backdrop-filter: blur(18px) saturate(1.15);
     border-bottom-color: color-mix(in srgb, var(--border) 50%, transparent);
   }
   @media (min-width: 640px) {
@@ -2113,8 +2116,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     border-radius: 9999px;
     background: color-mix(in srgb, #fff 8%, transparent);
     border: 1px solid color-mix(in srgb, #fff 10%, transparent);
-    backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
   }
   .library-marquee-header:not(.is-overlay) .marquee-tab-bar {
     background: color-mix(in srgb, var(--foreground) 6%, transparent);
@@ -2252,8 +2255,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .search-paint-surface {
     background: var(--background);
     border-color: color-mix(in srgb, var(--border) 72%, transparent);
-    backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   /* Panel chrome only once there is a sidebar to enclose. Below this the
@@ -2644,8 +2647,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
       color-mix(in srgb, var(--background) 94%, transparent),
       color-mix(in srgb, var(--background) 88%, transparent)
     );
-    backdrop-filter: blur(20px) saturate(1.3);
     -webkit-backdrop-filter: blur(20px) saturate(1.3);
+    backdrop-filter: blur(20px) saturate(1.3);
     border-bottom: 1px solid color-mix(in srgb, var(--impersonation-accent) 16%, var(--border));
     box-shadow:
       inset 0 1px 0 color-mix(in srgb, var(--impersonation-accent) 22%, transparent),
