@@ -625,7 +625,7 @@ function FleetPulse({
       </div>
 
       <div className="ms-auto flex flex-wrap items-center justify-end gap-2">
-        <span className="text-muted-foreground/70 text-[10px] tracking-[0.08em] uppercase">
+        <span className="text-muted-foreground text-[10px] tracking-[0.08em] uppercase">
           {t("web.admin.devices.groupBy.label")}
         </span>
         <SegmentedControl
@@ -777,9 +777,7 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: "de
       >
         {value}
       </span>
-      <span className="text-muted-foreground/70 text-[10px] tracking-[0.08em] uppercase">
-        {label}
-      </span>
+      <span className="text-muted-foreground text-[10px] tracking-[0.08em] uppercase">{label}</span>
     </span>
   );
 }
@@ -1023,7 +1021,7 @@ function FilterGroup({
 }) {
   return (
     <div>
-      <div className="text-muted-foreground/70 mb-2 flex items-center justify-between px-1 text-[10px] font-semibold tracking-[0.12em] uppercase">
+      <div className="text-muted-foreground mb-2 flex items-center justify-between px-1 text-[10px] font-semibold tracking-[0.12em] uppercase">
         <span>{label}</span>
         {action}
       </div>
@@ -1106,7 +1104,7 @@ function FacetCheckbox({
       <span className="flex items-center gap-2">
         <input
           type="checkbox"
-          className="border-border/80 bg-background/60 checked:bg-foreground checked:border-foreground checked:text-background h-3 w-3 cursor-pointer appearance-none rounded-[3px] border transition-colors checked:bg-[image:url('data:image/svg+xml;utf8,<svg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2012%2012%22%20fill=%22none%22%20stroke=%22%23141417%22%20stroke-width=%222.4%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22><polyline%20points=%222.5,6.5%205,9%209.5,3.5%22/></svg>')] checked:bg-[length:9px_9px] checked:bg-center checked:bg-no-repeat"
+          className="border-input bg-background/60 checked:bg-foreground checked:border-foreground checked:text-background h-3 w-3 cursor-pointer appearance-none rounded-[3px] border transition-colors checked:bg-[image:url('data:image/svg+xml;utf8,<svg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2012%2012%22%20fill=%22none%22%20stroke=%22%23141417%22%20stroke-width=%222.4%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22><polyline%20points=%222.5,6.5%205,9%209.5,3.5%22/></svg>')] checked:bg-[length:9px_9px] checked:bg-center checked:bg-no-repeat"
           checked={checked}
           onChange={onToggle}
         />
@@ -1244,7 +1242,7 @@ function DeviceGroup({
 
   return (
     <section>
-      <header className="bg-surface/60 border-border/40 sticky top-0 z-10 flex items-baseline justify-between gap-2 border-b px-3 py-2 backdrop-blur">
+      <header className="bg-surface/95 border-border/40 sticky top-0 z-10 flex items-baseline justify-between gap-2 border-b px-3 py-2 backdrop-blur">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -1272,7 +1270,7 @@ function DeviceGroup({
             </Link>
           )}
           {groupAnomalies > 0 && (
-            <span className="text-destructive bg-destructive/10 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] tracking-[0.04em]">
+            <span className="text-destructive-label bg-destructive/10 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] tracking-[0.04em]">
               <AlertTriangle className="h-2.5 w-2.5" />
               {groupAnomalies}
             </span>
@@ -1738,7 +1736,7 @@ function DeviceDetailPanel({
                 {data.device_name || t("web.admin.devices.unnamedDevice")}
               </h2>
               {isAnomaly && (
-                <span className="text-destructive border-destructive/30 bg-destructive/10 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] tracking-[0.04em] uppercase">
+                <span className="text-destructive-label border-destructive/30 bg-destructive/10 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] tracking-[0.04em] uppercase">
                   <AlertTriangle className="h-3 w-3" />
                   {t("web.admin.devices.detail.anomalyBadge")}
                 </span>
@@ -1916,7 +1914,7 @@ function ReadoutCell({
 }) {
   return (
     <div className="min-w-0">
-      <div className="text-muted-foreground/70 text-[10px] font-semibold tracking-[0.12em] uppercase">
+      <div className="text-muted-foreground text-[10px] font-semibold tracking-[0.12em] uppercase">
         {label}
       </div>
       <div
@@ -1933,10 +1931,7 @@ function ReadoutCell({
         {value}
       </div>
       {sub && (
-        <div
-          className="text-muted-foreground/70 mt-0.5 truncate text-[11px]"
-          title={subTitle ?? sub}
-        >
+        <div className="text-muted-foreground mt-0.5 truncate text-[11px]" title={subTitle ?? sub}>
           {sub}
         </div>
       )}
