@@ -247,7 +247,7 @@ func (d StoreDestination) FreeBytes(context.Context) (uint64, bool, error) {
 	if !sized {
 		return 0, false, nil
 	}
-	return uint64(free), true, nil
+	return uint64(free), true, nil //nolint:gosec // FreeForWrites never returns a negative size
 }
 
 // blockBytes is blocks times a Statfs block size, whose type differs by

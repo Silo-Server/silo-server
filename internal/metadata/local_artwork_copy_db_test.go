@@ -554,7 +554,7 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 
 // TestLocalArtworkWaitsForStorageSpaceDB pins the queue side of a full
 // artwork store. The deferral counts no attempt, so a scan's discovery copy
-// must still honour its wait rather than reprocess the file only to be
+// must still honor its wait rather than reprocess the file only to be
 // refused; a manual refresh starts it over at the short delay.
 func TestLocalArtworkWaitsForStorageSpaceDB(t *testing.T) {
 	pool := imageCacheQueueTestPool(t)

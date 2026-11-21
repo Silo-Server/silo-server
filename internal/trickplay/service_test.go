@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"sync"
 	"syscall"
 	"testing"
@@ -475,9 +476,10 @@ func TestDispatchPausesAfterStorageIsFull(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("the first file was never released")
 		}
-		time.Sleep(time.Millisecond)
+		runtime.Gosched()
 	}
-	time.Sleep(100 * time.Millisecond)
+	// A negative check: no second claim may come within the window.
+	time.Sleep(100 * time.Millisecond) //nolint:forbidigo // waits out a window in which nothing may happen
 	cancel()
 	<-done
 	q.mu.Lock()
