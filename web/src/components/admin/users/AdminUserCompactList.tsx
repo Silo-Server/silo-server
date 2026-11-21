@@ -79,7 +79,7 @@ function AdminUserCompactRow({ row }: { row: AdminUserRow }) {
         <span className="text-muted-foreground flex gap-1 text-xs">
           {group.kind === "admin" ? null : (
             <>
-              <span className="truncate">
+              <span dir="auto" className="truncate">
                 {group.kind === "group" ? group.name : t("web.admin.users.list.noGroup")}
               </span>
               <span aria-hidden="true">{SEPARATOR}</span>
