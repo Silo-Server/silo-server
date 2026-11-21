@@ -358,30 +358,38 @@ const (
 )
 
 // carry replaces the restored database's credentials, outbound settings,
-// plugin releases, and policies with those of liveURL, or with none when
-// liveURL is "".
-func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string) error {
-	// What the credential and plugin steps guard (revoked keys, replaced
-	// releases) must not come back because a step could not run on an
-	// older schema: each falls back to the stricter outcome, or fails.
-	if err := p.strictStep("replacing the backup's credentials", carryCredentials(ctx, loader, dbURL, liveURL, p.out),
-		"leaving out all of the backup's "+carriedKinds, func() error { return carryCredentials(ctx, loader, dbURL, "", p.out) }); err != nil {
+// plugin releases, and policies with those of carryFrom, or with none when
+// carryFrom is empty. destination is the live database that will be replaced,
+// even if the backup came from another deployment.
+func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, carryFrom, destination string) error {
+	authorityRestricted, err := carryCredentials(ctx, loader, dbURL, carryFrom, p.out)
+	if err := p.strictStep("replacing the backup's credentials", err,
+		"leaving out all of the backup's "+carriedKinds, func() error {
+			authorityRestricted = true
+			_, err := carryCredentials(ctx, loader, dbURL, "", p.out)
+			return err
+		}); err != nil {
 		return err
 	}
-	if err := p.step("carrying the outbound settings", carryOutboundSettings(ctx, loader, dbURL, liveURL, p.out)); err != nil {
+	if err := p.step("carrying the outbound settings", carryOutboundSettings(ctx, loader, dbURL, carryFrom, p.out)); err != nil {
 		return err
 	}
-	if err := p.strictStep("carrying the plugin releases", carryPluginReleases(ctx, loader, dbURL, liveURL, p.out),
+	releasesRestricted, err := carryPluginReleases(ctx, loader, dbURL, carryFrom, p.out)
+	if err := p.strictStep("carrying the plugin releases", err,
 		"turning off every restored plugin", func() error {
+			releasesRestricted = true
 			off, err := loader.DisablePlugins(ctx, dbURL)
 			if err == nil && len(off) > 0 {
-				_, _ = fmt.Fprintf(p.out, "Turned off %d plugins; check and enable them after Silo starts: %s.\n", len(off), strings.Join(off, ", "))
+				_, _ = fmt.Fprintf(p.out, "Turned off %d plugins: %s. Review them after Silo starts.\n", len(off), strings.Join(off, ", "))
 			}
 			return err
 		}); err != nil {
 		return err
 	}
-	return p.step("carrying the account policies", carryPolicies(ctx, loader, dbURL, liveURL, p.out))
+	if err := p.step("carrying the account policies", carryPolicies(ctx, loader, dbURL, carryFrom, p.out)); err != nil {
+		return err
+	}
+	return finishPluginProvisionRestore(ctx, loader, dbURL, destination, carryFrom == "", authorityRestricted || releasesRestricted, p.out)
 }
 
 // ValidateOptions are the inputs to §10.2 step 1.
@@ -599,6 +607,9 @@ type DatabaseLoader interface {
 	// returns them: the fallback when CarryPluginReleases cannot run on a
 	// backup's older schema.
 	DisablePlugins(ctx context.Context, dbURL string) ([]string, error)
+	// FinishPluginProvisionRestore clears restored status and sets a fresh
+	// provisioning hold when the restore restricted plugin state.
+	FinishPluginProvisionRestore(ctx context.Context, dbURL, liveURL string, foreign, restricted bool) (string, error)
 	// CarryServerSpecificSettings gives dbURL liveURL's server-specific
 	// settings and returns how many it changed.
 	CarryServerSpecificSettings(ctx context.Context, dbURL, liveURL string) (int, error)
@@ -786,7 +797,7 @@ func RestoreSeparate(ctx context.Context, src *Source, loader DatabaseLoader, op
 	}
 	// A copy is not the live server: it gets none of the backup's
 	// credentials and none of the live ones.
-	if err := post.carry(ctx, loader, opts.Into, ""); err != nil {
+	if err := post.carry(ctx, loader, opts.Into, "", ""); err != nil {
 		return RestoreReport{}, err
 	}
 	if err := post.step(stepInterrupt, interruptWork(ctx, loader, opts.Into, "", out)); err != nil {

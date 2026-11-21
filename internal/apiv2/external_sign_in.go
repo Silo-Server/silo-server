@@ -213,7 +213,7 @@ type AuthConnectionTestResult struct {
 	Steps []AuthConnectionTestStep `json:"steps" doc:"Checks in the order they ran"`
 	// CallbackURL is the redirect URI an OAuth provider must have
 	// registered for this installation.
-	CallbackURL string `json:"callback_url" format:"uri-reference" doc:"Redirect URI to register at an OAuth (OIDC) provider for this installation, on the public URL; empty when no public URL is configured. Password (LDAP) providers do not use it" example:"https://silo.example.test/api/v2/auth/oauth/3/callback"`
+	CallbackURL string `json:"callback_url" format:"uri-reference" doc:"Redirect URI to register at the OAuth provider. Empty for password providers, when the public URL is unset, or when the binding mode is unavailable." example:"https://silo.example.test/api/v2/auth/oauth/3/callback"`
 }
 
 // AuthConnectionTestOutput is the testAdminPluginAuthBinding response.
@@ -620,8 +620,8 @@ func registerExternalSignIn(reg *Registry) {
 		out := &AuthConnectionTestOutput{Body: AuthConnectionTestResult{OK: result.OK, Steps: make([]AuthConnectionTestStep, 0, len(result.Steps))}}
 		// Only an OAuth provider has a redirect URI to register; a password
 		// (LDAP) provider's result leaves it empty.
-		if svc := reg.deps.OAuth; svc != nil && svc.PublicURL("/", nil) != "" && auth.ProviderModeForAuthModes(result.AuthModes) == auth.ProviderModeOAuth {
-			out.Body.CallbackURL = svc.CallbackURL(Prefix, id)
+		if svc := reg.deps.OAuth; svc != nil && result.CallbackMode != "" && auth.ProviderModeForAuthModes(result.AuthModes) == auth.ProviderModeOAuth {
+			out.Body.CallbackURL = svc.CallbackURL(Prefix, id, result.CallbackMode)
 		}
 		for _, step := range result.Steps {
 			out.Body.Steps = append(out.Body.Steps, AuthConnectionTestStep{ID: step.ID, Label: step.Label, OK: step.OK, Message: step.Message})

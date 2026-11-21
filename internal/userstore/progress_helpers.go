@@ -8,6 +8,56 @@ import (
 	"time"
 )
 
+// SequencedPlaybackProgressWriter orders a heartbeat against the same attempt's
+// final stop. A skipped sample reports written=false and has no side effects.
+type SequencedPlaybackProgressWriter interface {
+	WriteSequencedPlaybackProgress(ctx context.Context, sessionID string, sequence int64, profileID, mediaItemID string,
+		position, duration float64, thresholds ProgressThresholds, hints VersionHints) (written, completed bool, err error)
+}
+
+// WritePlaybackProgress prefers the attempt fence. Stores without a shared
+// attempt table use their ordinary progress write.
+func WritePlaybackProgress(ctx context.Context, store UserStore, sessionID string, sequence int64, profileID, mediaItemID string,
+	position, duration float64, thresholds ProgressThresholds, hints VersionHints) (written, completed bool, err error) {
+	if writer, ok := store.(SequencedPlaybackProgressWriter); ok {
+		return writer.WriteSequencedPlaybackProgress(ctx, sessionID, sequence, profileID, mediaItemID, position, duration, thresholds, hints)
+	}
+	if _, _, skip := ResolveProgressState(position, duration, thresholds); skip {
+		return false, false, nil
+	}
+	completed, err = UpdateProgressReportingCompletion(ctx, store, profileID, mediaItemID, position, duration, thresholds)
+	if err != nil {
+		return false, false, err
+	}
+	return true, completed, store.UpdateProgressHints(ctx, profileID, mediaItemID, hints)
+}
+
+// PlaybackStopWrite is the final progress, version hints, and history for one
+// stop, including episodes covered by the same file. Entry.ID identifies the
+// stop. Keep its commit marker until ReplayUntil, after retries can no longer
+// reach the writer.
+type PlaybackStopWrite struct {
+	Entry           WatchHistoryEntry
+	ReplayUntil     time.Time
+	PositionSeconds float64
+	Thresholds      ProgressThresholds
+	Hints           VersionHints
+	SpannedTargets  []MarkWatchedTarget
+	SpannedHistory  []WatchHistoryEntry
+}
+
+type PlaybackStopWriter interface {
+	CommitPlaybackStop(context.Context, PlaybackStopWrite) (spanned []WatchHistoryEntry, alreadyRecorded bool, err error)
+}
+
+func CommitPlaybackStop(ctx context.Context, store UserStore, stop PlaybackStopWrite) ([]WatchHistoryEntry, bool, error) {
+	writer, ok := store.(PlaybackStopWriter)
+	if !ok {
+		return nil, false, errors.New("user store must commit playback stops atomically")
+	}
+	return writer.CommitPlaybackStop(ctx, stop)
+}
+
 type HistoryVisibilityStore interface {
 	VisibleHistoryTimestamps(ctx context.Context, profileID string, mediaItemIDs []string, at time.Time) (map[string]string, error)
 }

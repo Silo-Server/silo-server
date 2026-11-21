@@ -101,6 +101,8 @@ type AdminUserDownload struct {
 	UpdatedAt         Instant                          `json:"updated_at"`
 	CompletedAt       NullableInstant                  `json:"completed_at"`
 	StatusEventAt     NullableInstant                  `json:"status_event_at" doc:"Latest accepted client status report; null when the app never reported"`
+	CreatedClientIP   *string                          `json:"created_client_ip" nullable:"true" doc:"Address the device registered the download from, as the trusted proxies resolve it; null when none was recorded, as for downloads registered before servers recorded it"`
+	LastClientIP      *string                          `json:"last_client_ip" nullable:"true" doc:"Address the device was last seen at for this download: set at registration, then by each accepted status report and by a file request from a new address, which replaces it at most once a minute, so it can be older than the latest file request; null when none was recorded"`
 }
 
 type AdminUserDownloadsOutput struct {
@@ -162,6 +164,14 @@ func nullableInstantOf(t *time.Time) NullableInstant {
 	return NullableInstant{Valid: true, Time: NewInstant(*t)}
 }
 
+// nullableAddress is a recorded client address, or nil when none was.
+func nullableAddress(ip string) *string {
+	if ip == "" {
+		return nil
+	}
+	return &ip
+}
+
 func adminUserDownloadOf(row downloads.AdminDownloadRow) AdminUserDownload {
 	out := AdminUserDownload{
 		ID: ID(row.ID), ProfileID: ID(row.ProfileID), DeviceID: row.DeviceID, ContentID: row.ContentID, EpisodeID: row.EpisodeID, BatchID: ID(row.BatchID),
@@ -169,6 +179,7 @@ func adminUserDownloadOf(row downloads.AdminDownloadRow) AdminUserDownload {
 		DeliveryFormat: row.Format, TargetBitrateKbps: row.TargetBitrateKbps, FileSize: row.FileSize,
 		CreatedAt: NewInstant(row.CreatedAt), UpdatedAt: NewInstant(row.UpdatedAt),
 		CompletedAt: nullableInstantOf(row.CompletedAt), StatusEventAt: nullableInstantOf(row.StatusEventAt),
+		CreatedClientIP: nullableAddress(row.CreatedClientIP), LastClientIP: nullableAddress(row.LastClientIP),
 	}
 	if row.SeasonNumber != nil && row.EpisodeNumber != nil {
 		out.Episode = NullableAdminUserDownloadEpisode{Valid: true, Value: AdminUserDownloadEpisode{SeasonNumber: *row.SeasonNumber, EpisodeNumber: *row.EpisodeNumber, Title: row.EpisodeTitle}}

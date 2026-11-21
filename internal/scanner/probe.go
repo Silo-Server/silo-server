@@ -646,48 +646,6 @@ const (
 	trackSpanRelativeTolerance = 0.01
 )
 
-// A video duration is implausible when it is either far too short in absolute
-// terms, or when it implies a bitrate no real medium reaches. Both are
-// signatures of malformed container timestamps (and of the legacy probe that
-// divided large durations by one million).
-//
-// The absolute rule alone cannot catch a feature film that probed as, say, 61
-// seconds — well past the floor, yet still wrong by two orders of magnitude.
-// Size and duration together pin an implied bitrate, which separates the two
-// cases the absolute rule conflates: a genuine short clip has an ordinary
-// bitrate, while a 100 GB file claiming 61 seconds implies ~13 Gbps.
-//
-// The ceiling sits far above any real medium — UHD Blu-ray peaks near
-// 150 Mbps and ProRes 4444 XQ at 4K near 500 Mbps — so legitimate content
-// cannot trip it. This also makes the rule safer than the absolute floor
-// alone, which false-positives on a genuine high-bitrate short.
-//
-// The shape is shared with the repair triggers in probe_repair.go and
-// scanner.go so the probe parser and the repair layers cannot drift apart.
-const (
-	implausiblyShortVideoMaxSeconds = 10
-	implausiblyShortVideoMinBytes   = 100 * 1024 * 1024
-	implausibleVideoBitrateBps      = 1_000_000_000
-)
-
-func videoDurationImplausible(durationSeconds float64, sizeBytes int64, hasVideo bool) bool {
-	if !hasVideo || durationSeconds <= 0 || sizeBytes <= 0 {
-		return false
-	}
-	if durationSeconds <= implausiblyShortVideoMaxSeconds && sizeBytes >= implausiblyShortVideoMinBytes {
-		return true
-	}
-	return impliedBitrateBps(sizeBytes, durationSeconds) > implausibleVideoBitrateBps
-}
-
-// impliedBitrateBps is the bitrate a file's size and duration imply. Callers
-// use it as a duration-sanity signal, not as a real bitrate estimate: it
-// counts container overhead and every stream, which is precisely what makes it
-// a conservative upper bound.
-func impliedBitrateBps(sizeBytes int64, durationSeconds float64) float64 {
-	return float64(sizeBytes) * 8 / durationSeconds
-}
-
 func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 	if raw == nil {
 		return 0, false
@@ -900,7 +858,7 @@ func durationLooksImplausible(raw *ffprobeOutput, duration float64) bool {
 		return false
 	}
 	size := int64(parseFloat(raw.Format.Size))
-	return videoDurationImplausible(duration, size, hasVideoStream(raw.Streams))
+	return models.VideoDurationImplausible(duration, size, hasVideoStream(raw.Streams))
 }
 
 func durationAfterStart(end, start float64) float64 {

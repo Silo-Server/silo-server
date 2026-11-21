@@ -145,7 +145,7 @@ func (r *CatalogSelectionResolver) ResolveSourceFallback(ctx context.Context, us
 		candidate := &detail.Versions[i]
 		// Strictly descend the catalog order so different viewers cannot
 		// bounce the room between previously refused versions.
-		if !roomVersionBetter(*current, *candidate) || candidate.EditionKey != current.EditionKey ||
+		if candidate.Unreadable || !roomVersionBetter(*current, *candidate) || candidate.EditionKey != current.EditionKey ||
 			candidate.PresentationKind != current.PresentationKind || candidate.PresentationGroupKey != current.PresentationGroupKey ||
 			candidate.PresentationPartIndex != current.PresentationPartIndex {
 			continue

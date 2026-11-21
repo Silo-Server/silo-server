@@ -11,11 +11,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 // SessionSync represents the data needed to sync a playback session to the
@@ -55,7 +57,10 @@ type SessionSync struct {
 	ToneMapMode         string
 	// AdaptationReasons says why the route changes the file
 	// (playback.AdaptationReasons); empty for direct play.
-	AdaptationReasons       []string
+	AdaptationReasons []string
+	// Subtitle is the subtitle the session's current plan delivers; nil when
+	// it shows none.
+	Subtitle                *playback.SessionSubtitle
 	RoutingNetworkProvider  *string
 	RoutingWorkload         string
 	RoutingExecution        string
@@ -74,6 +79,11 @@ type SessionSync struct {
 	IsPaused                bool
 	HasWebSocket            bool
 	IsJellyfinCompat        bool
+	// Watch is the session's watch-time measurement (playback.WatchTime as
+	// JSON), saved on its lifecycle row rather than the sync row: the sync
+	// row goes when this node shuts down, and the measurement must outlive
+	// it. Nil when the session has none yet.
+	Watch json.RawMessage
 }
 
 // AggregateData represents the aggregate counts for a single user that are
@@ -216,8 +226,8 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				 routing_egress, routing_egress_node_id, routing_egress_node_url,
 				 position_seconds, is_paused, has_websocket, compat_origin, routing_network_provider,
 				 output_container, output_protocol, stream_location, device_id, device_platform, timeline_duration_seconds,
-				 adaptation_reasons)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)
+				 adaptation_reasons, subtitle)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46)
 			ON CONFLICT (session_id) DO UPDATE SET
 				user_id             = EXCLUDED.user_id,
 				profile_id          = EXCLUDED.profile_id,
@@ -263,6 +273,7 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				device_platform     = EXCLUDED.device_platform,
 				timeline_duration_seconds = EXCLUDED.timeline_duration_seconds,
 				adaptation_reasons  = EXCLUDED.adaptation_reasons,
+				subtitle            = EXCLUDED.subtitle,
 				last_sync_at        = NOW()
 		`, sessionSyncValues(s, sessionNode)...)
 		if err != nil {
@@ -289,6 +300,9 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing transaction: %w", err)
+	}
+	if err := r.saveWatch(ctx, sessions); err != nil {
+		log.Printf("reconciler: failed to save watch time for node %s: %v", reportingNode, err)
 	}
 	// The two publishes serve different consumers and are not alternatives:
 	// the events hub pushes "sessions.replaced" to connected admin clients,
@@ -317,6 +331,53 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 	}
 
 	return nil
+}
+
+// saveWatch saves each session's watch-time measurement on its lifecycle
+// row, so a stop recorded on another server, or after this one restarts,
+// carries on from it. It runs outside the sync transaction and leaves
+// updated_at alone, which the idle sweep reads as activity. A measurement
+// older than the saved one, from a copy that stopped receiving reports,
+// never replaces it.
+func (r *Reconciler) saveWatch(ctx context.Context, sessions []SessionSync) error {
+	type row struct {
+		SessionID string          `json:"session_id"`
+		Watch     json.RawMessage `json:"watch"`
+	}
+	rows := make([]row, 0, len(sessions))
+	for _, s := range sessions {
+		if len(s.Watch) == 0 {
+			continue
+		}
+		if _, err := uuid.Parse(s.SessionID); err != nil {
+			continue
+		}
+		rows = append(rows, row{SessionID: s.SessionID, Watch: s.Watch})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(rows)
+	if err != nil {
+		return err
+	}
+	_, err = r.pool.Exec(ctx, `
+		UPDATE playback_session_lifecycle lc SET watch = v.watch
+		FROM jsonb_to_recordset($1::jsonb) AS v(session_id uuid, watch jsonb)
+		WHERE lc.session_id = v.session_id AND lc.state <> 'stopped'
+		  AND lc.watch IS DISTINCT FROM v.watch
+		  AND (lc.watch IS NULL OR (lc.watch->>'until')::timestamptz <= (v.watch->>'until')::timestamptz)`, string(data))
+	return err
+}
+
+// SaveWatch saves the measurements of every session this node holds now, so
+// a graceful shutdown leaves the latest ones for the server that rebuilds or
+// stops the sessions.
+func (r *Reconciler) SaveWatch(ctx context.Context) error {
+	if r.sessionProvider == nil {
+		return nil
+	}
+	return r.saveWatch(ctx, r.sessionProvider())
 }
 
 // loadNodeSessionsSnapshot loads the normalized live-session view for one node.
@@ -367,7 +428,8 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			COALESCE(device_id, ''),
 			COALESCE(device_platform, ''),
 			COALESCE(timeline_duration_seconds, 0),
-			COALESCE(adaptation_reasons, '{}')
+			COALESCE(adaptation_reasons, '{}'),
+			subtitle
 		FROM playback_sessions_sync
 		WHERE COALESCE(reporting_node, '') = $1
 		ORDER BY session_id
@@ -426,6 +488,7 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			&s.DevicePlatform,
 			&s.TimelineDurationSeconds,
 			&s.AdaptationReasons,
+			&s.Subtitle,
 		); err != nil {
 			return nil, err
 		}
@@ -506,8 +569,16 @@ func sessionSnapshotsEqual(left, right []SessionSync) bool {
 	}
 	return slices.EqualFunc(left, right, func(l, r SessionSync) bool {
 		return l.TimelineDurationSeconds == r.TimelineDurationSeconds &&
-			slices.Equal(nullableStrings(l.AdaptationReasons), nullableStrings(r.AdaptationReasons))
+			slices.Equal(nullableStrings(l.AdaptationReasons), nullableStrings(r.AdaptationReasons)) &&
+			equalSubtitle(l.Subtitle, r.Subtitle)
 	})
+}
+
+func equalSubtitle(left, right *playback.SessionSubtitle) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 // nullableTimelineDuration stores an unset (or nonsensical) timeline duration
@@ -534,7 +605,7 @@ var sessionSyncColumns = []string{
 	"routing_egress", "routing_egress_node_id", "routing_egress_node_url",
 	"position_seconds", "is_paused", "has_websocket", "compat_origin", "routing_network_provider",
 	"output_container", "output_protocol", "stream_location", "device_id", "device_platform",
-	"timeline_duration_seconds", "adaptation_reasons",
+	"timeline_duration_seconds", "adaptation_reasons", "subtitle",
 }
 
 // sessionSyncValues is one session as a sync stores it, in
@@ -554,7 +625,7 @@ func sessionSyncValues(s SessionSync, sessionNode string) []any {
 		s.IsPaused, s.HasWebSocket, s.IsJellyfinCompat, s.RoutingNetworkProvider,
 		nullableString(s.OutputContainer), nullableString(s.OutputProtocol), s.StreamLocation,
 		nullableString(s.DeviceID), nullableString(s.DevicePlatform),
-		nullableTimelineDuration(s.TimelineDurationSeconds), nullableStrings(s.AdaptationReasons)}
+		nullableTimelineDuration(s.TimelineDurationSeconds), nullableStrings(s.AdaptationReasons), s.Subtitle}
 }
 
 // nullableStrings stores an empty list as NULL, as the other optional

@@ -23,6 +23,20 @@ type EventPublisher interface {
 	Publish(ctx context.Context, env events.Envelope) error
 }
 
+// pluginEventGate is implemented by an EventPublisher that knows whether a
+// plugin event has subscribers (*events.Hub does), so an event nobody
+// subscribes to is not built or published.
+type pluginEventGate interface {
+	PluginEventWanted(event string) bool
+}
+
+// wantsEvent reports whether the publisher could deliver eventName to a
+// subscriber.
+func (s *RuntimeHostServer) wantsEvent(eventName string) bool {
+	gate, ok := s.publisher.(pluginEventGate)
+	return !ok || gate.PluginEventWanted(eventName)
+}
+
 // LibraryRecord is the wire shape for libraries returned to plugins. Mirrors
 // the proto Library message.
 type LibraryRecord struct {
@@ -237,6 +251,10 @@ func (s *RuntimeHostServer) PublishEvent(ctx context.Context, req *pluginv1.Publ
 		return nil, fmt.Errorf("server: event publisher not configured")
 	}
 
+	prefixed := "plugin." + s.pluginID + "." + name
+	if !s.wantsEvent(prefixed) {
+		return &pluginv1.PublishEventResponse{}, nil
+	}
 	var payload json.RawMessage
 	if p := req.GetPayload(); p != nil {
 		raw, err := p.MarshalJSON()
@@ -246,7 +264,6 @@ func (s *RuntimeHostServer) PublishEvent(ctx context.Context, req *pluginv1.Publ
 		payload = raw
 	}
 
-	prefixed := "plugin." + s.pluginID + "." + name
 	env := events.Envelope{
 		Channel: events.ChannelPlugins,
 		Event:   prefixed,
@@ -279,6 +296,10 @@ func (s *RuntimeHostServer) PublishEventTo(ctx context.Context, req *pluginv1.Pu
 		return nil, fmt.Errorf("server: event publisher not configured")
 	}
 
+	prefixed := "plugin." + s.pluginID + "." + name
+	if !s.wantsEvent(prefixed) {
+		return &pluginv1.PublishEventToResponse{}, nil
+	}
 	var payload json.RawMessage
 	if p := req.GetPayload(); p != nil {
 		raw, err := p.MarshalJSON()
@@ -290,7 +311,7 @@ func (s *RuntimeHostServer) PublishEventTo(ctx context.Context, req *pluginv1.Pu
 
 	env := events.Envelope{
 		Channel:        events.ChannelPlugins,
-		Event:          "plugin." + s.pluginID + "." + name,
+		Event:          prefixed,
 		Data:           payload,
 		TargetPluginID: targetPluginID,
 	}
@@ -432,8 +453,9 @@ func (s *RuntimeHostServer) GetHostInfo(ctx context.Context, _ *pluginv1.GetHost
 	return resp, nil
 }
 
-// ReadInstanceState returns one key of the instance's private state. The
-// scope is fixed by the store the host configured for this process.
+// ReadInstanceState returns one key of the instance's private state with its
+// version. The scope is fixed by the store the host configured for this
+// process. Versioned is always set: this host honors expected_version.
 func (s *RuntimeHostServer) ReadInstanceState(ctx context.Context, req *pluginv1.ReadInstanceStateRequest) (*pluginv1.ReadInstanceStateResponse, error) {
 	if err := ValidateInstanceStateKey(req.GetKey()); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -441,17 +463,19 @@ func (s *RuntimeHostServer) ReadInstanceState(ctx context.Context, req *pluginv1
 	if s.instanceState == nil || s.installationID <= 0 {
 		return nil, status.Error(codes.FailedPrecondition, ErrInstanceStateUnavailable.Error())
 	}
-	value, found, err := s.instanceState.ReadInstanceState(ctx, s.installationID, req.GetKey())
+	value, version, err := s.instanceState.ReadInstanceState(ctx, s.installationID, req.GetKey())
 	if err != nil {
 		return nil, instanceStateError(err)
 	}
-	if !found {
-		return &pluginv1.ReadInstanceStateResponse{}, nil
+	if version == 0 {
+		return &pluginv1.ReadInstanceStateResponse{Versioned: true}, nil
 	}
-	return &pluginv1.ReadInstanceStateResponse{Value: value, Found: true}, nil
+	return &pluginv1.ReadInstanceStateResponse{Value: value, Found: true, Version: version, Versioned: true}, nil
 }
 
-// WriteInstanceState stores one key of the instance's private state.
+// WriteInstanceState stores one key of the instance's private state. With
+// expected_version set it writes only while the key is at that version and
+// answers Aborted otherwise.
 func (s *RuntimeHostServer) WriteInstanceState(ctx context.Context, req *pluginv1.WriteInstanceStateRequest) (*pluginv1.WriteInstanceStateResponse, error) {
 	if err := ValidateInstanceStateKey(req.GetKey()); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -462,10 +486,11 @@ func (s *RuntimeHostServer) WriteInstanceState(ctx context.Context, req *pluginv
 	if s.instanceState == nil || s.installationID <= 0 {
 		return nil, status.Error(codes.FailedPrecondition, ErrInstanceStateUnavailable.Error())
 	}
-	if err := s.instanceState.WriteInstanceState(ctx, s.installationID, req.GetKey(), req.GetValue()); err != nil {
+	version, err := s.instanceState.WriteInstanceState(ctx, s.installationID, req.GetKey(), req.GetValue(), req.ExpectedVersion)
+	if err != nil {
 		return nil, instanceStateError(err)
 	}
-	return &pluginv1.WriteInstanceStateResponse{}, nil
+	return &pluginv1.WriteInstanceStateResponse{Version: version}, nil
 }
 
 func instanceStateError(err error) error {
@@ -474,6 +499,8 @@ func instanceStateError(err error) error {
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, ErrInstanceStateTooManyKeys):
 		return status.Error(codes.ResourceExhausted, err.Error())
+	case errors.Is(err, ErrInstanceStateVersionConflict):
+		return status.Error(codes.Aborted, err.Error())
 	case errors.Is(err, ErrInstanceStateUnavailable):
 		return status.Error(codes.FailedPrecondition, err.Error())
 	}

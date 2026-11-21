@@ -5,6 +5,9 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -20,6 +23,7 @@ import (
 	"context"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/go-chi/chi/v5"
@@ -409,6 +413,57 @@ func TestSubtitleDeliveryMarksLTRAuthoredText(t *testing.T) {
 		if body := rr.Body.String(); rr.Code != 200 || strings.Count(body, "\u200e") != 3 || !strings.Contains(body, "\u200eلقد انفجر -") {
 			t.Fatalf("%s: status=%d body=%q", format, rr.Code, body)
 		}
+	}
+}
+
+// Infuse drops an external subtitle sent without Content-Length (#4486), and
+// net/http sends any body over its 2 KiB buffer chunked unless the handler
+// states the length. The server mounts the compat router's compressor, as
+// production does, and asks for gzip, as clients do.
+func TestSubtitleResponsesStateContentLength(t *testing.T) {
+	var srt, vtt, ass strings.Builder
+	vtt.WriteString("WEBVTT\n\n")
+	ass.WriteString("[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
+	for i := range 80 {
+		m, s := i*2/60, i*2%60
+		fmt.Fprintf(&srt, "%d\n00:%02d:%02d,000 --> 00:%02d:%02d,500\nLine %d of a subtitle long enough to outgrow the buffer\n\n", i+1, m, s, m, s, i)
+		fmt.Fprintf(&vtt, "00:%02d:%02d.000 --> 00:%02d:%02d.500\nLine %d of a subtitle long enough to outgrow the buffer\n\n", m, s, m, s, i)
+		fmt.Fprintf(&ass, "Dialogue: 0,0:%02d:%02d.00,0:%02d:%02d.50,Default,,0,0,0,,Line %d of a subtitle long enough to outgrow the buffer\n", m, s, m, s, i) //nolint:misspell // ASS event keyword
+	}
+	r := chi.NewRouter()
+	r.Use(httpstream.CompressExcept(skipCompatMediaCompression, "application/json"))
+	r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}", func(w http.ResponseWriter, r *http.Request) {
+		data := map[string]string{"srt": srt.String(), "vtt": vtt.String(), "ass": ass.String()}[r.URL.Query().Get("source")]
+		(&PlaybackHandler{}).deliverSubtitle(w, r, r.URL.Query().Get("source"), []byte(data), 0)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	for _, tc := range []struct{ name, route, query string }{
+		{"srt as stored", "stream.srt", "source=srt"},
+		{"vtt as stored", "stream.vtt", "source=vtt"},
+		{"ass as stored", "stream.ass", "source=ass"},
+		{"vtt windowed", "stream.vtt", "source=vtt&EndPositionTicks=6000000000"},
+		{"json events", "stream.js", "source=vtt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, srv.URL+"/Videos/item/source/Subtitles/5/0/"+tc.route+"?"+tc.query, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Accept-Encoding", "gzip")
+			resp, err := srv.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != http.StatusOK || len(resp.TransferEncoding) != 0 || resp.ContentLength != int64(len(body)) {
+				t.Fatalf("status=%d Transfer-Encoding=%v Content-Length=%d, read %d bytes", resp.StatusCode, resp.TransferEncoding, resp.ContentLength, len(body))
+			}
+		})
 	}
 }
 

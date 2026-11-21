@@ -117,7 +117,7 @@ func TestEventsSocketV2DeclaredChannelsSurviveSlowSnapshot(t *testing.T) {
 
 	h, _ := socketTestHandler()
 	hub := h.Events.hub
-	h.Events = NewEventsHandler(hub, nil, nil, blockedTaskLister{entered: entered, release: release}, nil, nil, nil)
+	h.Events = NewEventsHandler(hub, nil, blockedTaskLister{entered: entered, release: release}, nil, nil, nil)
 	conn, readFrame := dialEventsSocketV2(t, h, "admin", "?channels=tasks")
 	readFrame("hello")
 	readFrame("subscribed")

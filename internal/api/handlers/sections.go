@@ -37,6 +37,7 @@ type SectionHandler struct {
 	sectionReader interface {
 		GetByID(context.Context, string) (*sections.PageSection, error)
 	}
+	sectionLister         sectionScopeLister
 	fetcher               *sections.Fetcher
 	previewFetcher        sectionPreviewFetcher // set to fetcher at construction; separate for test injection
 	episodeFetcher        sectionEpisodeFetcher
@@ -77,7 +78,7 @@ func (h *SectionHandler) refreshSeasonalLists(ctx context.Context, configs ...js
 
 // NewSectionHandler creates a new SectionHandler.
 func NewSectionHandler(repo *sections.Repository, fetcher *sections.Fetcher) *SectionHandler {
-	return &SectionHandler{repo: repo, sectionReader: repo, fetcher: fetcher, previewFetcher: fetcher, episodeFetcher: fetcher, playableTargets: fetcher}
+	return &SectionHandler{repo: repo, sectionReader: repo, sectionLister: repo, fetcher: fetcher, previewFetcher: fetcher, episodeFetcher: fetcher, playableTargets: fetcher}
 }
 
 type sectionEpisodeFetcher interface {
@@ -228,20 +229,25 @@ func validateSectionConfig(sectionType sections.SectionType, config json.RawMess
 		}
 	}
 
-	cfg := sections.ParseConfigFilters(config)
-	if cfg.FilterType != "" && cfg.FilterType != "movie" && cfg.FilterType != "series" && cfg.FilterType != "audiobook" {
-		return "filter_type must be 'movie', 'series', or 'audiobook'", false
-	}
 	if _, err := sections.ParseContinueType(config); err != nil {
 		return err.Error(), false
 	}
 
 	var rawLibraryConfig struct {
-		FilterLibraryID  *int  `json:"filter_library_id"`
-		FilterLibraryIDs []int `json:"filter_library_ids"`
+		FilterType       string `json:"filter_type"`
+		FilterLibraryID  *int   `json:"filter_library_id"`
+		FilterLibraryIDs []int  `json:"filter_library_ids"`
 	}
 	if len(config) > 0 {
 		_ = json.Unmarshal(config, &rawLibraryConfig)
+	}
+	// Only the legacy filter_type key is limited here, as the parser
+	// normalizes it; a structured media_scope is checked when the query
+	// definition parses below.
+	if rawLibraryConfig.FilterType != "" {
+		if ft := sections.ParseConfigFilters(config).FilterType; ft != itemTypeMovie && ft != itemTypeSeries && ft != itemTypeAudiobook {
+			return "filter_type must be 'movie', 'series', or 'audiobook'", false
+		}
 	}
 	if rawLibraryConfig.FilterLibraryID != nil && *rawLibraryConfig.FilterLibraryID <= 0 {
 		return "filter_library_id must be a positive library ID", false
@@ -968,9 +974,9 @@ func (h *SectionHandler) ResolveProfileSectionSettings(ctx context.Context, user
 // resolveProfileSectionSettings is ResolveProfileSectionSettings after the
 // library check.
 func (h *SectionHandler) resolveProfileSectionSettings(ctx context.Context, userID int, profileID, scope string, libraryID *int, filter catalog.AccessFilter) ([]sections.ResolvedSection, error) {
-	adminSections, err := h.repo.ListByScope(ctx, scope, libraryID)
+	adminSections, err := h.activeAdminSections(ctx, scope, libraryID)
 	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
+		return nil, err
 	}
 
 	var overrides []sections.ProfileSectionOverride

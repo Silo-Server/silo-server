@@ -670,31 +670,7 @@ func (r *RefreshDebtRepository) GetMetrics(ctx context.Context, sampleLimit int)
 	}
 	metrics.AttemptBuckets = buildMetadataRefreshAttemptBuckets(attemptBucketCounts)
 
-	dueSamples, err := r.querySamples(ctx, `
-		SELECT
-			d.target_type,
-			d.content_id,
-			COALESCE(CASE d.target_type
-				WHEN 'item' THEN COALESCE(mi.title, '')
-				WHEN 'season' THEN TRIM(BOTH ' ' FROM COALESCE(smi.title || ' - ', '') || COALESCE(NULLIF(s.title, ''), 'Season ' || s.season_number::text))
-				WHEN 'episode' THEN TRIM(BOTH ' ' FROM COALESCE(emi.title || ' - ', '') || 'S' || e.season_number::text || 'E' || e.episode_number::text || ' ' || COALESCE(NULLIF(e.title, ''), ''))
-				ELSE ''
-			END, '') AS title,
-			CASE d.target_type
-				WHEN 'item' THEN COALESCE(mi.type, '')
-				ELSE d.target_type
-			END AS type,
-			d.reason_mask,
-			d.next_refresh_at,
-			d.last_attempt_at,
-			d.attempt_count,
-			d.last_error
-		FROM metadata_refresh_debt d
-		LEFT JOIN media_items mi ON d.target_type = 'item' AND mi.content_id = d.content_id
-		LEFT JOIN seasons s ON d.target_type = 'season' AND s.content_id = d.content_id
-		LEFT JOIN media_items smi ON smi.content_id = s.series_id
-		LEFT JOIN episodes e ON d.target_type = 'episode' AND e.content_id = d.content_id
-		LEFT JOIN media_items emi ON emi.content_id = e.series_id
+	dueSamples, err := r.querySamples(ctx, metadataRefreshDebtSampleSelect+`
 		WHERE d.next_refresh_at <= NOW()
 		ORDER BY d.priority DESC, d.next_refresh_at ASC, d.updated_at ASC
 		LIMIT $1
@@ -704,31 +680,7 @@ func (r *RefreshDebtRepository) GetMetrics(ctx context.Context, sampleLimit int)
 	}
 	metrics.DueSamples = dueSamples
 
-	recentErrors, err := r.querySamples(ctx, `
-		SELECT
-			d.target_type,
-			d.content_id,
-			COALESCE(CASE d.target_type
-				WHEN 'item' THEN COALESCE(mi.title, '')
-				WHEN 'season' THEN TRIM(BOTH ' ' FROM COALESCE(smi.title || ' - ', '') || COALESCE(NULLIF(s.title, ''), 'Season ' || s.season_number::text))
-				WHEN 'episode' THEN TRIM(BOTH ' ' FROM COALESCE(emi.title || ' - ', '') || 'S' || e.season_number::text || 'E' || e.episode_number::text || ' ' || COALESCE(NULLIF(e.title, ''), ''))
-				ELSE ''
-			END, '') AS title,
-			CASE d.target_type
-				WHEN 'item' THEN COALESCE(mi.type, '')
-				ELSE d.target_type
-			END AS type,
-			d.reason_mask,
-			d.next_refresh_at,
-			d.last_attempt_at,
-			d.attempt_count,
-			d.last_error
-		FROM metadata_refresh_debt d
-		LEFT JOIN media_items mi ON d.target_type = 'item' AND mi.content_id = d.content_id
-		LEFT JOIN seasons s ON d.target_type = 'season' AND s.content_id = d.content_id
-		LEFT JOIN media_items smi ON smi.content_id = s.series_id
-		LEFT JOIN episodes e ON d.target_type = 'episode' AND e.content_id = d.content_id
-		LEFT JOIN media_items emi ON emi.content_id = e.series_id
+	recentErrors, err := r.querySamples(ctx, metadataRefreshDebtSampleSelect+`
 		WHERE COALESCE(d.last_error, '') <> ''
 		ORDER BY d.updated_at DESC
 		LIMIT $1
@@ -740,6 +692,38 @@ func (r *RefreshDebtRepository) GetMetrics(ctx context.Context, sampleLimit int)
 
 	return metrics, nil
 }
+
+// metadataRefreshDebtSampleSelect reads a debt row with its target's own title,
+// and for a season or episode the series title and numbers, so a client can
+// label the target in its own language.
+const metadataRefreshDebtSampleSelect = `
+	SELECT
+		d.target_type,
+		d.content_id,
+		COALESCE(CASE d.target_type
+			WHEN 'item' THEN mi.title
+			WHEN 'season' THEN s.title
+			WHEN 'episode' THEN e.title
+		END, '') AS title,
+		CASE d.target_type
+			WHEN 'item' THEN COALESCE(mi.type, '')
+			ELSE d.target_type
+		END AS type,
+		COALESCE(smi.title, emi.title, '') AS series_title,
+		COALESCE(s.season_number, e.season_number) AS season_number,
+		e.episode_number,
+		d.reason_mask,
+		d.next_refresh_at,
+		d.last_attempt_at,
+		d.attempt_count,
+		d.last_error
+	FROM metadata_refresh_debt d
+	LEFT JOIN media_items mi ON d.target_type = 'item' AND mi.content_id = d.content_id
+	LEFT JOIN seasons s ON d.target_type = 'season' AND s.content_id = d.content_id
+	LEFT JOIN media_items smi ON smi.content_id = s.series_id
+	LEFT JOIN episodes e ON d.target_type = 'episode' AND e.content_id = d.content_id
+	LEFT JOIN media_items emi ON emi.content_id = e.series_id
+`
 
 func (r *RefreshDebtRepository) querySamples(ctx context.Context, query string, limit int) ([]models.MetadataRefreshDebtSample, error) {
 	rows, err := r.pool.Query(ctx, query, limit)
@@ -756,6 +740,9 @@ func (r *RefreshDebtRepository) querySamples(ctx context.Context, query string, 
 			&sample.ContentID,
 			&sample.Title,
 			&sample.Type,
+			&sample.SeriesTitle,
+			&sample.SeasonNumber,
+			&sample.EpisodeNumber,
 			&sample.ReasonMask,
 			&sample.NextRefreshAt,
 			&sample.LastAttemptAt,

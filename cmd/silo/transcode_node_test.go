@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,6 +36,21 @@ func nodeKeyFor(t *testing.T, id int) string {
 		t.Fatal(err)
 	}
 	return key
+}
+
+// A node's key can come from a mounted secret file, as a secrets manager
+// delivers it, instead of from the environment itself.
+func TestLoadTranscodeNodeEnvReadsKeyFile(t *testing.T) {
+	key := nodeKeyFor(t, testTranscodeNodeID)
+	path := filepath.Join(t.TempDir(), "node-key")
+	if err := os.WriteFile(path, []byte(key+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{envCoreURL: "http://core:8080", envNodeKey + "_FILE": path}
+	got, err := loadTranscodeNodeEnv(func(name string) string { return env[name] })
+	if err != nil || got.nodeKey != key {
+		t.Fatalf("node key = %q, %v; want the file's key", got.nodeKey, err)
+	}
 }
 
 func TestLoadTranscodeNodeEnv(t *testing.T) {
@@ -107,6 +123,9 @@ func newFakeNodeCore(t *testing.T, key string) *fakeNodeCore {
 	mux.HandleFunc("GET "+nodecontrol.PathConfig, func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(core.doc)
 	})
+	mux.HandleFunc("PUT "+nodecontrol.PathRegistration, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(nodecontrol.RegistrationResult{Node: core.doc.Node, EnvManaged: []string{}})
+	})
 	mux.HandleFunc("POST "+nodecontrol.PathLogs, func(w http.ResponseWriter, r *http.Request) {
 		var batch nodecontrol.LogBatch
 		_ = json.NewDecoder(r.Body).Decode(&batch)
@@ -142,7 +161,7 @@ func TestTranscodeNodeStartsFromTheCoreAlone(t *testing.T) {
 		var env []string
 		for _, kv := range os.Environ() {
 			name, _, _ := strings.Cut(kv, "=")
-			if !slices.Contains(append(slices.Clone(transcodeNodeIgnoredEnv), envCoreURL, envNodeKey, "PORT"), name) {
+			if !slices.Contains(append(slices.Clone(transcodeNodeIgnoredEnv), envCoreURL, envNodeKey, envNodeKey+"_FILE", "PORT"), name) {
 				env = append(env, kv)
 			}
 		}

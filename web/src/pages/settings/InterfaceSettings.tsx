@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ArrowDown, ArrowUp, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { v2ErrorText } from "@/api/v2/request";
 import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
@@ -79,10 +80,6 @@ function menuItemLabel(
   return t("web.settings.interface.menuCollection", { name });
 }
 
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
-}
-
 export default function InterfaceSettings() {
   const t = useT();
   const [revealShortcuts, setRevealShortcuts] = useState(false);
@@ -106,7 +103,7 @@ export default function InterfaceSettings() {
           it leads. */}
       <div className="grid gap-x-10 @5xl:grid-cols-[minmax(0,1fr)_auto]">
         <aside className="pb-2 @5xl:order-last @5xl:pb-0">
-          <div className="@5xl:sticky @5xl:top-6 @5xl:max-h-[calc(100dvh-1.5rem)] @5xl:overflow-y-auto @5xl:pt-6">
+          <div className="@5xl:sticky @5xl:top-[calc(1.5rem+var(--impersonation-banner-height))] @5xl:max-h-[calc(100dvh-1.5rem-var(--impersonation-banner-height))] @5xl:overflow-y-auto @5xl:pt-6">
             <PosterCardPreview revealShortcuts={revealShortcuts} />
           </div>
         </aside>
@@ -195,7 +192,7 @@ function PosterSettings() {
         identity: CLIENT_SCOPE,
       });
     } catch (error) {
-      toast.error(errorMessage(error, t("web.settings.interface.posterSaveFailed")));
+      toast.error(v2ErrorText(error, t("web.settings.interface.posterSaveFailed")));
     }
   }
 
@@ -203,7 +200,7 @@ function PosterSettings() {
     try {
       await clearValue.mutateAsync({ key: SETTING_KEYS.UI_CARD_PRESENTATION, identity });
     } catch (error) {
-      toast.error(errorMessage(error, t("web.settings.interface.posterResetFailed")));
+      toast.error(v2ErrorText(error, t("web.settings.interface.posterResetFailed")));
     }
   }
 
@@ -314,7 +311,7 @@ function MenuSettings() {
       });
     } catch (error) {
       setSaved(null);
-      toast.error(errorMessage(error, t("web.settings.interface.menuSaveFailed")));
+      toast.error(v2ErrorText(error, t("web.settings.interface.menuSaveFailed")));
     }
   }
 
@@ -323,7 +320,7 @@ function MenuSettings() {
       await clearValue.mutateAsync({ key: SETTING_KEYS.NAV_PRIMARY_MENU, identity });
       setSaved(null);
     } catch (error) {
-      toast.error(errorMessage(error, t("web.settings.interface.menuResetFailed")));
+      toast.error(v2ErrorText(error, t("web.settings.interface.menuResetFailed")));
     }
   }
 

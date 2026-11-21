@@ -90,9 +90,18 @@ export type WorkerToPageMessage =
    * A read from the source received data: request `request` has `bytes` in
    * all, its first at `first` and its latest at `last`, as
    * `performance.timeOrigin + performance.now()` so the page can place them
-   * on its own clock. Sent while data arrives, a few times a second.
+   * on its own clock. `spans` is a snapshot of the request's receiving time on
+   * the same clock: one `[first, last]` per response, from its first body chunk
+   * to its latest. Sent while data arrives, a few times a second.
    */
-  | { type: "media-data"; request: number; bytes: number; first: number; last: number }
+  | {
+      type: "media-data";
+      request: number;
+      bytes: number;
+      first: number;
+      last: number;
+      spans: [number, number][];
+    }
   | {
       type: "error";
       generation: number | null;

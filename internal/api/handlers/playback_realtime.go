@@ -22,13 +22,13 @@ type playbackCommandRecord struct {
 // then deleted); empty for system teardown such as an ffmpeg-exit cleanup,
 // where the card is kept so the client can reconstruct.
 func (h *PlaybackHandler) stopPlaybackSession(ctx context.Context, session *playback.Session, reason PlaybackEndReason) error {
-	_, err := h.stopPlaybackSessionWithResult(ctx, session, reason)
+	_, err := h.stopPlaybackSessionWithResult(ctx, session, reason, nil)
 	return err
 }
 
 // stopPlaybackSessionWithResult is stopPlaybackSession reporting the history
 // writer's result, which the v2 stop receipt carries.
-func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, session *playback.Session, reason PlaybackEndReason) (watchstate.PlaybackStopResult, error) {
+func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, session *playback.Session, reason PlaybackEndReason, accepted *playback.ProgressSampleV3) (watchstate.PlaybackStopResult, error) {
 	if h == nil || session == nil || session.ID == "" {
 		return watchstate.PlaybackStopResult{}, playback.ErrSessionNotFound
 	}
@@ -37,6 +37,12 @@ func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, ses
 	current, err := h.endPlaybackSessionAuthority(ctx, session, reason.userInitiated())
 	if err != nil {
 		return watchstate.PlaybackStopResult{}, err
+	}
+	// The stopped attempt owns the final position. A heartbeat may have
+	// updated this replica's live snapshot after the stop reached PostgreSQL.
+	if accepted != nil {
+		current.Position, current.IsPaused = accepted.Position, accepted.IsPaused
+		observeEndSample(current, time.Now())
 	}
 	return h.finalizeSessionStopWithResult(ctx, current, true, "stop", reason), nil
 }
@@ -85,13 +91,19 @@ func (h *PlaybackHandler) endPlaybackSessionAuthority(ctx context.Context, sessi
 // another caller owns: the live authority and the transport go, but no
 // history or provider event is written for it.
 func (h *PlaybackHandler) dropLiveSessionByID(ctx context.Context, sessionID string) error {
+	return h.dropLiveSession(ctx, sessionID, true)
+}
+
+// dropLiveSession is dropLiveSessionByID for a caller that chooses whether
+// the end is user-initiated (see endPlaybackSessionAuthority).
+func (h *PlaybackHandler) dropLiveSession(ctx context.Context, sessionID string, userInitiated bool) error {
 	session, err := h.sessionMgr.GetSession(sessionID)
 	if err != nil {
 		return err
 	}
 	unlock := h.tm.LockSessionLifecycle(session.ID)
 	defer unlock()
-	current, err := h.endPlaybackSessionAuthority(ctx, session, true)
+	current, err := h.endPlaybackSessionAuthority(ctx, session, userInitiated)
 	if err != nil {
 		return err
 	}
@@ -195,6 +207,9 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 		// written, from the confirmed snapshot; the finalizer must not too.
 		// A competing finalizer that finishes first told them itself.
 		finalizeCtx, notice := withProviderNoticeDeferred(parent)
+		// The confirmed stop removed the live copy, so the finalizer records
+		// from the attempt row; the copy's measurement goes with it.
+		finalizeCtx = withEndWatch(finalizeCtx, session)
 		receipt = h.finalizeRealtimeStop(finalizeCtx, store, record, session.ID, receipt, stopFinalizationLease)
 		notify = notice.left
 	}
@@ -254,7 +269,7 @@ func (h *PlaybackHandler) abortPlaybackSession(ctx context.Context, session *pla
 	if !claim.ownEnd(abortStopID(session.ID)) {
 		// An earlier stop won the row and never finished: finish it as
 		// that stop, then tear down as an abort without its writers.
-		h.FinishOtherEnd(ctx, claim, session.ID)
+		h.FinishOtherEnd(withEndWatch(ctx, session), claim, session.ID)
 		h.finalizeSessionAbort(ctx, session, true, "abort", nativeEndClaim{})
 		return nil
 	}

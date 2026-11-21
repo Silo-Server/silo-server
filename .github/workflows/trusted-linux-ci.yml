@@ -73,6 +73,8 @@ jobs:
     outputs:
       go: ${{ steps.plan.outputs.go }}
       web: ${{ steps.plan.outputs.web }}
+      web_settings_binding: ${{ steps.plan.outputs.web_settings_binding }}
+      web_apiv2_types: ${{ steps.plan.outputs.web_apiv2_types }}
     steps:
       # The plan compares trees, so it needs the full history but not the
       # file contents. A sparse checkout also fetches with blob:none, so only
@@ -93,6 +95,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -158,6 +161,9 @@ jobs:
           fi
           if [ -f scripts/test_lint_changed.py ]; then
             python3 scripts/test_lint_changed.py
+          fi
+          if [ -f scripts/ci/test_content_mtimes.py ]; then
+            python3 scripts/ci/test_content_mtimes.py
           fi
       - name: Check workflows and shell
         run: make verify-actionlint verify-shellcheck
@@ -362,10 +368,18 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # golangci-lint needs the merge base to tell this branch's lines
-          # from the ones it inherited.
+        with: &go-history-checkout
+          # golangci-lint and the contract diff need the merge base, but not
+          # frontend image or locale blobs (~390 MB). blob:none keeps full
+          # commit and tree history while downloading only checked-out files.
           fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: |
+            /*
+            !/web/assets-source/
+            !/web/src/locales/
+            !/web/public/images/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       # After the PR checkout, which would otherwise clean it away, and
@@ -379,6 +393,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -446,7 +461,7 @@ jobs:
             golangci-lint-cache-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}-
 
       - name: Normalize tracked source mtimes
-        run: python3 scripts/ci/content_mtimes.py
+        run: python3 .ci-tools/scripts/ci/content_mtimes.py
 
       - name: Check Go module tidiness without rewriting
         run: go mod tidy -diff
@@ -486,10 +501,7 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # The contract diff needs the merge base with the target branch.
-          fetch-depth: 0
-          persist-credentials: false
+        with: *go-history-checkout
 
       # After the PR checkout, which would otherwise clean it away, and
       # before any PR code runs.
@@ -502,6 +514,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -515,7 +528,7 @@ jobs:
       - *libvips-save
 
       - name: Normalize tracked source mtimes
-        run: python3 scripts/ci/content_mtimes.py
+        run: python3 .ci-tools/scripts/ci/content_mtimes.py
 
       - name: Scan reachable Go vulnerabilities
         if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main')
@@ -551,6 +564,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Go tests need collection-template image paths, not the ~130 MB of
+          # web translation catalogs.
+          filter: blob:limit=1m
+          sparse-checkout: |
+            /*
+            !/web/src/locales/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       # After the PR checkout, which would otherwise clean it away, and
@@ -564,6 +584,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -579,7 +600,7 @@ jobs:
       - *libvips-save
 
       - name: Normalize tracked source mtimes
-        run: python3 scripts/ci/content_mtimes.py
+        run: python3 .ci-tools/scripts/ci/content_mtimes.py
 
       - name: Run Go tests
         shell: bash
@@ -637,13 +658,16 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: &no-assets
-          # Fetch small files in the first pack. Checkout then requests only
-          # the remaining large files it needs, excluding the source artwork.
-          filter: blob:limit=1m
+        with: &go-db-checkout
+          # Fetch only trees in the initial pack, then download only the
+          # checked-out files in one batch, skipping frontend assets, images,
+          # and translation catalogs (~390 MB on disk) that no DB job reads.
+          filter: blob:none
           sparse-checkout: |
             /*
             !/web/assets-source/
+            !/web/src/locales/
+            !/web/public/images/
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Set up Go
@@ -668,7 +692,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/race"
-          go test -p 2 -race -c -o "$RUNNER_TEMP/race/" \
+          go test -race -c -o "$RUNNER_TEMP/race/" \
             ./internal/watchtogether/ ./migrations/ ./internal/historyimport/ ./internal/api/handlers/ ./internal/adminjob/ ./internal/auth/ ./internal/recommendations/ ./cmd/silo/
 
       - name: Test Watch Party coordination against Postgres
@@ -744,7 +768,7 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: *no-assets
+        with: *go-db-checkout
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -868,7 +892,7 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: *no-assets
+        with: *go-db-checkout
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -890,7 +914,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/race"
-          go test -p 2 -race -c -o "$RUNNER_TEMP/race/" \
+          go test -race -c -o "$RUNNER_TEMP/race/" \
             ./internal/api/handlers/ ./internal/auth/ ./internal/jellycompat/ ./internal/plugins/
 
       # Account resolution and linking, the local-password policy, the OAuth
@@ -926,7 +950,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: *no-assets
+        with:
+          filter: blob:limit=1m
+          sparse-checkout: |
+            /Makefile
+            /go.mod
+            /go.sum
+            /cmd/settingsgen/
+            /contracts/
+            /docs/design/schemas/
+            /internal/compat/zishang520-webtransport-go/
+            /internal/lang/
+            /internal/settingscontract/
+            /internal/settingskeys/
+            /web/
+            !/web/assets-source/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       # The pnpm version comes from web/package.json's packageManager field —
       # there is no package.json at the repo root, and `defaults.run` does not
@@ -1008,12 +1048,18 @@ jobs:
       # Not measured; needs a prototype defining entrypoints and public consumers.
 
       # A lint or format failure must not hide type, build or binding errors.
+      # Pull-request builds never upload web/dist, so skip writing .br/.gz
+      # sidecars there while keeping full precompression on main/apiv2 pushes.
       - name: Typecheck and build
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          SILO_SKIP_PRECOMPRESS: ${{ !(github.event_name == 'push' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)) && '1' || '' }}
         run: |
           failed=0
-          pnpm exec tsrs -b || { echo "::error::Typecheck failed"; failed=1; }
+          pnpm exec tsrs -b &
+          tsrs_pid=$!
           pnpm exec vite build || { echo "::error::Vite build failed"; failed=1; }
+          wait "$tsrs_pid" || { echo "::error::Typecheck failed"; failed=1; }
           exit "$failed"
 
       # Reports the launch bundle size, and fails when the React vendor chunk
@@ -1034,25 +1080,25 @@ jobs:
       # The generated web binding is compared after prettier, so this half of
       # the bindings check lives here rather than in a Go job, which has no
       # pnpm. It needs Go to run the generator, at the version the checkout's
-      # go.mod asks for.
+      # go.mod asks for. Skipped on PRs whose diff cannot change the binding.
       - name: Set up Go
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && (needs.select.result != 'success' || needs.select.outputs.web_settings_binding != 'false') }}
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: ${{ runner.environment == 'github-hosted' }}
 
       - name: Verify the generated web settings binding is current
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && (needs.select.result != 'success' || needs.select.outputs.web_settings_binding != 'false') }}
         working-directory: .
         run: make verify-settings-bindings-web
 
       # The web v2 contract types are generated from the committed OpenAPI
       # artifact with the pinned openapi-typescript; this byte-compares a
       # fresh generation so the typed request boundary never drifts from the
-      # spec the server serves.
+      # spec the server serves. Skipped on PRs whose diff cannot change them.
       - name: Verify the generated web v2 contract types are current
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && (needs.select.result != 'success' || needs.select.outputs.web_apiv2_types != 'false') }}
         working-directory: .
         run: make verify-apiv2-web-types
 
@@ -1069,7 +1115,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: *no-assets
+        with:
+          # Web tests read web/ (minus source artwork, public images, and
+          # non-English locale catalogs), v2 contract fixtures, and design
+          # schemas.
+          filter: blob:limit=1m
+          sparse-checkout: |
+            /Makefile
+            /contracts/api/v2/fixtures/
+            /docs/design/schemas/
+            /web/
+            !/web/assets-source/
+            !/web/public/images/
+            !/web/src/locales/*.json
+            /web/src/locales/en.json
+            /web/src/locales/en-XA.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -1116,6 +1178,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false

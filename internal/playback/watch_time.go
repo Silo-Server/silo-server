@@ -1,6 +1,9 @@
 package playback
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Watch-time measurement limits. Clients do not report a playback rate, so a
 // position advance is accepted as viewing when it fits a rate up to
@@ -122,6 +125,75 @@ func (w *WatchTime) Credit(position, listened float64, start, now time.Time) {
 func (w *WatchTime) Pause(now time.Time) {
 	if w.Measured && !w.lastPaused && w.pausedAt.IsZero() {
 		w.pausedAt = now
+	}
+}
+
+// watchTimeJSON is WatchTime as it is persisted, with the state the next
+// sample is judged against, so another server can carry on measuring.
+type watchTimeJSON struct {
+	Measured      bool       `json:"measured"`
+	StartPosition float64    `json:"start_position"`
+	PlayedSeconds float64    `json:"played_seconds"`
+	PausedSeconds float64    `json:"paused_seconds"`
+	Since         time.Time  `json:"since"`
+	Until         time.Time  `json:"until"`
+	LastPosition  float64    `json:"last_position"`
+	LastPaused    bool       `json:"last_paused"`
+	PausedAt      *time.Time `json:"paused_at,omitempty"`
+}
+
+// MarshalJSON persists the measurement with the state its next sample needs.
+func (w WatchTime) MarshalJSON() ([]byte, error) {
+	out := watchTimeJSON{
+		Measured: w.Measured, StartPosition: w.StartPosition,
+		PlayedSeconds: w.PlayedSeconds, PausedSeconds: w.PausedSeconds,
+		Since: w.Since, Until: w.Until,
+		LastPosition: w.lastPosition, LastPaused: w.lastPaused,
+	}
+	if !w.pausedAt.IsZero() {
+		out.PausedAt = &w.pausedAt
+	}
+	return json.Marshal(out)
+}
+
+// UnmarshalJSON restores a measurement MarshalJSON persisted.
+func (w *WatchTime) UnmarshalJSON(data []byte) error {
+	var in watchTimeJSON
+	if err := json.Unmarshal(data, &in); err != nil {
+		return err
+	}
+	*w = WatchTime{
+		Measured: in.Measured, StartPosition: in.StartPosition,
+		PlayedSeconds: in.PlayedSeconds, PausedSeconds: in.PausedSeconds,
+		Since: in.Since, Until: in.Until,
+		lastPosition: in.LastPosition, lastPaused: in.LastPaused,
+	}
+	if in.PausedAt != nil {
+		w.pausedAt = *in.PausedAt
+	}
+	return nil
+}
+
+// WatchTimeJSON is w as it is persisted, or nil when it has no measurement
+// to keep.
+func WatchTimeJSON(w WatchTime) json.RawMessage {
+	if !w.Measured {
+		return nil
+	}
+	data, err := json.Marshal(w)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+// Restore adopts a persisted measurement of the same play in place of an
+// empty one: a session rebuilt after a restart, or one recorded on a server
+// that never held it, carries on from what the play's last copy measured. A
+// measurement already under way is kept.
+func (w *WatchTime) Restore(persisted WatchTime) {
+	if !w.Measured && persisted.Measured {
+		*w = persisted
 	}
 }
 

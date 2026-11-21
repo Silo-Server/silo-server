@@ -831,13 +831,22 @@ func joinIntSlice(values []int, sep string) string {
 // Universe). An id of 0 is rejected here — placeholder templates with
 // collection_id=0 are surfaced as failures by the sync path, not silently
 // turned into an empty fetch.
-func (c *Client) GetCollection(ctx context.Context, id int) (*Collection, error) {
+//
+// language is the Silo metadata language (an ISO 639-1 code such as "de")
+// the name, overview and artwork come in; TMDB falls back to its default
+// where the collection has no translation or poster in that language. An
+// empty language leaves the choice to TMDB, which answers in English.
+func (c *Client) GetCollection(ctx context.Context, id int, language string) (*Collection, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("tmdb: collection id must be > 0 (got %d)", id)
 	}
 
+	path := fmt.Sprintf("/collection/%d", id)
+	if lang := apiLanguage(language); lang != "" {
+		path += "?language=" + url.QueryEscape(lang)
+	}
 	var resp collectionResponse
-	if err := c.doGet(ctx, fmt.Sprintf("/collection/%d", id), &resp); err != nil {
+	if err := c.doGet(ctx, path, &resp); err != nil {
 		return nil, err
 	}
 
@@ -866,6 +875,18 @@ func (c *Client) GetCollection(ctx context.Context, id int) (*Collection, error)
 		BackdropPath: resp.BackdropPath,
 		Parts:        parts,
 	}, nil
+}
+
+// apiLanguage converts a Silo metadata language (an ISO 639-1 code) into
+// TMDB's language parameter the way the TMDB metadata plugin does: English
+// becomes en-US, which TMDB prefers, and any other code passes through. An
+// empty language stays empty.
+func apiLanguage(language string) string {
+	language = strings.ToLower(strings.TrimSpace(language))
+	if language == "en" {
+		return "en-US"
+	}
+	return language
 }
 
 // GetMovieCollection returns the collection a movie belongs to, or nil when

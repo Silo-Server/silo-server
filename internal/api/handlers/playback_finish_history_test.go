@@ -134,7 +134,7 @@ func TestFinishedJellyfinPlayIsRecordedOnce(t *testing.T) {
 
 	assertOneCompletedPlay(t, store)
 	assertStillWatched(t, store)
-	if len(admin.history) == 0 || admin.history[0].WatchedSeconds != 3500 || !admin.history[0].Completed {
+	if len(admin.history) == 0 || admin.history[0].EndPositionSeconds != 3500 || !admin.history[0].Completed {
 		t.Fatalf("admin history = %+v, want the finished play first, at 3500 and completed", admin.history)
 	}
 }
@@ -337,7 +337,7 @@ func TestAdminPlaybackWatchTimeDB(t *testing.T) {
 		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
 			SessionID: "resumed-" + suffix, UserID: account, ProfileID: "p-1", PlayMethod: "direct_play",
 			StartedAt: started.Format(time.RFC3339Nano), EndedAt: ended.Format(time.RFC3339Nano),
-			WatchedSeconds: position, Completed: completed, Watch: watch,
+			EndPositionSeconds: position, Completed: completed, Watch: watch,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -381,7 +381,7 @@ func TestAdminPlaybackWatchTimeDB(t *testing.T) {
 		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
 			SessionID: rebuilt, UserID: account, ProfileID: "p-1", PlayMethod: "direct_play",
 			StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(to).Format(time.RFC3339Nano),
-			WatchedSeconds: played, Watch: playback.WatchTime{Measured: true, PlayedSeconds: played, Since: started.Add(from), Until: started.Add(to)},
+			EndPositionSeconds: played, Watch: playback.WatchTime{Measured: true, PlayedSeconds: played, Since: started.Add(from), Until: started.Add(to)},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -431,7 +431,7 @@ func TestAdminPlaybackHistoryFactsDB(t *testing.T) {
 		}
 		entry.UserID, entry.ProfileID, entry.PlayMethod = account, "p-1", "direct_play"
 		entry.StartedAt, entry.EndedAt = started.Format(time.RFC3339Nano), started.Add(ended).Format(time.RFC3339Nano)
-		entry.WatchedSeconds = position
+		entry.EndPositionSeconds = position
 		if err := store.RecordHistory(ctx, entry); err != nil {
 			t.Fatal(err)
 		}
@@ -504,8 +504,8 @@ func TestAdminPlaybackHistoryFactsDB(t *testing.T) {
 			t.Errorf("%s = %s, want %s", check.field, check.got, check.want)
 		}
 	}
-	if !got.EndedAt.Equal(started.Add(12*time.Minute)) || got.WatchedSeconds != 700 {
-		t.Errorf("ended_at %v watched %v, want the furthest finalization", got.EndedAt, got.WatchedSeconds)
+	if !got.EndedAt.Equal(started.Add(12*time.Minute)) || got.EndPositionSeconds != 700 {
+		t.Errorf("ended_at %v watched %v, want the furthest finalization", got.EndedAt, got.EndPositionSeconds)
 	}
 
 	rows = list(started.Add(time.Hour), started.Add(2*time.Hour))
@@ -616,8 +616,8 @@ func TestEveryEndRecordsTheAdminLog(t *testing.T) {
 				t.Fatalf("admin history = %+v, want one row", admin.history)
 			}
 			row := admin.history[0]
-			if row.EndReason != tc.wantReason || row.WatchedSeconds != 1800 {
-				t.Fatalf("admin row = reason %q at %v, want %q at 1800", row.EndReason, row.WatchedSeconds, tc.wantReason)
+			if row.EndReason != tc.wantReason || row.EndPositionSeconds != 1800 {
+				t.Fatalf("admin row = reason %q at %v, want %q at 1800", row.EndReason, row.EndPositionSeconds, tc.wantReason)
 			}
 			if tc.wantClient != "" && (row.ClientName != tc.wantClient || row.DeviceID != "browser-1" || row.StartedAt != started.Format(time.RFC3339Nano)) {
 				t.Fatalf("admin row = client %q device %q started %s, want the live row's", row.ClientName, row.DeviceID, row.StartedAt)
@@ -647,7 +647,8 @@ func TestEveryEndRecordsTheAdminLog(t *testing.T) {
 
 // TestLiveSessionReadsTheSyncedRowDB pins the columns a detached end and a
 // rebuilt session read from the shared live row, including a row that never
-// recorded a start, and from the start row once no live row is left.
+// recorded a start, and from the start row once no live row is left. The
+// subtitle round-trips through both, which is how it outlives a restart.
 func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -669,8 +670,9 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	synced, bare := "synced-"+suffix, "bare-"+suffix
 	if _, err = pool.Exec(ctx, `INSERT INTO playback_sessions_sync
 		(session_id, user_id, profile_id, media_file_id, requested_media_file_id, play_method, started_at, client_ip,
-		 client_name, client_version, device_id, device_platform, transcode_audio, target_video_codec, position_seconds, compat_origin)
-		VALUES ($1, $2, 'p-1', 7, 8, 'transcode', $3, '203.0.113.9', 'Jellyfin Web', '10.9', 'browser-1', 'web', TRUE, 'h264', 1800, TRUE)`,
+		 client_name, client_version, device_id, device_platform, transcode_audio, target_video_codec, position_seconds, compat_origin, subtitle)
+		VALUES ($1, $2, 'p-1', 7, 8, 'transcode', $3, '203.0.113.9', 'Jellyfin Web', '10.9', 'browser-1', 'web', TRUE, 'h264', 1800, TRUE,
+			'{"track_id":"file:7:subtitle:1","codec":"hdmv_pgs_subtitle","source":"embedded","delivery":"burn_in","forced":true,"hearing_impaired":false}')`,
 		synced, account, started); err != nil {
 		t.Fatal(err)
 	}
@@ -685,7 +687,8 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	want := playback.Session{ID: synced, UserID: account, ProfileID: "p-1", MediaFileID: 7, RequestedMediaFileID: 8,
 		PlayMethod: playback.PlayTranscode, StartedAt: started, ClientIP: "203.0.113.9", ClientName: "Jellyfin Web",
 		ClientVersion: "10.9", DeviceID: "browser-1", DevicePlatform: "web", TranscodeAudio: true,
-		TargetVideoCodec: "h264", Position: 1800, IsJellyfinCompat: true}
+		TargetVideoCodec: "h264", Position: 1800, IsJellyfinCompat: true,
+		Subtitle: &playback.SessionSubtitle{TrackID: "file:7:subtitle:1", Codec: "hdmv_pgs_subtitle", Source: "embedded", Delivery: "burn_in", Forced: true}}
 	if live.StartedAt.Equal(started) {
 		live.StartedAt = started
 	}
@@ -702,9 +705,10 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	// Once no live row is left, as after a graceful restart, the session is
 	// read from the row it stored when it started.
 	startOnly := uuid.NewString()
+	subtitle := &playback.SessionSubtitle{TrackID: "file:7:subtitle:0", Language: "fr", Codec: "subrip", Format: "vtt", Source: "external", Delivery: "sidecar"}
 	row, err := worker.SessionSyncRowJSON(worker.SessionSync{
 		SessionID: startOnly, UserID: account, ProfileID: "p-1", ClientName: "Silo Android TV",
-		ClientUserAgent: "ktor-client", DeviceID: "device-1", DevicePlatform: "android-tv",
+		ClientUserAgent: "ktor-client", DeviceID: "device-1", DevicePlatform: "android-tv", Subtitle: subtitle,
 	}, "node-1")
 	if err != nil {
 		t.Fatal(err)
@@ -717,8 +721,8 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	}
 	if live, err = store.LiveSession(ctx, startOnly); err != nil || live.UserID != account || live.ProfileID != "p-1" ||
 		live.ClientName != "Silo Android TV" || live.ClientUserAgent != "ktor-client" ||
-		live.DeviceID != "device-1" || live.DevicePlatform != "android-tv" {
-		t.Fatalf("start row = %+v, %v; want the client the session started on", live, err)
+		live.DeviceID != "device-1" || live.DevicePlatform != "android-tv" || !reflect.DeepEqual(live.Subtitle, subtitle) {
+		t.Fatalf("start row = %+v, %v; want the client and subtitle the session started on", live, err)
 	}
 }
 
@@ -745,7 +749,7 @@ func TestDetachedSnapshotsKeepWhatTheyReported(t *testing.T) {
 			if len(admin.history) != tc.wantRows {
 				t.Fatalf("admin history = %+v, want %d rows", admin.history, tc.wantRows)
 			}
-			if tc.wantRows == 1 && (admin.history[0].WatchedSeconds != 1500 || admin.history[0].UserID != live.UserID) {
+			if tc.wantRows == 1 && (admin.history[0].EndPositionSeconds != 1500 || admin.history[0].UserID != live.UserID) {
 				t.Fatalf("row = %+v, want the live row's account and position", admin.history[0])
 			}
 		})
@@ -755,7 +759,7 @@ func TestDetachedSnapshotsKeepWhatTheyReported(t *testing.T) {
 	admin := &liveRowAdminStore{live: &live}
 	replica := newFinishHistoryReplica(newPlaybackTestStore(t), admin, finishHistoryFile())
 	replica.mgr.FinishDetached(context.Background(), playback.Session{ID: live.ID, UserID: live.UserID, ProfileID: live.ProfileID, MediaFileID: 42, Position: 600, StartedAt: live.StartedAt})
-	if len(admin.history) != 1 || admin.history[0].ClientName != "Jellyfin Web" || admin.history[0].DeviceID != "browser-1" || admin.history[0].WatchedSeconds != 600 {
+	if len(admin.history) != 1 || admin.history[0].ClientName != "Jellyfin Web" || admin.history[0].DeviceID != "browser-1" || admin.history[0].EndPositionSeconds != 600 {
 		t.Fatalf("admin history = %+v, want the live row's client and device at the reported 600", admin.history)
 	}
 }
@@ -776,7 +780,7 @@ func TestEndRecordsAPlayWhoseFileLeftTheCatalog(t *testing.T) {
 	session := compatFinishSession()
 	session.IsJellyfinCompat, session.Position = false, 900
 	h.recordAdminStopHistory(context.Background(), &session, PlaybackEndExpired)
-	if len(admin.history) != 1 || admin.history[0].EndReason != PlaybackEndExpired || admin.history[0].MediaItemID != "" || admin.history[0].DurationSeconds != nil || admin.history[0].WatchedSeconds != 900 {
+	if len(admin.history) != 1 || admin.history[0].EndReason != PlaybackEndExpired || admin.history[0].MediaItemID != "" || admin.history[0].DurationSeconds != nil || admin.history[0].EndPositionSeconds != 900 {
 		t.Fatalf("admin history = %+v, want one expired row without an item or duration", admin.history)
 	}
 }
@@ -825,7 +829,75 @@ func TestStaleJellyfinCopyKeepsAnotherReplicasEnd(t *testing.T) {
 	newerCopy := newer.holdCopy(t, session, 3500)
 	older.handler.expireSessionCopy(context.Background(), olderCopy)
 	newer.handler.expireSessionCopy(context.Background(), newerCopy)
-	if len(admin.history) != 2 || admin.history[1].WatchedSeconds != 3500 {
+	if len(admin.history) != 2 || admin.history[1].EndPositionSeconds != 3500 {
 		t.Fatalf("admin history = %+v, want the newer copy's 3500 recorded after the older expiry", admin.history)
+	}
+}
+
+// TestRebuiltSessionTakesItsSubtitleFromTheAttempt pins that a session
+// rebuilt from a stream token reports the subtitle its last replan committed,
+// not the one its start row recorded: a restart can leave only that row.
+func TestRebuiltSessionTakesItsSubtitleFromTheAttempt(t *testing.T) {
+	h := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	started := &playback.SessionSubtitle{TrackID: "file:7:subtitle:0", Source: "embedded", Delivery: "sidecar"}
+	h.AdminStore = &liveRowAdminStore{live: &playback.Session{ID: "s-1", UserID: 7, ProfileID: "p-1", ClientName: "Silo Web", Subtitle: started}}
+	plan := playback.PlanV3{Subtitle: playback.SubtitleDecisionV3{
+		Mode: playback.SubtitleConvertV3, TrackID: "file:7:subtitle:2", Artifact: &playback.SubtitleArtifactV3{Format: "vtt"},
+		Inventory: []playback.SubtitleInventoryItemV3{{TrackID: "file:7:subtitle:2", Source: "embedded", Language: "en"}},
+	}}
+	store := playback.NewMemoryPlanStoreV3()
+	if err := store.SaveAttempt(t.Context(), playback.AttemptRecordV3{PlaybackAttemptID: "a-1", SessionID: "s-1", UserID: 7, ProfileID: "p-1",
+		CurrentPlan: plan, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	h.PlanStoreV3 = store
+	card := playback.RecipeCard{SessionID: "s-1", UserID: 7, ProfileID: "p-1"}
+	h.restoreReconstructedClient(t.Context(), &card)
+	if card.ClientName != "Silo Web" || card.Subtitle == nil || card.Subtitle.TrackID != "file:7:subtitle:2" {
+		t.Fatalf("rebuilt card client %q subtitle %+v; want the live row's client and the attempt's subtitle", card.ClientName, card.Subtitle)
+	}
+}
+
+// TestRecoveryCardTakesItsSubtitleFromThePlan pins that a header-authenticated
+// recovery card reports the subtitle of the plan it is bound to: the card is
+// frozen before the transport attaches a sidecar, so it holds none of its own.
+func TestRecoveryCardTakesItsSubtitleFromThePlan(t *testing.T) {
+	plan := playback.PlanV3{PlanID: "plan-1", Subtitle: playback.SubtitleDecisionV3{
+		Mode: playback.SubtitleConvertV3, TrackID: "file:7:subtitle:2", Artifact: &playback.SubtitleArtifactV3{Format: "vtt"},
+		Inventory: []playback.SubtitleInventoryItemV3{{TrackID: "file:7:subtitle:2", Source: "external", Language: "en"}},
+	}}
+	attempts := playback.NewMemoryPlanStoreV3()
+	if err := attempts.SaveAttempt(t.Context(), playback.AttemptRecordV3{PlaybackAttemptID: "a-1", SessionID: "s-1", UserID: 7, ProfileID: "p-1",
+		CurrentPlanID: "plan-1", CurrentPlan: plan, ExpiresAt: time.Now().Add(time.Hour),
+		NormalizedRequest: playback.StartRequestV3{ClientFeatures: []string{playback.FeatureHeaderAuthenticatedMediaV3}}}); err != nil {
+		t.Fatal(err)
+	}
+	recipes := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{"s-1": {
+		SessionID: "s-1", UserID: 7, ProfileID: "p-1", PlanID: "plan-1", RequireMediaAuthorization: true, ClientName: "Silo Web",
+	}}}
+	card, err := storedSessionRecipeV3(t.Context(), recipes, attempts, "s-1", 7)
+	if err != nil || card == nil || card.Subtitle == nil || card.Subtitle.TrackID != "file:7:subtitle:2" || card.Subtitle.Delivery != "sidecar" {
+		t.Fatalf("recovery card = %+v, %v; want the plan's sidecar subtitle", card, err)
+	}
+}
+
+// TestLifecycleSweepRecordsTheAttemptsSubtitle pins that a sweep recording a
+// play's end from its start row keeps the subtitle its last replan committed,
+// not the one it started with: history keeps whichever end is later.
+func TestLifecycleSweepRecordsTheAttemptsSubtitle(t *testing.T) {
+	started := &playback.SessionSubtitle{TrackID: "file:42:subtitle:0", Source: "embedded", Delivery: "burn_in"}
+	admin := &liveRowAdminStore{live: &playback.Session{ID: "s-1", UserID: 7, ProfileID: "p-1", MediaFileID: 42,
+		PlayMethod: playback.PlayTranscode, StartedAt: time.Now().Add(-time.Hour), Position: 60, Subtitle: started}}
+	h := newFinishHistoryReplica(newPlaybackTestStore(t), admin, finishHistoryFile()).handler
+	store := playback.NewMemoryPlanStoreV3()
+	if err := store.SaveAttempt(t.Context(), playback.AttemptRecordV3{PlaybackAttemptID: "a-1", SessionID: "s-1", UserID: 7, ProfileID: "p-1",
+		CurrentPlanID: "plan-2", CurrentPlan: playback.PlanV3{Subtitle: playback.SubtitleDecisionV3{Mode: playback.SubtitleOffV3}},
+		ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	h.PlanStoreV3 = store
+	h.endLifecycleWith(t.Context(), nil, "s-1", PlaybackEndExpired, time.Now(), nil)
+	if len(admin.history) != 1 || admin.history[0].Subtitle != nil {
+		t.Fatalf("admin history = %+v, want one end with the subtitle turned off", admin.history)
 	}
 }

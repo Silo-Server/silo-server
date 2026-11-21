@@ -153,9 +153,10 @@ export default function CatalogFiltersPanel({
     });
   }
 
-  // The sheet edits the whole definition, and Advanced has its own Sort by.
-  // A sort picked there leaves source order as one picked in the toolbar
-  // does; under source order the URL carries no sort, so it would be lost.
+  // The sheet edits the whole definition, and Advanced has its own Sort by
+  // (except on a search, where the toolbar owns the sort). A sort picked
+  // there leaves source order as one picked in the toolbar does; under
+  // source order the URL carries no sort, so it would be lost.
   function updateDefinition(nextQd: QueryDefinition) {
     const sortChanged =
       usesSourceOrder && querySortToSelectValue(nextQd.sort) !== querySortToSelectValue(qd.sort);
@@ -223,6 +224,7 @@ export default function CatalogFiltersPanel({
           sortRelevanceScope={sortRelevanceScope}
           editorMode={editorMode}
           onEditorModeChange={setEditorMode}
+          showAdvancedSort={!relevanceSort}
           guidedAvailable={guidedAvailable}
           queryDefinition={qd}
           onQueryDefinitionChange={updateDefinition}
@@ -253,6 +255,7 @@ export function CatalogFilterSheetContainer({
   sortRelevanceScope,
   editorMode,
   onEditorModeChange,
+  showAdvancedSort,
   guidedAvailable,
   queryDefinition,
   onQueryDefinitionChange,
@@ -271,6 +274,7 @@ export function CatalogFilterSheetContainer({
   sortRelevanceScope?: QuerySortRelevanceScope;
   editorMode: "guided" | "advanced";
   onEditorModeChange: (mode: "guided" | "advanced") => void;
+  showAdvancedSort?: boolean;
   guidedAvailable?: boolean;
   queryDefinition: QueryDefinition;
   onQueryDefinitionChange: (nextQd: QueryDefinition) => void;
@@ -295,6 +299,7 @@ export function CatalogFilterSheetContainer({
       sortRelevanceScope={sortRelevanceScope}
       editorMode={editorMode}
       onEditorModeChange={onEditorModeChange}
+      showAdvancedSort={showAdvancedSort}
       guidedAvailable={guidedAvailable}
       queryDefinition={queryDefinition}
       onQueryDefinitionChange={onQueryDefinitionChange}

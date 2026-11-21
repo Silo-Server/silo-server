@@ -40,3 +40,44 @@ profile do not update that profile's visible cache.
 Existing web catalog controls use these operations. The migration inventory lists
 no Apple or Android consumers for catalog settings. Jellyfin compatibility behavior
 and plugin worker protocols do not change.
+
+## Environment provisioning
+
+`GET /api/v2/admin/plugins/capabilities` reports `env_declarations` when the
+server supports deployment declarations, ownership metadata and provisioning
+status. This capability is available whether or not this deployment has a
+declaration. The capability read supports `If-None-Match` and `304`.
+
+`GET /api/v2/admin/plugins/provisioning-status` returns recorded outcomes in
+an `items` array. An API replica with a declaration can report its local writer
+status ahead of the outcome recorded in the shared database. Each entry has a
+manifest `plugin_id`, `version`, `state` and redacted `detail`. The version names
+the release the outcome refers to, such as the installed version after an
+apply or the requested pin while waiting for a package. A declaration can
+appear here as `pending`, `refused` or `held` before an installation exists.
+`applied` means Silo accepted the declaration. The status describes the latest
+recorded provisioning outcome. Use the installation's runtime state to check
+the plugin process.
+
+`GET /api/v2/admin/plugins/installations` and operations that return an
+installation include optional `env_managed`. Its presence means a declaration
+owns the installation and its package source. `version_pin` is present for
+an exact version pin. `config_fields` maps each global config entry key to
+the top-level fields the declaration owns. `binding_fields` maps each
+capability ID to the binding fields it owns. Installed sign-in capabilities
+and bindings also expose their owned fields as an optional `env_managed`
+array. A capability can expose those fields even when there is no binding row.
+The ownership projection contains no config values or credentials. A replica
+reads the persisted ownership even when it starts without a declaration.
+
+An admin write that changes or clears an owned field returns HTTP 422
+`validation_failed` with field code `managed_by_environment`. Locations name
+the refused field, such as `body.config.connection.client_secret` or
+`body.auth_binding.enabled`. Omitted config fields and blank redacted
+secret inputs preserve stored values. Restating an unchanged owned value
+allows a write to other fields. The installation enable switch remains
+available for emergency use. A pin prevents manual and automatic version
+changes or policy edits. For unpinned installs the administrator can edit
+the policy and apply a verified update from the same source that preserves
+the declared settings. To remove a declared installation, release it in the
+declaration first.

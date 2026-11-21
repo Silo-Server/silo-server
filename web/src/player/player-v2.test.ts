@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { t } from "@/i18n";
 import type { PlayerConfig } from "./context/PlayerConfigContext";
 import { PlayerFetchError } from "./player-fetch";
 import { playerV2, playerV2Origin } from "./player-v2";
@@ -8,7 +9,7 @@ const config: PlayerConfig = {
   apiBaseUrl: "/api/v2",
   getAccessToken: () => "token-1",
   getProfileId: () => "profile-1",
-  getDeviceId: () => "web-player-device",
+  getDeviceHeaders: () => ({ "X-Silo-Device-Id": "web-player-device" }),
 };
 
 afterEach(() => {
@@ -192,6 +193,83 @@ describe("playerV2", () => {
       status: 422,
       code: "validation_failed",
       message: "credits marker: credits must start at or after 32:30, in the end-credits window",
+    });
+  });
+
+  // A reverse proxy answers with its own HTML page when the server is down or
+  // misrouted; that page must never become text the player shows.
+  const proxyPage = "<html><body><h1>502 Bad Gateway</h1><hr>nginx</body></html>";
+
+  it("keeps a proxy's HTML error page out of the error message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(proxyPage, {
+            status: 502,
+            statusText: "Bad Gateway",
+            headers: { "Content-Type": "text/html" },
+          }),
+      ),
+    );
+
+    const failure = await playerV2(config, "PUT /api/v2/subtitle-prefs/{series_id}", {
+      path: { series_id: "series-1" },
+      body: { subtitle_track_index: 0 },
+    }).catch((err: unknown) => err);
+
+    expect(failure).toBeInstanceOf(PlayerFetchError);
+    expect(failure).toMatchObject({
+      status: 502,
+      code: undefined,
+      message: t("web.player.error.requestFailed"),
+      rawBody: proxyPage,
+    });
+  });
+
+  it("keeps a gateway's own JSON error out of the error message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ detail: "Gateway could not reach its upstream" }), {
+            status: 502,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    );
+
+    const failure = await playerV2(config, "PUT /api/v2/subtitle-prefs/{series_id}", {
+      path: { series_id: "series-1" },
+      body: { subtitle_track_index: 0 },
+    }).catch((err: unknown) => err);
+
+    expect(failure).toMatchObject({
+      status: 502,
+      code: undefined,
+      message: t("web.player.error.requestFailed"),
+    });
+  });
+
+  it("fails a success status whose body is not JSON with the player's own message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(proxyPage, { status: 200, headers: { "Content-Type": "text/html" } }),
+      ),
+    );
+
+    const failure = await playerV2(config, "PUT /api/v2/subtitle-prefs/{series_id}", {
+      path: { series_id: "series-1" },
+      body: { subtitle_track_index: 0 },
+    }).catch((err: unknown) => err);
+
+    expect(failure).toBeInstanceOf(PlayerFetchError);
+    expect(failure).toMatchObject({
+      status: 200,
+      message: t("web.player.error.requestFailed"),
+      rawBody: proxyPage,
     });
   });
 });

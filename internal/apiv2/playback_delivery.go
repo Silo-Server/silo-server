@@ -43,6 +43,8 @@ const (
 	playbackContentEncoding    = "Content-Encoding"
 	// playbackTranscodePath prefixes the HLS playlist and segment routes.
 	playbackTranscodePath = "/playback/transcode/"
+	// playbackMediaBytesProtocol marks the original-file stream routes.
+	playbackMediaBytesProtocol = "media-bytes"
 )
 
 // PlaybackMediaHandlers shares the raw byte delivery protocols and the typed
@@ -85,6 +87,35 @@ type PlaybackSubtitleFontsOutput struct {
 	Body         Collection[PlaybackSubtitleFont]
 }
 
+// playbackMediaCORS answers the preflight of /api/v2/stream/{session_id}, so
+// the web player can read ranges from the admin's media origin. It answers
+// before any credential is read and grants none: authorization stays in the
+// URL's token and st. It is router middleware because raw operations take no
+// OPTIONS method. The GET and HEAD answers get their CORS headers from
+// RawOperation.CrossOrigin.
+func playbackMediaCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodOptions || !isPlaybackMediaPath(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		header := w.Header()
+		header.Set("Access-Control-Allow-Origin", "*")
+		header.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+		header.Set("Access-Control-Allow-Headers", "Range")
+		// Without it a browser that preflights Range asks again every 5 seconds.
+		header.Set("Access-Control-Max-Age", "600")
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
+// isPlaybackMediaPath reports whether path is exactly Prefix/stream/{id}, with
+// one non-empty segment: subtitle, font, HLS and every other route stay out.
+func isPlaybackMediaPath(path string) bool {
+	id, ok := strings.CutPrefix(path, Prefix+"/stream/")
+	return ok && id != "" && !strings.Contains(id, "/")
+}
+
 func registerPlaybackDelivery(reg *Registry) {
 	var handlers PlaybackMediaHandlers
 	if reg.deps.PlaybackMedia != nil {
@@ -96,8 +127,8 @@ func registerPlaybackDelivery(reg *Registry) {
 		media                      []string
 		ranges                     bool
 	}{
-		{http.MethodGet, "/stream/{session_id}", "getPlaybackMedia", "media-bytes", handlers.Original, append(playback.MediaMIMETypes(), playbackMediaBinary, "multipart/byteranges"), true},
-		{http.MethodHead, "/stream/{session_id}", "headPlaybackMedia", "media-bytes", handlers.Original, nil, true},
+		{http.MethodGet, "/stream/{session_id}", "getPlaybackMedia", playbackMediaBytesProtocol, handlers.Original, append(playback.MediaMIMETypes(), playbackMediaBinary, "multipart/byteranges"), true},
+		{http.MethodHead, "/stream/{session_id}", "headPlaybackMedia", playbackMediaBytesProtocol, handlers.Original, nil, true},
 		{http.MethodGet, "/playback/transcode/{session_id}/master.m3u8", "getPlaybackManifest", "hls", handlers.Manifest, []string{"application/vnd.apple.mpegurl"}, false},
 		{http.MethodHead, "/playback/transcode/{session_id}/master.m3u8", playbackManifestHead, "hls", handlers.Manifest, nil, false},
 		{http.MethodGet, "/playback/transcode/{session_id}/segment/{name}", playbackSegmentOperation, "hls", handlers.Segment, []string{"video/mp4", "video/mp2t", playbackSubtitleVTT, playbackMediaBinary, "multipart/byteranges"}, true},
@@ -109,7 +140,7 @@ func registerPlaybackDelivery(reg *Registry) {
 			{Name: playbackAccountToken, In: playbackParamQuery, Description: "Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector.", Schema: &huma.Schema{Type: huma.TypeString}},
 			{Name: "st", In: playbackParamQuery, Description: "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media.", Schema: &huma.Schema{Type: huma.TypeString}},
 		}
-		if route.protocol == "media-bytes" {
+		if route.protocol == playbackMediaBytesProtocol {
 			params = append(params, &huma.Param{Name: playback.RemuxRangeQueryParam, In: playbackParamQuery, Description: "Set to refuse by the server on a server_remux_progressive URL whose attempt listed progressive_range_refusal_v1 in deliveries.progressive.features. A progressive remux streams from its seek origin and cannot resume: with it, a GET whose Range starts past byte 0 (or is a suffix range) answers 409 before the remux starts, and the client reopens the stream at its current position. Without it such a range streams from the origin with 200.", Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{playback.RemuxRangeRefuse}}})
 		}
 		if route.id == playbackSegmentOperation {
@@ -162,8 +193,10 @@ func registerPlaybackDelivery(reg *Registry) {
 			reason = "Token-authorized sidecar text and bitmap bytes are streamed as extracted."
 		}
 		// A Google Cast receiver plays HLS through a script on its own origin,
-		// so the playlist and segments must be readable cross-origin.
-		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + route.path, OperationID: route.id, Tags: []string{playbackTag}, Parameters: params, Responses: responses}, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, Protocol: route.protocol, Reason: reason, CrossOrigin: strings.HasPrefix(route.path, playbackTranscodePath)}
+		// so the playlist and segments must be readable cross-origin; so must
+		// the original-file stream, which the web player reads from the admin's
+		// media origin.
+		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + route.path, OperationID: route.id, Tags: []string{playbackTag}, Parameters: params, Responses: responses}, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, Protocol: route.protocol, Reason: reason, CrossOrigin: strings.HasPrefix(route.path, playbackTranscodePath) || route.protocol == playbackMediaBytesProtocol}
 		RegisterRaw(reg, raw, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !playbackUUID(chi.URLParam(r, "session_id")) {
 				writeProblem(w, r, validationProblem("path.session_id", "invalid", "Expected a canonical UUID."))

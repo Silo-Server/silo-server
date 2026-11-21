@@ -13,7 +13,7 @@ const config: PlayerConfig = {
   apiBaseUrl: "/api/v1",
   getAccessToken: () => "token",
   getProfileId: () => "profile",
-  getDeviceId: () => "device",
+  getDeviceHeaders: () => ({ "X-Silo-Device-Id": "device" }),
 };
 const sample = { position: 30, is_paused: false };
 const receipt = (body: unknown, status = 200) =>
