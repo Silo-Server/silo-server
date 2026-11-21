@@ -291,8 +291,10 @@ export default function MediaCarousel({
         {/* Inline flow puts the actions right after the heading's last word, or
             at the start of the next line when they don't fit; in a flex row, a
             wrapped heading keeps its full width and leaves them at the far edge.
-            The heading inherits the size here, so min-h-lh is one heading line. */}
-        <div className={`min-w-0 ${titleSize}`}>
+            The heading inherits the size here, so min-h-lh is one heading line.
+            The column stacks above "Explore all", so an action squeezed under it
+            on a very narrow header still takes its own taps. */}
+        <div className={`relative z-10 min-w-0 ${titleSize}`}>
           {titleHref ? (
             <Link to={titleHref} className="group/title">
               {/* The heading and "View" set their own colors, so without "View"
@@ -317,7 +319,7 @@ export default function MediaCarousel({
             <h2 className={titleClass}>{title}</h2>
           )}
           {headerActions ? (
-            <span className="inline-flex min-h-lh items-center gap-2 align-top">
+            <span className="inline-flex min-h-lh items-center gap-2 align-top empty:hidden">
               {headerActions}
             </span>
           ) : null}
