@@ -68,6 +68,21 @@ describe("RedisGroup", () => {
     expect(screen.getByText("0 staged")).toBeInTheDocument();
   });
 
+  it("follows a URL saved elsewhere after Use Redis was turned on and back off", async () => {
+    const { rerender } = render(<Harness />);
+    const useRedis = screen.getByRole("switch", { name: "Use Redis" });
+    await userEvent.click(useRedis);
+    await userEvent.type(screen.getByLabelText("Connection URL"), "redis://cache:6379");
+    await userEvent.click(useRedis);
+
+    // Another admin saves a URL, and the page's credential status refreshes.
+    sensitiveStatus.current = { configured: ["redis.url"], managed_by_env: [] };
+    rerender(<Harness />);
+
+    expect(screen.getByRole("switch", { name: "Use Redis" })).toBeChecked();
+    expect(screen.getByLabelText("Connection URL")).toBeInTheDocument();
+  });
+
   it("keeps Use Redis on while a URL typed with nothing saved is erased", async () => {
     render(<Harness />);
     const useRedis = screen.getByRole("switch", { name: "Use Redis" });

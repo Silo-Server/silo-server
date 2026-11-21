@@ -104,14 +104,17 @@ export function RedisGroup({
             form.resetValue("redis.db");
             return;
           }
-          setEnabledOverride(false);
           // With no saved URL there is nothing to switch off: drop what was
-          // typed, since the fields that showed it are about to hide.
+          // typed, since the fields that showed it are about to hide. The
+          // switch then follows what is saved again, so a URL saved elsewhere
+          // later still shows.
           if (!configured) {
+            setEnabledOverride(null);
             form.resetValue("redis.url");
             form.resetValue("redis.db");
             return;
           }
+          setEnabledOverride(false);
           stageRedisUrl(form, "");
         }}
         disabled={secrets.disabled}
