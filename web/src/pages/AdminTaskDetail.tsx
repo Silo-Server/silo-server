@@ -253,11 +253,11 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
                     {refreshItemTypeLabel(t, entry.type)}
                   </div>
                 </td>
-                <td className="px-4 py-2 sm:whitespace-nowrap">
+                <td className="px-4 py-2 md:whitespace-nowrap">
                   {formatDateTime(entry.next_refresh_at)}
                 </td>
                 <td className="px-4 py-2">{entry.attempt_count}</td>
-                <td className="px-4 py-2 sm:whitespace-nowrap">
+                <td className="px-4 py-2 md:whitespace-nowrap">
                   {formatOptionalDateTime(entry.last_attempt_at)}
                 </td>
               </tr>
