@@ -563,7 +563,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      --accent           Active/highlighted element backgrounds
      --destructive      Danger/error text, icons, borders
      --destructive-fill Solid danger fill under --destructive-foreground
-     --<status>-label   Status text on a 10% tint of its own colour
+     --<status>-label   Status text on its own 10% tint or a surface
      --border           Default border color
      --sidebar          Sidebar background (often darkest surface)
    ================================================================ */
@@ -582,8 +582,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --info-foreground: oklch(0.98 0.01 250);
 
     /* Small status-coloured labels on a 10% tint of their own colour, such
-       as the play-method tags. Red falls below 4.5:1 there (3.8:1 on a
-       hovered row), so its label mixes toward --contrast-boost. High
+       as the play-method tags, or on a plain surface. Red falls below 4.5:1
+       on the tint (3.8:1 on a hovered row), so its label mixes toward
+       --contrast-boost. High
        contrast lightens the surfaces under every label, so it mixes each
        one further (see the block below). */
     --success-label: var(--success);
