@@ -54,6 +54,17 @@ func editorTestRepository(t *testing.T) *Repository {
 	if _, err = pool.Exec(t.Context(), `CREATE TABLE users(id integer PRIMARY KEY); INSERT INTO users VALUES(1),(2); CREATE TABLE media_request_targets(integration_id text,status text)`); err != nil {
 		t.Fatal(err)
 	}
+	// The servers name installations 1 and 2; keep them in this schema so a
+	// delete sees them installed whatever the shared database holds.
+	if _, err = pool.Exec(t.Context(), `
+		CREATE TABLE plugin_installations (LIKE public.plugin_installations INCLUDING ALL);
+		CREATE TABLE plugin_capabilities (LIKE public.plugin_capabilities INCLUDING ALL);
+		INSERT INTO plugin_installations (id, plugin_id, version, install_path) VALUES
+			(1, 'silo.requests.arr', '1.0.0', '/plugins/arr'), (2, 'example.requests.local', '1.0.0', '/plugins/local');
+		INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id) VALUES
+			(1, 'request_router.v1', 'arr'), (2, 'request_router.v1', 'local')`); err != nil {
+		t.Fatal(err)
+	}
 	cipher, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
 	if err != nil {
 		t.Fatal(err)
