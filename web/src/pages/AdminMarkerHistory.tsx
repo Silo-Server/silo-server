@@ -25,6 +25,7 @@ import {
 import { useAllMarkerEditHistory } from "@/hooks/queries/admin/markers";
 import { MARKER_LABEL_KEYS, formatClock } from "@/lib/markers";
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
+import { startsRightToLeft } from "@/lib/direction";
 import { numberText, type Translate, useT } from "@/i18n";
 
 const LIMIT_OPTIONS = ["25", "50", "100"] as const;
@@ -124,7 +125,14 @@ function MarkerHistoryRow({ row }: { row: MarkerEditAuditEntry }) {
         {formatHistoryDate(row.created_at)}
       </TableCell>
       <TableCell>
-        <div className="max-w-[18rem] truncate font-medium">
+        {/* The label takes the title's direction, so a cut one keeps its start;
+            w-fit keeps it on the page's start side. It is judged from the title
+            alone, not with dir="auto", because the label is a translated
+            template that a language may start with the type. */}
+        <div
+          dir={startsRightToLeft(title) ? "rtl" : "ltr"}
+          className="w-fit max-w-[18rem] truncate font-medium"
+        >
           {row.item_id ? (
             <Link
               to={`/item/${encodeURIComponent(row.item_id)}`}
@@ -182,7 +190,10 @@ function MarkerHistoryRow({ row }: { row: MarkerEditAuditEntry }) {
         <div className="text-muted-foreground max-w-[13rem] truncate text-xs">
           {row.request_id ?? t("web.admin.markers.history.noRequestId")}
         </div>
-        <div className="text-muted-foreground max-w-[13rem] truncate text-xs">
+        {/* An address or user agent reads left to right in any language, so an
+            IPv6 address keeps its order and a cut one keeps its start; w-fit
+            keeps it on the page's start side. */}
+        <div dir="ltr" className="text-muted-foreground w-fit max-w-[13rem] truncate text-xs">
           {row.client_ip ?? row.user_agent ?? ""}
         </div>
       </TableCell>

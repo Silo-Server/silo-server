@@ -245,7 +245,12 @@ function InvitationCard({ invitation, shared }: RowProps) {
     <DiagnosticsCard>
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1 space-y-0.5">
-          <h3 className={cn("font-medium", row.link ? "break-words" : "break-all")}>
+          {/* As in the table row: an email keeps its order on a right-to-left
+              page, and the link invitation's label follows the page. */}
+          <h3
+            dir={row.link ? undefined : emailDir(row.recipient)}
+            className={cn("w-fit max-w-full font-medium", row.link ? "break-words" : "break-all")}
+          >
             {row.recipient}
           </h3>
           {row.details && (
