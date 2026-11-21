@@ -620,9 +620,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --primary: #e8e8ec;
     --primary-foreground: #141417;
     /* The solid primary fill on hover: the primary faded a tenth toward the
-       page. It resolves against an admin accent's --primary too; an accent
-       whose dark label would drop below 4.5:1 on it sets its own
-       (web/src/lib/accentColor.ts). */
+       page. An admin accent sets its own (web/src/lib/accentColor.ts), which
+       lightens instead when this fade would take its label below 4.5:1. */
     --primary-hover: color-mix(in srgb, var(--primary) 90%, var(--background));
 
     /* Secondary & Muted: subtle surface variations */

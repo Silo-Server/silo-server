@@ -102,14 +102,15 @@ function accentOnDark(hex: string): string {
 const PAGE = "#141417";
 
 /**
- * A replacement for the theme's --primary-hover when its fade toward the page
- * would take `label` below 4.5:1, else null. Only a dark label can lose
- * contrast to that fade, so the replacement lightens the accent a tenth
- * instead, which can only raise a dark label's contrast.
+ * The accent's hover fill (--primary-hover): faded a tenth toward the page,
+ * like the theme's, unless that takes `label` below 4.5:1. Only a dark label
+ * can lose contrast to that fade, so the accent then lightens a tenth instead,
+ * which can only raise it. The accent always sets the color it checked: the
+ * theme's color-mix keeps fractional channels and can land just under it.
  */
-function hoverFillOverride(hex: string, label: string): string | null {
-  if (contrastRatio(mix(hex, PAGE, 0.1), label) >= MIN_LABEL_CONTRAST) return null;
-  return mix(hex, WHITE_LABEL, 0.1);
+function hoverFill(hex: string, label: string): string {
+  const faded = mix(hex, PAGE, 0.1);
+  return contrastRatio(faded, label) >= MIN_LABEL_CONTRAST ? faded : mix(hex, WHITE_LABEL, 0.1);
 }
 
 /**
@@ -136,7 +137,6 @@ export function accentDeclarations(accent: string): Record<string, string> | nul
     declarations["primary-foreground"] = label;
     declarations["sidebar-primary-foreground"] = label;
   }
-  const hover = hoverFillOverride(hex, label);
-  if (hover) declarations["primary-hover"] = hover;
+  declarations["primary-hover"] = hoverFill(hex, label);
   return declarations;
 }
