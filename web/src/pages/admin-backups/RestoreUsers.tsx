@@ -191,8 +191,10 @@ export const AccountRow = memo(function AccountRow({
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
+        {/* Named from the plain label: Chromium reads a <wbr> in it as a space. */}
         <Checkbox
           id={controlId}
+          aria-label={item.label}
           checked={checked}
           disabled={!item.selectable}
           onCheckedChange={(value) => onToggle(toggleKeys("users", item), value === true)}
@@ -255,7 +257,7 @@ export const AccountRow = memo(function AccountRow({
       </div>
       {open ? (
         <div id={detailsId} className="space-y-1 ps-7 pb-3">
-          {status ? <p className="text-[13px] @2xl:hidden">{status}</p> : null}
+          {status ? <p className="text-[13px] wrap-anywhere @2xl:hidden">{status}</p> : null}
           {account.admin ? (
             <p className="text-muted-foreground text-xs @2xl:hidden">
               {t("web.admin.backups.restore.users.administrator")}
@@ -334,19 +336,30 @@ export function DataTypesPanel({
           {DATA_TYPE_IDS.map((id) => {
             const controlId = `${baseId}-${id}`;
             const count = counts.get(id) ?? 0;
+            // The checkbox's box is one line tall. The label's text size replaces Label's
+            // leading-none, so it inherits the row's unitless line height. The text is in rem
+            // like the checkbox, so a larger browser font grows both and the line stays
+            // taller than the checkbox, and a minimum font size still spaces wrapped lines.
+            // The label is a block so its count wraps with its text, and text-pretty keeps
+            // the count off a last line of its own where the browser supports it.
             return (
-              <div key={id} className="flex items-center gap-2">
-                <Checkbox
-                  id={controlId}
-                  checked={dataTypes.has(id)}
-                  onCheckedChange={(value) => {
-                    const next = new Set(dataTypes);
-                    if (value === true) next.add(id);
-                    else next.delete(id);
-                    onChange(next);
-                  }}
-                />
-                <Label htmlFor={controlId} className="text-[13px] font-normal">
+              <div key={id} className="flex items-start gap-2 text-[0.8125rem] leading-normal">
+                <span className="flex min-h-lh shrink-0 items-center">
+                  <Checkbox
+                    id={controlId}
+                    checked={dataTypes.has(id)}
+                    onCheckedChange={(value) => {
+                      const next = new Set(dataTypes);
+                      if (value === true) next.add(id);
+                      else next.delete(id);
+                      onChange(next);
+                    }}
+                  />
+                </span>
+                <Label
+                  htmlFor={controlId}
+                  className="block text-[0.8125rem] font-normal text-pretty"
+                >
                   {count > 0
                     ? t("web.admin.backups.restore.users.dataTypeCount", {
                         label: DATA_TYPE_LABELS[id],

@@ -21527,14 +21527,26 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EHide the account\u202C"
+              "value": "\u202EHide the account\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide the accounts\u202C"
             }
           ]
         },
@@ -21542,25 +21554,35 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EHide the accounts\u202C"
+              "value": "\u202EHide the accounts\u202C"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EHide the file\u202C"
+              "value": "\u202EHide the file\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide the files\u202C"
             }
           ]
         },
@@ -21568,25 +21590,35 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EHide the files\u202C"
+              "value": "\u202EHide the files\u202C"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EHide file\u202C"
+              "value": "\u202EHide file\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide files\u202C"
             }
           ]
         },
@@ -21594,13 +21626,11 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EHide files\u202C"
+              "value": "\u202EHide files\u202C"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -22029,14 +22059,26 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EShow the account\u202C"
+              "value": "\u202EShow the account\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EShow the accounts\u202C"
             }
           ]
         },
@@ -22044,13 +22086,11 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EShow the accounts\u202C"
+              "value": "\u202EShow the accounts\u202C"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -22089,14 +22129,26 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EShow the file\u202C"
+              "value": "\u202EShow the file\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EShow the files\u202C"
             }
           ]
         },
@@ -22104,25 +22156,35 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EShow the files\u202C"
+              "value": "\u202EShow the files\u202C"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EShow file\u202C"
+              "value": "\u202EShow file\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EShow files\u202C"
             }
           ]
         },
@@ -22130,13 +22192,11 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EShow files\u202C"
+              "value": "\u202EShow files\u202C"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -64534,7 +64594,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "\u200F\u202EReload to see the current values. Your edits to settings that changed, and to saved passwords and keys with their related settings, are undone; your other edits are kept.\u202C"
+      "value": "\u200F\u202EReload to see the current values. If something on this page changed, or you edited a saved password or key, all your edits are undone; otherwise they’re kept.\u202C"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -81207,6 +81267,32 @@
     {
       "type": 0,
       "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": "\u202E - \u202C"
     },
     {
       "type": 1,

@@ -325,8 +325,10 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
     }
     case "checking":
       body = (
-        <p className="flex items-center gap-2 text-sm" role="status">
-          <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />
+        <p className="flex items-start gap-2 text-sm" role="status">
+          <span className="flex h-lh shrink-0 items-center">
+            <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />
+          </span>
           {t("web.admin.backups.upload.checking")}
         </p>
       );

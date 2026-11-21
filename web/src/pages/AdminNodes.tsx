@@ -962,7 +962,9 @@ function NodeDevicePicker({
               <p className={cn("truncate text-sm", !row.reported && "text-muted-foreground")}>
                 {row.description}
               </p>
-              <p className="text-muted-foreground truncate font-mono text-xs">{row.path}</p>
+              <p className="text-muted-foreground truncate font-mono text-xs">
+                <span dir="ltr">{row.path}</span>
+              </p>
             </div>
             <Switch
               checked={row.selected}
@@ -1334,6 +1336,8 @@ function NodeForm({
                 <>
                   <Input
                     id="node-hw-device-override"
+                    // Device paths read left to right; the translated placeholder keeps the page's direction.
+                    dir={hwDeviceOverride ? "ltr" : undefined}
                     value={hwDeviceOverride}
                     disabled={isLocked("hw_device_override")}
                     onChange={(e) => setHwDeviceOverride(e.target.value)}

@@ -24257,51 +24257,22 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Сховати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " обліковий запис"
+              "value": "Сховати обліковий запис"
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Сховати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " облікові записи"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Сховати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " облікових записів"
+              "value": "Сховати облікові записи"
             }
           ]
         },
@@ -24309,69 +24280,31 @@
           "value": [
             {
               "type": 0,
-              "value": "Сховати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " облікового запису"
+              "value": "Сховати облікові записи"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Сховати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файл"
+              "value": "Сховати файл"
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Сховати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файли"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Сховати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файлів"
+              "value": "Сховати файли"
             }
           ]
         },
@@ -24379,69 +24312,31 @@
           "value": [
             {
               "type": 0,
-              "value": "Сховати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файлу"
+              "value": "Сховати файли"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Сховати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файл"
+              "value": "Сховати файл"
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Сховати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файли"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Сховати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файлів"
+              "value": "Сховати файли"
             }
           ]
         },
@@ -24449,20 +24344,11 @@
           "value": [
             {
               "type": 0,
-              "value": "Сховати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файлу"
+              "value": "Сховати файли"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -25047,51 +24933,22 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Показати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " обліковий запис"
+              "value": "Показати обліковий запис"
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Показати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " облікові записи"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Показати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " облікових записів"
+              "value": "Показати облікові записи"
             }
           ]
         },
@@ -25099,20 +24956,11 @@
           "value": [
             {
               "type": 0,
-              "value": "Показати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " облікового запису"
+              "value": "Показати облікові записи"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -25175,51 +25023,22 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Показати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файл"
+              "value": "Показати файл"
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Показати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файли"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Показати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файлів"
+              "value": "Показати файли"
             }
           ]
         },
@@ -25227,69 +25046,31 @@
           "value": [
             {
               "type": 0,
-              "value": "Показати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файлу"
+              "value": "Показати файли"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Показати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файл"
+              "value": "Показати файл"
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Показати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файли"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Показати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файлів"
+              "value": "Показати файли"
             }
           ]
         },
@@ -25297,20 +25078,11 @@
           "value": [
             {
               "type": 0,
-              "value": "Показати "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " файлу"
+              "value": "Показати файли"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -74789,7 +74561,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Перезавантажте, щоб побачити поточні значення. Ваші зміни в налаштуваннях, які змінилися, а також у збережених паролях і ключах та пов’язаних із ними налаштуваннях буде скасовано; інші ваші зміни буде збережено."
+      "value": "Перезавантажте, щоб побачити поточні значення. Якщо щось на цій сторінці змінилося або ви редагували збережений пароль чи ключ, усі ваші зміни буде скасовано; інакше їх буде збережено."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -91579,6 +91351,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"
