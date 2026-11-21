@@ -3,13 +3,17 @@
 package nodeinstall
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
@@ -28,6 +32,42 @@ echo "$*" >> "$dir/calls"
 case "$1" in
 print) [ -e "$dir/gone" ] && exit 113; [ -e "$dir/booted" ] && touch "$dir/gone"; exit 0 ;;
 bootout) touch "$dir/booted"; exit ` + bootoutStatus + ` ;;
+esac
+exit 0
+`
+	path := filepath.Join(dir, "launchctl")
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	previous := launchctlPath
+	launchctlPath = path
+	t.Cleanup(func() { launchctlPath = previous })
+	return dir
+}
+
+// fakeDrainingLaunchctl points launchctlPath at a script whose job runs as pid
+// 100 until a kill. The first print after the kill still shows pid 100; the
+// next shows afterPID (none when empty), as the job an older plist keeps alive
+// would. A bootout then removes the job by the second print after it.
+func fakeDrainingLaunchctl(t *testing.T, afterPID string) (dir string) {
+	t.Helper()
+	dir = t.TempDir()
+	script := `#!/bin/sh
+dir='` + dir + `'
+echo "$*" >> "$dir/calls"
+pidline() { [ -n "$1" ] && printf 'state = running\n\tpid = %s\n\tpid-local endpoints = {\n\t\tpid = 1\n\t}\n' "$1"; return 0; }
+case "$1" in
+print)
+	[ -e "$dir/gone" ] && exit 113
+	[ -e "$dir/booted" ] && { touch "$dir/gone"; exit 0; }
+	if [ -e "$dir/killed" ]; then
+		if [ -e "$dir/exited" ]; then pidline '` + afterPID + `'; else touch "$dir/exited"; pidline 100; fi
+	else
+		pidline 100
+	fi
+	exit 0 ;;
+kill) touch "$dir/killed" ;;
+bootout) touch "$dir/booted" ;;
 esac
 exit 0
 `
@@ -65,6 +105,145 @@ func TestStopTreatsBootoutInProgressAsSent(t *testing.T) {
 	}
 	if calls := launchctlCalls(t, dir); !strings.Contains(calls, "bootout") || strings.Count(calls, "print") < 3 {
 		t.Fatalf("launchctl calls:\n%s\nwant a bootout, then prints until the job is gone", calls)
+	}
+}
+
+// stop sends the running node SIGTERM and waits for that process to exit
+// before the bootout, since launchd kills a job a minute after its bootout
+// whatever ExitTimeOut asks. A job an older plist restarts under a new pid
+// still goes on to the bootout.
+func TestStopDrainsBeforeTheBootout(t *testing.T) {
+	for _, afterPID := range []string{"", "200"} {
+		dir := fakeDrainingLaunchctl(t, afterPID)
+		sent, err := fakeInstaller(t).stop(context.Background(), io.Discard)
+		if !sent || err != nil {
+			t.Fatalf("after pid %q: stop = %v, %v; want sent and no error", afterPID, sent, err)
+		}
+		calls := strings.Split(strings.TrimSpace(launchctlCalls(t, dir)), "\n")
+		want := []string{"print", "kill SIGTERM", "print", "print", "bootout", "print", "print"}
+		if len(calls) != len(want) {
+			t.Fatalf("after pid %q: launchctl calls %q; want %q", afterPID, calls, want)
+		}
+		for i := range want {
+			if !strings.HasPrefix(calls[i], want[i]) {
+				t.Fatalf("after pid %q: launchctl calls %q; want %q", afterPID, calls, want)
+			}
+		}
+	}
+}
+
+// A node still draining at the stop's deadline is booted out all the same,
+// and the installer says so.
+func TestStopBootsOutANodeStillDrainingAtTheDeadline(t *testing.T) {
+	previous := nodeStopWait
+	nodeStopWait = func(time.Duration) time.Duration { return time.Second }
+	t.Cleanup(func() { nodeStopWait = previous })
+	dir := fakeDrainingLaunchctl(t, "100")
+	var out bytes.Buffer
+	sent, err := fakeInstaller(t).stop(context.Background(), &out)
+	if !sent || err != nil {
+		t.Fatalf("stop = %v, %v; want sent and no error", sent, err)
+	}
+	if !strings.Contains(launchctlCalls(t, dir), "bootout") {
+		t.Fatal("no bootout after the deadline")
+	}
+	if !strings.Contains(out.String(), "still finishing streams") {
+		t.Fatalf("output %q does not say the node is stopped mid-stream", out.String())
+	}
+}
+
+// A rollback that cannot confirm the new job stopped restores nothing and
+// keeps the backups, which a node that may still run must not lose.
+func TestRollbackKeepsBackupsWhenTheStopFails(t *testing.T) {
+	dir := t.TempDir()
+	script := "#!/bin/sh\necho \"$*\" >> '" + dir + "/calls'\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "launchctl"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	previous := launchctlPath
+	launchctlPath = filepath.Join(dir, "launchctl")
+	t.Cleanup(func() { launchctlPath = previous })
+	n := fakeInstaller(t)
+	if err := os.MkdirAll(filepath.Dir(n.paths.plist), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{n.paths.plist: "new plist", n.paths.env: "new env", n.paths.env + ".old": "old env"}
+	for path, data := range files {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := n.rollback(context.Background(), []nodeInstallSwap{{path: n.paths.env, hadOld: true, placed: true}}, []byte("old plist"), true)
+	if err == nil || !strings.Contains(err.Error(), "recovery is incomplete") || !strings.Contains(err.Error(), n.paths.env+".old") {
+		t.Fatalf("rollback = %v; want incomplete recovery naming the backup", err)
+	}
+	for path, want := range files {
+		if got, err := os.ReadFile(path); err != nil || string(got) != want {
+			t.Errorf("%s = %q, %v; want %q left in place", path, got, err, want)
+		}
+	}
+	if strings.Contains(launchctlCalls(t, dir), "bootstrap") {
+		t.Fatal("bootstrapped the previous job while the new one may still run")
+	}
+}
+
+// A run stopped mid-swap leaves node.env and node-key only at their backups;
+// a rerun without flags takes its settings from them. Without either, the
+// install is new and needs --server.
+func TestStoredReadsAnInterruptedSwapsBackups(t *testing.T) {
+	n := fakeInstaller(t)
+	if err := os.MkdirAll(n.paths.dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if stored, _, err := n.stored(); err != nil || stored != (nodeInstallSettings{}) {
+		t.Fatalf("no install: stored = %+v, %v; want nothing", stored, err)
+	}
+	if _, err := resolveNodeInstall(nodeInstallSettings{}, nodeInstallSettings{}); err == nil || !strings.Contains(err.Error(), "--server is required") {
+		t.Fatalf("no install: resolve = %v; want --server required", err)
+	}
+	env := "MODE=\"transcode\"\nSILO_CORE_URL=\"http://localhost:8090\"\nPORT=\"8200\"\nSILO_NODE_DRAIN_TIMEOUT=\"15m\"\n"
+	for path, data := range map[string]string{n.paths.env + ".old": env, n.paths.key + ".old": "old-key\n"} {
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stored, extra, err := n.stored()
+	want := nodeInstallSettings{server: "http://localhost:8090", key: "old-key", port: 8200}
+	if err != nil || stored != want || extra[transcodenode.EnvDrainTimeout] != "15m" {
+		t.Fatalf("stored = %+v, %v, %v; want %+v and the drain kept", stored, extra, err, want)
+	}
+}
+
+// --server is a plain URL: the probe and the node join paths onto it, and
+// userinfo would go out as Basic auth and show in messages.
+func TestValidateRefusesServerURLsWithMore(t *testing.T) {
+	for _, server := range []string{"http://user:pass@localhost:8090", "http://localhost:8090/?a=b", "http://localhost:8090?", "http://localhost:8090/#x", "http://localhost:8090#"} {
+		err := nodeInstallSettings{server: server, port: 8100}.validateAllButKey()
+		if err == nil || !strings.Contains(err.Error(), "plain http or https URL") {
+			t.Errorf("--server %q: %v; want refused", server, err)
+		}
+	}
+}
+
+// The readiness probe keeps the path of a server behind a prefix, with or
+// without a trailing slash.
+func TestCheckServerReadyKeepsAPathPrefix(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/silo/api/v1/ready" {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	for _, url := range []string{server.URL + "/silo", server.URL + "/silo/"} {
+		if err := (nodeInstallSettings{server: url, port: 8100}).validateAllButKey(); err != nil {
+			t.Fatalf("--server %q: %v", url, err)
+		}
+		if err := checkServerReady(context.Background(), url); err != nil {
+			t.Fatalf("--server %q: %v", url, err)
+		}
 	}
 }
 
@@ -171,5 +350,46 @@ func TestPromptNodeKeyReadsAPipedKey(t *testing.T) {
 		if key, err := promptNodeKey(strings.NewReader(in), io.Discard); err != nil || key != want {
 			t.Fatalf("piped %q: key %q, %v; want %q", in, key, err, want)
 		}
+	}
+}
+
+// Without the swap marker, .old files are a finished run's leftovers and go;
+// with it, they are the last working install and stay.
+func TestDropStaleBackupsFollowsTheSwapMarker(t *testing.T) {
+	n := nodeInstaller{paths: nodeInstallPathsIn(t.TempDir())}
+	if err := os.MkdirAll(n.paths.dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeBackups := func() {
+		for _, path := range n.paths.installedFiles() {
+			if err := os.WriteFile(path+".old", []byte("old"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	countBackups := func() (n2 int) {
+		for _, path := range n.paths.installedFiles() {
+			if _, err := os.Stat(path + ".old"); err == nil {
+				n2++
+			}
+		}
+		return n2
+	}
+
+	writeBackups()
+	if err := os.WriteFile(n.paths.swapPending(), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	n.dropStaleBackups()
+	if got := countBackups(); got != 3 {
+		t.Fatalf("with the marker, %d of 3 backups kept; want all", got)
+	}
+
+	if err := os.Remove(n.paths.swapPending()); err != nil {
+		t.Fatal(err)
+	}
+	n.dropStaleBackups()
+	if got := countBackups(); got != 0 {
+		t.Fatalf("without the marker, %d backups left; want none", got)
 	}
 }

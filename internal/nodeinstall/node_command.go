@@ -60,16 +60,12 @@ const defaultNodeInstallPort = 8100
 // nodeKeyPrompt marks a run that asks for a new key (--new-key).
 const nodeKeyPrompt = "-"
 
-// nodeExitTimeout is how long launchd waits after SIGTERM before it kills a
-// node that drains for drain: the drain and a minute to shut down.
+// nodeExitTimeout is how long launchd should wait after SIGTERM before it kills
+// a node that drains for drain: the drain and a minute to shut down. Current
+// macOS caps ExitTimeOut at 60 seconds, so the installer sends SIGTERM itself
+// and waits for the drain before its bootout.
 func nodeExitTimeout(drain time.Duration) time.Duration {
 	return addCapped(drain, time.Minute)
-}
-
-// nodeStopTimeout bounds the installer's wait for a node that drains for
-// drain to exit: launchd's ExitTimeOut and a minute more.
-func nodeStopTimeout(drain time.Duration) time.Duration {
-	return addCapped(drain, 2*time.Minute)
 }
 
 func addCapped(d, extra time.Duration) time.Duration {
@@ -304,8 +300,10 @@ func renderNodePlist(p nodeInstallPaths, drain time.Duration) []byte {
 	str(p.log)
 	key("RunAtLoad")
 	b.WriteString("<true/>\n")
+	// Restarted after a crash or a failed exit, but not after a drained node's
+	// clean exit, which the installer's stop waits for.
 	key("KeepAlive")
-	b.WriteString("<true/>\n")
+	b.WriteString("<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<false/>\n\t</dict>\n")
 	key("ProcessType")
 	str("Interactive")
 	key("ExitTimeOut")

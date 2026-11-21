@@ -278,7 +278,7 @@ cipher or event bus.
 Before its first configuration read the node sends its declaration
 ([Registration](#registration)), so the configuration it loads already
 reflects it. The node then reads its configuration, retrying with backoff from one second to 30
-seconds until a read succeeds or it is signalled, and only then opens its
+seconds until a read succeeds or it is signaled, and only then opens its
 listener. A configuration that names another node id than the key is refused
 (`Client.FetchConfig`). Each call to the core has a 10-second timeout
 (`nodecontrol.Client`).
@@ -554,7 +554,7 @@ build compiles.
 | `~/Library/Application Support/Silo/node/silo` | The binary. |
 | `~/Library/Application Support/Silo/node/node.env` | Mode 0600. The installer manages `MODE=transcode`, `SILO_CORE_URL`, `SILO_NODE_KEY_FILE` naming `node-key`, and `PORT` (default 8100, since Docker Desktop often publishes 8080). Any other variable in the file, such as one from [Startup and environment](#startup-and-environment), is kept across reruns, except `SILO_NODE_KEY`, which would clash with the key file. |
 | `~/Library/Application Support/Silo/node/node-key` | Mode 0600: the node key. |
-| `~/Library/LaunchAgents/org.siloserver.node.plist` | Runs the binary with `-env` and `node.env`, `RunAtLoad`, `KeepAlive`, and an `ExitTimeOut` of the drain timeout `node.env` sets plus a minute (660 seconds with the default). |
+| `~/Library/LaunchAgents/org.siloserver.node.plist` | Runs the binary with `-env` and `node.env`, `RunAtLoad`, `KeepAlive` with `SuccessfulExit` false (launchd restarts the node after a crash or a non-zero exit, not after the clean exit that ends a drain), and an `ExitTimeOut` of the drain timeout `node.env` sets plus a minute (660 seconds with the default). Current macOS caps `ExitTimeOut` at 60 seconds, so a logout or shutdown stops the node's streams a minute after SIGTERM; the installer's own stop does not depend on it. |
 | `~/Library/Application Support/Silo/node-install.lock` | Mode 0600, in a 0700 folder: the lock every install and uninstall holds. It sits outside the node's folder, which uninstall removes while it holds the lock, and is never removed, so two runs always lock the same file. |
 | `~/Library/Logs/Silo/node.log` | The node's output. Uninstall keeps it. |
 
@@ -563,19 +563,37 @@ from the existing install, and replaces the binary unless it runs from the
 installed one. The key is never a command-line argument, which other users of
 the Mac could read: a first install, and a rerun with `--new-key`, ask for it at
 a hidden prompt, or read it from standard input when that isn't a terminal. It checks everything it can before it writes anything: the
-flags and key, a `SILO_NODE_DRAIN_TIMEOUT` the node would ignore
+flags and key (`--server` must be a plain `http` or `https` URL: no userinfo,
+which would go out as Basic auth, and no query or fragment, which would swallow
+the paths joined onto it), a `SILO_NODE_DRAIN_TIMEOUT` the node would ignore
 (`transcodenode.ParseDrainTimeout`, which the node parses it with), FFmpeg (Homebrew's `ffmpeg-full`, as `playback`'s discovery
-finds it), the server's `GET /api/v1/ready` (a `200` within five seconds, no
-redirects, so a server that is restarting or migrating stops the run), and the
+finds it), the server's `GET /api/v1/ready` (joined onto the URL's path, so a
+server behind a path prefix works; a `200` within five seconds, no redirects,
+so a server that is restarting or migrating stops the run), and the
 port (nothing else may answer on it). It then takes the lock, reads the
-install again under it, stages the new files beside the old ones, boots the
-old job out (SIGTERM, so it drains), swaps the files in, bootstraps the job,
-and waits up to 60 seconds for the node's `GET /api/v1/health`. A stop waits
-for the stopped install's drain timeout plus two minutes, a minute past
-launchd's `ExitTimeOut`. The swap moves each file to `<file>.old` and keeps
-it until the new node is ready; a `<file>.old` already there is the last
-working file of a run that stopped mid-swap, so it stays the backup and the
-unverified file in its place is dropped.
+install again under it, stages the new files beside the old ones, stops the
+old job, swaps the files in, bootstraps the job, and waits up to 60 seconds
+for the node's `GET /api/v1/health`.
+
+The stop drains before it boots the job out. `launchctl bootout` returns at
+once and launchd kills the job a minute after it, whatever `ExitTimeOut` asks,
+so the installer sends SIGTERM itself (`launchctl kill SIGTERM`), polls
+`launchctl print` until the signaled pid is gone, and only then boots the job
+out and waits for launchd to let it go. A job an older plist keeps alive
+unconditionally restarts under a new pid; the signaled pid's exit still ends
+the drain. Each wait is bounded by the stopped install's drain timeout plus
+two minutes. A node still running at that deadline is booted out anyway, and
+the installer says it is stopping a node that is still finishing streams, so a
+stop never leaves the job stopped without the install's restart or rollback
+running. Uninstall stops the job the same way.
+
+The swap moves each file to `<file>.old` and keeps it until the new node is
+ready; a `<file>.old` already there is the last working file of a run that
+stopped mid-swap, so it stays the backup and the unverified file in its place
+is dropped. For the same reason, an install reads its stored settings from
+`node.env.old` and `node-key.old` when `node.env` or `node-key` is missing, so a
+rerun after such a run keeps the previous server, port, key and other
+variables instead of starting over as a first install.
 
 The node is ready when that answers `200` with a `node_control_version`, which
 neither the API server's health nor a proxy's carries, and without
@@ -586,8 +604,11 @@ accepted its key, so a ready node also shows that the key and core URL work.
 When the new job does not start or become ready, or the run is interrupted
 after the files were swapped, the previous files come back, with a context of
 their own, and the previous job is bootstrapped only if launchd had it before
-the install, so a node that was stopped stays stopped. The installer exits
-non-zero with the end of the log. A stop interrupted, or failed in launchctl, after the bootout went out
+the install, so a node that was stopped stays stopped. A rollback first stops
+the new job, and restores nothing until launchd confirms it is gone: when the
+stop fails, every file and backup stays where it is and the installer reports
+the recovery as incomplete, naming the backups. The installer exits
+non-zero with the end of the log. A stop interrupted, or failed in launchctl, after its signal went out
 waits until launchd lets the old job go and bootstraps its plist again, so the
 old node is not left stopped. Only `launchctl print`'s "not found" status
 (113) counts as a job launchd does not have. A bootout that answers

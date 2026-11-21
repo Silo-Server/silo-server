@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -178,6 +179,7 @@ func (n nodeInstaller) installLocked(ctx context.Context, given nodeInstallSetti
 	if err != nil {
 		return err
 	}
+	n.dropStaleBackups()
 	// The new node.env keeps the drain, so it bounds both the old node's stop
 	// and the new one's ExitTimeOut.
 	if n.drain, err = nodeEnvDrainTimeout(extra); err != nil {
@@ -223,8 +225,14 @@ func (s nodeInstallSettings) validateAllButKey() error {
 	if s.server == "" {
 		return errors.New("--server is required the first time: the Silo server's URL as this Mac reaches it, such as http://localhost:8090")
 	}
-	if _, ok := transcodenode.ParseCoreURL(s.server); !ok {
+	parsed, ok := transcodenode.ParseCoreURL(s.server)
+	if !ok {
 		return errors.New("--server must be an absolute http or https URL")
+	}
+	// The readiness probe and the node join paths onto it, which a query or
+	// fragment would swallow, and userinfo would go out as Basic auth.
+	if parsed.User != nil || strings.ContainsAny(s.server, "?#") {
+		return errors.New("--server must be a plain http or https URL such as http://localhost:8090")
 	}
 	if _, err := quoteNodeEnv(s.server); err != nil {
 		return fmt.Errorf("--server: %w", err)
@@ -242,7 +250,11 @@ func checkServerReady(ctx context.Context, server string) error {
 	defer cancel()
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	reason := ""
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(server, "/")+"/api/v1/ready", nil)
+	readyURL, err := nodeServerReadyURL(server)
+	var req *http.Request
+	if err == nil {
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, readyURL, nil)
+	}
 	if err == nil {
 		var resp *http.Response
 		if resp, err = client.Do(req); err == nil {
@@ -268,21 +280,66 @@ func checkServerReady(ctx context.Context, server string) error {
 	return fmt.Errorf("the server at %s isn't ready yet (%s); run this again once it is", server, reason)
 }
 
+// nodeServerReadyURL is the readiness probe under server, a URL validate
+// accepted, with any path it has kept as a prefix.
+func nodeServerReadyURL(server string) (string, error) {
+	parsed, err := url.Parse(server)
+	if err != nil {
+		return "", err
+	}
+	return parsed.JoinPath("api", "v1", "ready").String(), nil
+}
+
 // stored reads the existing install's settings, all zero without one, and the
-// other variables its node.env carries.
+// other variables its node.env carries. A run stopped mid-swap can leave a
+// file only at its backup, <file>.old, which is then the one read.
 func (n nodeInstaller) stored() (nodeInstallSettings, map[string]string, error) {
-	env, err := os.ReadFile(n.paths.env)
+	env, err := readInstalledFile(n.paths.env)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nodeInstallSettings{}, nil, nil
 	}
 	if err != nil {
 		return nodeInstallSettings{}, nil, err
 	}
-	key, err := os.ReadFile(n.paths.key)
+	key, err := readInstalledFile(n.paths.key)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nodeInstallSettings{}, nil, err
 	}
 	return storedNodeInstall(env, key)
+}
+
+// readInstalledFile reads path, or its backup when path is missing.
+// nodeStopTimeout bounds the installer's wait for a node that drains for
+// drain to exit: launchd's ExitTimeOut and a minute more.
+func nodeStopTimeout(drain time.Duration) time.Duration {
+	return addCapped(drain, 2*time.Minute)
+}
+
+// swapPending is the marker an install writes before it moves files aside and
+// removes once the new node is ready. With the marker, a .old file is the last
+// working install; without it, a leftover of a run that finished.
+func (p nodeInstallPaths) swapPending() string { return filepath.Join(p.dir, ".swap-pending") }
+
+// installedFiles are the files a swap replaces.
+func (p nodeInstallPaths) installedFiles() []string { return []string{p.binary, p.env, p.key} }
+
+// dropStaleBackups removes the .old files a finished run left behind, so a
+// later rollback can't restore an older install than the one that ran.
+func (n nodeInstaller) dropStaleBackups() {
+	if _, err := os.Stat(n.paths.swapPending()); err == nil {
+		return
+	}
+	for _, path := range n.paths.installedFiles() {
+		_ = os.Remove(path + ".old")
+	}
+}
+
+func readInstalledFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: the installer's own files.
+	if errors.Is(err, fs.ErrNotExist) {
+		data, err = os.ReadFile(nodeInstallSwap{path: path}.old())
+	}
+	return data, err
 }
 
 // install stages the new binary and settings beside the old ones, stops the
@@ -315,7 +372,10 @@ func (n nodeInstaller) install(ctx context.Context, settings nodeInstallSettings
 		return err
 	}
 	logStart := fileSize(n.paths.log)
-	err = swapIn(swaps)
+	err = writeNodeFile(n.paths.swapPending(), nil, 0o600)
+	if err == nil {
+		err = swapIn(swaps)
+	}
 	if err == nil {
 		err = writeNodeFile(n.paths.plist, renderNodePlist(n.paths, n.drain), 0o644)
 	}
@@ -329,10 +389,10 @@ func (n nodeInstaller) install(ctx context.Context, settings nodeInstallSettings
 	if err != nil {
 		return n.failInstall(ctx, err, swaps, oldPlist, oldLoaded, logStart)
 	}
-	for _, s := range swaps {
-		if s.hadOld {
-			_ = os.Remove(s.old())
-		}
+	// The swap is committed once the marker is gone; every backup goes after.
+	_ = os.Remove(n.paths.swapPending())
+	for _, path := range n.paths.installedFiles() {
+		_ = os.Remove(path + ".old")
 	}
 	return n.reportInstalled(settings, oldPort, drained)
 }
@@ -456,10 +516,23 @@ func discardStaged(swaps []nodeInstallSwap) {
 
 // rollback stops the new job, puts the previous files back, and starts the
 // previous job again when launchd had it (oldLoaded); without one, it removes
-// what the install added.
+// what the install added. Until the new job is known to be gone it touches no
+// file, so a node that may still run keeps its files, and the backups stay.
 func (n nodeInstaller) rollback(ctx context.Context, swaps []nodeInstallSwap, oldPlist []byte, oldLoaded bool) error {
-	_, stopErr := n.stop(ctx, io.Discard)
-	errs := []error{stopErr}
+	if _, err := n.stop(ctx, io.Discard); err != nil {
+		var backups []string
+		for _, s := range swaps {
+			if s.hadOld {
+				backups = append(backups, s.old())
+			}
+		}
+		kept := "no previous files were replaced"
+		if len(backups) > 0 {
+			kept = "the previous files are kept at " + strings.Join(backups, ", ")
+		}
+		return fmt.Errorf("recovery is incomplete: the new node could not be confirmed stopped (%w), so nothing was restored and %s", err, kept)
+	}
+	var errs []error
 	for _, s := range swaps {
 		if !s.placed {
 			_ = os.Remove(s.staged())
@@ -475,11 +548,16 @@ func (n nodeInstaller) rollback(ctx context.Context, swaps []nodeInstallSwap, ol
 		if err := os.Remove(n.paths.plist); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, err)
 		}
-		return errors.Join(errs...)
+	} else {
+		errs = append(errs, writeNodeFile(n.paths.plist, oldPlist, 0o644))
 	}
-	errs = append(errs, writeNodeFile(n.paths.plist, oldPlist, 0o644))
-	if err := errors.Join(errs...); err != nil || !oldLoaded {
+	if err := errors.Join(errs...); err != nil {
 		return err
+	}
+	// The previous install is whole again, so the swap is over.
+	_ = os.Remove(n.paths.swapPending())
+	if oldPlist == nil || !oldLoaded {
+		return nil
 	}
 	return n.bootstrap(ctx)
 }
@@ -548,27 +626,46 @@ func (n nodeInstaller) launchctl(ctx context.Context, args ...string) ([]byte, e
 	}
 }
 
+// launchdPIDLine is the running process's line in launchctl print's output.
+var launchdPIDLine = regexp.MustCompile(`(?m)^\tpid = ([0-9]+)$`)
+
 // loaded reports whether launchd has the node's job. Only launchctl's "not
 // found" status means it does not; any other failure is an error.
 func (n nodeInstaller) loaded(ctx context.Context) (bool, error) {
-	_, err := n.launchctl(ctx, "print", n.service)
+	loaded, _, err := n.status(ctx)
+	return loaded, err
+}
+
+// status reports whether launchd has the node's job and, while its node runs,
+// the node's pid (0 otherwise).
+func (n nodeInstaller) status(ctx context.Context) (loaded bool, pid int, err error) {
+	output, err := n.launchctl(ctx, "print", n.service)
 	var exitErr *exec.ExitError
 	switch {
 	case err == nil:
-		return true, nil
+		if match := launchdPIDLine.FindSubmatch(output); match != nil {
+			pid, _ = strconv.Atoi(string(match[1]))
+		}
+		return true, pid, nil
 	case errors.As(err, &exitErr) && exitErr.ExitCode() == launchctlNotFound:
-		return false, nil
+		return false, 0, nil
 	default:
-		return false, err
+		return false, 0, err
 	}
 }
 
-// stop boots the job out, if launchd has it, and waits until launchd no
-// longer has it. The node drains on SIGTERM, so this can take as long as its
-// streams. sent reports that the bootout went out, so the job may be on its
-// way down even when stop returns an error.
+// nodeStopWait bounds each of stop's waits for a node that drains for drain;
+// tests shorten it.
+var nodeStopWait = nodeStopTimeout
+
+// stop stops the job, if launchd has it, and waits until launchd no longer
+// has it. launchd caps ExitTimeOut at a minute, so stop first sends the
+// running node SIGTERM itself and waits for it to drain, which can take as
+// long as its streams, and only then boots the job out. sent reports that a
+// signal went out, so the job may be on its way down even when stop returns
+// an error.
 func (n nodeInstaller) stop(ctx context.Context, out io.Writer) (sent bool, err error) {
-	loaded, err := n.loaded(ctx)
+	loaded, pid, err := n.status(ctx)
 	if err != nil || !loaded {
 		return false, err
 	}
@@ -579,26 +676,73 @@ func (n nodeInstaller) stop(ctx context.Context, out io.Writer) (sent bool, err 
 	if _, err := io.WriteString(out, notice); err != nil {
 		return false, err
 	}
+	killed := false
+	if pid > 0 {
+		if killed, err = n.drainJob(ctx, out, pid, time.Now().Add(nodeStopWait(n.drain))); err != nil {
+			return false, err
+		}
+	}
 	// The bootout is not canceled with ctx: once it starts it may have gone
 	// out, and its own timeout bounds it.
 	_, bootoutErr := n.launchctl(context.WithoutCancel(ctx), "bootout", n.service)
 	var exitErr *exec.ExitError
 	if errors.As(bootoutErr, &exitErr) && exitErr.ExitCode() != launchctlInProgress {
 		// launchctl refused it: the job is gone, or it was left as it is.
-		if loaded, err := n.loaded(ctx); err != nil || loaded {
-			return false, errors.Join(bootoutErr, err)
+		loaded, err := n.loaded(ctx)
+		if err == nil && !loaded {
+			return true, nil
 		}
-		return true, nil
+		if err == nil && killed {
+			// The job stays, but its node may have drained and exited, which
+			// KeepAlive does not restart: start it again.
+			_, err = n.launchctl(context.WithoutCancel(ctx), "kickstart", n.service)
+		}
+		return false, errors.Join(bootoutErr, err)
 	}
 	// Sent (the job may still be shutting down), or still waiting for an
 	// answer when its timeout cut it off.
-	if err := n.waitGone(ctx, time.Now().Add(nodeStopTimeout(n.drain))); err != nil {
+	if err := n.waitGone(ctx, time.Now().Add(nodeStopWait(n.drain))); err != nil {
 		if errors.Is(err, errNodeStillLoaded) {
-			err = fmt.Errorf("the running node did not stop within %s: %w", minutes(nodeStopTimeout(n.drain)), err)
+			err = fmt.Errorf("the running node did not stop within %s: %w", minutes(nodeStopWait(n.drain)), err)
 		}
 		return true, err
 	}
 	return true, nil
+}
+
+// drainJob sends the node running as pid SIGTERM through launchd and waits,
+// until deadline, for that process to exit. A job an older plist keeps alive
+// may start again under a new pid; the signaled pid's exit still ends the
+// drain. killed reports that the signal went out. Once it has, every way out
+// (the exit, the deadline, an interrupt, a launchctl error) leads to the
+// bootout, so the job is never left stopped by a drained node alone; an
+// error means ctx ended before anything was sent.
+func (n nodeInstaller) drainJob(ctx context.Context, out io.Writer, pid int, deadline time.Time) (killed bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	// Not canceled with ctx, as the bootout: once it starts it may have gone out.
+	if _, err := n.launchctl(context.WithoutCancel(ctx), "kill", "SIGTERM", n.service); err != nil {
+		// No signal: the bootout sends one.
+		return false, nil
+	}
+	ticker := time.NewTicker(nodePollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return true, nil
+		case <-ticker.C:
+		}
+		loaded, running, err := n.status(ctx)
+		switch {
+		case err != nil, !loaded, running != pid:
+			return true, nil
+		case !time.Now().Before(deadline):
+			_, _ = fmt.Fprintf(out, "The node is still finishing streams after %s and is being stopped now.\n", minutes(nodeStopWait(n.drain)))
+			return true, nil
+		}
+	}
 }
 
 // waitGone polls launchd until it no longer has the job. At deadline it
@@ -750,6 +894,9 @@ func nodePortTaken(ctx context.Context, port int) bool {
 func promptNodeKey(in io.Reader, out io.Writer) (string, error) {
 	file, ok := in.(*os.File)
 	if !ok || !term.IsTerminal(int(file.Fd())) {
+		if _, err := fmt.Fprintln(out, "Reading the node key from standard input."); err != nil {
+			return "", err
+		}
 		return readNodeKeyLine(in)
 	}
 	fd := int(file.Fd())
