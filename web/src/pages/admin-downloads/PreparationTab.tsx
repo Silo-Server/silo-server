@@ -213,7 +213,7 @@ export default function PreparationTab() {
           <div
             role="img"
             aria-label={t(`${K}.stateBarLabel`)}
-            className="flex h-1.5 overflow-hidden rounded-full"
+            className="flex h-1.5 gap-0.5 overflow-hidden rounded-full"
           >
             {PREPARATION_STATES.filter((state) => counts[state] > 0).map((state) => (
               <div
