@@ -170,7 +170,7 @@ function SectionIndex({
               onClick={() => scrollToSection(section.id)}
               className="hover:bg-accent focus-visible:ring-ring/50 flex w-full items-baseline justify-between gap-3 rounded-md px-2 py-1 text-start text-[13px] outline-none focus-visible:ring-[3px]"
             >
-              <span className="truncate">{t(SECTION_TITLES[section.id])}</span>
+              <span className="min-w-0 wrap-anywhere">{t(SECTION_TITLES[section.id])}</span>
               <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
                 {sectionProgress(section, selection)}
               </span>
