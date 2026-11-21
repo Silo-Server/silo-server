@@ -48,10 +48,11 @@ const TRIGGER_FIELD_WIDTH = "w-full sm:w-fit sm:min-w-40 sm:max-w-full";
 
 // 11.5ic holds the widest "None" placeholder measured, Croatian "Bez ograničenja"
 // (167 px at 16 px text and 152 px at 14 px in Firefox), beside the number
-// spinners Firefox and Safari always draw. ic equals em at normal settings, so
-// the box grows with its own text size, and unlike em it also follows Firefox's
-// minimum font size. A browser without ic keeps the full-width box.
-const MAX_RUNTIME_INPUT_WIDTH = "w-full sm:w-[11.5ic] sm:max-w-full";
+// spinners Firefox and Safari always draw. ic and cap match em at normal
+// settings, so the box grows with its own text size; unlike em, they also follow
+// a browser minimum font size. The box stops at its column's width. A browser
+// without these units drops the width and shows the input at its default size.
+const MAX_RUNTIME_INPUT_WIDTH = "w-full sm:w-[max(11.5ic,15.5cap)] sm:max-w-full";
 
 type IntervalUnit = "seconds" | "minutes" | "hours";
 
