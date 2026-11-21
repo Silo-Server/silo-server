@@ -51,7 +51,7 @@ const TRIGGER_FIELD_WIDTH = "w-full sm:w-fit sm:min-w-40 sm:max-w-full";
 // spinners Firefox and Safari always draw. ic equals em at normal settings, so
 // the box grows with its own text size, and unlike em it also follows Firefox's
 // minimum font size. A browser without ic keeps the full-width box.
-const MAX_RUNTIME_INPUT_WIDTH = "w-full sm:w-[11.5ic]";
+const MAX_RUNTIME_INPUT_WIDTH = "w-full sm:w-[11.5ic] sm:max-w-full";
 
 type IntervalUnit = "seconds" | "minutes" | "hours";
 
@@ -205,7 +205,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
           <label className="text-muted-foreground text-xs whitespace-nowrap">
             {t("web.admin.tasks.detail.maxRuntimeLabel")}
           </label>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <Input
               type="number"
               min={0}
