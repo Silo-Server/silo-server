@@ -61,7 +61,7 @@ export function CollectionPosterCard({
   }
 
   return (
-    <div className="group/card relative w-full text-start">
+    <div className={`group/card relative w-full text-start ${handle ? "@container/poster" : ""}`}>
       <ViewTransitionLink to={href} className="block w-full text-start">
         <div className="media-card-image relative aspect-[2/3] overflow-hidden rounded-xl">
           {collection.poster_url ? (
@@ -98,8 +98,21 @@ export function CollectionPosterCard({
       </ViewTransitionLink>
       {meta !== undefined ? <div className="px-0.5">{meta}</div> : null}
       {tag ? <div className="px-0.5 pt-1.5">{tag}</div> : null}
-      {menu ? <div className="absolute end-2 top-2 z-10">{menu}</div> : null}
-      {handle ? <div className="absolute start-2 top-2 z-10">{handle}</div> : null}
+      {/* With a handle, the two corner chips share the top edge; on the
+          narrowest cards (about 88 px on a 320 px phone) a tighter inset
+          keeps a gap between them. */}
+      {menu ? (
+        <div
+          className={`absolute end-2 top-2 z-10 ${handle ? "@max-[96px]/poster:end-1.5 @max-[96px]/poster:top-1.5" : ""}`}
+        >
+          {menu}
+        </div>
+      ) : null}
+      {handle ? (
+        <div className="absolute start-2 top-2 z-10 @max-[96px]/poster:start-1.5 @max-[96px]/poster:top-1.5">
+          {handle}
+        </div>
+      ) : null}
       {pinnable && !isUserCollection && libraryId !== undefined ? (
         <SidebarPinButton collection={collection} libraryId={libraryId} />
       ) : null}
