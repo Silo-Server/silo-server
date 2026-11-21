@@ -48,7 +48,11 @@ export function HealthStripWidget() {
   const healthyNodes = enabledNodes.filter((node) => node.healthy).length;
 
   if (statusQuery.isLoading) {
-    return <Skeleton className="h-full min-h-[92px] rounded-2xl" />;
+    // Content-sized rows (narrow screens) need a minimum height. It is in rem
+    // and below the grid's fixed row (--admin-row-h in app.css), so it fits one
+    // row at any browser font size; a px minimum overflows the row when a small
+    // default font shrinks it.
+    return <Skeleton className="h-full min-h-23 rounded-2xl" />;
   }
 
   if (statusQuery.error || !status) {
