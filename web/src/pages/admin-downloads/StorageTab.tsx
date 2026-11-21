@@ -204,7 +204,9 @@ export default function StorageTab({
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* grid-cols-1, not the implicit column: a long location name is cut instead of
+          widening the column past the screen. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {data.locations.map((location) => (
           <LocationCard
             key={location.key}
@@ -364,7 +366,9 @@ function LocationCard({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <h2 className="truncate text-base font-semibold">{location.name}</h2>
+          <h2 dir="auto" className="truncate text-base font-semibold">
+            {location.name}
+          </h2>
           <StatusPill location={location} />
         </div>
         <Button variant="ghost" size="sm" onClick={onCleanUp} disabled={cleanUpBusy || offline}>
