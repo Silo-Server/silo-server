@@ -104,8 +104,10 @@ function ProfileRow({
       <div className="min-w-0 flex-1">
         {/* When the name and detail don't fit on one line, the detail moves under the
             name, and a name wider than the row wraps; as a block, its words wrap at the
-            row's width. A name that still overflows is clipped sideways at the row's
-            edge, and its title shows it in full. */}
+            row's width. A name that still overflows is clipped sideways at the row's end
+            edge, and its title shows it in full. The start padding, offset by a negative
+            margin, keeps a first letter whole whose ink reaches before its box, such as
+            a leading "j". */}
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <Label
             ref={nameRef}
@@ -113,7 +115,7 @@ function ProfileRow({
             title={profile.name}
             className={cn(
               "block min-w-0 text-sm wrap-anywhere",
-              nameOverflows && "overflow-x-clip",
+              nameOverflows && "-ms-[0.25em] overflow-x-clip ps-[0.25em]",
               !selectable && "text-muted-foreground",
             )}
           >
