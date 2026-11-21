@@ -1002,7 +1002,9 @@ function MediaCell({ session }: { session: AdminSession }) {
 /**
  * Position through the title, with a bar, and whether the viewer paused. The
  * bar narrows before anything wraps; past that the line wraps, so its end
- * (usually the pause label) never paints over the next column.
+ * (usually the pause label) never paints over the next column. When the
+ * position alone is wider than the column (a large minimum font size), it
+ * wraps at the " / ".
  */
 function ProgressLine({ session }: { session: AdminSession }) {
   const t = useT();
@@ -1020,7 +1022,7 @@ function ProgressLine({ session }: { session: AdminSession }) {
           />
         </span>
       ) : null}
-      <span className="shrink-0 tabular-nums">{formatPlaybackPosition(session)}</span>
+      <span className="max-w-full shrink-0 tabular-nums">{formatPlaybackPosition(session)}</span>
       {session.is_paused ? (
         <span className="text-warning inline-flex shrink-0 items-center gap-1 font-medium">
           <Pause aria-hidden="true" className="h-3 w-3" />
