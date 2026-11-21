@@ -848,6 +848,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   html[data-high-contrast="true"] .border-border\/80 {
     border-color: var(--border) !important;
   }
+  html[data-text-weight="strong"] .font-normal {
+    font-weight: var(--font-weight-ui, 520) !important;
+  }
   html[data-text-weight="strong"] .font-medium {
     font-weight: var(--font-weight-medium-ui, 600) !important;
   }

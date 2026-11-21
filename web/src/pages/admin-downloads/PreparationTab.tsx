@@ -722,7 +722,7 @@ function WorkerBadge({ prep }: { prep: AdminDownloadPreparation }) {
   }
   return (
     <span className="border-primary/20 bg-primary/10 text-primary inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold">
-      <span className="text-foreground/75 font-(--font-weight-ui)">{worker.label}</span>
+      <span className="text-foreground/75 font-normal">{worker.label}</span>
       <span className="truncate">{worker.name}</span>
     </span>
   );
