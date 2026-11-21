@@ -260,7 +260,7 @@ function NodeDriftBadge({ node }: { node: StreamNode }) {
   return (
     <Badge
       variant="outline"
-      className="bg-warning/10 text-warning border-warning/15"
+      className="bg-warning/10 text-warning-label border-warning/15"
       title={drift.title}
     >
       {drift.label}

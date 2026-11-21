@@ -141,7 +141,7 @@ export function SortableCollectionCard({
               type="button"
               aria-label={t("web.collections.page.dragHandle", { name: collection.name })}
               data-drag-handle
-              className="flex size-8 cursor-grab touch-none items-center justify-center rounded-[10px] bg-black/55 text-white opacity-0 backdrop-blur-sm transition group-focus-within/card:opacity-100 group-hover/card:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100"
+              className="flex size-8 cursor-grab touch-none items-center justify-center rounded-[10px] bg-black/55 text-white opacity-0 backdrop-blur-sm transition group-focus-within/card:opacity-100 group-hover/card:opacity-100 focus-visible:opacity-100 max-lg:size-9 [@media(pointer:coarse)]:opacity-100"
               {...attributes}
               onKeyDown={listeners?.onKeyDown as KeyboardEventHandler}
             >
