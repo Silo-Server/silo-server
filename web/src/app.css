@@ -1730,6 +1730,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     overflow: hidden;
     border-radius: var(--radius-xl);
     background-color: var(--surface);
+    /* A thumbhash placeholder is set inline with background-size: cover; a
+       repeating one tiles its opposite edge into the translucent border. */
+    background-repeat: no-repeat;
     border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.05),
