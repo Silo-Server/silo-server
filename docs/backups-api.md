@@ -376,7 +376,8 @@ Kind-specific details:
   creates an administrator), `match` (`account_id`, `restored`,
   `username_email`, or `new`), `target` (what the request sends back: the
   local account id, or `new`), `local_id` and `local_username` of a matched
-  account, `group` (the backup's group name, which a new account joins here),
+  account (its username, or its email when it has none), `group` (the
+  backup's group name, which a new account joins here),
   `policy_differences` (`{field, backup, here}` for each policy field this
   server would grant a new account more of), `libraries_left_out` (library
   entries with no library here, dropped), `profile_room` (how many new
