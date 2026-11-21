@@ -74,6 +74,10 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+  --color-success-label: var(--success-label);
+  --color-warning-label: var(--warning-label);
+  --color-info-label: var(--info-label);
+  --color-destructive-label: var(--destructive-label);
 
   /* ── Borders & Focus ─────────────────────────────────────── */
   --color-border: var(--border);
@@ -560,6 +564,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      --accent           Active/highlighted element backgrounds
      --destructive      Danger/error text, icons, borders
      --destructive-fill Solid danger fill under --destructive-foreground
+     --<status>-label   Status text on a 10% tint of its own colour
      --border           Default border color
      --sidebar          Sidebar background (often darkest surface)
    ================================================================ */
@@ -576,6 +581,29 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --warning-foreground: oklch(0.98 0.01 85);
     --info: oklch(0.7 0.15 250);
     --info-foreground: oklch(0.98 0.01 250);
+
+    /* Small status-coloured labels on a 10% tint of their own colour, such
+       as the play-method tags. The plain status colours fall below 4.5:1
+       there: --destructive is 3.8:1 on a hovered row. So the label mixes
+       its colour toward --contrast-boost, and further in high contrast,
+       which lightens the surfaces under it (see the block below). */
+    --status-label-boost: 25%;
+    --success-label: color-mix(
+      in srgb,
+      var(--success),
+      var(--contrast-boost) var(--status-label-boost)
+    );
+    --warning-label: color-mix(
+      in srgb,
+      var(--warning),
+      var(--contrast-boost) var(--status-label-boost)
+    );
+    --info-label: color-mix(in srgb, var(--info), var(--contrast-boost) var(--status-label-boost));
+    --destructive-label: color-mix(
+      in srgb,
+      var(--destructive),
+      var(--contrast-boost) var(--status-label-boost)
+    );
   }
 
   /* ── Contrast-adjustable tokens ─────────────────────────────
@@ -794,6 +822,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --surface-hover: color-mix(in srgb, var(--contrast-boost) 16%, var(--surface-hover-base));
     --surface-raised: color-mix(in srgb, var(--contrast-boost) 20%, var(--surface-raised-base));
     --accent: color-mix(in srgb, var(--contrast-boost) 14%, var(--accent-base));
+    /* A hovered row is --surface-hover, the lightest surface under a status
+       label; at 60% the lowest label there, destructive, is 5.1:1. */
+    --status-label-boost: 60%;
     --ambient-glow-opacity: 0.04;
   }
   html[data-high-contrast="true"] .surface-panel-subtle,
