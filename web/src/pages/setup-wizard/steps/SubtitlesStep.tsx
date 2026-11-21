@@ -183,6 +183,9 @@ function ProviderRow({
       variant="secondary"
       size="sm"
       onClick={() => {
+        // The reloaded credentials may be another admin's, so an earlier
+        // Test result says nothing about them.
+        setTested(null);
         refocusAfterReload.current = true;
         onReload();
       }}
