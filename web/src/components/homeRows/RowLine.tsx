@@ -113,14 +113,10 @@ export function RowLine({
           ) : null}
           {surface === "profile" ? (
             // Phones have no room for the tag next to the name.
-            <span
-              className={
-                row.own
-                  ? "text-info font-semibold sm:hidden"
-                  : "text-foreground font-medium sm:hidden"
-              }
-            >
-              {row.own ? t("web.home.rows.line.yours") : t("web.home.rows.line.server")}
+            <span className="sm:hidden">
+              <span className={row.own ? "text-info font-semibold" : "text-foreground font-medium"}>
+                {row.own ? t("web.home.rows.line.yours") : t("web.home.rows.line.server")}
+              </span>
               <MetaDot />
             </span>
           ) : null}
