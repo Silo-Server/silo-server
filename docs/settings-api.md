@@ -492,7 +492,8 @@ or light-theme logo URLs, and the API has no theme overrides or theme catalog.
 Text in the accent color (`text-primary`) doesn't use the stored value as is.
 The web client lightens the accent just enough to read at 4.5:1 on Cinema
 Dark's lightest surface and on the accent's own 20% tint, with a paler variant
-for high contrast. Fills, borders and the focus ring keep the stored color.
+for high contrast. Fills and borders keep the stored color, as does the focus
+ring outside high contrast.
 
 ### Retired theme settings
 
