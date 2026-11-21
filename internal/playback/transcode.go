@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math"
 	"mime"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -395,6 +396,11 @@ type TranscodeSession struct {
 	// closing is set once Close or CloseProcess begins. It is terminal: from
 	// then on no restart publishes a generation and no throttler is armed.
 	closing bool
+	// streamEnded and streamEndSegment record the media's last segment,
+	// learned when an FFmpeg reads its input to the end. They outlive later
+	// generations: the media does not grow. Guarded by mu.
+	streamEnded      bool
+	streamEndSegment int
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -698,10 +704,24 @@ func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, don
 		}
 	}
 	processmetrics.Record(processmetrics.Transcode, cmd.ProcessState, waitErr, ctx.Err())
-	s.flushStderr(ctx)
+	demuxError := s.flushStderr(ctx)
+	// FFmpeg that exits 0 without a demux error read its input to the end:
+	// being stopped or replaced kills it, and a failed read logs
+	// ffmpegDemuxErrorLine before an exit 0 that only looks clean. Its last
+	// segment is then the media's last. A keyframe plan lists only segments
+	// the source has, and keeps its own recovery rules.
+	endedCleanly := waitErr == nil && !demuxError && ctx.Err() == nil && s.copyPlan == nil
+	var lastSegment int
+	if endedCleanly {
+		lastSegment = s.SegmentProgress(time.Now()).ProducedHead
+	}
 	s.mu.Lock()
 	s.running = false
 	s.waitErr = waitErr
+	if endedCleanly {
+		s.streamEnded = true
+		s.streamEndSegment = lastSegment
+	}
 	s.mu.Unlock()
 	s.logWaitResult(ctx, waitErr)
 	close(done)
@@ -3213,6 +3233,15 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 	}
 
 	switch {
+	case s.pastEndOfStream(segNum):
+		// The container outlasts its streams (a subtitle track or a bad
+		// duration tag): no generation, the one a restart in flight is
+		// starting included, writes this segment, and a restart there
+		// would write nothing while the player asks again. The handler
+		// answers the end of the stream (ServeIfPastEndOfStream).
+		decision.WaitTimeout = 0
+		decision.RestartOnTimeout = false
+		decision.Reason = "past_end_of_stream"
 	// Restarting must be checked before Running: the restart window runs
 	// with running=false, and a concurrent segment request must wait out
 	// the in-flight restart rather than trigger another one. Dueling
@@ -3250,6 +3279,36 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 	}
 
 	return decision
+}
+
+// pastEndOfStream reports whether segNum lies after the media's last
+// segment, which the session learns when an FFmpeg reads its input to the
+// end.
+func (s *TranscodeSession) pastEndOfStream(segNum int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.streamEnded && segNum > s.streamEndSegment
+}
+
+// ServeIfPastEndOfStream answers a video segment request that found no
+// segment (err is ErrSegmentNotFound) past the media's last segment with an
+// empty segment, 200 and no bytes, and reports whether it did. Segment
+// handlers call it after any wait, since FFmpeg can finish while a request
+// waits, and before any restart. The synthetic playlist lists segments to
+// the stored duration, which can outlast every stream; a player steps over
+// an empty segment to the end of the playlist, while an error status is
+// retried and ends playback as a failure.
+func (s *TranscodeSession) ServeIfPastEndOfStream(w http.ResponseWriter, name string, segNum int, err error) bool {
+	if !errors.Is(err, ErrSegmentNotFound) || !s.pastEndOfStream(segNum) {
+		return false
+	}
+	if contentType := mime.TypeByExtension(filepath.Ext(name)); contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	w.Header().Set("Content-Length", "0")
+	w.WriteHeader(http.StatusOK)
+	return true
 }
 
 // GenerateFullManifest builds a complete VOD-style HLS manifest that lists
@@ -4769,6 +4828,14 @@ type ffmpegStderrWriter struct {
 	session *TranscodeSession
 	ctx     context.Context
 	partial []byte
+	// demuxError records that this FFmpeg's demuxer stopped on a read
+	// error (ffmpegDemuxErrorLine), after which it still exits 0.
+	demuxError bool
+}
+
+func (w *ffmpegStderrWriter) line(line string) {
+	w.demuxError = w.demuxError || strings.Contains(line, ffmpegDemuxErrorLine)
+	w.session.logFFmpegLine(w.ctx, line)
 }
 
 func (w *ffmpegStderrWriter) Write(p []byte) (int, error) {
@@ -4781,8 +4848,7 @@ func (w *ffmpegStderrWriter) Write(p []byte) (int, error) {
 		if idx < 0 {
 			break
 		}
-		line := strings.TrimRight(string(w.partial[:idx]), "\r")
-		w.session.logFFmpegLine(w.ctx, line)
+		w.line(strings.TrimRight(string(w.partial[:idx]), "\r"))
 		w.partial = append([]byte(nil), w.partial[idx+1:]...)
 	}
 	return len(p), nil
@@ -4792,7 +4858,7 @@ func (w *ffmpegStderrWriter) Flush() {
 	if len(w.partial) == 0 {
 		return
 	}
-	w.session.logFFmpegLine(w.ctx, strings.TrimRight(string(w.partial), "\r"))
+	w.line(strings.TrimRight(string(w.partial), "\r"))
 	w.partial = nil
 }
 
@@ -4807,14 +4873,18 @@ func (s *TranscodeSession) newStderrWriter(ctx context.Context) io.Writer {
 	return io.MultiWriter(s.stderr, lineWriter)
 }
 
-func (s *TranscodeSession) flushStderr(ctx context.Context) {
+// flushStderr logs the current FFmpeg's last partial stderr line and reports
+// whether its demuxer stopped on a read error.
+func (s *TranscodeSession) flushStderr(ctx context.Context) (demuxError bool) {
 	s.mu.Lock()
 	writer := s.stderrWriter
 	s.stderrWriter = nil
 	s.mu.Unlock()
-	if writer != nil {
-		writer.Flush()
+	if writer == nil {
+		return false
 	}
+	writer.Flush()
+	return writer.demuxError
 }
 
 func (s *TranscodeSession) logFFmpegLine(ctx context.Context, line string) {

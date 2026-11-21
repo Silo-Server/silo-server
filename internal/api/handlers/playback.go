@@ -2414,6 +2414,12 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 				}
 			}
 
+			// Past the media's end (FFmpeg finished there, perhaps during the
+			// wait) the segment never comes: end the stream, never restart.
+			if transcodeSession.ServeIfPastEndOfStream(w, segmentName, segNum, err) {
+				return
+			}
+
 			// If the segment is still missing (timed out, or outside the
 			// active encode range), either restart at the exact manifest-derived
 			// timeline position or return 404 for copy-mode segments outside the

@@ -372,6 +372,13 @@ id); clients never retry automatically and treat `429` as drop.
 | Subtitle sidecar | GET/HEAD `/api/v2/stream/{session_id}/subtitles/{track}` |
 | Subtitle fonts | GET `/api/v2/stream/{session_id}/subtitles/{track}/fonts`, JSON `{items: [{name, data}]}` |
 
+An encoded transcode's playlist can list video segments past the end of the
+media. Once FFmpeg has read the source to its end, a request for such a segment
+answers `200` with an empty body and the segment's media type; the player steps
+over it to the end of the playlist
+([protocol](architecture/playback-protocol-v3.md)). Transcode nodes and the
+Jellyfin-compatible transcode answer it the same way.
+
 These reuse the shared byte-delivery handlers behind the v2 listener, as the raw
 playback registry allows. The plan's URLs
 carry the signed stream reference `st`; a media element that cannot set headers

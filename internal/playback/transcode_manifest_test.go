@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -878,6 +880,94 @@ func TestSegmentRecoveryDecision(t *testing.T) {
 				t.Fatalf("Reason = %q, want %s", decision.Reason, tt.wantReason)
 			}
 			tt.check(t, decision)
+		})
+	}
+}
+
+// A file whose container outlasts its streams lists segments FFmpeg never
+// writes. FFmpeg finishing the input cleanly is the end of the stream: a
+// request past its last segment must end playback rather than seek-restart
+// FFmpeg past the end, which writes nothing and is requested again. A
+// failed FFmpeg is a crash and still restarts, and so is one that exits 0
+// after its input failed (a source read cut short), which ends its output
+// early.
+func TestSegmentRecoveryAfterFFmpegExits(t *testing.T) {
+	const demuxError = "[in#0/matroska,webm @ 0x1] Error during demuxing: Input/output error"
+	for _, tt := range []struct {
+		name       string
+		exitCode   int
+		stderr     string
+		restarting bool
+		request    int
+		wantEnd    bool
+		wantReason string
+	}{
+		{"clean exit ends the stream past its last segment", 0, "", false, 75, true, "past_end_of_stream"},
+		{"clean exit ends the stream during another request's restart", 0, "", true, 75, true, "past_end_of_stream"},
+		{"clean exit still restarts before its first segment", 0, "", false, 10, false, "transcode_not_running"},
+		{"failed exit restarts past its last segment", 1, "", false, 75, false, "transcode_not_running"},
+		{"exit after a demux error restarts past its last segment", 0, demuxError, false, 75, false, "transcode_not_running"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			script := filepath.Join(t.TempDir(), "ffmpeg")
+			body := "#!/bin/sh\n" +
+				"for n in 72 73 74; do printf x > seg_000$n.ts; done\n" +
+				"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:72\\n" +
+				"#EXTINF:2.0,\\nseg_00072.ts\\n#EXTINF:2.0,\\nseg_00073.ts\\n#EXTINF:2.0,\\nseg_00074.ts\\n#EXT-X-ENDLIST\\n' > stream.m3u8\n" +
+				fmt.Sprintf("echo '%s' >&2\nexit %d\n", tt.stderr, tt.exitCode)
+			if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			s := &TranscodeSession{
+				outputDir: dir,
+				opts: TranscodeOpts{
+					SessionID:        "sess-eof",
+					FFmpegPath:       script,
+					OutputDir:        dir,
+					TargetCodecVideo: "h264",
+					SegmentDuration:  2,
+				},
+			}
+			t.Cleanup(func() {
+				s.StopThrottler()
+				_ = s.Close()
+			})
+			if err := s.Restart(context.Background(), 144, 72); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-s.Done():
+			case <-time.After(10 * time.Second):
+				t.Fatal("fake FFmpeg did not exit")
+			}
+			if tt.restarting {
+				// A backward seek's restart is in flight for another request.
+				s.mu.Lock()
+				s.restarting = &restartFlight{}
+				s.mu.Unlock()
+				t.Cleanup(func() {
+					s.mu.Lock()
+					s.restarting = nil
+					s.mu.Unlock()
+				})
+			}
+
+			decision := s.SegmentRecoveryDecision(tt.request, time.Now())
+			if decision.Reason != tt.wantReason {
+				t.Fatalf("Reason = %q, want %q", decision.Reason, tt.wantReason)
+			}
+			rec := httptest.NewRecorder()
+			served := s.ServeIfPastEndOfStream(rec, fmt.Sprintf("seg_%05d.ts", tt.request), tt.request, ErrSegmentNotFound)
+			if served != tt.wantEnd {
+				t.Fatalf("ServeIfPastEndOfStream(%d) = %v, want %v", tt.request, served, tt.wantEnd)
+			}
+			if served && (rec.Code != http.StatusOK || rec.Body.Len() != 0 || rec.Header().Get("Content-Type") != "video/mp2t") {
+				t.Fatalf("end of stream = %d %q (%d bytes), want an empty 200 video/mp2t segment", rec.Code, rec.Header().Get("Content-Type"), rec.Body.Len())
+			}
+			if decision.RestartOnTimeout == tt.wantEnd || decision.Wait {
+				t.Fatalf("decision = %+v, want a restart only when the stream has not ended, and no wait", decision)
+			}
 		})
 	}
 }

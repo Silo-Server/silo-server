@@ -1322,6 +1322,11 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 				}
 			}
 
+			// Past the media's end (FFmpeg finished there, perhaps during the
+			// wait) the segment never comes: end the stream, never restart.
+			if transcodeSession.ServeIfPastEndOfStream(w, segmentName, segNum, err) {
+				return
+			}
 			if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
 				target, ok, restartErr := h.tm.RestartSegmentLocked(
 					r.Context(),
