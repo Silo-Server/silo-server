@@ -177,10 +177,10 @@ export const AccountRow = memo(function AccountRow({
         })
       : t("web.admin.backups.restore.users.newAccount");
   // Laid out like ItemRow (RestoreRows.tsx): a narrow row wraps the name above the
-  // contact line and leaves out the admin badge, profile count and merge status, so
-  // they never squeeze the name. Its details show the merge status, the admin role
-  // and the profiles. A wide row's badge can cut a long merge destination short, so
-  // the details show a merge in full at every width.
+  // contact line. The admin badge, profile count and merge status would leave a 42rem
+  // row's name and contact about 220 px, so they join the line only from 56rem; below
+  // that the details show the admin role and the status. The badge can cut a long
+  // merge destination short, so the details show a merge in full at every width.
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
@@ -218,13 +218,13 @@ export const AccountRow = memo(function AccountRow({
           ) : null}
         </div>
         {account.admin ? (
-          <span className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[11px] @2xl:inline-flex">
+          <span className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[11px] @4xl:inline-flex">
             <ShieldCheck aria-hidden="true" className="size-3.5" />
             {t("web.admin.backups.restore.users.administrator")}
           </span>
         ) : null}
         {account.profiles.length > 0 ? (
-          <span className="text-muted-foreground hidden shrink-0 text-[11px] whitespace-nowrap @2xl:inline">
+          <span className="text-muted-foreground hidden shrink-0 text-[11px] whitespace-nowrap @4xl:inline">
             {t("web.admin.backups.restore.users.profileCount", {
               count: account.profiles.length,
               count_text: account.profiles.length,
@@ -232,7 +232,7 @@ export const AccountRow = memo(function AccountRow({
           </span>
         ) : null}
         {status ? (
-          <span title={status} className="hidden max-w-40 shrink-0 truncate text-xs @2xl:inline">
+          <span title={status} className="hidden max-w-40 shrink-0 truncate text-xs @4xl:inline">
             {status}
           </span>
         ) : null}
@@ -252,10 +252,10 @@ export const AccountRow = memo(function AccountRow({
       {open ? (
         <div id={detailsId} className="space-y-1 ps-7 pb-3">
           {status ? (
-            <p className={cn("text-[13px] wrap-anywhere", !merges && "@2xl:hidden")}>{status}</p>
+            <p className={cn("text-[13px] wrap-anywhere", !merges && "@4xl:hidden")}>{status}</p>
           ) : null}
           {account.admin ? (
-            <p className="text-muted-foreground text-xs @2xl:hidden">
+            <p className="text-muted-foreground text-xs @4xl:hidden">
               {t("web.admin.backups.restore.users.administrator")}
             </p>
           ) : null}
