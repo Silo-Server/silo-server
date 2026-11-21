@@ -767,15 +767,21 @@ function describeImportJob(t: Translate, job: AdminJob) {
   );
 }
 
-// The key is a path, so a left-to-right isolate (LRI … PDI) keeps it in order in any language.
-// textValue lets type-to-select match the key rather than the invisible isolate before it.
+/** Decorative separator in an import source's label; not text, so not translated. */
+const SOURCE_LABEL_SEPARATOR = " • ";
+
+// The key is a path, so <bdi dir="ltr"> keeps it in order in any language without adding
+// characters to the label. textValue makes type-to-select match the path, not the date.
 function importSourceItem(source: CatalogSeedImportSource) {
-  const key = `\u2066${source.key}\u2069`;
-  const label = source.last_modified ? formatDateTime(source.last_modified) : key;
-  const text = `${label} • ${key}`;
+  const key = <bdi dir="ltr">{source.key}</bdi>;
   return (
     <SelectItem key={source.key} value={source.key} textValue={source.key}>
-      {text}
+      {/* One span, so the item's flex layout wraps the label as one run of text. */}
+      <span>
+        {source.last_modified ? formatDateTime(source.last_modified) : key}
+        {SOURCE_LABEL_SEPARATOR}
+        {key}
+      </span>
     </SelectItem>
   );
 }
