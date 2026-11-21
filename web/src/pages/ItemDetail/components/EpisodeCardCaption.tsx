@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { EpisodeListItem } from "@/api/types";
+import { useClampCut } from "@/hooks/useOverflowsInline";
 import { useAppLanguage } from "@/i18n";
 import { cn } from "@/lib/utils";
 import MachineTranslatedLabel from "./MachineTranslatedLabel";
@@ -39,6 +40,7 @@ export default function EpisodeCardCaption({
   const overview = hideOverview ? "" : (episode.overview?.trim() ?? "");
   const showsTranslationLabel =
     overview !== "" && hasMachineTranslation(episode.machine_translated_fields);
+  const [overviewRef, overviewCut] = useClampCut<HTMLParagraphElement>(overview);
 
   return (
     <div className="mt-2 space-y-1">
@@ -80,13 +82,15 @@ export default function EpisodeCardCaption({
       )}
       {overview && (
         // Three lines are reserved, as on the Apple card, so short descriptions
-        // keep the row's cards the same height. The text sits in a block
-        // inside the clamp so `.bidi-clamp` can tell when the clamp cuts it.
-        <div className="bidi-clamp text-muted-foreground line-clamp-3 min-h-[3lh] text-xs leading-relaxed">
-          <p dir="auto" className="bidi-text">
-            {overview}
-          </p>
-        </div>
+        // keep the row's cards the same height.
+        <p
+          ref={overviewRef}
+          dir="auto"
+          data-clamp-cut={overviewCut || undefined}
+          className="bidi-text text-muted-foreground line-clamp-3 min-h-[3lh] text-xs leading-relaxed"
+        >
+          {overview}
+        </p>
       )}
     </div>
   );

@@ -773,23 +773,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      end of its own direction, where the clamp's overflow hides it: an English
      overview cut in Arabic ended with no "…". While the clamp cuts such text,
      it aligns to its own start instead, and text that fits still lines up with
-     the page. Text that measures its own cut sets data-clamp-cut. Other text
-     sits in a block inside a `.bidi-clamp` box, whose scroll state says when
-     the clamp cuts it. A title can't use the query: its glyphs reach past its
-     tight line height, so its box scrolls a few pixels with nothing cut. Only
-     Chromium has scroll-state queries, so Firefox and WebKit keep the page's
-     alignment, where they draw the "…" correctly. :dir() limits both rules to
-     text that runs the other way from the element it sits in; text that runs
-     that element's way is already at its start and doesn't restyle. */
-  .bidi-clamp {
-    container-type: scroll-state;
-  }
-  @container scroll-state(scrollable: block) {
-    .bidi-clamp:dir(ltr) > .bidi-text:dir(rtl),
-    .bidi-clamp:dir(rtl) > .bidi-text:dir(ltr) {
-      text-align: start;
-    }
-  }
+     the page. CSS can't tell when a clamp cuts, so the component measures it
+     and sets data-clamp-cut (`useClampCut`). :dir() limits the rule to text
+     that runs the other way from the element it sits in; text that runs that
+     element's way is already at its start. Firefox and WebKit draw the "…"
+     correctly with the page's alignment, so they keep it: scroll-state
+     support stands in for Chromium here, and an engine that gains it later
+     would still show the "…". */
   @supports (container-type: scroll-state) {
     :dir(ltr) > .bidi-text[data-clamp-cut]:dir(rtl),
     :dir(rtl) > .bidi-text[data-clamp-cut]:dir(ltr) {

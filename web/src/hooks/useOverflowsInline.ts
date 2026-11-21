@@ -23,39 +23,79 @@ function textOverflows(element: HTMLElement) {
 }
 
 /**
- * Whether an element's text is wider than its box, such as a name or folder path
- * holding one long run of joined emoji that no line break can split. Clip such
- * text sideways only while this is true: clipping text that fits would trim letters
- * whose ink reaches past their edge, and in Firefox also tall marks above and
- * below the line. Measured after layout, again whenever the box resizes or a
- * web font finishes loading, and whenever `content` changes.
+ * Whether a line-clamped element cuts text that runs the other way from the element it
+ * sits in, the only text `data-clamp-cut` restyles (app.css). Text that runs its parent's
+ * way skips the layout read. A fraction of a pixel past the clamp counts as fitting.
  */
-export function useOverflowsInline<T extends HTMLElement>(content: unknown) {
+function clampCutsOppositeText(element: HTMLElement) {
+  const parent = element.parentElement;
+  if (parent && getComputedStyle(element).direction === getComputedStyle(parent).direction) {
+    return false;
+  }
+  return element.scrollHeight > element.clientHeight + 1;
+}
+
+/**
+ * `measure` for the element behind the returned ref: after layout, and again whenever the
+ * box resizes, a web font finishes loading, the text weight preference or the interface
+ * language changes, or `content` changes. Fonts, weight and language can all reflow text
+ * without resizing its box, so the resize observer alone would miss them; the language
+ * also changes how text such as Japanese breaks into lines.
+ */
+function useMeasuredFlag<T extends HTMLElement>(
+  measure: (element: T) => boolean,
+  content: unknown,
+) {
   const ref = useRef<T>(null);
-  const [overflows, setOverflows] = useState(false);
+  const [flag, setFlag] = useState(false);
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
     let active = true;
-    const measure = () => {
-      if (active) setOverflows(textOverflows(element));
+    const update = () => {
+      if (active) setFlag(measure(element));
     };
-    measure();
-    // A web font that finishes loading after the first measure changes the text's width
-    // without resizing its box, so the resize observer alone would miss it. `ready` covers
-    // a load already under way (WebKit fires no "loadingdone"); the event covers later ones.
+    update();
+    // `ready` covers a font load already under way (WebKit fires no "loadingdone"); the
+    // event covers later ones. With nothing loading, the first measure already counts.
     const fonts = "fonts" in document ? document.fonts : undefined;
-    void fonts?.ready.then(measure);
-    fonts?.addEventListener("loadingdone", measure);
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    if (fonts?.status === "loading") void fonts.ready.then(update);
+    fonts?.addEventListener("loadingdone", update);
+    const typography = new MutationObserver(update);
+    typography.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-text-weight", "lang"],
+    });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
     observer?.observe(element);
     return () => {
       active = false;
       observer?.disconnect();
-      fonts?.removeEventListener("loadingdone", measure);
+      typography.disconnect();
+      fonts?.removeEventListener("loadingdone", update);
     };
-  }, [content]);
-  return [ref, overflows] as const;
+  }, [measure, content]);
+  return [ref, flag] as const;
+}
+
+/**
+ * Whether an element's text is wider than its box, such as a name or folder path
+ * holding one long run of joined emoji that no line break can split. Clip such
+ * text sideways only while this is true: clipping text that fits would trim letters
+ * whose ink reaches past their edge, and in Firefox also tall marks above and
+ * below the line. Re-measured as `useMeasuredFlag` describes.
+ */
+export function useOverflowsInline<T extends HTMLElement>(content: unknown) {
+  return useMeasuredFlag<T>(textOverflows, content);
+}
+
+/**
+ * Whether a line-clamped `.bidi-text` element cuts text that runs the other way from the
+ * element it sits in, for its `data-clamp-cut` (see app.css). Re-measured as
+ * `useMeasuredFlag` describes.
+ */
+export function useClampCut<T extends HTMLElement>(content: unknown) {
+  return useMeasuredFlag<T>(clampCutsOppositeText, content);
 }
 
 /**
