@@ -8,8 +8,8 @@
 import { classParts, classTokenVisitors } from "./class-tokens.js";
 
 // The whole utility: a pixel size, then optionally `/` and a line height.
-const PX_SIZE = /^text-\[(length:)?(\d+(?:\.\d+)?)px\](?:\/(.+))?$/;
-const PX_LINE_HEIGHT = /^\[(\d+(?:\.\d+)?)px\]$/;
+const PX_SIZE = /^text-\[(length:)?(\d+(?:\.\d+)?)px\](?:\/(.+))?$/i;
+const PX_LINE_HEIGHT = /^\[(\d+(?:\.\d+)?)px\]$/i;
 
 const rem = (px) => `${Number(px) / 16}rem`;
 

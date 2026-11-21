@@ -44,6 +44,15 @@ tester.run("text-size-in-rem", rule, {
       `<div className="text-[13px]/[18px]" />`,
       `<div className="text-[0.8125rem]/[1.125rem]" />`,
     ),
+    // CSS units are case-insensitive, and a quoted selector splits the token at its quote.
+    fixed(
+      `<div className="text-[length:13PX] text-[13px]/[18PX]" />`,
+      `<div className="text-[length:0.8125rem] text-[0.8125rem]/[1.125rem]" />`,
+    ),
+    fixed(
+      `<div className="[&_svg:not([class*='text-'])]:text-[13px]" />`,
+      `<div className="[&_svg:not([class*='text-'])]:text-[0.8125rem]" />`,
+    ),
     fixed(`<div className="text-[length:13px]" />`, `<div className="text-[length:0.8125rem]" />`),
   ],
 });
