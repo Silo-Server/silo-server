@@ -46,14 +46,12 @@ interface TriggerFormRowProps {
 // so one long label can't push the Remove button out of view.
 const TRIGGER_FIELD_WIDTH = "w-full sm:w-fit sm:min-w-40 sm:max-w-full";
 
-// In em so the box grows with its own text size. 11.5em holds the widest "None"
-// placeholder measured, Croatian "Bez ograničenja" (167 px at 16 px text and
-// 152 px at 14 px in Firefox), beside the number spinners Firefox and Safari
-// always draw. Firefox's minimum font size enlarges the text without changing
-// em, so where field-sizing is supported an empty box may also grow to fit its
-// placeholder. A typed value never widens it.
-const MAX_RUNTIME_INPUT_WIDTH =
-  "w-full sm:w-[11.5em] sm:field-sizing-content sm:supports-[field-sizing:content]:placeholder-shown:min-w-fit";
+// 11.5ic holds the widest "None" placeholder measured, Croatian "Bez ograničenja"
+// (167 px at 16 px text and 152 px at 14 px in Firefox), beside the number
+// spinners Firefox and Safari always draw. ic equals em at normal settings, so
+// the box grows with its own text size, and unlike em it also follows Firefox's
+// minimum font size. A browser without ic keeps the full-width box.
+const MAX_RUNTIME_INPUT_WIDTH = "w-full sm:w-[11.5ic]";
 
 type IntervalUnit = "seconds" | "minutes" | "hours";
 
