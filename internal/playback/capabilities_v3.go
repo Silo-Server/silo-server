@@ -497,6 +497,13 @@ func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (b
 			claims.DolbyVisionReason = "profile_7_enhancement_layer_unknown"
 			return false, claims
 		}
+		// A full enhancement layer changes the picture, and a client's Dolby
+		// Vision profile claims do not say it decodes one. A minimal layer
+		// adds nothing, so it plays like any other Profile 7 source.
+		if source.DVProfile == 7 && source.DVEnhancementLayer == EnhancementFELV3 {
+			claims.DolbyVisionReason = "profile_7_full_enhancement_layer"
+			return false, claims
+		}
 		if hdr != nil && hdrSupportsDolbyVisionSourceV3(*hdr, source) {
 			claims.DolbyVision = true
 			claims.DolbyVisionReason = "native_profile_supported"

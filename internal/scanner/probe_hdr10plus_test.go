@@ -187,3 +187,28 @@ func TestProbeFileReturnsContextErrorWhenCanceledDuringFrameProbe(t *testing.T) 
 		t.Fatalf("ProbeFile error = %v, want context.DeadlineExceeded so an unchecked frame is not stored", err)
 	}
 }
+
+// A Profile 7 file's frame read asks for the RPU's NLQ coefficients, which
+// FFmpeg prints only when asked, and the scan records the enhancement layer's
+// type from them.
+func TestProbeFileReadsTheDolbyVisionEnhancementLayerType(t *testing.T) {
+	streams := `{"streams":[{"index":0,"codec_name":"hevc","codec_type":"video","profile":"Main 10","width":3840,"height":2160,` +
+		`"color_range":"tv","color_transfer":"smpte2084","color_primaries":"bt2020","pix_fmt":"yuv420p10le","disposition":{"default":1},` +
+		`"side_data_list":[{"side_data_type":"DOVI configuration record","dv_profile":7,"dv_level":6,"rpu_present_flag":1,` +
+		`"el_present_flag":1,"bl_present_flag":1,"dv_bl_signal_compatibility_id":6}]}],` +
+		`"format":{"filename":"movie.mkv","format_name":"matroska,webm","duration":"5400.0"}}`
+	component := `{"nlq_offset":512,"vdr_in_max":1048576,"linear_deadzone_slope":2048,"linear_deadzone_threshold":0}`
+	frame := `{"frames":[{"media_type":"video","color_range":"tv","side_data_list":[{"side_data_type":"Dolby Vision RPU Data"},` +
+		`{"side_data_type":"Dolby Vision Metadata","coef_log2_denom":23,"components":[` + component + "," + component + "," + component + `]}]}]}`
+	ffprobe, _ := writeHDR10PlusFFprobe(t, streams, "case \"$*\" in\n"+
+		"*frame_side_data=side_data_type,coef_log2_denom*frame_side_data_component=nlq_offset,vdr_in_max,linear_deadzone_slope,linear_deadzone_threshold*) printf '%s' '"+frame+"' ;;\n"+
+		"*) printf '%s' '"+hdr10PlusFrameJSON+"' ;;\nesac")
+
+	probe, err := ProbeFile(context.Background(), ffprobe, filepath.Join(t.TempDir(), "movie.mkv"))
+	if err != nil {
+		t.Fatalf("ProbeFile: %v", err)
+	}
+	if got := probe.VideoTracks[0].DVEnhancementLayer; got != "fel" {
+		t.Fatalf("DVEnhancementLayer = %q, want fel", got)
+	}
+}
