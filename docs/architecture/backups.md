@@ -134,7 +134,8 @@ the drill for that.
 The check value is HKDF-SHA256 over `SECRET_KEY` with info
 `silo/backup-key-check/v1`, 8 bytes, written as 16 hex digits in groups of 4
 (`secret.KeyCheckValue`, beside the data key derivation in
-`internal/secret/cipher.go`). `silo secret check` reads a key on stdin and
+`internal/secret/cipher.go`). `silo secret check` reads a key from the first line
+of stdin, or with `--file` from a key file read as `SECRET_KEY_FILE` is, and
 prints the value, so an operator can tell which key a backup needs without
 showing either key.
 

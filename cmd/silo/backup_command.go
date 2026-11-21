@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -785,19 +786,42 @@ func plainSettings(ctx context.Context, dbURL string) (map[string]string, error)
 	return catalog.NewServerSettingsRepo(pool).GetAll(ctx)
 }
 
-// runSecretCommand runs `silo secret check`: it reads a SECRET_KEY on stdin
-// (using the same 1 MiB limit and single-line-ending rule as SECRET_KEY_FILE)
-// and prints its check value, the one every backup manifest records, so an
-// operator can confirm which key a backup needs without showing the key.
+// runSecretCommand runs `silo secret check`: it reads a SECRET_KEY and prints
+// its check value, the one every backup manifest records, so an operator can
+// confirm which key a backup needs without showing the key. The key comes from
+// the first line of stdin, so one pasted at a prompt is checked at Enter, or
+// with --file from a key file read the way SECRET_KEY_FILE is.
 func runSecretCommand(args []string, in io.Reader, out io.Writer) error {
-	if len(args) != 1 || args[0] != "check" {
-		return errors.New("usage: printf %s \"$SECRET_KEY\" | silo secret check (or: silo secret check < \"$SECRET_KEY_FILE\")")
+	const usage = `usage: printf %s "$SECRET_KEY" | silo secret check, or silo secret check --file "$SECRET_KEY_FILE"`
+	if len(args) == 0 || args[0] != "check" {
+		return errors.New(usage)
 	}
-	data, err := envutil.ReadBounded(in)
-	if err != nil {
-		return err
+	flags := flag.NewFlagSet("secret check", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	file := flags.String("file", "", "read the key from this file, as SECRET_KEY_FILE does")
+	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
+		return errors.New(usage)
 	}
-	key := envutil.TrimOneLineEnding(string(data))
+	var key string
+	if *file != "" {
+		// SECRET_KEY_FILE's own lookup, so the key and every refusal match startup.
+		fileVar := envSecretKey + envutil.SecretFileSuffix
+		var err error
+		if key, _, err = envutil.LookupSecret(func(name string) string {
+			if name == fileVar {
+				return *file
+			}
+			return ""
+		}, envSecretKey); err != nil {
+			return err
+		}
+	} else {
+		line, err := bufio.NewReader(io.LimitReader(in, 64<<10)).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		key = strings.TrimRight(line, "\r\n")
+	}
 	check, err := secret.KeyCheckValue([]byte(key))
 	if err != nil {
 		return err

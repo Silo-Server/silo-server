@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/backup"
@@ -165,7 +167,7 @@ func TestBackupCommandsReadS3DB(t *testing.T) {
 		"SECRET_KEY": b.masterKey, envBackupS3Endpoint: b.srv.URL, envBackupS3Region: "us-east-1",
 		envBackupS3AccessKey: "a", envBackupS3SecretKey: "s", envBackupS3PathStyle: "true",
 		// A shell that sets the file variants would make each read ambiguous.
-		"SECRET_KEY_FILE": "", envBackupS3AccessKey + "_FILE": "", envBackupS3SecretKey + "_FILE": "",
+		"SECRET_KEY_FILE": "", "DATABASE_URL_FILE": "", envBackupS3AccessKey + "_FILE": "", envBackupS3SecretKey + "_FILE": "",
 	} {
 		t.Setenv(k, v)
 	}
@@ -208,17 +210,50 @@ func TestBackupCommandsReadS3DB(t *testing.T) {
 	}
 }
 
-// `silo secret check` matches SECRET_KEY_FILE byte for byte, including a key
-// file with an extra trailing newline or a wrapped multi-line key.
-func TestSecretCheckMatchesSecretFile(t *testing.T) {
-	dir := t.TempDir()
-	cases := map[string]string{
-		"double-newline": "0123456789abcdef0123456789abcdef\n\n",
-		"multiline":      "0123456789abcdef0123456789abcdef\nsecond-line-of-key\n",
+// `silo secret check` answers once a key typed or pasted on stdin ends its
+// line, with no end of input needed, and `--file` reads a key file the way
+// SECRET_KEY_FILE does, including an extra trailing newline or a wrapped
+// multi-line key.
+func TestSecretCheck(t *testing.T) {
+	const key = "0123456789abcdef0123456789abcdef"
+	checkOf := func(t *testing.T, key string) string {
+		t.Helper()
+		check, err := secret.KeyCheckValue([]byte(key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return check
 	}
-	for name, raw := range cases {
+
+	t.Run("stdin", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			in, typed := io.Pipe()
+			defer func() { _ = typed.Close() }()
+			var out bytes.Buffer
+			done := make(chan error, 1)
+			go func() { done <- runSecretCommand([]string{"check"}, in, &out) }()
+			if _, err := io.WriteString(typed, key+"\n"); err != nil {
+				t.Fatal(err)
+			}
+			synctest.Wait()
+			select {
+			case err := <-done:
+				if got := strings.TrimSpace(out.String()); err != nil || got != checkOf(t, key) {
+					t.Fatalf("secret check = %q, %v; want %q", got, err, checkOf(t, key))
+				}
+			default:
+				t.Fatal("secret check is still waiting for the end of input after the key's line")
+			}
+		})
+	})
+
+	dir := t.TempDir()
+	for name, raw := range map[string]string{
+		"file double newline": key + "\n\n",
+		"file multiline":      key + "\nsecond-line-of-key\n",
+	} {
 		t.Run(name, func(t *testing.T) {
-			path := filepath.Join(dir, name)
+			path := filepath.Join(dir, strings.ReplaceAll(name, " ", "-"))
 			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -226,16 +261,12 @@ func TestSecretCheckMatchesSecretFile(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want, err := secret.KeyCheckValue([]byte(loaded))
-			if err != nil {
-				t.Fatal(err)
-			}
 			var out bytes.Buffer
-			if err := runSecretCommand([]string{"check"}, strings.NewReader(raw), &out); err != nil {
+			if err := runSecretCommand([]string{"check", "--file", path}, strings.NewReader(""), &out); err != nil {
 				t.Fatal(err)
 			}
-			if got := strings.TrimSpace(out.String()); got != want {
-				t.Fatalf("secret check = %q, want %q (from ReadSecretFile)", got, want)
+			if got, want := strings.TrimSpace(out.String()), checkOf(t, loaded); got != want {
+				t.Fatalf("secret check --file = %q, want %q (from ReadSecretFile)", got, want)
 			}
 		})
 	}

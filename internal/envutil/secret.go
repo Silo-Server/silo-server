@@ -47,18 +47,18 @@ func LookupSecret(getenv func(string) string, name string) (value, usedVar strin
 	}
 }
 
-// TrimOneLineEnding removes one trailing LF (and a preceding CR) from s,
+// trimOneLineEnding removes one trailing LF (and a preceding CR) from s,
 // since editors and `echo` add one; anything else in s stays intact.
-func TrimOneLineEnding(s string) string {
+func trimOneLineEnding(s string) string {
 	if line, ended := strings.CutSuffix(s, "\n"); ended {
 		return strings.TrimSuffix(line, "\r")
 	}
 	return s
 }
 
-// ReadBounded reads at most maxFileBytes from r, refusing larger input so a
+// readBounded reads at most maxFileBytes from r, refusing larger input so a
 // mistaken path or stream cannot pull an unbounded body into memory.
-func ReadBounded(r io.Reader) ([]byte, error) {
+func readBounded(r io.Reader) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(r, maxFileBytes+1))
 	if err != nil || len(data) > maxFileBytes {
 		return nil, errors.New("could not read file within the 1 MiB limit")
@@ -75,7 +75,7 @@ func ReadSecretFile(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	secret := TrimOneLineEnding(string(data))
+	secret := trimOneLineEnding(string(data))
 	if secret == "" || !utf8.ValidString(secret) {
 		return "", errors.New("the file must hold a nonempty UTF-8 value")
 	}
@@ -98,7 +98,7 @@ func ReadRegularFile(path string) ([]byte, error) {
 		return nil, fileError(err)
 	}
 	defer func() { _ = f.Close() }()
-	return ReadBounded(f)
+	return readBounded(f)
 }
 
 // fileError names why a file could not be read. Silo reads it as its own
