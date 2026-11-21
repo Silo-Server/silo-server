@@ -769,10 +769,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
       text-align: match-parent;
     }
   }
-  /* Left-to-right text in a block, such as a path, whose lines line up the way
-     the text around it does: at the right on a right-to-left page. An inherited
-     `start` would resolve against the block's own `dir="ltr"` instead. Not named
-     `text-*`, which `cn()` would take for a text color and drop the real one. */
+  /* Text with a direction of its own in a block, such as a path or a name, whose
+     lines line up the way the text around it does: at the right on a right-to-left
+     page. An inherited `start` would resolve against the block's own `dir` instead.
+     Not named `text-*`, which `cn()` would take for a text color and drop the real
+     one. */
   .align-with-page {
     text-align: -webkit-match-parent;
   }
@@ -887,6 +888,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   html[data-high-contrast="true"] .border-border\/70,
   html[data-high-contrast="true"] .border-border\/80 {
     border-color: var(--border) !important;
+  }
+  html[data-text-weight="strong"] .font-normal {
+    font-weight: var(--font-weight-ui, 520) !important;
   }
   html[data-text-weight="strong"] .font-medium {
     font-weight: var(--font-weight-medium-ui, 600) !important;
@@ -1295,9 +1299,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   /* ── Glass Surfaces ──────────────────────────────────────── */
   /* Frosted glass effect for floating controls, overlay panels.
      Usage: <div class="glass">...</div>
-     Put -webkit-backdrop-filter before backdrop-filter. The production
-     build's CSS minifier merges the pair and keeps only the later one, so
-     the reverse order leaves Chrome and Firefox with no blur. */
+     Put -webkit-backdrop-filter before backdrop-filter. `vite build` runs
+     this file through Lightning CSS, which drops a backdrop-filter that is
+     followed by its -webkit- form, leaving Chrome and Firefox with no blur.
+     In this order it ships both. `pnpm run budget:check` fails on a built
+     rule with only the -webkit- form. */
   .glass {
     background: color-mix(in srgb, var(--surface) 70%, transparent);
     -webkit-backdrop-filter: blur(20px) saturate(1.2);
@@ -2161,10 +2167,14 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .library-marquee-header.is-overlay .marquee-tab-trigger {
     color: color-mix(in srgb, #fff 68%, transparent);
   }
-  .marquee-tab-trigger:hover {
+  /* Mouse only, like the `hover:` variant: a tap leaves :hover stuck on touch,
+     and a stuck tab reads as selected once the selection moves on. */
+  :where(:root[data-fine-pointer="true"]) .marquee-tab-trigger:hover {
     color: var(--foreground);
   }
-  .library-marquee-header.is-overlay .marquee-tab-trigger:hover {
+  :where(:root[data-fine-pointer="true"])
+    .library-marquee-header.is-overlay
+    .marquee-tab-trigger:hover {
     color: #fff;
   }
   .marquee-tab-trigger[data-state="active"] {
@@ -2627,7 +2637,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     /* How far fixed chrome at the foot of a page rises, and how much the admin
        shell pads the end of its pages, to clear whichever background playback
        bar shows. useRootHeightProperty measures each bar, bottom inset
-       included, on the root while it shows. */
+       included, on the root while it shows. The audiobook bar's height stays
+       while Now Listening covers it, until playback ends. */
     --playback-bar-clearance: max(var(--watch-bar-height, 0px), var(--audiobook-bar-height, 0px));
     /* The impersonation banner pins to the top of the viewport above every
        route, and ImpersonationBanner measures its height here while it shows.
@@ -2812,5 +2823,20 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 @media (min-width: 64rem) {
   .settings-section {
     padding-block: 1.75rem;
+  }
+}
+
+/* Arabic letters join, and letter-spacing pulls them apart. CSS Text 3 says not
+   to space cursive scripts: Chromium and Firefox skip it, Safari doesn't. Clear
+   it wherever the language is Arabic, which in the Arabic interface is the whole
+   page (<html lang>). Names and titles keep the interface language, so a tracked
+   element that shows them sets `data-cursive` when they hold Arabic-script text
+   (hasArabicScript in lib/direction). !important in @layer base outranks every
+   other letter-spacing: later layers' !important (Tailwind's `tracking-*!`),
+   unlayered rules such as setup-wizard.css, and inline styles. */
+@layer base {
+  :lang(ar),
+  [data-cursive] {
+    letter-spacing: normal !important;
   }
 }

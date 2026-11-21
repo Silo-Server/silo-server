@@ -96,11 +96,22 @@ function SuggestionRow({
             </span>
           ) : null}
         </div>
-        <div className="text-muted-foreground mt-0.5 truncate text-xs">
-          {suggesterName}
+        {/* The name and the note each read in their own direction and are cut
+            at their own end; the note goes first. The note's truncate also
+            folds its line breaks, which pre would keep. */}
+        <div className="text-muted-foreground mt-0.5 flex overflow-hidden text-xs whitespace-pre">
+          <span dir="auto" className="max-w-full shrink-0 truncate">
+            {suggesterName}
+          </span>
           {suggestion.note ? (
-            <span className="italic">
-              {t("web.watchTogether.suggestions.note", { note: suggestion.note })}
+            <span className="flex min-w-0 italic">
+              {t("web.watchTogether.suggestions.note", {
+                note: (
+                  <span dir="auto" className="truncate">
+                    {suggestion.note}
+                  </span>
+                ),
+              })}
             </span>
           ) : null}
         </div>

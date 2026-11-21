@@ -36,6 +36,7 @@ var launchesOutsideFspath = map[string]string{
 	"internal/playback/encoder_warmup.go:runHardwareEncoderWarmup":                           "FFmpeg on lavfi test sources",
 	"internal/playback/remux.go:supportsDoviRPUFilter":                                       "ffmpeg -bsfs",
 	"internal/playback/remux.go:supportsLeadingPictureDropFilter":                            "ffmpeg -h bsf=noise",
+	"internal/playback/transcode.go:supportsScaleReference":                                  "FFmpeg on lavfi test sources",
 	"internal/playback/transformations_v3.go:ProbeTransformationRegistryWithToneMapV3Result": "ffmpeg -bsfs and -encoders",
 	"internal/playback/transformations_v3.go:probeAudioRecipeFilterV3":                       "FFmpeg on a lavfi anullsrc input",
 	"internal/playback/transformations_v3.go:probeHEVCRecipeV3":                              "FFmpeg on a lavfi testsrc2 input",

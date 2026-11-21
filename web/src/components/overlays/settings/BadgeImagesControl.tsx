@@ -34,16 +34,20 @@ function ImageSelect({
       value={value ?? NONE}
       onValueChange={(next) => onChange(next === NONE ? undefined : next)}
     >
-      <SelectTrigger className="w-full" aria-label={label}>
+      <SelectTrigger className="w-full min-w-0" aria-label={label}>
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      {/* A long image name is cut, not grown past the screen: the trigger, the menu
+          and each level down to the name can shrink. */}
+      <SelectContent className="max-w-[calc(100vw-2rem)]">
         <SelectItem value={NONE}>{noneLabel}</SelectItem>
         {images.map((image) => (
-          <SelectItem key={image.ref} value={image.ref}>
-            <span className="flex items-center gap-2">
+          <SelectItem key={image.ref} value={image.ref} className="*:last:min-w-0">
+            <span className="flex min-w-0 items-center gap-2">
               <img src={image.url} alt="" className="h-4 w-auto max-w-12 object-contain" />
-              <span className="truncate">{image.name}</span>
+              <span dir="auto" className="truncate">
+                {image.name}
+              </span>
             </span>
           </SelectItem>
         ))}

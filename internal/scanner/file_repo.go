@@ -1709,7 +1709,7 @@ func (r *FileRepository) listMarkerEditAudit(ctx context.Context, whereClause st
 		       iu.username,
 		       a.api_key_id,
 		       a.request_id,
-		       a.client_ip::text,
+		       host(a.client_ip),
 		       a.user_agent,
 		       a.created_at
 		FROM marker_edit_audit a

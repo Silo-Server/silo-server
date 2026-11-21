@@ -21,6 +21,7 @@ import {
   type MissingFileGroup,
   type OmissionGroup,
 } from "./warningDetails";
+import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
 
 /**
  * Picks a toggle label's wording for the number of items it reveals. The label
@@ -38,6 +39,25 @@ function amount(count: number): "exactlyOne" | "exactlyTwo" | "other" {
 const LONG_LIST =
   "bg-background/60 max-h-48 overflow-y-auto rounded-md border px-3 py-2 text-xs select-text";
 
+/**
+ * One name in an omission group's full list. Only while it can't wrap to fit, such as
+ * one long run of joined emoji, is it clipped sideways at its column's edge; its title
+ * shows it in full. A name stays in one column: split across two, the measurement would
+ * see the union of both pieces and miss the overflow in the first.
+ */
+function OmittedName({ label }: { label: string }) {
+  const [ref, overflows] = useOverflowsInline<HTMLLIElement>(label);
+  return (
+    <li
+      ref={ref}
+      title={label}
+      className={cn("break-inside-avoid break-words", overflows && OVERFLOW_CLIP)}
+    >
+      {label}
+    </li>
+  );
+}
+
 /** One section's headline: the only amber line, with the warning icon. */
 function Headline({ children }: { children: ReactNode }) {
   return (
@@ -52,6 +72,12 @@ function OmissionGroupRow({ group }: { group: OmissionGroup }) {
   const t = useT();
   const listId = useId();
   const [open, setOpen] = useState(false);
+  const sample = nameSampleText(group.labels);
+  // More than NAMES_SHOWN names get a full list below; otherwise the sample is the only place
+  // the names appear, so it carries their full text as a tooltip.
+  const hasList = group.labels.length > NAMES_SHOWN;
+  // Clipped sideways only while a name in it can't wrap to fit.
+  const [sampleRef, sampleOverflows] = useOverflowsInline<HTMLParagraphElement>(sample);
   return (
     <li className="min-w-0 space-y-1">
       <p className="text-[13px]">{omissionGroupTitle(group)}</p>
@@ -64,8 +90,17 @@ function OmissionGroupRow({ group }: { group: OmissionGroup }) {
       >
         {group.detail}
       </p>
-      <p className="text-muted-foreground text-xs break-words">{nameSampleText(group.labels)}</p>
-      {group.labels.length > NAMES_SHOWN ? (
+      <p
+        ref={sampleRef}
+        title={hasList ? undefined : sample}
+        className={cn(
+          "text-muted-foreground text-xs break-words",
+          sampleOverflows && OVERFLOW_CLIP,
+        )}
+      >
+        {sample}
+      </p>
+      {hasList ? (
         <Disclosure open={open} onOpenChange={setOpen} controls={listId}>
           {open
             ? t("web.admin.backups.warnings.hideNames")
@@ -78,9 +113,7 @@ function OmissionGroupRow({ group }: { group: OmissionGroup }) {
       {open ? (
         <ul id={listId} className={cn(LONG_LIST, "gap-x-6 sm:columns-2 lg:columns-3")}>
           {group.labels.map((label, position) => (
-            <li key={`${label}-${position}`} className="break-words">
-              {label}
-            </li>
+            <OmittedName key={`${label}-${position}`} label={label} />
           ))}
         </ul>
       ) : null}

@@ -76,6 +76,7 @@ import {
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { menuItemKey } from "@/lib/uiCustomization";
 import { Direction } from "radix-ui";
+import { getInitial } from "@/lib/text";
 
 // Same icons the admin library-type picker shows; Library only for a type the
 // picker does not know.
@@ -96,9 +97,21 @@ function getLibraryIdFromPathname(pathname: string): number | null {
  * layout box in both states and only fade — the moving frame hides them. Animating
  * `max-width` here used to reflow the whole nav subtree on every frame.
  */
-function SidebarLabel({ children, show }: { children: ReactNode; show: boolean }) {
+function SidebarLabel({
+  children,
+  show,
+  dir,
+}: {
+  children: ReactNode;
+  show: boolean;
+  /** "auto" for a name someone typed, so a cut one keeps its start in either script. */
+  dir?: "auto";
+}) {
   return (
-    <span className={`sidebar-fade max-w-[180px] truncate ${show ? "opacity-100" : "opacity-0"}`}>
+    <span
+      dir={dir}
+      className={`sidebar-fade max-w-[180px] truncate ${show ? "opacity-100" : "opacity-0"}`}
+    >
       {children}
     </span>
   );
@@ -198,6 +211,8 @@ interface ResolvedPrimaryMenuLink {
   href: string;
   label: string;
   icon: ReactNode;
+  /** "auto" when the label is a library, section or collection name. */
+  dir?: "auto";
 }
 
 export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppSidebarProps) {
@@ -300,6 +315,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
             href: `/library/${library.id}`,
             label: item.label || library.name,
             icon: getLibraryIcon(library.type),
+            dir: "auto",
           },
         ];
       }
@@ -317,6 +333,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
             }),
             label,
             icon: <LayoutGrid className="h-[18px] w-[18px] shrink-0" />,
+            dir: "auto",
           },
         ];
       }
@@ -337,6 +354,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                 : buildLibraryCollectionCatalogHref(item.collection_id, label, item.library_id),
             label,
             icon: <FolderOpen className="h-[18px] w-[18px] shrink-0" />,
+            dir: "auto",
           },
         ];
       }
@@ -592,7 +610,9 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                         />
                       ) : null}
                       {link.icon}
-                      <SidebarLabel show={showLabels}>{link.label}</SidebarLabel>
+                      <SidebarLabel show={showLabels} dir={link.dir}>
+                        {link.label}
+                      </SidebarLabel>
                     </ViewTransitionLink>
                   </li>
                 );
@@ -695,7 +715,9 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                             <span className="flex w-[18px] flex-shrink-0 items-center justify-center">
                               {getLibraryIcon(lib.type)}
                             </span>
-                            <SidebarLabel show={showLabels}>{lib.name}</SidebarLabel>
+                            <SidebarLabel show={showLabels} dir="auto">
+                              {lib.name}
+                            </SidebarLabel>
                           </ViewTransitionLink>
                           {hasPins ? (
                             <button
@@ -1094,10 +1116,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                       <AvatarImage src={profile.avatar_url} alt={profile.name} />
                     ) : null}
                     <AvatarFallback className="bg-primary text-primary-foreground text-xs font-bold shadow-[0_14px_32px_-20px_rgba(0,0,0,0.8)]">
-                      {profile?.name?.charAt(0).toUpperCase() ??
-                        user?.username?.charAt(0).toUpperCase() ??
-                        // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- placeholder initial, not a word
-                        "?"}
+                      {getInitial(profile?.name ?? user?.username ?? "?")}
                     </AvatarFallback>
                   </Avatar>
                 </span>
@@ -1122,7 +1141,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     <AvatarImage src={profile.avatar_url} alt={profile.name} />
                   ) : null}
                   <AvatarFallback className="bg-primary text-primary-foreground text-sm font-bold">
-                    {(profile?.name ?? user?.username ?? "?").charAt(0).toUpperCase()}
+                    {getInitial(profile?.name ?? user?.username ?? "?")}
                   </AvatarFallback>
                 </Avatar>
                 {/* w-fit keeps a short name on the start side; the column would
