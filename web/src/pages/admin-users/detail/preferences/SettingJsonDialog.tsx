@@ -45,11 +45,11 @@ export function SettingJsonDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          <p className="text-muted-foreground text-[12.5px]">{description}</p>
+          <p className="text-muted-foreground text-[0.78125rem]">{description}</p>
           <textarea
             spellCheck={false}
             aria-label={t("web.admin.users.detail.preferences.json.rawValueAria")}
-            className="border-input bg-background focus:border-foreground/40 min-h-[260px] w-full rounded-md border px-3 py-2 font-mono text-[13px] leading-relaxed transition-colors outline-none max-sm:text-base"
+            className="border-input bg-background focus:border-foreground/40 min-h-[260px] w-full rounded-md border px-3 py-2 font-mono text-[0.8125rem] leading-relaxed transition-colors outline-none max-sm:text-base"
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
           />

@@ -684,7 +684,7 @@ function ScanQueuePopover({
               {t("web.admin.libraries.scanQueue.title")}
             </span>
           </div>
-          <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
+          <div className="text-muted-foreground flex items-center gap-1.5 text-[0.6875rem]">
             {totalRunning > 0 && (
               <>
                 <span className="bg-success inline-block h-1.5 w-1.5 rounded-full" />
@@ -759,14 +759,14 @@ function ScanQueueGroup({
     <div>
       {/* Library header row */}
       <div className="flex items-center gap-2 py-1.5">
-        <span className="text-muted-foreground/60 text-[10px] font-semibold tracking-widest uppercase">
+        <span className="text-muted-foreground/60 text-[0.625rem] font-semibold tracking-widest uppercase">
           {getLibraryScanGroupName(t, group.library, group.libraryID)}
         </span>
         <div className="bg-border/25 h-px flex-1" />
         <Button
           variant="ghost"
           size="sm"
-          className="text-muted-foreground hover:text-destructive h-6 gap-1 px-2 text-[10px]"
+          className="text-muted-foreground hover:text-destructive h-6 gap-1 px-2 text-[0.625rem]"
           disabled={cancelling}
           onClick={() => onCancel(group.libraryID)}
         >
@@ -805,12 +805,12 @@ function ScanQueueGroup({
             <div className="flex items-baseline gap-1.5">
               <span className="text-xs leading-snug font-medium">{formatActiveScanMode(scan)}</span>
               {scan.trigger && (
-                <span className="bg-muted/50 text-muted-foreground rounded px-1 py-px text-[9px] font-medium">
+                <span className="bg-muted/50 text-muted-foreground rounded px-1 py-px text-[0.5625rem] font-medium">
                   {formatActiveScanTrigger(scan.trigger)}
                 </span>
               )}
             </div>
-            <div className="text-muted-foreground mt-px flex items-center gap-1 text-[10px] leading-relaxed">
+            <div className="text-muted-foreground mt-px flex items-center gap-1 text-[0.625rem] leading-relaxed">
               <code
                 className="text-muted-foreground/70 max-w-[200px] truncate font-mono"
                 title={scan.path}
@@ -825,7 +825,7 @@ function ScanQueueGroup({
               </span>
             </div>
             {formatActiveScanProgress(scan) && (
-              <div className="text-muted-foreground/80 mt-1 truncate text-[10px] leading-relaxed">
+              <div className="text-muted-foreground/80 mt-1 truncate text-[0.625rem] leading-relaxed">
                 {formatActiveScanProgress(scan)}
               </div>
             )}
@@ -835,7 +835,7 @@ function ScanQueueGroup({
       {collapsible ? (
         <button
           type="button"
-          className="text-muted-foreground hover:text-foreground flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] transition-colors"
+          className="text-muted-foreground hover:text-foreground flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[0.625rem] transition-colors"
           onClick={() => setExpanded((current) => !current)}
         >
           {expanded ? (

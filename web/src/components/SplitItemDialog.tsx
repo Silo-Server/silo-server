@@ -221,7 +221,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                 {t("web.item.dialog.yearInParens", { year: item.year })}
               </span>
             ) : null}
-            <Badge variant="secondary" className="ms-2 text-[10px]">
+            <Badge variant="secondary" className="ms-2 text-[0.625rem]">
               {item.type}
             </Badge>
           </div>
@@ -274,7 +274,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                               {file.file_path.split("/").pop()}
                             </span>
                             {file.season_number && file.episode_number ? (
-                              <Badge variant="outline" className="text-[10px]">
+                              <Badge variant="outline" className="text-[0.625rem]">
                                 {t("web.item.split.episodeCode", {
                                   season: codeNumber(file.season_number),
                                   episode: codeNumber(file.episode_number),
@@ -444,7 +444,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                   id: (chunks) => <code className="font-mono text-xs">{chunks}</code>,
                 })}
                 {preview.target_created ? (
-                  <Badge variant="secondary" className="ms-2 text-[10px]">
+                  <Badge variant="secondary" className="ms-2 text-[0.625rem]">
                     {t("web.item.split.newItem")}
                   </Badge>
                 ) : null}

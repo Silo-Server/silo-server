@@ -43,7 +43,7 @@ export function UsersWidget() {
         </CardTitle>
         <Link
           to="/admin/users"
-          className="text-muted-foreground hover:text-primary text-[11px] transition-colors"
+          className="text-muted-foreground hover:text-primary text-[0.6875rem] transition-colors"
         >
           {t("web.admin.dashboard.widgets.users.manage")}
         </Link>
@@ -93,7 +93,7 @@ export function UsersWidget() {
                   <TableCell className="w-full max-w-0">
                     <div className="flex items-center gap-2.5">
                       <div
-                        className="text-primary-foreground flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+                        className="text-primary-foreground flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[0.625rem] font-bold"
                         style={{ background: `var(--primary)` }}
                       >
                         {u.username.charAt(0).toUpperCase()}
@@ -101,16 +101,16 @@ export function UsersWidget() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
                           {/* A cut username keeps its start in either script. */}
-                          <span dir="auto" className="truncate text-[13px] font-semibold">
+                          <span dir="auto" className="truncate text-[0.8125rem] font-semibold">
                             {u.username}
                           </span>
                           {u.role === "admin" && (
-                            <Badge variant="default" className="px-1.5 py-0 text-[9px]">
+                            <Badge variant="default" className="px-1.5 py-0 text-[0.5625rem]">
                               {accountRoleLabel(u)}
                             </Badge>
                           )}
                         </div>
-                        <div className="text-muted-foreground hidden truncate text-[10px] sm:block">
+                        <div className="text-muted-foreground hidden truncate text-[0.625rem] sm:block">
                           {u.email}
                         </div>
                       </div>

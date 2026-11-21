@@ -64,7 +64,7 @@ function Stage({ kind }: { kind: CollectionKind }) {
           <span
             key={title}
             className={cn(
-              "text-foreground/85 grid h-9 grid-cols-[14px_22px_1fr] items-center gap-2.5 rounded-[10px] px-2.5 text-[12.5px] font-medium",
+              "text-foreground/85 grid h-9 grid-cols-[14px_22px_1fr] items-center gap-2.5 rounded-[10px] px-2.5 text-[0.78125rem] font-medium",
               tile,
               index === 1 && "translate-x-2.5 -rotate-[1.5deg] bg-white/[0.09] shadow-lg",
             )}
@@ -88,7 +88,7 @@ function Stage({ kind }: { kind: CollectionKind }) {
             <span
               key={rule}
               className={cn(
-                "text-foreground/85 inline-flex h-6 items-center rounded-[7px] px-[9px] text-[11.5px] font-medium whitespace-nowrap",
+                "text-foreground/85 inline-flex h-6 items-center rounded-[7px] px-[9px] text-[0.71875rem] font-medium whitespace-nowrap",
                 index < 2 ? "bg-[color-mix(in_srgb,var(--tint)_22%,transparent)]" : tile,
               )}
             >
@@ -117,12 +117,12 @@ function Stage({ kind }: { kind: CollectionKind }) {
           <span
             key={name}
             className={cn(
-              "flex h-9 items-center gap-2.5 rounded-[11px] px-3 text-[12.5px] font-semibold",
+              "flex h-9 items-center gap-2.5 rounded-[11px] px-3 text-[0.78125rem] font-semibold",
               tile,
             )}
           >
             <span
-              className="grid size-6 place-items-center rounded-md text-[10px] font-extrabold text-white"
+              className="grid size-6 place-items-center rounded-md text-[0.625rem] font-extrabold text-white"
               style={{ background: color }}
             >
               {mark}
@@ -179,7 +179,7 @@ function CardBody({
   const Icon = ICON[kind];
   return (
     <span className="grid gap-1.5 px-5 pt-[18px] pb-5 max-lg:pe-11">
-      <span className="flex items-center gap-2.5 text-[17px] font-semibold tracking-[-0.015em]">
+      <span className="flex items-center gap-2.5 text-[1.0625rem] font-semibold tracking-[-0.015em]">
         <span
           aria-hidden
           className="grid size-8 place-items-center rounded-[9px] bg-[color-mix(in_srgb,var(--tint)_18%,transparent)] text-(--tint)"
@@ -188,10 +188,10 @@ function CardBody({
         </span>
         <span id={nameId}>{collectionKindLabel(kind)}</span>
       </span>
-      <span id={sentenceId} className="text-foreground/75 text-[13.5px] leading-normal">
+      <span id={sentenceId} className="text-foreground/75 text-[0.84375rem] leading-normal">
         {kindSentence(kind)}
       </span>
-      <span id={noteId} className="text-muted-foreground mt-1.5 text-[12.5px] leading-normal">
+      <span id={noteId} className="text-muted-foreground mt-1.5 text-[0.78125rem] leading-normal">
         {note ?? (
           <>
             <b className="text-foreground/70 font-medium">
@@ -346,7 +346,7 @@ export function NewCollectionPicker({
       titleRef={titleRef}
       description={newCollectionHelp(scope)}
       footerStart={
-        <p className="text-muted-foreground min-w-0 text-[13px]">
+        <p className="text-muted-foreground min-w-0 text-[0.8125rem]">
           {newCollectionNext()}
           {starterPacks ? (
             <>

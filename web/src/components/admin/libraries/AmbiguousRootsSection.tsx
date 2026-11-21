@@ -220,11 +220,11 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                       <TableCell className="max-w-[28rem]">
                         <div className="space-y-1">
                           <div className="truncate text-sm font-medium">{row.label}</div>
-                          <code className="text-muted-foreground block truncate text-[11px]">
+                          <code className="text-muted-foreground block truncate text-[0.6875rem]">
                             {root.root_path}
                           </code>
                           {row.evidence !== null ? (
-                            <div className="text-muted-foreground truncate text-[11px]">
+                            <div className="text-muted-foreground truncate text-[0.6875rem]">
                               {row.evidence}
                             </div>
                           ) : null}

@@ -705,7 +705,7 @@ export function SourceDialog(props: SourceDialogProps) {
                 <TabsTrigger
                   key={tab.id}
                   value={tab.id}
-                  className="flex-none px-1.5 text-[13px] sm:px-3 sm:text-sm"
+                  className="flex-none px-1.5 text-[0.8125rem] sm:px-3 sm:text-sm"
                 >
                   {tab.label}
                   {problemTabs.has(tab.id) && (

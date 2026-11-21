@@ -78,7 +78,7 @@ export function PosterTile({
         {card.type === "series" ? (
           <span
             className={cn(
-              "glass-subtle absolute end-1.5 flex items-center gap-0.5 rounded-full border border-white/15 px-1.5 py-0.5 text-[10px] font-semibold text-white/90",
+              "glass-subtle absolute end-1.5 flex items-center gap-0.5 rounded-full border border-white/15 px-1.5 py-0.5 text-[0.625rem] font-semibold text-white/90",
               // Sit above the progress bar rather than across it.
               progress !== undefined ? "bottom-4" : "bottom-1.5",
             )}
@@ -105,7 +105,7 @@ export function PosterTile({
                 />
               ))}
               {who.length > 2 ? (
-                <span className="pe-1 text-[11px] font-semibold text-white">
+                <span className="pe-1 text-[0.6875rem] font-semibold text-white">
                   {t("web.watchTogether.picker.moreMembers", { count: who.length - 2 })}
                 </span>
               ) : null}
@@ -115,8 +115,8 @@ export function PosterTile({
         {progress !== undefined ? <WatchProgressBar percent={progress * 100} /> : null}
       </div>
       <div className="px-0.5 pt-2">
-        <div className="truncate text-[13px] font-semibold">{card.title}</div>
-        <div className="text-muted-foreground mt-0.5 truncate text-[11px]">
+        <div className="truncate text-[0.8125rem] font-semibold">{card.title}</div>
+        <div className="text-muted-foreground mt-0.5 truncate text-[0.6875rem]">
           {caption ??
             (card.year
               ? String(card.year)
@@ -181,7 +181,7 @@ export function PickerRowSection({
       skeletonCount={5}
       headerActions={
         hint ? (
-          <span className="text-muted-foreground text-[11px]">
+          <span className="text-muted-foreground text-[0.6875rem]">
             {t("web.watchTogether.picker.rowHint", { hint })}
           </span>
         ) : undefined

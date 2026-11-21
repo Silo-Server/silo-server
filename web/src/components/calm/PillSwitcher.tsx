@@ -93,7 +93,7 @@ export function PillSwitcher({
                         {" "}
                         <span
                           className={cn(
-                            "text-[12.5px] font-(--font-weight-ui)",
+                            "text-[0.78125rem] font-(--font-weight-ui)",
                             // On the accent fill only the label's own color is sure to read.
                             // Off it, a step below the label's /80. Not muted-foreground:
                             // high contrast pins that brighter than the label.
@@ -114,7 +114,9 @@ export function PillSwitcher({
         {edges.right ? <PageButton side="right" onClick={() => page("right")} /> : null}
       </div>
       {summary ? (
-        <p className="text-muted-foreground shrink-0 text-[13px] whitespace-nowrap">{summary}</p>
+        <p className="text-muted-foreground shrink-0 text-[0.8125rem] whitespace-nowrap">
+          {summary}
+        </p>
       ) : null}
     </div>
   );

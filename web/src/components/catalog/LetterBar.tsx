@@ -173,7 +173,7 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
             onFocus={() => setFocused(letter)}
             onClick={() => jump(letter)}
             className={cn(
-              "focus-visible:ring-ring flex min-h-0 w-5 flex-1 items-center justify-center rounded-full text-[10px] leading-none font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none sm:w-6 sm:text-[11px]",
+              "focus-visible:ring-ring flex min-h-0 w-5 flex-1 items-center justify-center rounded-full text-[0.625rem] leading-none font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none sm:w-6 sm:text-[0.6875rem]",
               !entry && "text-muted-foreground/35 cursor-default",
               entry && !isActive && "text-muted-foreground hover:text-foreground",
               isActive && "bg-primary text-primary-foreground",

@@ -174,7 +174,7 @@ export function AdminSectionCommandDialog({
             autoComplete="off"
             autoFocus
           />
-          <kbd className="bg-muted text-muted-foreground pointer-events-none ms-3 hidden rounded border px-1.5 py-0.5 text-[10px] font-medium select-none sm:inline-flex">
+          <kbd className="bg-muted text-muted-foreground pointer-events-none ms-3 hidden rounded border px-1.5 py-0.5 text-[0.625rem] font-medium select-none sm:inline-flex">
             {ESCAPE_KEY_LABEL}
           </kbd>
         </div>

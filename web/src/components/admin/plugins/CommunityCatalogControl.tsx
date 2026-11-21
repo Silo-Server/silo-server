@@ -46,11 +46,11 @@ export function CommunityCatalogControl({
           <label htmlFor="approved-community-plugins" className="block text-sm font-semibold">
             {t("web.admin.plugins.communityCatalog.includeLabel")}
           </label>
-          <p className="text-muted-foreground text-[13px] leading-relaxed">
+          <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
             {t("web.admin.plugins.communityCatalog.description")}
           </p>
           {settings.migrated_plugin_count > 0 ? (
-            <p className="text-muted-foreground text-[13px]">
+            <p className="text-muted-foreground text-[0.8125rem]">
               {t("web.admin.plugins.communityCatalog.migrated", {
                 count: settings.migrated_plugin_count,
                 count_text: settings.migrated_plugin_count,

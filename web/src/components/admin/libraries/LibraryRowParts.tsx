@@ -103,7 +103,7 @@ export function LibraryLastScanned({ row }: { row: LibraryRow }) {
           : t("web.admin.libraries.list.neverScanned")}
       </div>
       {library.scan_warning_at ? (
-        <div className="text-destructive text-[11px]">
+        <div className="text-destructive text-[0.6875rem]">
           {t("web.admin.libraries.list.warningAt", {
             time: formatDateTime(library.scan_warning_at),
           })}
@@ -204,7 +204,7 @@ export function LibraryActiveWork({
   const t = useT();
   const { activeRefreshJob, activeScans } = row;
   return (
-    <div className={cn("text-muted-foreground flex flex-col gap-1.5 text-[11px]", className)}>
+    <div className={cn("text-muted-foreground flex flex-col gap-1.5 text-[0.6875rem]", className)}>
       {activeRefreshJob ? (
         <div className="flex min-w-0 items-start gap-1.5">
           <StopTaskButton
@@ -223,7 +223,7 @@ export function LibraryActiveWork({
                 {activeRefreshJob.message || t("web.admin.libraries.activeWork.refreshQueued")}
               </span>
             </div>
-            <div className="text-muted-foreground/80 truncate text-[10px]">
+            <div className="text-muted-foreground/80 truncate text-[0.625rem]">
               {formatJobProgress(activeRefreshJob)}
             </div>
           </div>
@@ -292,7 +292,7 @@ function LibraryScanTasks({
           <button
             type="button"
             className={cn(
-              "text-muted-foreground hover:text-foreground flex items-center gap-0.5 rounded px-1 text-[10px] transition-colors",
+              "text-muted-foreground hover:text-foreground flex items-center gap-0.5 rounded px-1 text-[0.625rem] transition-colors",
               touch && TOUCH_HIT_AREA,
             )}
             aria-expanded={expanded}
@@ -341,19 +341,19 @@ function CompactScanRow({ scan }: { scan: ScanRun }) {
         )}
       />
       {scan.mode !== "file" ? (
-        <span className="shrink-0 text-[10px]">{formatActiveScanMode(scan)}</span>
+        <span className="shrink-0 text-[0.625rem]">{formatActiveScanMode(scan)}</span>
       ) : null}
       {scan.path ? (
-        <code className="text-muted-foreground/80 truncate font-mono text-[10px]">
+        <code className="text-muted-foreground/80 truncate font-mono text-[0.625rem]">
           {formatActiveScanTarget(scan)}
         </code>
       ) : (
-        <span className="text-muted-foreground/80 truncate text-[10px]">
+        <span className="text-muted-foreground/80 truncate text-[0.625rem]">
           {formatActiveScanTarget(scan)}
         </span>
       )}
       {progress ? (
-        <span className="text-muted-foreground/60 truncate text-[10px]">
+        <span className="text-muted-foreground/60 truncate text-[0.625rem]">
           {SEPARATOR} {progress}
         </span>
       ) : null}

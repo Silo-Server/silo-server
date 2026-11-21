@@ -75,7 +75,7 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
               {event.badges.map((badge) => (
                 <span
                   key={badge}
-                  className={`rounded-full border px-2 py-0.5 text-[10px] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(badge)}`}
+                  className={`rounded-full border px-2 py-0.5 text-[0.625rem] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(badge)}`}
                 >
                   {upcomingBadgeLabel(badge)}
                 </span>
@@ -97,17 +97,17 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
       </ViewTransitionLink>
       <ViewTransitionLink to={href} className="block px-1 pt-3">
         <div
-          className={`truncate text-[14px] font-semibold tracking-tight ${watched ? "text-muted-foreground" : ""}`}
+          className={`truncate text-[0.875rem] font-semibold tracking-tight ${watched ? "text-muted-foreground" : ""}`}
         >
           {event.title}
         </div>
         {subtitle ? (
-          <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
+          <div className="text-muted-foreground mt-1 truncate text-[0.6875rem] font-medium tracking-[0.14em] uppercase">
             {subtitle}
           </div>
         ) : null}
         {airTime ? (
-          <div className="text-muted-foreground mt-0.5 text-[11px] font-medium">{airTime}</div>
+          <div className="text-muted-foreground mt-0.5 text-[0.6875rem] font-medium">{airTime}</div>
         ) : null}
       </ViewTransitionLink>
     </div>

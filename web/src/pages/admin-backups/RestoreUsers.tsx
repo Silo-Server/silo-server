@@ -234,13 +234,13 @@ export const AccountRow = memo(function AccountRow({
           ) : null}
         </div>
         {account.admin ? (
-          <span className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[11px] @2xl:inline-flex">
+          <span className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[0.6875rem] @2xl:inline-flex">
             <ShieldCheck aria-hidden="true" className="size-3.5" />
             {t("web.admin.backups.restore.users.administrator")}
           </span>
         ) : null}
         {account.profiles.length > 0 ? (
-          <span className="text-muted-foreground hidden shrink-0 text-[11px] whitespace-nowrap @2xl:inline">
+          <span className="text-muted-foreground hidden shrink-0 text-[0.6875rem] whitespace-nowrap @2xl:inline">
             {t("web.admin.backups.restore.users.profileCount", {
               count: account.profiles.length,
               count_text: account.profiles.length,
@@ -267,7 +267,7 @@ export const AccountRow = memo(function AccountRow({
       </div>
       {open ? (
         <div id={detailsId} className="space-y-1 ps-7 pb-3">
-          {status ? <p className="text-[13px] wrap-anywhere @2xl:hidden">{status}</p> : null}
+          {status ? <p className="text-[0.8125rem] wrap-anywhere @2xl:hidden">{status}</p> : null}
           {account.admin ? (
             <p className="text-muted-foreground text-xs @2xl:hidden">
               {t("web.admin.backups.restore.users.administrator")}
@@ -348,7 +348,7 @@ export function DataTypesPanel({
   return (
     <div className="bg-background/60 my-2 rounded-lg border p-3">
       <fieldset className="space-y-2">
-        <legend className="mb-2 text-[13px] font-medium">
+        <legend className="mb-2 text-[0.8125rem] font-medium">
           {t("web.admin.backups.restore.users.dataLegend")}
         </legend>
         <div className="grid gap-x-4 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-3">

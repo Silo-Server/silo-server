@@ -360,7 +360,7 @@ function StoreLink({ link }: { link: OnboardingStepLink }) {
     >
       <brand.Icon className="size-6 shrink-0" aria-hidden="true" />
       <span className="min-w-0">
-        <span className="text-muted-foreground block text-[10px] leading-tight tracking-wide uppercase">
+        <span className="text-muted-foreground block text-[0.625rem] leading-tight tracking-wide uppercase">
           {brand.eyebrow}
         </span>
         <span className="block truncate text-sm leading-tight font-semibold">{link.label}</span>

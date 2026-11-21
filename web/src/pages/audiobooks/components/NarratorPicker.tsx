@@ -47,7 +47,7 @@ export function NarratorPicker({ currentNarrator, currentContentId, others }: Na
           role="listbox"
           className="bg-popover absolute start-0 top-full z-50 mt-1 min-w-[220px] overflow-hidden rounded-md border shadow-lg"
         >
-          <div className="text-muted-foreground px-3 py-2 text-[11px] tracking-[0.12em] uppercase">
+          <div className="text-muted-foreground px-3 py-2 text-[0.6875rem] tracking-[0.12em] uppercase">
             {t("web.audiobooks.narrator.narrationCount", { count: options.length })}
           </div>
           {options.map((it) => {

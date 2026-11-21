@@ -30,7 +30,7 @@ export function SettingRow({ label, description, control, icon }: SettingRowProp
             {label}
           </Label>
           {description ? (
-            <p className="text-muted-foreground text-[13px] leading-relaxed">{description}</p>
+            <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">{description}</p>
           ) : null}
         </div>
       </div>

@@ -149,17 +149,19 @@ export function ListRow({
       )}
       <div className={cn("min-w-0", onOpen && "cursor-pointer")} onClick={onOpen}>
         {collapsed ? (
-          <p className="text-muted-foreground truncate text-[13.5px]">
+          <p className="text-muted-foreground truncate text-[0.84375rem]">
             <b className="text-foreground/80 font-semibold">{title}</b>
             {collapsedText}
           </p>
         ) : (
           <>
-            <div className="flex min-w-0 items-center gap-2 text-[15px] font-semibold tracking-[-0.01em]">
+            <div className="flex min-w-0 items-center gap-2 text-[0.9375rem] font-semibold tracking-[-0.01em]">
               <span className="truncate">{title}</span>
               {tags}
             </div>
-            <p className="text-muted-foreground mt-1 truncate text-[13px] leading-[1.45]">{meta}</p>
+            <p className="text-muted-foreground mt-1 truncate text-[0.8125rem] leading-[1.45]">
+              {meta}
+            </p>
           </>
         )}
       </div>

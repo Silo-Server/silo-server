@@ -118,7 +118,7 @@ export function OverlayImageLibrary({
             ) : null}
           </div>
           {error ? <p className="text-destructive text-sm">{error}</p> : null}
-          <p className="text-muted-foreground text-[13px] leading-relaxed">
+          <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
             {t("web.settings.overlays.library.help")}
           </p>
         </>
