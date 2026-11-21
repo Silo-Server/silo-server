@@ -494,13 +494,14 @@ export default function Layout({ children }: LayoutProps) {
           </div>
         )}
 
-        {/* Main content — offset by sidebar width on desktop */}
+        {/* Main content — offset by sidebar width on desktop. `scroll-mt-24`
+          keeps Skip to content's jump clear of the pinned phone header. */}
         <main
           id="main-content"
           tabIndex={-1}
           data-sidebar-target-collapsed={targetDetailImmersion ? "true" : undefined}
           data-sidebar-visual-collapsed={visualDetailImmersion ? "true" : undefined}
-          className={`sidebar-main-stage relative min-h-screen outline-none ${
+          className={`sidebar-main-stage relative min-h-screen scroll-mt-24 outline-none lg:scroll-mt-0 ${
             targetDetailImmersion ? "lg:ms-16" : "lg:ms-[260px]"
           } ${hasBackgroundBar ? "pb-32 sm:pb-36" : ""}`}
           style={{ viewTransitionName: "main-content" }}
