@@ -6,6 +6,7 @@ import type { PluginAdminForm, PluginAdminFormField, PluginAdminFormSection } fr
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { startsRightToLeft } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -315,10 +316,12 @@ export function SchemaForm({
     // IDs), which a right-to-left page would draw backwards (`/mnt/media` as
     // `mnt/media/`). "auto" takes the direction from the value's first letter, so
     // those read left to right while text typed in Arabic or Hebrew stays right
-    // to left. An empty field is left to right for its placeholder, which comes
-    // untranslated from the schema.
+    // to left. "auto" ignores the placeholder, so an empty field takes its
+    // placeholder's direction instead: usually an untranslated path or URL from
+    // the schema, but a host can pass translated text (a saved secret's hint).
     const text = String(effectiveValue(field, values) ?? "");
-    const textDir = text ? "auto" : "ltr";
+    let textDir: "auto" | "ltr" | "rtl" = "auto";
+    if (!text) textDir = startsRightToLeft(field.placeholder ?? "") ? "rtl" : "ltr";
 
     if (field.control === "TEXTAREA" || field.multiline) {
       return (
