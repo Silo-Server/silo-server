@@ -104,7 +104,7 @@ export function LoginSessionsPanel({
           !adminUser && "page-header mb-8",
         )}
       >
-        <div className="space-y-2">
+        <div className="min-w-0 space-y-2">
           <Heading
             ref={heading}
             tabIndex={-1}
@@ -112,7 +112,7 @@ export function LoginSessionsPanel({
               "focus:outline-none",
               adminUser
                 ? "text-lg font-semibold tracking-tight"
-                : "text-[1.75rem] leading-[1.15] font-bold tracking-[-0.035em] text-balance sm:text-[2rem]",
+                : "text-[1.75rem] leading-[1.15] font-bold tracking-[-0.035em] text-balance break-words hyphens-auto sm:text-[2rem]",
             )}
           >
             {t("web.settings.sessions.title")}
