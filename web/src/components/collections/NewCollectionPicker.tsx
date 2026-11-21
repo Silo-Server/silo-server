@@ -53,7 +53,7 @@ function Poster({ index, className }: { index: number; className?: string }) {
 }
 
 /** The decorative picture at the top of each card, after the mockup. */
-function Stage({ kind, className }: { kind: CollectionKind; className?: string }) {
+function Stage({ kind }: { kind: CollectionKind }) {
   const t = useT();
   const tile = "bg-white/[0.05] ring-1 ring-inset ring-white/[0.08]";
   let picture: ReactNode;
@@ -145,10 +145,7 @@ function Stage({ kind, className }: { kind: CollectionKind; className?: string }
   return (
     <span
       aria-hidden
-      className={cn(
-        "border-border/80 relative block h-[168px] overflow-hidden border-b bg-[radial-gradient(120%_120%_at_0%_0%,color-mix(in_srgb,var(--tint)_22%,transparent),transparent_62%)] max-lg:hidden",
-        className,
-      )}
+      className="border-border/80 relative block h-[168px] overflow-hidden border-b bg-[radial-gradient(120%_120%_at_0%_0%,color-mix(in_srgb,var(--tint)_22%,transparent),transparent_62%)] max-lg:hidden"
     >
       {picture}
     </span>
@@ -180,16 +177,9 @@ function CardBody({
 }) {
   const t = useT();
   const Icon = ICON[kind];
-  // A type that can't be made dims all but its note, which says why.
-  const off = note !== undefined;
   return (
     <span className="grid gap-1.5 px-5 pt-[18px] pb-5 max-lg:pe-11">
-      <span
-        className={cn(
-          "flex items-center gap-2.5 text-[17px] font-semibold tracking-[-0.015em]",
-          off && "opacity-60",
-        )}
-      >
+      <span className="flex items-center gap-2.5 text-[17px] font-semibold tracking-[-0.015em]">
         <span
           aria-hidden
           className="grid size-8 place-items-center rounded-[9px] bg-[color-mix(in_srgb,var(--tint)_18%,transparent)] text-(--tint)"
@@ -198,14 +188,18 @@ function CardBody({
         </span>
         <span id={nameId}>{collectionKindLabel(kind)}</span>
       </span>
-      <span
-        id={sentenceId}
-        className={cn("text-foreground/75 text-[13.5px] leading-normal", off && "opacity-60")}
-      >
+      <span id={sentenceId} className="text-foreground/75 text-[13.5px] leading-normal">
         {kindSentence(kind)}
       </span>
-      {/* Not text-muted-foreground: high contrast pins that brighter than the /75 sentence. */}
-      <span id={noteId} className="text-foreground/65 mt-1.5 text-[12.5px] leading-normal">
+      {/* Not text-muted-foreground: high contrast pins that brighter than the /75 sentence.
+          A note sits on a card faded to 60%, so it takes the full foreground to stay readable. */}
+      <span
+        id={noteId}
+        className={cn(
+          note ? "text-foreground" : "text-foreground/65",
+          "mt-1.5 text-[12.5px] leading-normal",
+        )}
+      >
         {note ?? (
           <>
             <b className="text-foreground/70 font-medium">
@@ -268,8 +262,8 @@ function SyncedOffCard({ scope }: { scope: ScopeKind }) {
   useAppLanguage();
   const id = useId();
   return (
-    <div style={{ "--tint": TINT.synced } as CSSProperties} className={CARD}>
-      <Stage kind="synced" className="opacity-60" />
+    <div style={{ "--tint": TINT.synced } as CSSProperties} className={cn(CARD, "opacity-60")}>
+      <Stage kind="synced" />
       <CardBody
         kind="synced"
         scope={scope}
