@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useT } from "@/i18n";
+import { cn } from "@/lib/utils";
 
 import { useWebhookEndpoint, type WebhookEndpoint } from "./useWebhookEndpoint";
 
@@ -65,6 +66,17 @@ export function WebhookEndpointSection({ source }: { source: AutoscanSource }) {
   const t = useT();
   const endpoint = useWebhookEndpoint(source);
   const { view, url, active, uncertain } = endpoint;
+  // A translated sentence shown in place of the URL, or null when the URL shows.
+  let notice: string | null = null;
+  if (!active) {
+    notice = t("web.admin.autoscan.webhook.endpoint.otherProfile");
+  } else if (uncertain) {
+    notice = t("web.admin.autoscan.webhook.endpoint.reloadBeforeUse");
+  } else if (!url) {
+    notice = t("web.admin.autoscan.webhook.endpoint.unavailable", {
+      suffix: view?.webhook_secret_suffix ?? "",
+    });
+  }
 
   return (
     <div className="space-y-1.5">
@@ -77,17 +89,9 @@ export function WebhookEndpointSection({ source }: { source: AutoscanSource }) {
             <Input
               id={`webhook-url-${source.id}`}
               readOnly
-              value={
-                active
-                  ? uncertain
-                    ? t("web.admin.autoscan.webhook.endpoint.reloadBeforeUse")
-                    : url ||
-                      t("web.admin.autoscan.webhook.endpoint.unavailable", {
-                        suffix: view?.webhook_secret_suffix ?? "",
-                      })
-                  : t("web.admin.autoscan.webhook.endpoint.otherProfile")
-              }
-              className="min-w-0 flex-1 font-mono text-xs"
+              value={notice ?? url}
+              // Monospace only for the URL: a monospace font draws Arabic letters unjoined.
+              className={cn("min-w-0 flex-1 text-xs", !notice && "font-mono")}
               aria-label={t("web.admin.autoscan.webhook.endpoint.fieldLabel")}
               onFocus={(e) => e.currentTarget.select()}
             />

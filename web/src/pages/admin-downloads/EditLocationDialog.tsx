@@ -199,6 +199,8 @@ function NodeLocationFields({
   const t = useT();
   const update = useUpdateNode();
   const dirId = useId();
+  const dirHelpId = useId();
+  const dirErrorId = useId();
   const budgetId = useId();
   const currentDir = node.download_artifact_dir_override ?? "";
   const currentBudget = node.download_artifact_max_bytes_override ?? null;
@@ -262,12 +264,19 @@ function NodeLocationFields({
             id={dirId}
             value={dir}
             onChange={(event) => setDir(event.target.value)}
-            placeholder={clusterDir ?? t("web.admin.downloads.location.dirPlaceholder")}
+            // No sentence as a placeholder: an input can't wrap it, so longer
+            // translations clip on a phone. The help text below says it instead.
+            placeholder={clusterDir}
             className="font-mono text-xs"
             aria-invalid={dirError ? true : undefined}
+            aria-describedby={dirError ? `${dirErrorId} ${dirHelpId}` : dirHelpId}
           />
-          {dirError ? <p className="text-destructive text-xs">{dirError}</p> : null}
-          <p className="text-muted-foreground text-xs">
+          {dirError ? (
+            <p id={dirErrorId} className="text-destructive text-xs">
+              {dirError}
+            </p>
+          ) : null}
+          <p id={dirHelpId} className="text-muted-foreground text-xs">
             {clusterDir
               ? t("web.admin.downloads.location.dirHelpCluster", { dir: clusterDir, code })
               : t("web.admin.downloads.location.dirHelpDefault", { code })}
