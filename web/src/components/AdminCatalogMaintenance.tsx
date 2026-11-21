@@ -43,6 +43,7 @@ import {
   updatePathRewrite,
 } from "./adminCatalogMaintenancePathRewrites";
 import { formatExportProgressLabel, formatJobProgress } from "./adminCatalogMaintenanceFormatters";
+import { PathText } from "@/components/PathText";
 import { Download, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDateTime } from "@/lib/datetime";
@@ -762,11 +763,9 @@ function describeExportJob(t: Translate, job: AdminJob) {
 
 function describeImportJob(t: Translate, job: AdminJob): ReactNode {
   const label = (job.request_payload as { source_label?: string }).source_label;
-  // The server's label is the remote URL, a file name, or "Export job <id>", untranslated. dir="auto"
-  // keeps a URL or Latin file name left to right in a right-to-left page and an Arabic or Hebrew
-  // file name in its own order; bdi, not isolate characters, keeps copied text clean.
+  // The server's label: the remote URL, a file name, or "Export job <id>", untranslated.
   return label ? (
-    <bdi dir="auto">{label}</bdi>
+    <PathText value={label} />
   ) : (
     t("web.admin.catalogMaintenance.imports.seedFallback")
   );

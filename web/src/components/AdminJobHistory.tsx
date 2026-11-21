@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
 import { formatJobProgress } from "./adminCatalogMaintenanceFormatters";
+import { PathText } from "@/components/PathText";
 import { formatDateTime } from "@/lib/datetime";
 import { numberText, useT, type MessageKey, type Translate } from "@/i18n";
 
@@ -80,10 +81,10 @@ function jobDescription(job: AdminJob, t: Translate) {
       return t("web.admin.common.jobHistory.target.allLibraries");
     }
     case "catalog_import": {
-      // A URL, file name, or "Export job <id>" from the server, laid out in its own direction.
+      // The server's label: the remote URL, a file name, or "Export job <id>", untranslated.
       const label = payload.source_label as string | undefined;
       return label ? (
-        <bdi dir="auto">{label}</bdi>
+        <PathText value={label} />
       ) : (
         t("web.admin.common.jobHistory.target.catalogSeed")
       );
