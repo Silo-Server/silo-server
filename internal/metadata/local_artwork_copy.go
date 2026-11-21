@@ -156,6 +156,12 @@ func (p *ImageCacheProcessor) copyDiscoveredLocalArtwork(store localArtworkJobSt
 	if job == nil {
 		return
 	}
+	// A deferral for a full store counts no attempt, so a scan finds the
+	// job again; right after a full-store failure it waits without reading
+	// or decoding the file, as background drains do.
+	if p.storageRecentlyFull() && p.deferForFullStorage(ctx, job) {
+		return
+	}
 	result := p.processOne(ctx, job)
 	p.logger.DebugContext(ctx, "metadata image cache: copied discovered local artwork",
 		"job_id", job.ID, "target_type", job.TargetType, "target_id", job.TargetContentID,

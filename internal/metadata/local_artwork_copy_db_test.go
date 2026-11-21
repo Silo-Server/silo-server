@@ -551,3 +551,48 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 		assertStableFailure(t, run(t, []string{root}, "file://"+filepath.Join(root, "Art", "poster.jpg")+"?v=12-1700000000"), "local image missing")
 	})
 }
+
+// TestLocalArtworkWaitsForStorageSpaceDB pins the queue side of a full
+// artwork store. The deferral counts no attempt, so a scan's discovery copy
+// must still honour its wait rather than reprocess the file only to be
+// refused; a manual refresh starts it over at the short delay.
+func TestLocalArtworkWaitsForStorageSpaceDB(t *testing.T) {
+	pool := imageCacheQueueTestPool(t)
+	ctx := context.Background()
+	repo := NewImageCacheJobRepository(pool)
+	contentID := fmt.Sprintf("movie:storage-full-%d", time.Now().UnixNano())
+	cleanupLocalArtworkJobs(t, pool, contentID)
+	in := EnqueueImageCacheJobInput{
+		TargetType: ImageCacheTargetItem, TargetContentID: contentID, SeriesID: contentID,
+		ContentType: "movie", ImageType: ImageCacheImagePoster, SourcePath: "file:///media/Film/poster.jpg",
+	}
+	if err := repo.Enqueue(ctx, in); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	deferForSpace := func() {
+		t.Helper()
+		jobs, err := repo.claimDueForTarget(ctx, "full-server", contentID, 1)
+		if err != nil || len(jobs) != 1 {
+			t.Fatalf("claim = %d jobs, %v; want 1", len(jobs), err)
+		}
+		if err := repo.DeferClaimed(ctx, jobs[0].ID, jobs[0].LockedBy, imageCacheStorageFullError, imageCacheStorageFullRetry, imageCacheStorageFullRepeatRetry); err != nil {
+			t.Fatalf("defer: %v", err)
+		}
+	}
+	deferForSpace()
+
+	if job, err := repo.claimQueuedLocalJob(ctx, in, "scan-copy"); err != nil || job != nil {
+		t.Fatalf("discovery claim while waiting for space = %+v, %v; want none", job, err)
+	}
+
+	// A refresh pulls it forward and starts the deferral over, so the next
+	// refusal waits the short delay, not the repeat one.
+	if err := repo.retryTargetNow(ctx, contentID); err != nil {
+		t.Fatalf("retryTargetNow: %v", err)
+	}
+	deferForSpace()
+	got := readLocalArtworkJob(t, pool, ImageCacheTargetItem, contentID, ImageCacheImagePoster)
+	if got.attempts != 0 || got.lastError != imageCacheStorageFullError || got.nextAttemptIn > imageCacheStorageFullRetry+time.Minute {
+		t.Fatalf("after a refresh = %+v, want queued again within %s", got, imageCacheStorageFullRetry)
+	}
+}

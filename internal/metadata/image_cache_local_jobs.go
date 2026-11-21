@@ -59,7 +59,8 @@ func (r *ImageCacheJobRepository) enqueueHeldLocalJobs(ctx context.Context, inpu
 // claimQueuedLocalJob claims the queued job for one discovered slot when it
 // still carries the discovered source. It ignores the discovery hold and a
 // deferral for missing storage (also one that followed an earlier failed
-// attempt), but not the backoff of an attempt that failed. It returns nil
+// attempt), but not the backoff of an attempt that failed, nor a deferral
+// for a full artwork store, which counts no attempt. It returns nil
 // when another worker holds the job, it already finished or is backing off,
 // or the slot's source has changed since.
 func (r *ImageCacheJobRepository) claimQueuedLocalJob(ctx context.Context, in EnqueueImageCacheJobInput, workerID string) (*models.MetadataImageCacheJob, error) {
@@ -82,9 +83,9 @@ func (r *ImageCacheJobRepository) claimQueuedLocalJob(ctx context.Context, in En
 		  AND j.target_language = $4
 		  AND j.source_path = $5
 		  AND j.status = 'queued'
-		  AND (j.attempt_count = 0 OR j.next_attempt_at <= NOW() OR starts_with(j.last_error, $7))
+		  AND ((j.attempt_count = 0 AND j.last_error <> $8) OR j.next_attempt_at <= NOW() OR starts_with(j.last_error, $7))
 		RETURNING `+imageCacheJobReturningColumns,
-		in.TargetType, in.TargetContentID, in.ImageType, in.TargetLanguage, in.SourcePath, workerID, localImageStorageUnavailable)
+		in.TargetType, in.TargetContentID, in.ImageType, in.TargetLanguage, in.SourcePath, workerID, localImageStorageUnavailable, imageCacheStorageFullError)
 	if err != nil {
 		return nil, fmt.Errorf("claiming discovered local image cache job: %w", err)
 	}
