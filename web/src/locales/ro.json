@@ -67950,7 +67950,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Reîncărcați pentru a vedea valorile curente. Modificările dvs. la setările care s-au schimbat, precum și la parolele și cheile salvate și la setările asociate acestora, se anulează; celelalte modificări se păstrează."
+      "value": "Reîncărcați pentru a vedea valorile curente. Dacă una dintre modificările dvs. privește o setare care s-a schimbat sau o parolă ori o cheie salvată, toate modificările se anulează; altfel, se păstrează."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -84468,6 +84468,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

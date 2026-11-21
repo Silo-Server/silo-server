@@ -75488,7 +75488,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Wczytaj ponownie, aby zobaczyć bieżące wartości. Twoje zmiany w ustawieniach, które się zmieniły, oraz w zapisanych hasłach i kluczach wraz z powiązanymi z nimi ustawieniami zostaną cofnięte; pozostałe zmiany zostaną zachowane."
+      "value": "Wczytaj ponownie, aby zobaczyć bieżące wartości. Jeśli którakolwiek z twoich zmian dotyczy ustawienia, które się zmieniło, albo zapisanego hasła lub klucza, wszystkie twoje zmiany zostaną cofnięte; w przeciwnym razie zostaną zachowane."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -92346,6 +92346,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"

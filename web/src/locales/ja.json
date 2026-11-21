@@ -54641,7 +54641,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "再読み込みすると現在の値が表示されます。変更された設定への編集と、保存済みのパスワードやキーおよびその関連設定への編集は取り消されます。その他の編集は保持されます。"
+      "value": "再読み込みすると現在の値が表示されます。変更された設定、または保存済みのパスワードやキーへの編集が含まれている場合は、すべての編集が取り消されます。それ以外の場合、編集は保持されます。"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -70523,6 +70523,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

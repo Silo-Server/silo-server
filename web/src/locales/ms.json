@@ -54489,7 +54489,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Muat semula untuk melihat nilai semasa. Suntingan anda pada tetapan yang berubah, serta pada kata laluan dan kunci yang disimpan berserta tetapan yang berkaitan dengannya, dibatalkan; suntingan anda yang lain dikekalkan."
+      "value": "Muat semula untuk melihat nilai semasa. Jika salah satu suntingan anda melibatkan tetapan yang berubah, atau kata laluan atau kunci yang disimpan, semua suntingan anda dibatalkan; jika tidak, semuanya dikekalkan."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -70343,6 +70343,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

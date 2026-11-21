@@ -54993,7 +54993,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "重新加载以查看当前值。你对已更改的设置项、已保存的密码和密钥及其相关设置项所做的编辑将被撤销；你的其他编辑会保留。"
+      "value": "重新加载以查看当前值。如果你的编辑中有涉及已更改的设置项，或已保存的密码或密钥，你的所有编辑都将被撤销；否则会保留。"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -70963,6 +70963,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

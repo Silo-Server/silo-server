@@ -61338,7 +61338,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Презаредете, за да видите текущите стойности. Промените ви в настройките, които са се променили, както и в запазените пароли и ключове заедно със свързаните с тях настройки, се отменят; другите ви промени се запазват."
+      "value": "Презаредете, за да видите текущите стойности. Ако някоя от промените ви засяга настройка, която е била променена, или запазена парола или ключ, всички ваши промени се отменят; в противен случай се запазват."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -77580,6 +77580,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"

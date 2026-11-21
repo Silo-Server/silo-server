@@ -60938,7 +60938,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Az aktuális értékek megtekintéséhez töltse be újra a beállításokat. A közben módosult beállításokon, valamint a mentett jelszavakon, kulcsokon és a hozzájuk tartozó beállításokon végzett változtatásai elvesznek; a többi változtatása megmarad."
+      "value": "Az aktuális értékek megtekintéséhez töltse be újra a beállításokat. Ha valamelyik módosítása egy közben megváltozott beállítást, illetve egy mentett jelszót vagy kulcsot érint, az összes módosítása elvész; ellenkező esetben megmaradnak."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -77136,6 +77136,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

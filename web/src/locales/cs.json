@@ -74866,7 +74866,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Znovu načtěte aktuální hodnoty. Zruší se vaše úpravy nastavení, která se změnila, a také úpravy uložených hesel a klíčů i nastavení, která s nimi souvisejí; ostatní úpravy zůstanou zachovány."
+      "value": "Načtením znovu zobrazíte aktuální hodnoty. Pokud se některá z vašich úprav týká nastavení, které se změnilo, nebo uloženého hesla či klíče, zruší se všechny vaše úpravy; jinak zůstanou zachovány."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -91676,6 +91676,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"

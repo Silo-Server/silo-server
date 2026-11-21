@@ -75549,7 +75549,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Įkelkite iš naujo, kad matytumėte dabartines reikšmes. Jūsų pakeitimai pasikeitusiuose nustatymuose, išsaugotuose slaptažodžiuose ir raktuose bei su jais susijusiuose nustatymuose atšaukiami; kiti jūsų pakeitimai išlaikomi."
+      "value": "Įkelkite iš naujo, kad matytumėte dabartines reikšmes. Jei bent vienas jūsų pakeitimas susijęs su pasikeitusiu nustatymu arba išsaugotu slaptažodžiu ar raktu, atšaukiami visi jūsų pakeitimai; kitu atveju jie išlaikomi."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -92483,6 +92483,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"

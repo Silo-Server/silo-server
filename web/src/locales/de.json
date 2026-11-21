@@ -60914,7 +60914,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Lade neu, um die aktuellen Werte zu sehen. Deine Änderungen an inzwischen geänderten Einstellungen sowie an gespeicherten Passwörtern und Schlüsseln samt den zugehörigen Einstellungen werden verworfen; deine übrigen Änderungen bleiben erhalten."
+      "value": "Lade neu, um die aktuellen Werte zu sehen. Betrifft eine deiner Änderungen eine inzwischen geänderte Einstellung oder ein gespeichertes Passwort bzw. einen gespeicherten Schlüssel, werden alle deine Änderungen verworfen; andernfalls bleiben sie erhalten."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -77152,6 +77152,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"

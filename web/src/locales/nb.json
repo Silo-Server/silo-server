@@ -61146,7 +61146,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Last inn på nytt for å se de gjeldende verdiene. Endringene dine i innstillinger som er endret, og i lagrede passord og nøkler med tilhørende innstillinger, blir angret. De andre endringene dine beholdes."
+      "value": "Last inn på nytt for å se de gjeldende verdiene. Hvis en av endringene dine gjelder en innstilling som er endret, eller et lagret passord eller en lagret nøkkel, blir alle endringene dine angret. Ellers beholdes de."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -77320,6 +77320,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

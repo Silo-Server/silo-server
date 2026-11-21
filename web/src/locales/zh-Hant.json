@@ -55127,7 +55127,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "重新載入即可查看目前的值。你對已變更的設定項目，以及對已儲存的密碼、金鑰及其相關設定項目所做的編輯都會復原；其他編輯則會保留。"
+      "value": "重新載入即可查看目前的值。如果你編輯的項目中有已變更的設定項目，或有已儲存的密碼或金鑰，你的所有編輯都會復原；否則會保留。"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -71113,6 +71113,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

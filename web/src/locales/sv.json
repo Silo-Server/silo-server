@@ -61030,7 +61030,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Läs in igen för att se de aktuella värdena. Dina ändringar av inställningar som har ändrats, och av sparade lösenord och nycklar med tillhörande inställningar, ångras. Dina övriga ändringar behålls."
+      "value": "Läs in igen för att se de aktuella värdena. Om någon av dina ändringar gäller en inställning som har ändrats, eller ett sparat lösenord eller en sparad nyckel, ångras alla dina ändringar. Annars behålls de."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -77200,6 +77200,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"

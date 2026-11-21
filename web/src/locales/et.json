@@ -61718,7 +61718,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Praeguste väärtuste nägemiseks laadige leht uuesti. Teie muudatused seadistustes, mis vahepeal muutusid, samuti salvestatud paroolides ja võtmetes ning nendega seotud seadistustes tühistatakse; teie ülejäänud muudatused jäävad alles."
+      "value": "Praeguste väärtuste nägemiseks laadige leht uuesti. Kui mõni teie muudatus puudutab seadistust, mis vahepeal muutus, või salvestatud parooli või võtit, tühistatakse kõik teie muudatused; vastasel juhul jäävad need alles."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -77988,6 +77988,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
     {
       "type": 1,
       "value": "code"
