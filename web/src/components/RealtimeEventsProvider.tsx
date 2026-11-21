@@ -38,10 +38,11 @@ import {
 } from "@/hooks/queries/notifications";
 import { toast } from "sonner";
 import {
-  RealtimeEventsContext,
+  RealtimeConnectionStateContext,
+  RealtimeEventsActionsContext,
   type EventChannelHandlers,
   type RealtimeConnectionState,
-  type RealtimeEventsContextValue,
+  type RealtimeEventsActionsContextValue,
 } from "@/components/realtimeEventsContext";
 import {
   createCatalogInvalidationScheduler,
@@ -557,6 +558,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const isDashboardRoute = location.pathname === "/admin" || location.pathname === "/admin/";
   const allowDashboardRealtimeUpdates = !isDashboardRoute || pageActivity.canPollDashboard;
   const [connectionState, setConnectionState] = useState<RealtimeConnectionState>("connecting");
+  const connectionStateRef = useRef<RealtimeConnectionState>(connectionState);
   const catalogInvalidation = useMemo(
     () => createCatalogInvalidationScheduler(queryClient),
     [queryClient],
@@ -1056,21 +1058,26 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    const updateConnectionState = (next: RealtimeConnectionState) => {
+      connectionStateRef.current = next;
+      setConnectionState(next);
+    };
+
     if (!authenticatedUserID) {
-      setConnectionState("disconnected");
+      updateConnectionState("disconnected");
       return;
     }
     if (!keepSocketOpen) {
       // Frames sent from now on are missed; catch up when the page returns.
       shouldCatchUpOnFocusRef.current = true;
       watchStateMissedFramesRef.current = true;
-      setConnectionState("disconnected");
+      updateConnectionState("disconnected");
       return;
     }
 
     const authority = captureEventsAuthority();
     if (!authority) {
-      setConnectionState("disconnected");
+      updateConnectionState("disconnected");
       return;
     }
     const authorityActive = () => isEventsAuthorityActive(authority);
@@ -1125,7 +1132,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       if (closedByEffect) {
         return;
       }
-      setConnectionState("connecting");
+      updateConnectionState("connecting");
       helloReceivedRef.current = false;
 
       void mintEventsSocketTicket(authority)
@@ -1135,7 +1142,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         })
         .catch(() => {
           if (closedByEffect || !authorityActive()) return;
-          setConnectionState("disconnected");
+          updateConnectionState("disconnected");
           scheduleReconnect();
         });
     };
@@ -1149,7 +1156,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           `silo.ticket.${ticket}`,
         ]);
       } catch {
-        setConnectionState("disconnected");
+        updateConnectionState("disconnected");
         scheduleReconnect();
         return;
       }
@@ -1176,7 +1183,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         if (closedByEffect || socketRef.current !== socket || !authorityActive()) {
           return;
         }
-        setConnectionState("live");
+        updateConnectionState("live");
       };
 
       socket.onmessage = (event) => {
@@ -1268,7 +1275,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         if (closedByEffect || socketRef.current !== socket || !authorityActive()) {
           return;
         }
-        setConnectionState("disconnected");
+        updateConnectionState("disconnected");
       };
 
       socket.onclose = (event: CloseEvent) => {
@@ -1308,7 +1315,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         socketRef.current = null;
         activeSocket = null;
         helloReceivedRef.current = false;
-        setConnectionState("disconnected");
+        updateConnectionState("disconnected");
         if (!closedByEffect) {
           scheduleReconnect();
         }
@@ -1319,6 +1326,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 
     return () => {
       closedByEffect = true;
+      connectionStateRef.current = "disconnected";
       adminRefresh.cancel();
       clearReconnect();
       // The server job outlives this socket: keep waiting on it by polling.
@@ -1374,7 +1382,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       // Must match the gate on AdminRealtimeEventChannels: when the jobs
       // channel isn't subscribed (not acting as admin), waiting on a live
       // event would hang until the fallback timeout — poll instead.
-      if (!actingAdmin || connectionState !== "live") {
+      if (!actingAdmin || connectionStateRef.current !== "live") {
         return pollAdminJobUntilTerminal(jobId, session);
       }
 
@@ -1393,19 +1401,24 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         waitersRef.current.set(jobId, { timeoutId, resolve, reject, poll });
       });
     },
-    [actingAdmin, connectionState, queryClient],
+    [actingAdmin, queryClient],
   );
 
-  const value = useMemo<RealtimeEventsContextValue>(
+  const actionsValue = useMemo<RealtimeEventsActionsContextValue>(
     () => ({
-      connectionState,
       awaitAdminJob,
       subscribeChannel,
     }),
-    [awaitAdminJob, connectionState, subscribeChannel],
+    [awaitAdminJob, subscribeChannel],
   );
 
-  return <RealtimeEventsContext.Provider value={value}>{children}</RealtimeEventsContext.Provider>;
+  return (
+    <RealtimeEventsActionsContext.Provider value={actionsValue}>
+      <RealtimeConnectionStateContext.Provider value={connectionState}>
+        {children}
+      </RealtimeConnectionStateContext.Provider>
+    </RealtimeEventsActionsContext.Provider>
+  );
 }
 
 export { buildEventsUrl };
