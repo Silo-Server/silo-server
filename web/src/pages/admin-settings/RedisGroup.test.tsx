@@ -83,5 +83,7 @@ describe("RedisGroup", () => {
 
     expect(screen.getByRole("switch", { name: "Use Redis" })).toBeChecked();
     expect(screen.getByLabelText("Connection URL")).toBeInTheDocument();
+    // The Redis drafts went with the takeover; the other edit stays.
+    expect(screen.getByText("1 staged")).toBeInTheDocument();
   });
 });
