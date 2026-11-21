@@ -100,6 +100,10 @@ export function RedisGroup({
           if (secrets.disabled) return;
           if (value === "true") {
             setEnabledOverride(true);
+            // Taking back the switch-off clears the Redis edits, and maybe the
+            // whole page, by the switch's own doing: the override stays.
+            setLastRedisStaged(false);
+            setLastFormClean(form.dirtyKeys.every((key) => REDIS_KEYS.includes(key)));
             // Takes back a staged switch-off, which cleared the number too.
             form.resetValue("redis.url");
             form.resetValue("redis.db");

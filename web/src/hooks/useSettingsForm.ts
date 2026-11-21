@@ -435,18 +435,24 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         if (result.restart_required) setRestartRequired(true);
         return;
       }
-      // An acknowledged save changes the validator even when newer local edits
-      // remain dirty. Reconcile only with a refresh matching that write's revision;
-      // background reads and failed writes never advance this draft baseline.
-      if (result.settingsSnapshot) editBaseline.current = result.settingsSnapshot;
-      savedOver.current = settings;
       const settledKeys = submittedKeys.filter(
         (key) => (editVersions.current.get(key) ?? 0) === submittedVersions.get(key),
       );
+      // Edits still staged once this save settles: newer ones made during it.
+      // An edit taken back during the save (Keep saved) isn't one of them.
+      const stillStaged = [...dirtyRef.current].filter((key) => !settledKeys.includes(key));
+      // An acknowledged save changes the validator even when newer local edits
+      // remain dirty. Reconcile only with a refresh matching that write's revision;
+      // background reads and failed writes never advance this draft baseline.
+      // With nothing left staged, the next edit starts its own baseline.
+      if (result.settingsSnapshot && stillStaged.length > 0) {
+        editBaseline.current = result.settingsSnapshot;
+      }
+      savedOver.current = settings;
       for (const key of submittedKeys) {
         // A later edit of a key this save wrote began over the written value,
         // which secrets only show as set.
-        if (settledKeys.includes(key)) editedOver.current.delete(key);
+        if (!stillStaged.includes(key)) editedOver.current.delete(key);
         else
           editedOver.current.set(key, {
             value: result.values[key],

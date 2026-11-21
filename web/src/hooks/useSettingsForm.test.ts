@@ -254,6 +254,38 @@ describe("useSettingsForm save()", () => {
     expect(guard.displayed).toBe(current);
   });
 
+  it("guards the next edit with the current snapshot after a save that settles after its edit was taken back", async () => {
+    let resolveMutation: ((value: unknown) => void) | undefined;
+    mutateAsync.mockReturnValue(
+      new Promise((resolve) => {
+        resolveMutation = resolve;
+      }),
+    );
+    const { result, rerender } = renderHook(() => useSettingsForm({ keys: KEYS }));
+
+    act(() => result.current.setValue("database.max_connections", "40"));
+    let savePromise: Promise<void> | undefined;
+    act(() => {
+      savePromise = result.current.save();
+    });
+    // "Keep saved" on the only edit while its save is in flight.
+    act(() => result.current.resetValue("database.max_connections"));
+    await act(async () => {
+      resolveMutation?.({
+        values: { "database.max_connections": "40" },
+        restart_required: false,
+        settingsSnapshot: { ...settingsData, "database.max_connections": "40" },
+      });
+      await savePromise;
+    });
+    const current = { ...settingsData, "database.max_connections": "60" };
+    snapshot.values = current;
+    rerender();
+    act(() => result.current.setValue("database.max_connections", "80"));
+
+    expect(guard.displayed).toBe(current);
+  });
+
   it("keeps a change back to the old value staged while that save is in flight", async () => {
     let resolveMutation:
       | ((value: { values: Record<string, string>; restart_required: boolean }) => void)
