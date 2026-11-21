@@ -51,7 +51,7 @@ export function RestoreReview({
     <div className="max-w-[70rem] space-y-5">
       {plan.map((group) => (
         <FieldGroup key={group.section} label={group.title}>
-          <ul className="list-disc space-y-1.5 py-3.5 ps-5 text-sm">
+          <ul className="list-disc space-y-1.5 py-3.5 ps-5 text-sm wrap-anywhere">
             {group.sentences.map((sentence, position) => (
               <li key={position}>{t("web.admin.backups.restore.plan.sentence", { sentence })}</li>
             ))}
@@ -63,7 +63,7 @@ export function RestoreReview({
           label={t("web.admin.backups.restore.review.leftOut")}
           description={t("web.admin.backups.restore.review.leftOutDescription")}
         >
-          <ul className="space-y-2 py-3.5 text-sm">
+          <ul className="space-y-2 py-3.5 text-sm wrap-anywhere">
             {caveats.map((caveat) => (
               <li key={caveat.key}>
                 {t("web.admin.backups.restore.review.caveat", {
