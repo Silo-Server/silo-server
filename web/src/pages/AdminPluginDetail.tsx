@@ -254,7 +254,7 @@ function PluginPageHeader({
     <div className="flex flex-wrap items-center gap-4">
       <PluginMonogram name={name} size="lg" />
       <div className="min-w-[min(220px,100%)] flex-1">
-        <h1 className="text-[1.75rem] leading-[1.15] font-bold tracking-[-0.035em] text-balance break-words hyphens-auto [hyphenate-limit-chars:6_3_3] sm:text-[2rem]">
+        <h1 className="text-[1.75rem] leading-[1.15] font-bold tracking-[-0.035em] text-balance break-words sm:text-[2rem]">
           {name}
         </h1>
         <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13.5px]">
