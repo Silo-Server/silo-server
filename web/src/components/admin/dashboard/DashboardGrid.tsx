@@ -16,6 +16,13 @@ import {
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { type AutoScrollGesture, useDragAutoScroll } from "./dragAutoScroll";
+import {
+  CUSTOMIZE_GRID_CLASS,
+  GRID_COLUMNS,
+  readColumnGapPx,
+  readRowGapPx,
+  readRowHeightPx,
+} from "./gridMetrics";
 import { getDashboardWidget } from "./registry";
 import type { WidgetId } from "./types";
 import type { DashboardLayout } from "./useDashboardLayout";
@@ -23,60 +30,12 @@ import { WidgetChromeProvider } from "./widgetChrome";
 import { isRightToLeft, readingArrowKey } from "@/lib/direction";
 import { Direction } from "radix-ui";
 
-/** Fallback for the `gap` of `.admin-widget-grid` in app.css (0.875rem). */
-const GRID_GAP_PX = 14;
-/** Must match `--admin-row-h` on `.admin-widget-grid` in app.css (6.25rem). */
-const GRID_ROW_HEIGHT_PX = 100;
-const GRID_COLUMNS = 12;
-
 /**
  * Drag payload type for adding a widget from the Add-widget sheet, distinct
  * from the `text/plain` payload a grid reorder drag carries so neither path
  * can mistake the other's drag for its own.
  */
 const WIDGET_ADD_DRAG_TYPE = "application/x-silo-widget-add";
-
-/**
- * Row height in CSS pixels.
- *
- * Read back from `--admin-row-h` so a drag follows the stylesheet instead of a
- * second copy of the number; `GRID_ROW_HEIGHT_PX` is the fallback for anything
- * that cannot resolve the variable (jsdom, a grid that is not mounted yet).
- */
-function readRowHeightPx(grid: HTMLElement | null): number {
-  if (!grid) {
-    return GRID_ROW_HEIGHT_PX;
-  }
-  const raw = window.getComputedStyle(grid).getPropertyValue("--admin-row-h").trim();
-  const value = Number.parseFloat(raw);
-  if (!Number.isFinite(value) || value <= 0) {
-    return GRID_ROW_HEIGHT_PX;
-  }
-  if (raw.endsWith("rem")) {
-    const root = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
-    return Number.isFinite(root) && root > 0 ? value * root : GRID_ROW_HEIGHT_PX;
-  }
-  return value;
-}
-
-/**
- * Gutter width in CSS pixels.
- *
- * Read back from the resolved `column-gap` for the same reason as the row
- * height: a drag follows the stylesheet rather than a second copy of the
- * number. `GRID_GAP_PX` is the fallback for anything that cannot resolve it
- * (jsdom, a grid that is not mounted yet).
- */
-function readGapPx(grid: HTMLElement | null): number {
-  if (!grid) {
-    return GRID_GAP_PX;
-  }
-  const value = Number.parseFloat(window.getComputedStyle(grid).columnGap);
-  if (!Number.isFinite(value) || value < 0) {
-    return GRID_GAP_PX;
-  }
-  return value;
-}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -175,8 +134,9 @@ export function DashboardGrid({
   }, []);
 
   const isResizing = resizePreview !== null;
+  const isDragging = draggedId !== null || addDragId !== null;
   let autoScrollGesture: AutoScrollGesture | null = null;
-  if (draggedId !== null || addDragId !== null) autoScrollGesture = "drag";
+  if (isDragging) autoScrollGesture = "drag";
   else if (isResizing) autoScrollGesture = "pointer";
   const gestureActive = autoScrollGesture !== null;
 
@@ -256,7 +216,10 @@ export function DashboardGrid({
       const host = (event.target as HTMLElement).closest<HTMLElement>("[data-widget-id]");
       if (!host) return null;
       const rect = host.getBoundingClientRect();
-      // "Before" is the start side: the left half, or the right half right to left.
+      // Above the widget (its pill, or the gap over it in Customize mode) is
+      // before it. Otherwise "before" is the start side: the left half, or the
+      // right half right to left.
+      if (event.clientY < rect.top) return { id: overId, edge: "before" };
       const leftHalf = event.clientX < rect.left + rect.width / 2;
       return { id: overId, edge: leftHalf !== (dir === "rtl") ? "before" : "after" };
     },
@@ -387,7 +350,7 @@ export function DashboardGrid({
       event.stopPropagation();
       event.currentTarget.setPointerCapture(event.pointerId);
       const gridWidth = gridRef.current?.getBoundingClientRect().width ?? 0;
-      const gapPx = readGapPx(gridRef.current);
+      const gapPx = readColumnGapPx(gridRef.current);
       const columnUnit = gridWidth > 0 ? (gridWidth + gapPx) / GRID_COLUMNS : 1;
       resizeSessionRef.current = {
         id,
@@ -400,7 +363,7 @@ export function DashboardGrid({
         startSpan: currentSpan,
         startRows: currentRows,
         columnUnit,
-        rowUnit: readRowHeightPx(gridRef.current) + gapPx,
+        rowUnit: readRowHeightPx(gridRef.current) + readRowGapPx(gridRef.current),
         minSpan: widget.minSpan,
         maxSpan: widget.maxSpan,
         minRows: widget.minRows,
@@ -504,6 +467,9 @@ export function DashboardGrid({
       const forward = key === "ArrowRight" || key === "ArrowDown";
       if (!backward && !forward) return;
       event.preventDefault();
+      // One gesture at a time: a pointer press on a resize handle leaves focus
+      // on this button, and reordering would cut that resize short.
+      if (resizeSessionRef.current) return;
       const index = entries.findIndex((entry) => entry.id === id);
       if (index === -1) return;
       const nextIndex = backward ? index - 1 : index + 1;
@@ -568,7 +534,7 @@ export function DashboardGrid({
       </span>
       <div
         ref={gridRef}
-        className="admin-widget-grid"
+        className={cn("admin-widget-grid", isCustomizing && CUSTOMIZE_GRID_CLASS)}
         onDragStart={handleDragStart}
         onDragEnd={endDrag}
         onDragOver={handleDragOver}
@@ -640,7 +606,23 @@ export function DashboardGrid({
                     />
                   )}
 
-                  <div className="border-border bg-background/95 absolute end-3 -top-3 z-20 flex items-center gap-0.5 rounded-full border px-1 py-0.5 shadow-md backdrop-blur">
+                  {/* The gap above the widget belongs to it while something is
+                      dragged, so a drop there lands before it instead of at
+                      the end of the dashboard, where drops on the grid's own
+                      space go. It is the row gap's height and reaches half the
+                      column gap (0.875rem in app.css) to each side, so the
+                      areas of neighbors meet where the gaps cross. */}
+                  {isDragging && (
+                    <div
+                      aria-hidden="true"
+                      className="absolute -inset-x-1.75 bottom-full h-(--customize-row-gap)"
+                    />
+                  )}
+
+                  {/* Above the widget, in the gap CUSTOMIZE_GRID_CLASS makes
+                      room for, so it never covers the widget's label, icon,
+                      or links. */}
+                  <div className="border-border bg-background/95 absolute end-3 bottom-full z-20 flex items-center gap-0.5 rounded-full border px-1 py-0.5 shadow-md backdrop-blur">
                     <button
                       type="button"
                       aria-label={t("web.admin.dashboard.grid.moveLabel", { title })}

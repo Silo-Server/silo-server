@@ -264,11 +264,13 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
         ) : (
           <Play className={`text-primary/40 h-5 w-5 ${session.is_paused ? "opacity-45" : ""}`} />
         )}
+        {/* Icon only: the poster is 58px inside, narrower than the word in
+            most languages, so the word is left to screen readers. */}
         {session.is_paused ? (
           <div className="absolute inset-0 flex items-center justify-center bg-black/35">
-            <div className="border-border/40 bg-background/90 text-foreground inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold shadow-sm backdrop-blur">
-              <Pause className="h-3 w-3" />
-              {t("web.admin.dashboard.widgets.nowPlaying.paused")}
+            <div className="border-border/40 bg-background/90 text-foreground flex h-6 w-6 items-center justify-center rounded-full border shadow-sm backdrop-blur">
+              <Pause className="h-3 w-3 fill-current" aria-hidden="true" />
+              <span className="sr-only">{t("web.admin.dashboard.widgets.nowPlaying.paused")}</span>
             </div>
           </div>
         ) : null}

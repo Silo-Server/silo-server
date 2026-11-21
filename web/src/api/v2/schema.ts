@@ -15221,6 +15221,7 @@ export interface components {
        * @example 1
        */
       local_id?: string;
+      /** @description The matched account's username, or its email when it has none */
       local_username?: string;
       /**
        * @description account_id: the backup is this server's and the account id exists; restored: an earlier restore of this backup's server created it; username_email: the one account here whose username or email is this account's username or email; new: restoring creates it

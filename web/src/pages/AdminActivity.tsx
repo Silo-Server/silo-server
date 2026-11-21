@@ -1069,6 +1069,8 @@ function ViewerCell({
     ? `${clientLabelFull || clientLabel} — ${clientUserAgent}`
     : clientLabelFull || clientLabel;
   const clientIP = session.client_ip?.trim() || "";
+  // A long IPv6 address truncates, so the tooltip carries the whole address.
+  const clientIPTitle = `${clientIP} — ${t("web.admin.activity.ipLookup.heading")}`;
   const location =
     session.stream_location === "local"
       ? t("web.player.routeBadge.local")
@@ -1108,8 +1110,8 @@ function ViewerCell({
             <button
               type="button"
               onClick={() => onIPLookup(clientIP)}
-              title={t("web.admin.activity.ipLookup.heading")}
-              className={`${ROW_LINK_CLASS} shrink-0 tabular-nums`}
+              title={clientIPTitle}
+              className={`${ROW_LINK_CLASS} truncate tabular-nums`}
             >
               {clientIP}
             </button>

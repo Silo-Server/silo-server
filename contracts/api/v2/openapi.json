@@ -4035,6 +4035,7 @@
             "type": "string"
           },
           "local_username": {
+            "description": "The matched account's username, or its email when it has none",
             "type": "string"
           },
           "match": {

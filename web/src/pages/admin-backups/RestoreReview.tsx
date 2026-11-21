@@ -114,7 +114,17 @@ export function RestoreReview({
             {caveats.map((caveat) => (
               <li key={caveat.key}>
                 {t("web.admin.backups.restore.review.caveat", {
-                  label: caveat.label,
+                  // Each name is isolated in every language, so a right-to-left name or one
+                  // with a direction override can't reorder the ":" and the text after it.
+                  // The colon stays outside the isolate, in the page's direction.
+                  label: caveat.profile ? (
+                    t("web.admin.backups.restore.caveat.profileLabel", {
+                      account: <bdi>{caveat.profile.account}</bdi>,
+                      profile: <bdi>{caveat.profile.profile}</bdi>,
+                    })
+                  ) : (
+                    <bdi>{caveat.label}</bdi>
+                  ),
                   text: caveat.text,
                   b: (chunks) => (
                     <span title={caveat.label} className="font-medium">

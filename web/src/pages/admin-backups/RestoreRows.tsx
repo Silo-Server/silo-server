@@ -101,10 +101,11 @@ function settingValues(t: Translate, setting: RestoreSetting): { now: string; ba
  * A setting key or dotted name that may break after its dots and underscores,
  * so a narrow column wraps "playback.watched_threshold" or "silo.tmdb 1.2.3"
  * between words, not inside one. A dot before a digit, another dot or a space
- * stays, keeping a version number and an ellipsis whole.
+ * stays, keeping a version number and an ellipsis whole, and so does a dot or
+ * underscore before "*", so a prefix like "s3.*" keeps its "*".
  */
 export function BreakableKey({ value }: { value: string }) {
-  const parts = value.replace(/(_|\.(?=[^\d.\s]))/g, "$1\u0000").split("\u0000");
+  const parts = value.replace(/(_(?!\*)|\.(?=[^\d.\s*]))/g, "$1\u0000").split("\u0000");
   return (
     <>
       {parts.map((part, position) => (
@@ -271,12 +272,15 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
       </div>
     ) : null,
     paths.length > 0 ? (
-      // Paths read left to right in any language; w-fit keeps the list on the
-      // page's start side.
+      // Paths read left to right in any language; align-with-page keeps each line,
+      // a short path's or a wrapped one's, on the page's start side.
       <ul
         key="paths"
         dir="ltr"
-        className={cn("text-muted-foreground w-fit font-mono text-xs break-all", KEEP_SPACES)}
+        className={cn(
+          "text-muted-foreground align-with-page font-mono text-xs break-all",
+          KEEP_SPACES,
+        )}
       >
         {paths.map((path) => (
           <li key={path}>{path}</li>

@@ -127,10 +127,12 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   `dir="auto"` leaves an empty field's example in the page's direction, and
   `type="url"` rejects addresses without a scheme.
 - A path or URL shown as text (a `code` block, a list of folders) also sets `dir="ltr"`,
-  and the block that holds it takes `align-with-page` (in `app.css`) so its lines, wrapped
-  or not, line up with the text around them: on the page's start side. Without it they
-  start at the block's left edge. Firefox and Safari hide that inside a list item, where
-  they right-align them anyway, so check in Chromium.
+  and the block that holds it takes `align-with-page` (in `app.css`). Its lines, wrapped or
+  not, then align the way its parent's lines do: on the page's start side when the parent
+  is start-aligned, like the text around them. Without the class, an inherited `start`
+  resolves against the block's own direction and puts every line at its left edge.
+  Firefox and Safari don't show this inside a list item, where they right-align the lines
+  anyway, so check in Chromium.
 - A name that can be in either script and is cut with `truncate` (a username, say) takes
   `dir="auto"`: it reads in the direction of its first strong character (a letter, or
   right-to-left punctuation such as `؟`), and left to right when it has none, as a name
