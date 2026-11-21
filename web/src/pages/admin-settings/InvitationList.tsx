@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/table";
 import { useT } from "@/i18n";
 import { formatDate } from "@/lib/datetime";
+import { emailDir } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 
 import { DeliveryLabel } from "./InvitationDisplay";
@@ -191,7 +192,15 @@ function InvitationRow({ invitation, shared }: RowProps) {
   return (
     <TableRow>
       <TableCell className="max-w-xs">
-        <div className="truncate font-medium">{row.recipient}</div>
+        {/* An email reads left to right unless written in a right-to-left script,
+            so on a right-to-left page a cut one keeps its start; w-fit keeps it on
+            the page's start side. The link invitation's label follows the page. */}
+        <div
+          dir={row.link ? undefined : emailDir(row.recipient)}
+          className="w-fit max-w-full truncate font-medium"
+        >
+          {row.recipient}
+        </div>
         {row.details && <div className="text-muted-foreground truncate text-xs">{row.details}</div>}
       </TableCell>
       <TableCell className="text-muted-foreground capitalize">{invitation.role}</TableCell>

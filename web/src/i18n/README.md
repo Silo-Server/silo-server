@@ -137,6 +137,12 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   can't be sized that way: keep `flex-1` on a wrapper and put the name in a
   `block w-fit max-w-full` span inside it. Don't use `.bidi-text` for this: its
   `unicode-bidi: plaintext` drops the "…" in Firefox and cuts the start in WebKit.
+- A path or an email cut with `truncate` needs its own direction too. A path takes
+  `dir="ltr"` and renders through `PathText` (`src/components/PathText.tsx`), which
+  keeps each folder name in its own direction so folders named in Arabic don't
+  reverse. An email takes `dir={emailDir(email)}` (`src/lib/direction.ts`), which
+  keeps one with an Arabic name part in the page's direction; `dir="auto"` would turn
+  it right to left on a left-to-right page. Size the element as for a name, above.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also
