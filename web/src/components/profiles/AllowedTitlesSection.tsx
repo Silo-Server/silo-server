@@ -177,7 +177,7 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
                   <span dir="auto" className="block w-fit max-w-full truncate text-sm">
                     {collection.name}
                   </span>
-                  <span className="text-muted-foreground block text-xs">
+                  <span className="text-muted-foreground block text-xs text-pretty break-words">
                     {collection.live
                       ? t("web.profiles.allowedTitles.titleCount", {
                           count: collection.item_count,
