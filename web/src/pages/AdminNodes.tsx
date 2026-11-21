@@ -454,10 +454,7 @@ function GroupChip({
       )}
       <span className={cn(active && "font-medium")}>{label}</span>
       <span
-        className={cn(
-          "font-mono text-[10px] tabular-nums",
-          active ? "opacity-70" : "text-muted-foreground",
-        )}
+        className={cn("font-mono text-[10px] tabular-nums", !active && "text-muted-foreground")}
       >
         {count}
       </span>
@@ -1390,7 +1387,7 @@ function NodeForm({
 
 /** Rich-text tag for the device examples in the form help. */
 function mono(chunks: ReactNode[]) {
-  return <span className="font-mono">{chunks}</span>;
+  return <code className="font-mono">{chunks}</code>;
 }
 
 /** The node the key dialog acts on, and whether it has a key to replace. */

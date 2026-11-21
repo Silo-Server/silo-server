@@ -73,9 +73,10 @@ function Dialog({ row }: { row: HomeRow }) {
 - **Right to left:** in an RTL language every printed string placeholder is
   wrapped in Unicode isolates, so a left-to-right title keeps its punctuation in
   place. `select` and `plural` arguments are not, and neither is a placeholder
-  printed only as the whole content of a `code` tag (`<code>{command}</code>`), so
-  it copies without invisible characters. Render a `code` tag as a `<code>`
-  element, which app.css isolates. English bytes never change.
+  printed only as the whole content of a `code`, `url`, `address`, `mono` or `id`
+  tag (`<code>{command}</code>`), so it copies without invisible characters.
+  Render those tags as `<code>` elements, which app.css isolates (add
+  `[font-family:inherit]` for text that isn't monospace). English bytes never change.
 - **Web-only keys** may use `select` and rich-text tags:
   `"Read the <link>guide</link>"` with
   `t(id, { link: (chunks) => <a href={url}>{chunks}</a> })`, which returns React nodes.
@@ -131,6 +132,17 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   its own direction. A plain `dir="ltr"` box swaps two adjacent Arabic or Hebrew segments.
   `PathText` is inline, so a `truncate` container around it still sets `dir="ltr"` to clip
   the end rather than the start.
+- A name that can be in either script and is cut with `truncate` (a username, say) takes
+  `dir="auto"`: it reads in the direction of its first strong character (a letter, or
+  right-to-left punctuation such as `؟`), and left to right when it has none, as a name
+  made only of digits does. A name in one script then keeps its start. In a name that
+  mixes directions, a part that runs the other way, such as a long run of digits before
+  Arabic letters, can still lose its own start; no `dir` avoids that for every name.
+  Where the box would stretch (a block, a `flex-col` child), size it to its text with
+  `w-fit max-w-full` so a short name stays on the page's start side. A `flex-1` item
+  can't be sized that way: keep `flex-1` on a wrapper and put the name in a
+  `block w-fit max-w-full` span inside it. Don't use `.bidi-text` for this: its
+  `unicode-bidi: plaintext` drops the "…" in Firefox and cuts the start in WebKit.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also

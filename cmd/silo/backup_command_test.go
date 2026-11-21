@@ -5,17 +5,20 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/backup"
 	"github.com/Silo-Server/silo-server/internal/backup/backuptest"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/envutil"
 	"github.com/Silo-Server/silo-server/internal/s3client/s3test"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
@@ -163,6 +166,8 @@ func TestBackupCommandsReadS3DB(t *testing.T) {
 	for k, v := range map[string]string{
 		"SECRET_KEY": b.masterKey, envBackupS3Endpoint: b.srv.URL, envBackupS3Region: "us-east-1",
 		envBackupS3AccessKey: "a", envBackupS3SecretKey: "s", envBackupS3PathStyle: "true",
+		// A shell that sets the file variants would make each read ambiguous.
+		"SECRET_KEY_FILE": "", "DATABASE_URL_FILE": "", envBackupS3AccessKey + "_FILE": "", envBackupS3SecretKey + "_FILE": "",
 	} {
 		t.Setenv(k, v)
 	}
@@ -202,5 +207,89 @@ func TestBackupCommandsReadS3DB(t *testing.T) {
 	}
 	if left := dirNames(work); len(left) != 1 || left[0] != "db.dump" {
 		t.Fatalf("refused commands left %v", left)
+	}
+}
+
+// `silo secret check` answers once a key typed or pasted on stdin ends its
+// line, with no end of input needed, and `--file` reads a key file the way
+// SECRET_KEY_FILE does, including an extra trailing newline or a wrapped
+// multi-line key.
+func TestSecretCheck(t *testing.T) {
+	const key = "0123456789abcdef0123456789abcdef"
+	checkOf := func(t *testing.T, key string) string {
+		t.Helper()
+		check, err := secret.KeyCheckValue([]byte(key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return check
+	}
+
+	t.Run("stdin", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			in, typed := io.Pipe()
+			defer func() { _ = typed.Close() }()
+			var out bytes.Buffer
+			done := make(chan error, 1)
+			go func() { done <- runSecretCommand([]string{"check"}, in, &out) }()
+			if _, err := io.WriteString(typed, key+"\n"); err != nil {
+				t.Fatal(err)
+			}
+			synctest.Wait()
+			select {
+			case err := <-done:
+				if got := strings.TrimSpace(out.String()); err != nil || got != checkOf(t, key) {
+					t.Fatalf("secret check = %q, %v; want %q", got, err, checkOf(t, key))
+				}
+			default:
+				t.Fatal("secret check is still waiting for the end of input after the key's line")
+			}
+		})
+	})
+
+	dir := t.TempDir()
+	for name, raw := range map[string]string{
+		"file double newline": key + "\n\n",
+		"file multiline":      key + "\nsecond-line-of-key\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(dir, strings.ReplaceAll(name, " ", "-"))
+			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := envutil.ReadSecretFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			if err := runSecretCommand([]string{"check", "--file", path}, strings.NewReader(""), &out); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := strings.TrimSpace(out.String()), checkOf(t, loaded); got != want {
+				t.Fatalf("secret check --file = %q, want %q (from ReadSecretFile)", got, want)
+			}
+		})
+	}
+}
+
+// Missing or conflicting _FILE variables fail before restore reads --from.
+func TestBackupRestoreChecksSecretFilesBeforeOpeningSource(t *testing.T) {
+	dir := t.TempDir()
+	for k, v := range map[string]string{
+		"SECRET_KEY":        "0123456789abcdef0123456789abcdef-at-rest",
+		"SECRET_KEY_FILE":   "",
+		"DATABASE_URL":      "postgres://example.invalid/silo",
+		"DATABASE_URL_FILE": "",
+		"REDIS_URL":         "",
+		"REDIS_URL_FILE":    filepath.Join(dir, "missing-redis-url"),
+	} {
+		t.Setenv(k, v)
+	}
+	var out bytes.Buffer
+	err := runBackupCommand(t.Context(), []string{
+		"restore", "--from", filepath.Join(dir, "missing-backup"), "-env", filepath.Join(dir, "no.env"),
+	}, &out)
+	if err == nil || !strings.Contains(err.Error(), "REDIS_URL_FILE") {
+		t.Fatalf("error = %v, want REDIS_URL_FILE error before reading --from", err)
 	}
 }

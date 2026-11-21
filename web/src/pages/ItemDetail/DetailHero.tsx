@@ -31,7 +31,7 @@ interface DetailHeroProps {
    */
   genreHref?: (genre: string) => string;
   overview?: string;
-  /** Pulses the overview while an on-view AI translation is in flight. */
+  /** Shows the translating status while an on-view AI translation is in flight. */
   overviewTranslating?: boolean;
   /** When set, renders a small "Translate" chip under the overview. */
   onTranslateOverview?: () => void;

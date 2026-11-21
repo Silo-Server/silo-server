@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import {
   CircleCheck,
@@ -57,6 +57,17 @@ const OUTCOME = {
   },
 } satisfies Record<RestoreReportItem["outcome"], { label: MessageKey; [key: string]: unknown }>;
 
+/** Keeps each "·" with the word after it, so a wrapped line never ends on a separator. */
+function keepSeparatorsWithNext(node: ReactNode): ReactNode {
+  if (typeof node === "string") return node.replace(/· /g, "·\u00a0");
+  return Array.isArray(node) ? node.map(keepSeparatorsWithNext) : node;
+}
+
+/** Joins a short status's words ("Left out") with no-break spaces. */
+function nonBreaking(text: string): string {
+  return text.replace(/ /g, "\u00a0");
+}
+
 function ReportRow({ item }: { item: RestoreReportItem }) {
   const t = useT();
   const outcome = OUTCOME[item.outcome];
@@ -81,13 +92,20 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
     <li className="border-border/60 flex items-start gap-3 border-b py-3 last:border-b-0">
       <outcome.Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", outcome.tone)} />
       <div className="min-w-0 flex-1">
-        <p className="text-sm">
+        <p className="text-sm wrap-anywhere">
           {t("web.admin.backups.restore.run.itemLine", {
             label: displayLabel(item),
             section: t(SECTION_TITLES[item.section]),
-            outcome: t(outcome.label),
+            // The status stays whole: no break at its spaces or between its Chinese, Japanese,
+            // or Korean characters. One wider than the line still breaks, through
+            // `wrap-anywhere`. (An inline block would let the line break before it, leaving
+            // the message's "·" at the end of a line.) <bdi> keeps the direction isolation a
+            // string value gets in right-to-left languages.
+            outcome: <bdi className="break-keep">{nonBreaking(t(outcome.label))}</bdi>,
             b: (chunks) => <span className="font-medium">{chunks}</span>,
-            muted: (chunks) => <span className="text-muted-foreground">{chunks}</span>,
+            muted: (chunks) => (
+              <span className="text-muted-foreground">{keepSeparatorsWithNext(chunks)}</span>
+            ),
           })}
         </p>
         {details.map((detail, position) => (
@@ -147,11 +165,15 @@ function AccountReport({
                   <span className="flex min-h-lh shrink-0 items-center">
                     <outcome.Icon aria-hidden="true" className={cn("size-3.5", outcome.tone)} />
                   </span>
-                  <span>
+                  <span className="min-w-0 wrap-anywhere">
                     {/* The outcome moves to the next line as a unit, so its "·" stays with the
                         word it introduces, and wraps inside itself only when it can't fit on a
                         line. The gap is the name's margin, left behind at the end of the line. */}
-                    <span className="me-1.5 font-medium">{profile.label}</span>
+                    <span className="me-1.5 font-medium">
+                      {/* <bdi> isolates the name's direction. It sits inside the span, so the
+                          margin follows the page's direction, not the name's. */}
+                      <bdi>{profile.label}</bdi>
+                    </span>
                     <wbr />
                     <span className="text-muted-foreground inline-block">
                       {t("web.admin.backups.restore.run.profileOutcome", {
@@ -187,7 +209,10 @@ function AccountReport({
                           ),
                         })}
                         {data.notes.map((note, position) => (
-                          <span key={position} className="text-muted-foreground block">
+                          <span
+                            key={position}
+                            className="text-muted-foreground block wrap-anywhere"
+                          >
                             {note}
                           </span>
                         ))}
