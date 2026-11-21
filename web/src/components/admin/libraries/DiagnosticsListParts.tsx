@@ -32,7 +32,7 @@ import { cn } from "@/lib/utils";
  * card chrome below it.
  */
 
-/** Controls at least 44px tall below `lg`, where the sections show cards. */
+/** Controls at least 44px tall below `lg`, where every section shows cards. */
 export const TOUCH_CONTROL_CLASS = "max-lg:h-11!";
 
 /** A full-width labeled action at the bottom of a card. */

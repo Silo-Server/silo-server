@@ -113,8 +113,10 @@ export function StaleIDsSection() {
                 <TableRow key={staleIDKey(s)}>
                   {/* The title takes the width the other columns leave and truncates,
                       so a long title can't push the table past its section. */}
-                  <TableCell className="w-full max-w-0 truncate font-medium" title={s.title}>
-                    {s.title}
+                  <TableCell className="w-full max-w-0 font-medium">
+                    <span dir="auto" className="block w-fit max-w-full truncate" title={s.title}>
+                      {s.title}
+                    </span>
                   </TableCell>
                   <TableCell className="tabular-nums">{numberText(s.year)}</TableCell>
                   <TableCell className="text-sm">{s.library_name}</TableCell>
