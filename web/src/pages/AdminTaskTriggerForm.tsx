@@ -46,13 +46,16 @@ interface TriggerFormRowProps {
 // so one long label can't push the Remove button out of view.
 const TRIGGER_FIELD_WIDTH = "w-full sm:w-fit sm:min-w-40 sm:max-w-full";
 
-// 11.5ic holds the widest "None" placeholder measured, Croatian "Bez ograničenja"
+// Sized for the widest "None" placeholder measured, Croatian "Bez ograničenja"
 // (167 px at 16 px text and 152 px at 14 px in Firefox), beside the number
-// spinners Firefox and Safari always draw. ic and cap match em at normal
-// settings, so the box grows with its own text size; unlike em, they also follow
-// a browser minimum font size. The box stops at its column's width. A browser
-// without these units drops the width and shows the input at its default size.
-const MAX_RUNTIME_INPUT_WIDTH = "w-full sm:w-[max(11.5ic,15.5cap)] sm:max-w-full";
+// spinners Firefox and Safari always draw: about 11.5em. Plus Jakarta Sans's cap
+// height is about 0.75em, so 15.5cap is the same width; change both together.
+// A browser minimum font size moves ic and cap in Firefox, but only cap in
+// Chromium, and em in neither, so where cap is supported the box takes the
+// larger of the two. Other browsers keep 11.5em. The box stops at its column's
+// width.
+const MAX_RUNTIME_INPUT_WIDTH =
+  "w-full sm:w-[11.5em] sm:supports-[width:1cap]:w-[max(11.5ic,15.5cap)] sm:max-w-full";
 
 type IntervalUnit = "seconds" | "minutes" | "hours";
 
