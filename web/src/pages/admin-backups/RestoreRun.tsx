@@ -102,7 +102,9 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
             // the message's "·" at the end of a line.) <bdi> keeps the direction isolation a
             // string value gets in right-to-left languages.
             outcome: <bdi className="break-keep">{nonBreaking(t(outcome.label))}</bdi>,
-            b: (chunks) => <span className="font-medium">{chunks}</span>,
+            // The label is isolated in every language, so a right-to-left name or one with a
+            // direction override can't reorder the " · section · outcome" text after it.
+            b: (chunks) => <bdi className="font-medium">{chunks}</bdi>,
             muted: (chunks) => (
               <span className="text-muted-foreground">{keepSeparatorsWithNext(chunks)}</span>
             ),
@@ -168,7 +170,8 @@ function AccountReport({
                   <span className="min-w-0 wrap-anywhere">
                     {/* The outcome moves to the next line as a unit, so its "·" stays with the
                         word it introduces, and wraps inside itself only when it can't fit on a
-                        line. The gap is the name's margin, left behind at the end of the line. */}
+                        line; a no-break space keeps the "·" with the word then too. The gap is
+                        the name's margin, left behind at the end of the line. */}
                     <span className="me-1.5 font-medium">
                       {/* <bdi> isolates the name's direction. It sits inside the span, so the
                           margin follows the page's direction, not the name's. */}
@@ -176,11 +179,13 @@ function AccountReport({
                     </span>
                     <wbr />
                     <span className="text-muted-foreground inline-block">
-                      {t("web.admin.backups.restore.run.profileOutcome", {
-                        outcome: profile.created
-                          ? t("web.admin.backups.restore.outcome.created")
-                          : t(outcome.label),
-                      })}
+                      {keepSeparatorsWithNext(
+                        t("web.admin.backups.restore.run.profileOutcome", {
+                          outcome: profile.created
+                            ? t("web.admin.backups.restore.outcome.created")
+                            : t(outcome.label),
+                        }),
+                      )}
                     </span>
                   </span>
                 </p>
