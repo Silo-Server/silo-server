@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAppLanguage, useT } from "@/i18n";
 import { pendingCount } from "@/lib/profileDataTypes";
+import { cn } from "@/lib/utils";
 import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 
@@ -32,6 +33,7 @@ import { Disclosure } from "./Disclosure";
 import { PlanSentences } from "./RestoreReview";
 import { BreakableKey, ItemRow, SameRow, type ToggleKeys } from "./RestoreRows";
 import { AccountRow, DataTypesPanel } from "./RestoreUsers";
+import { OVERFLOW_CLIP, useOverflowsInline } from "./useOverflowsInline";
 import {
   FILTER_THRESHOLD,
   STATE_ORDER,
@@ -237,6 +239,7 @@ function LibraryGroupRows({
   useT();
   const listId = useId();
   const [open, setOpen] = useState(true);
+  const [textRef, textOverflows] = useOverflowsInline<HTMLSpanElement>(name);
   return (
     <div className="pt-2">
       <Disclosure
@@ -249,13 +252,13 @@ function LibraryGroupRows({
             with no spaces still breaks to fit. The name keeps its own direction,
             so a name in another script can't pull the count across it. The count
             is an inline block, so it moves to the next line whole. The button and
-            the text stay within the row, which clips sideways the part of a name
-            that can't wrap, such as one long run of joined emoji. The 0.25em of
-            padding, offset by a negative margin, keeps letters whole whose ink
-            reaches past their edge. */}
+            the text stay within the row. Only a name still wider than the row after
+            wrapping, such as one long run of joined emoji, is clipped sideways at
+            the row's end edge, as in ProfileRow (RestoreUsers.tsx). */}
         <span
+          ref={textRef}
           title={name}
-          className="-mx-[0.25em] min-w-0 overflow-x-clip px-[0.25em] wrap-anywhere"
+          className={cn("min-w-0 wrap-anywhere", textOverflows && OVERFLOW_CLIP)}
         >
           {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
           <span className="bidi-text me-1">{name}</span>{" "}
@@ -595,6 +598,7 @@ export function RestoreChoose({
   const index = useMemo(() => indexItems(set), [set]);
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeRef, noticeScrolls] = useScrolls();
+  const [noticeTextRef, noticeOverflows] = useOverflowsInline<HTMLSpanElement>(notice);
   const libraries = useAdminLibraries();
   const names = useMemo(() => libraryNames(set, libraries.data ?? []), [set, libraries.data]);
   const plan = restorePlan(set, selection, dataTypes);
@@ -732,13 +736,14 @@ export function RestoreChoose({
               tabIndex={noticeScrolls ? 0 : undefined}
               className="overlay-scroll focus-visible:outline-ring -mx-[0.25em] rounded-sm px-[0.25em] text-[13px] wrap-anywhere text-amber-600 focus-visible:outline-2 focus-visible:outline-offset-2 lg:max-h-32 lg:min-h-0 lg:overflow-y-auto dark:text-amber-400"
             >
-              {/* A block child, so useScrolls sees the text grow. It clips
-                  sideways a name that can't wrap, such as a run of joined
-                  emoji; a clip on the notice itself would still let script
-                  and find-in-page scroll it. The 0.25em of padding, offset by
-                  a negative margin, keeps letters whole whose ink reaches past
-                  their edge; the notice's matching padding holds that room. */}
-              <span className="-mx-[0.25em] block overflow-x-clip px-[0.25em]">{notice}</span>
+              {/* A block child, so useScrolls sees the text grow. Only while a
+                  name can't wrap to fit, such as a run of joined emoji, does it
+                  clip sideways; a clip on the notice itself would still let
+                  script and find-in-page scroll it. The notice's padding holds
+                  the clip's start room. */}
+              <span ref={noticeTextRef} className={cn("block", noticeOverflows && OVERFLOW_CLIP)}>
+                {notice}
+              </span>
             </p>
           ) : null}
           <Button className="w-full lg:shrink-0" disabled={selection.size === 0} onClick={onReview}>

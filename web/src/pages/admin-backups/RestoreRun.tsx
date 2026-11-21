@@ -33,6 +33,7 @@ import {
   displayLabel,
   reportHeadline,
 } from "./restoreModel";
+import { OVERFLOW_CLIP, useOverflowsInline } from "./useOverflowsInline";
 
 const OUTCOME = {
   restored: {
@@ -89,14 +90,14 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
         : null,
   ].filter((detail): detail is string => Boolean(detail));
   const label = displayLabel(item);
+  const [columnRef, columnOverflows] = useOverflowsInline<HTMLDivElement>(item);
   return (
     <li className="border-border/60 flex items-start gap-3 border-b py-3 last:border-b-0">
       <outcome.Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", outcome.tone)} />
-      {/* Part of a name that can't wrap, such as one long run of joined emoji, is clipped
-          sideways at the row's edge, in the item's line and in its profiles' lines; the words
-          around it still wrap. The 0.25em of padding, offset by a negative margin, keeps
-          letters whole whose ink reaches past their edge. */}
-      <div className="-mx-[0.25em] min-w-0 flex-1 overflow-x-clip px-[0.25em]">
+      {/* Only while a line is still wider than the row after wrapping, such as one holding a
+          long run of joined emoji in a name or a note, does the row clip sideways at its end
+          edge; the words around the run still wrap, and a name's title shows it in full. */}
+      <div ref={columnRef} className={cn("min-w-0 flex-1", columnOverflows && OVERFLOW_CLIP)}>
         <p className="text-sm wrap-anywhere">
           {t("web.admin.backups.restore.run.itemLine", {
             // <bdi>, not the isolate characters a string value gets in right-to-left languages:
