@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { PAGE_SIZE, type SortDir } from "@/components/admin/libraries/diagnosticsListState";
+import { PathText } from "@/components/PathText";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -286,7 +287,7 @@ export function CardPath({ path, className }: { path: string; className?: string
       )}
       dir="ltr"
     >
-      {path}
+      <PathText path={path} />
     </code>
   );
 }
