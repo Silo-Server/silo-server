@@ -25,7 +25,7 @@ import {
   useLibraryMetadataMatchQueues,
   useRetryLibraryMetadataMatchQueue,
 } from "@/hooks/queries/admin/libraries";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
 import { formatDecimal } from "@/lib/numberFormat";
 import { cn } from "@/lib/utils";
@@ -67,7 +67,7 @@ function describeRejection(decision: MatchDecision, t: Translate): string | unde
 
 /** A candidate's title with its year, as the provider gave them. */
 function candidateTitle(candidate: { title: string; year?: number | null }): string {
-  return candidate.year ? `${candidate.title} (${candidate.year})` : candidate.title;
+  return candidate.year ? `${candidate.title} (${numberText(candidate.year)})` : candidate.title;
 }
 
 /** A queue entry's state badge; a state this build does not know shows as sent. */
@@ -130,7 +130,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
         ...detail.raw_files.map((entry) => {
           const identity = [
             entry.base_title,
-            entry.base_year ? `(${entry.base_year})` : "",
+            entry.base_year ? `(${numberText(entry.base_year)})` : "",
             entry.base_type ? `[${entry.base_type}]` : "",
           ]
             .filter(Boolean)
@@ -175,10 +175,10 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
   const parkedCount = (count: number) =>
     count > 0 ? (
       <Badge variant="outline" className="border-amber-500/30 text-amber-600">
-        {count}
+        {numberText(count)}
       </Badge>
     ) : (
-      0
+      numberText(0)
     );
   // The selected library's entries and pager, under its table row or in its card.
   const queueDetail = (touch: boolean) => (
@@ -246,7 +246,9 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                       onClick={() => toggleLibrary(queue.library_id)}
                     >
                       <TableCell className="font-medium">{libraryName(queue.library_id)}</TableCell>
-                      <TableCell className="text-end tabular-nums">{queue.pending_count}</TableCell>
+                      <TableCell className="text-end tabular-nums">
+                        {numberText(queue.pending_count)}
+                      </TableCell>
                       <TableCell className="text-end tabular-nums">
                         {parkedCount(queue.parked_count)}
                       </TableCell>
@@ -285,7 +287,9 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                     <span className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                       <span className="inline-flex items-center gap-1.5">
                         {t("web.admin.common.libraryEditor.matcher.pending")}
-                        <span className="text-foreground tabular-nums">{queue.pending_count}</span>
+                        <span className="text-foreground tabular-nums">
+                          {numberText(queue.pending_count)}
+                        </span>
                       </span>
                       <span className="inline-flex items-center gap-1.5">
                         {t("web.admin.common.libraryEditor.matcher.parked")}
