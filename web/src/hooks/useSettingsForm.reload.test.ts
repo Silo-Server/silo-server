@@ -248,3 +248,70 @@ it("keeps every edit when a reload after a refused save can't read which secrets
   expect(result.current.dirtyCount).toBe(0);
   expect(result.current.getValue("server.log_level")).toBe("warn");
 });
+
+it("leaves the edits alone when a save starts while a reload after a refused save is reading", async () => {
+  let stored = { "branding.server_name": "Silo", "branding.login_subtitle": "Welcome" };
+  let tag = '"tagA"';
+  let release = () => {};
+  const statusHeld = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let holdStatus = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT")
+        return response(
+          {
+            type: "https://siloserver.org/docs/api/v2/problems/precondition_failed",
+            title: "Precondition failed",
+            status: 412,
+          },
+          412,
+        );
+      if (url.endsWith("/sensitive-status")) {
+        if (holdStatus) await statusHeld;
+        return response({ configured: [], managed_by_env: [] });
+      }
+      return response(stored, 200, tag);
+    }),
+  );
+  const { client, wrapper } = fixture();
+  const { result } = renderHook(
+    () =>
+      useSettingsForm({
+        keys: ["branding.server_name", "branding.login_subtitle", "download.artifact_dir"],
+      }),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.sensitiveStatusReady).toBe(true));
+  await waitFor(() => expect(result.current.getValue("branding.server_name")).toBe("Silo"));
+  act(() => result.current.setValue("branding.server_name", "Casa"));
+  // A change on this page, so a reload that went ahead would undo every edit.
+  stored = { ...stored, "branding.login_subtitle": "Hello" };
+  tag = '"tagB"';
+  await act(async () => {
+    await expect(result.current.save()).rejects.toBeInstanceOf(Error);
+  });
+  const action = vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.action as
+    | { onClick: (event: { preventDefault: () => void }) => void }
+    | undefined;
+  holdStatus = true;
+  act(() => action?.onClick({ preventDefault() {} }));
+  await waitFor(() => expect(client.isFetching()).toBe(1));
+  // While the reload waits for the secret status, the admin edits again and
+  // saves, and that save is refused too.
+  act(() => result.current.setValue("download.artifact_dir", "/srv/artifacts"));
+  await act(async () => {
+    await expect(result.current.save()).rejects.toBeInstanceOf(Error);
+  });
+  act(() => release());
+  await waitFor(() => expect(client.isFetching()).toBe(0));
+
+  expect([...result.current.dirtyKeys].sort()).toEqual([
+    "branding.server_name",
+    "download.artifact_dir",
+  ]);
+  expect(result.current.getValue("download.artifact_dir")).toBe("/srv/artifacts");
+  expect(toast.dismiss).not.toHaveBeenCalled();
+});

@@ -322,6 +322,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   const reloadAfterConflict = useCallback(async () => {
     if (reloading.current || savePending.current) return;
     const generation = draftGeneration.current;
+    const epoch = saveEpoch.current;
     const baseline = editBaseline.current;
     const secretsThen = baselineConfigured.current;
     reloading.current = true;
@@ -331,12 +332,13 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       // again. A refetch another read cancels settles with that newer read.
       const settingsResult = await refetch();
       const statusResult = await refetchSensitiveStatus();
-      // Discard, a profile switch, unmount, a save started meanwhile, or a
-      // baseline another path advanced: this result no longer applies.
+      // Discard, a profile switch, unmount, a save started meanwhile (even
+      // one already refused, whose toast offers Reload again), or a baseline
+      // another path advanced: this result no longer applies.
       if (
         !mounted.current ||
         generation !== draftGeneration.current ||
-        savePending.current ||
+        saveEpoch.current !== epoch ||
         editBaseline.current !== baseline
       )
         return;
