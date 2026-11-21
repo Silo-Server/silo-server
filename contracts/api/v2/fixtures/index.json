@@ -8378,6 +8378,27 @@
       "body_file": "get_plugin_settings_ok.json"
     },
     {
+      "name": "get_profile_section_baseline_ok",
+      "operation_id": "getProfileSectionBaseline",
+      "scenario": "The home page's pre-override server section baseline: opaque tokens for the server rows in libraries the profile is allowed, plus the pre-override visible server rows.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/profile/sections/baseline",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ProfileSectionBaseline",
+      "body_file": "get_profile_section_baseline_ok.json"
+    },
+    {
       "name": "get_profile_section_flags_ok",
       "operation_id": "getProfileSectionFlags",
       "scenario": "What this server lets profiles do to their pages.",

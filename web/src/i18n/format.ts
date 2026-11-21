@@ -105,23 +105,47 @@ const TAG = 8;
 interface ArgumentUse {
   /** Arguments printed as text (`{name}`). */
   printed: Set<string>;
+  /**
+   * Printed arguments that need isolates in a right-to-left interface: all of
+   * them except one printed only as the whole content of a code-like tag
+   * (`<code>{command}</code>`, `<url>{login_url}</url>`). Those tags render as
+   * a `<code>` element, which app.css already isolates, and isolate characters
+   * inside it would end up in a copy of the value.
+   */
+  isolated: Set<string>;
   /** Arguments a `select` or `plural` chooses on; never isolated, or no branch would match. */
   selectors: Set<string>;
 }
+
+/** Rich-text tags that every caller renders as a `<code>` element. */
+const CODE_TAGS = new Set(["code", "url", "address", "mono", "id"]);
 
 const uses = new WeakMap<MessageFormatElement[], ArgumentUse>();
 
 function argumentUse(ast: MessageFormatElement[]): ArgumentUse {
   let use = uses.get(ast);
   if (use) return use;
-  use = { printed: new Set(), selectors: new Set() };
+  use = { printed: new Set(), isolated: new Set(), selectors: new Set() };
   const walk = (elements: MessageFormatElement[]) => {
     for (const element of elements) {
-      if (element.type === ARGUMENT) use!.printed.add(element.value);
-      else if (element.type === SELECT || element.type === PLURAL) {
+      if (element.type === ARGUMENT) {
+        use!.printed.add(element.value);
+        use!.isolated.add(element.value);
+      } else if (element.type === SELECT || element.type === PLURAL) {
         use!.selectors.add(element.value);
         for (const option of Object.values(element.options)) walk(option.value);
-      } else if (element.type === TAG) walk(element.children);
+      } else if (element.type === TAG) {
+        const [only] = element.children;
+        if (
+          CODE_TAGS.has(element.value) &&
+          element.children.length === 1 &&
+          only?.type === ARGUMENT
+        ) {
+          use!.printed.add(only.value);
+        } else {
+          walk(element.children);
+        }
+      }
     }
   };
   walk(ast);
@@ -215,6 +239,9 @@ const DIGITS = /^\p{Nd}+$/u;
  *   numbers ("01" in "S{season}E{episode}") are not: an isolate would cut a
  *   number off the letters it belongs to and reorder it. A range or a signed
  *   number ("2-3", "8+") keeps its isolate, or Arabic text would reorder it.
+ *   A value that is the whole content of a code-like tag (`CODE_TAGS`) isn't
+ *   wrapped either: its `<code>` element isolates it, and the value copies as
+ *   shown.
  *
  * Left-to-right output in Latin digits is unchanged, so English keeps its bytes.
  */
@@ -228,13 +255,15 @@ function prepareValues<V extends RichValues>(
   const rtl = interfaceDirection(intl.locale) === "rtl";
   const localDigits = translated && nonLatinDigits(intl) !== null;
   if (!rtl && !localDigits) return values;
-  const { printed, selectors } = argumentUse(ast);
+  const { printed, isolated, selectors } = argumentUse(ast);
   const prepared: RichValues = { ...values };
   for (const name of printed) {
     if (selectors.has(name)) continue;
     let value = values[name];
     if (typeof value === "number") value = localDigits ? numberText(value, intl) : String(value);
-    if (rtl && typeof value === "string" && !DIGITS.test(value)) value = FSI + value + PDI;
+    if (rtl && isolated.has(name) && typeof value === "string" && !DIGITS.test(value)) {
+      value = FSI + value + PDI;
+    }
     prepared[name] = value;
   }
   return prepared as V;

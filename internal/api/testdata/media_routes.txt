@@ -433,6 +433,7 @@ POST /api/v2/admin/requests/{id}/approve	non-media
 POST /api/v2/admin/requests/{id}/cancel	non-media
 POST /api/v2/admin/requests/{id}/decline	non-media
 GET /api/v2/admin/requests/{id}/events	non-media
+GET /api/v2/admin/requests/{id}/poster	non-media
 POST /api/v2/admin/requests/{id}/retry	non-media
 GET /api/v2/admin/sections	non-media
 POST /api/v2/admin/sections	non-media
@@ -890,6 +891,7 @@ POST /api/v2/profile/import	non-media
 DELETE /api/v2/profile/sections	non-media
 GET /api/v2/profile/sections	non-media
 PUT /api/v2/profile/sections	non-media
+GET /api/v2/profile/sections/baseline	non-media
 GET /api/v2/profile/sections/flags	non-media
 GET /api/v2/profile/sections/settings	non-media
 GET /api/v2/profiles	non-media
@@ -1506,6 +1508,7 @@ POST /api/v2/admin/requests/{id}/approve	non-media
 POST /api/v2/admin/requests/{id}/cancel	non-media
 POST /api/v2/admin/requests/{id}/decline	non-media
 GET /api/v2/admin/requests/{id}/events	non-media
+GET /api/v2/admin/requests/{id}/poster	non-media
 POST /api/v2/admin/requests/{id}/retry	non-media
 GET /api/v2/admin/sections	non-media
 POST /api/v2/admin/sections	non-media
@@ -1963,6 +1966,7 @@ POST /api/v2/profile/import	non-media
 DELETE /api/v2/profile/sections	non-media
 GET /api/v2/profile/sections	non-media
 PUT /api/v2/profile/sections	non-media
+GET /api/v2/profile/sections/baseline	non-media
 GET /api/v2/profile/sections/flags	non-media
 GET /api/v2/profile/sections/settings	non-media
 GET /api/v2/profiles	non-media

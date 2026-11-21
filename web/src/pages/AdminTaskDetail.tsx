@@ -8,6 +8,7 @@ import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Badge } from "@/components/ui/badge";
+import { Table } from "@/components/ui/table";
 import { TaskStatusBadge } from "@/components/admin/TaskStatusBadge";
 import {
   useTask,
@@ -24,11 +25,14 @@ import {
 import type { ExecutionResult, TriggerConfig } from "@/api/types";
 
 import { describeTrigger } from "@/lib/taskTrigger";
+import { itemTypeLabel } from "@/lib/itemTypeLabels";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
 import { useServerText, useT, type MessageKey, type Translate } from "@/i18n";
-import { taskText } from "@/lib/taskText";
+import { TASK_CATEGORY_LABELS, taskText } from "@/lib/taskText";
 import { TriggerFormRow } from "./AdminTaskTriggerForm";
+import { seasonDisplayName } from "./ItemDetail/itemDetailLayout";
+import { formatEpisodeCode } from "@/lib/episodeCardLabels";
 
 const EM_DASH = "—";
 
@@ -45,6 +49,10 @@ const REFRESH_REASON_LABELS: Record<string, MessageKey> = {
 function refreshReasonLabel(t: Translate, reason: string): string {
   const key = REFRESH_REASON_LABELS[reason] as MessageKey | undefined;
   return key ? t(key) : reason;
+}
+
+function refreshItemTypeLabel(t: Translate, type: string): string {
+  return type ? itemTypeLabel(t, type) : t("web.admin.tasks.detail.itemFallback");
 }
 
 function formatDuration(t: Translate, ms: number): string {
@@ -67,6 +75,32 @@ function formatDateTime(dateStr: string): string {
 
 function formatOptionalDateTime(dateStr?: string | null): string {
   return dateStr ? formatDateTime(dateStr) : EM_DASH;
+}
+
+type RefreshDebtSample = MetadataRefreshMetrics["due_samples"][number];
+
+/**
+ * A due or failed target's title in the interface language. Seasons and
+ * episodes are named from their parts with the item pages' helpers: a season
+ * keeps its own name and a stored English default becomes the translated one.
+ * A target that no longer exists shows its content ID.
+ */
+function refreshSampleTitle(t: Translate, entry: RefreshDebtSample): string {
+  const season = entry.season_number;
+  if (season == null) return entry.title || entry.content_id;
+  const series = entry.series_title;
+  const episode = entry.episode_number;
+  if (episode != null && entry.title) {
+    // One message rather than one nested in another: a right-to-left interface
+    // isolates each placeholder, and a nested message's isolate reads left to right.
+    const code = formatEpisodeCode(season, episode);
+    return series
+      ? t("web.admin.tasks.detail.sampleSeriesEpisode", { series, code, title: entry.title })
+      : t("web.admin.tasks.detail.sampleEpisode", { code, title: entry.title });
+  }
+  const name =
+    episode == null ? seasonDisplayName(season, entry.title) : formatEpisodeCode(season, episode);
+  return series ? t("web.admin.tasks.detail.sampleTitle", { series, name }) : name;
 }
 
 function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
@@ -113,7 +147,8 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="surface-panel rounded-2xl border-0 p-4">
+        {/* min-w-0 lets a long sample title wrap inside the panels instead of widening the page. */}
+        <div className="surface-panel min-w-0 rounded-2xl border-0 p-4">
           <h3 className="text-sm font-medium">{t("web.admin.tasks.detail.reasonBreakdown")}</h3>
           <div className="mt-3 flex flex-wrap gap-2">
             {reasonCounts.length === 0 && (
@@ -142,7 +177,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
           </div>
         </div>
 
-        <div className="surface-panel rounded-2xl border-0 p-4">
+        <div className="surface-panel min-w-0 rounded-2xl border-0 p-4">
           <h3 className="text-sm font-medium">{t("web.admin.tasks.detail.recentErrors")}</h3>
           <div className="mt-3 space-y-3">
             {metrics.recent_errors.length === 0 && (
@@ -157,12 +192,12 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">
-                      {entry.title || entry.content_id}
+                    <div className="line-clamp-2 text-sm font-medium break-words">
+                      {refreshSampleTitle(t, entry)}
                     </div>
                     <div className="text-muted-foreground text-xs">
                       {t("web.admin.tasks.detail.recentErrorAttempts", {
-                        type: entry.type || t("web.admin.tasks.detail.itemFallback"),
+                        type: refreshItemTypeLabel(t, entry.type),
                         count: entry.attempt_count,
                         count_text: entry.attempt_count,
                       })}
@@ -173,7 +208,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
                   </div>
                 </div>
                 <div className="text-muted-foreground mt-2 line-clamp-2 text-xs">
-                  {entry.last_error}
+                  {t("web.admin.tasks.detail.refreshFailed")}
                 </div>
               </div>
             ))}
@@ -185,50 +220,67 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
         <div className="border-border border-b px-4 py-3">
           <h3 className="text-sm font-medium">{t("web.admin.tasks.detail.dueSamples")}</h3>
         </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-border bg-muted/40 border-b">
-              <th className="px-4 py-2 text-start font-medium">
-                {t("web.admin.tasks.detail.columns.item")}
-              </th>
-              <th className="px-4 py-2 text-start font-medium">
-                {t("web.admin.tasks.detail.columns.nextRefresh")}
-              </th>
-              <th className="px-4 py-2 text-start font-medium">
-                {t("web.admin.tasks.detail.columns.attempts")}
-              </th>
-              <th className="px-4 py-2 text-start font-medium">
-                {t("web.admin.tasks.detail.columns.lastAttempt")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {metrics.due_samples.length === 0 && (
-              <tr>
-                <td colSpan={4} className="text-muted-foreground px-4 py-4 text-center">
-                  {t("web.admin.tasks.detail.noDueItems")}
-                </td>
+        {/* A plain wrapper, so the table's scroll container doesn't take the panel's
+            rounded corners under the header bar. */}
+        <div>
+          <Table>
+            <thead>
+              <tr className="border-border bg-muted/40 border-b">
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.columns.item")}
+                </th>
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.columns.nextRefresh")}
+                </th>
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.columns.attempts")}
+                </th>
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.columns.lastAttempt")}
+                </th>
               </tr>
-            )}
-            {metrics.due_samples.map((entry) => (
-              <tr key={entry.content_id} className="border-border border-b last:border-b-0">
-                <td className="px-4 py-2">
-                  <div className="font-medium">{entry.title || entry.content_id}</div>
-                  <div className="text-muted-foreground text-xs">
-                    {entry.type || t("web.admin.tasks.detail.itemFallback")}
-                  </div>
-                </td>
-                <td className="px-4 py-2">{formatDateTime(entry.next_refresh_at)}</td>
-                <td className="px-4 py-2">{entry.attempt_count}</td>
-                <td className="px-4 py-2">{formatOptionalDateTime(entry.last_attempt_at)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {metrics.due_samples.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="text-muted-foreground px-4 py-4 text-center">
+                    {t("web.admin.tasks.detail.noDueItems")}
+                  </td>
+                </tr>
+              )}
+              {metrics.due_samples.map((entry) => (
+                <tr key={entry.content_id} className="border-border border-b last:border-b-0">
+                  <td className="px-4 py-2">
+                    <div className="min-w-32 font-medium wrap-anywhere">
+                      {refreshSampleTitle(t, entry)}
+                    </div>
+                    <div className="text-muted-foreground text-xs">
+                      {refreshItemTypeLabel(t, entry.type)}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2 md:whitespace-nowrap">
+                    {formatDateTime(entry.next_refresh_at)}
+                  </td>
+                  <td className="px-4 py-2">{entry.attempt_count}</td>
+                  <td className="px-4 py-2 md:whitespace-nowrap">
+                    {formatOptionalDateTime(entry.last_attempt_at)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
       </div>
     </div>
   );
 }
+
+/**
+ * A save-conflict action is never wider than the schedule panel: a label too
+ * long for one line wraps inside the button instead of running off screen.
+ */
+const CONFLICT_ACTION =
+  "h-auto min-h-9 max-w-full py-1.5 text-start text-balance wrap-anywhere whitespace-normal";
 
 function TaskSchedulePanel({
   taskKey,
@@ -296,10 +348,16 @@ function TaskSchedulePanel({
   };
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-medium">{t("web.admin.tasks.detail.schedule")}</h2>
         {!manualOnly && !snapshot && (
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => void startEditing()}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-auto min-h-8 max-w-full py-1 text-start text-balance wrap-anywhere whitespace-normal"
+            disabled={busy}
+            onClick={() => void startEditing()}
+          >
             {t("web.admin.tasks.detail.editSchedule")}
           </Button>
         )}
@@ -323,7 +381,7 @@ function TaskSchedulePanel({
         </div>
       ) : (
         <div className="surface-panel space-y-3 rounded-2xl p-4">
-          <fieldset disabled={update.isPending || busy} className="space-y-3">
+          <fieldset disabled={update.isPending || busy} className="min-w-0 space-y-3">
             {draft.map((trigger, i) => (
               <TriggerFormRow
                 key={draftKeys[i]}
@@ -340,6 +398,7 @@ function TaskSchedulePanel({
             <Button
               variant="outline"
               size="sm"
+              className="h-auto min-h-8 max-w-full py-1 text-start wrap-anywhere whitespace-normal"
               onClick={() => {
                 setDraft([...draft, { type: "interval", interval_ms: 3_600_000 }]);
                 setDraftKeys([...draftKeys, nextDraftKey.current++]);
@@ -353,6 +412,7 @@ function TaskSchedulePanel({
             <div className="space-y-2 text-sm">
               <Button
                 variant="outline"
+                className={CONFLICT_ACTION}
                 disabled={busy || update.isPending}
                 onClick={() => void review()}
               >
@@ -369,6 +429,7 @@ function TaskSchedulePanel({
                     ))
                   )}
                   <Button
+                    className={CONFLICT_ACTION}
                     disabled={busy || update.isPending}
                     onClick={() => {
                       setSnapshot(candidate);
@@ -422,14 +483,17 @@ function HistoryRow({
   onToggle: () => void;
 }) {
   const t = useT();
+  const serverText = useServerText();
   const hasResultData = result.result_data && Object.keys(result.result_data).length > 0;
   const failedSteps = (result.steps ?? [])
     .filter((step) => step.status === "failed")
-    .map((step) => step.name);
+    .map((step) => taskText(serverText, step, "name"));
   const errorText =
     failedSteps.length > 0
       ? t("web.admin.tasks.detail.history.failedSteps", { steps: joinList(failedSteps) })
-      : result.error_message || EM_DASH;
+      : result.status === "failed"
+        ? t("web.admin.common.taskStatus.failedDetails")
+        : result.error_message || EM_DASH;
 
   return (
     <>
@@ -454,7 +518,11 @@ function HistoryRow({
         <td className="px-4 py-2">
           <TaskStatusBadge result={result} />
         </td>
-        <td className="text-muted-foreground max-w-xs truncate px-4 py-2" title={errorText}>
+        {/* Wraps where the table fits its panel; translated step names run long. */}
+        <td
+          className="text-muted-foreground max-w-xs truncate px-4 py-2 sm:text-pretty sm:whitespace-normal"
+          title={errorText}
+        >
           {errorText}
         </td>
       </tr>
@@ -557,7 +625,7 @@ export default function AdminTaskDetail() {
         subtitle={taskText(serverText, task, "description")}
         actions={
           <>
-            <Badge variant="outline">{task.category}</Badge>
+            <Badge variant="outline">{t(TASK_CATEGORY_LABELS[task.category])}</Badge>
             {isRunning ? (
               <Button
                 variant="outline"

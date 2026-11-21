@@ -449,6 +449,12 @@
       "value": "続行するには、ネットワークのサインインからサインインしてください。"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "このノードはサーバーのデプロイ構成で設定されています。ここで管理するには、デプロイ構成からノードを削除して、APIサーバーを再起動してください。"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -495,6 +501,12 @@
     {
       "type": 0,
       "value": "この再生セッションは終了しました。もう一度再生してください。"
+    }
+  ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "このストリームは置き換えられました。現在のストリームで再生を続行しています。"
     }
   ],
   "error.precondition_failed": [
@@ -13008,6 +13020,28 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件は復元できません — 異なる設定、またはその接続の一部がこのサーバーの環境で設定されています"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13219,7 +13253,7 @@
             },
             {
               "type": 0,
-              "value": "件は復元できません — ここですでに同じです"
+              "value": "件は復元できません — このサーバーですでに同じ内容です"
             }
           ]
         }
@@ -13362,6 +13396,28 @@
     {
       "type": 0,
       "value": "サービスのアドレスが変わりますが、バックアップに認証情報が含まれていないため、復元するとここの認証情報がクリアされ、再入力するまでサービスはオフになります。"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件の設定は、設定自体またはその接続の一部がこのサーバーの環境で設定されているため、現在の値を維持します。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -13716,8 +13772,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "非表示にする"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "非表示にする"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "非表示にする"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "非表示にする"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13838,8 +13920,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "表示する"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "表示する"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "表示する"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "表示する"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -14516,9 +14624,41 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "選択した項目に必要な"
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "も選択しました。"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "選択した項目に必要な"
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "も選択しました。"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14535,16 +14675,46 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "選択を解除した項目を必要とする"
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "も選択を解除しました。"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "選択を解除した項目を必要とする"
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "も選択を解除しました。"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14561,9 +14731,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -15738,6 +15906,12 @@
       "value": "このサーバーの別のアカウントが、同じユーザー名またはメールアドレスでサインインしています。"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "異なる設定、またはその接続の一部がこのサーバーの環境で設定されているため、このサーバーは現在の値を維持します。"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16178,6 +16352,142 @@
     {
       "type": 0,
       "value": "を開けません。"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "背景画像"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のコレクションアイテム"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "コレクションの置き換え"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "構成"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "説明"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "有効化"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "注目"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "アイテム数の上限"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "アイテムの並べ替え"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "ライブラリ"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "位置"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "ポスター"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "並び順"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "ソース"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "同期スケジュール"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "タイトル"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "タイトルの翻訳"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "種類"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "公開範囲"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Webのみ"
     }
   ],
   "web.admin.backups.restore.rows.changes": [
@@ -16672,6 +16982,16 @@
     {
       "type": 0,
       "value": "（維持：より厳格）"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "（維持：環境）"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -17638,6 +17958,20 @@
       "value": "サーバーのタイムゾーンで指定します。"
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "サーバーのタイムゾーンの時刻です。お使いのタイムゾーンでは"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "です。"
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -18486,9 +18820,25 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "データを読み取れませんでした"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "データを読み取れませんでした"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18497,9 +18847,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -18530,20 +18878,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "アカウントを非表示"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "アカウントを非表示"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "アカウントを非表示"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "アカウントを非表示"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "ファイルを非表示"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを非表示"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを非表示"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを非表示"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "ファイルを非表示"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを非表示"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを非表示"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを非表示"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -18586,6 +19012,226 @@
     {
       "type": 0,
       "value": "データベースで参照されていますが、ストレージに見つかりませんでした。復元時には除外されます。"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のブランディング素材"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のコレクションの背景画像"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のコレクションのポスター"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のダウンロードした字幕"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のライブラリのポスター"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のオーバーレイ画像"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件の個人のコレクションのポスター"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のプロフィールのアバター"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のアップロードしたアートワークファイル"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のアップロードした字幕"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -18760,9 +19406,33 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": "を読み取れませんでした"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": "を読み取れませんでした"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18775,9 +19445,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -18792,8 +19460,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "アカウントを表示"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "アカウントを表示"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "アカウントを表示"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "アカウントを表示"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -18820,21 +19514,89 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "ファイルを表示"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを表示"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを表示"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを表示"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "ファイルを表示"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを表示"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを表示"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを表示"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "データが復元セットには大きすぎます"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "データが復元セットには大きすぎます"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18843,9 +19605,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -25822,6 +26582,12 @@
       "value": "失敗"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "タスクが失敗しました。詳細は管理者向けの診断情報を確認してください。"
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -27600,7 +28366,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "最近開始した再生セッションのフィード"
+      "value": "全アカウントの最近の再生"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -29042,6 +29808,80 @@
     {
       "type": 0,
       "value": "アクティビティを読み込めませんでした。"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "が"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "を再生しました"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "が"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "を再生しました"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -39990,6 +40830,24 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "高"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "低"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "中"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -41443,6 +42301,24 @@
     {
       "type": 0,
       "value": "無視済みの項目をタイトル、ライブラリ、種類で検索…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "曖昧"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "照合待ち"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "未照合"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -43912,6 +44788,12 @@
       "value": "設定を完成させるには、サーバーアドレスを入力してください。"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "サーバーのデプロイ構成で設定されたキー"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 1,
@@ -44800,6 +45682,12 @@
     {
       "type": 0,
       "value": "を削除"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "サーバーのデプロイ構成で設定されています。ここで削除するには、デプロイ構成から削除してAPIサーバーを再起動してください。"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -47204,6 +48092,98 @@
       "value": "生成は停止しました。保存済みのおすすめは、サーバーが再起動するまでディスカバーに表示されます。"
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "プロフィールをランク付け中（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDBリストを取得中（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "タイトルを検索してエンベディング中（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "期限切れのタイトル"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件をクリアしました"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -47224,6 +48204,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめを作成する前に、下のエンベディングのロックの競合を解決してください。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Siloが比較に使うライブラリのベクトルを用意するため、先に「エンベディング」ジョブを実行してください。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめを作成する前に、AIサービスでエンベディングプロバイダーを接続してください。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "嗜好プロフィールを持つプロフィールはまだありません。誰かがタイトルを視聴または評価したら、「嗜好プロフィール」を実行してください。"
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -48746,6 +49750,28 @@
       "value": "「管理 → おすすめ」でディスカバーのおすすめをオンにするまで空のままです。"
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "管理 → おすすめ"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "でディスカバーのおすすめをオンにするまで、おすすめの行は空のままです。"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "「おすすめ」でオフ"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -50127,6 +51153,12 @@
       "value": "新しい行はディスカバーの最下部に追加されます"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "「おすすめ」の設定を開く"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -50139,6 +51171,12 @@
       "value": "MDBListのフィードには、リストのページで保存された並び順が含まれません。そのページで表示されている並び順を選択してください。"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "このプロフィールにはまだディスカバーのおすすめがありません。この行をプレビューするには、「ディスカバーのおすすめ」を実行するか、いくつかのタイトルを視聴して評価してください。"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -50149,6 +51187,12 @@
     {
       "type": 0,
       "value": "リストを選択するかリンクを貼り付けると、タイトルが表示されます。"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "この行をプレビューするには、「管理 → おすすめ」でディスカバーのおすすめをオンにしてください。"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -50867,6 +51911,12 @@
     {
       "type": 0,
       "value": "メッセージを送信しました"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "プレーヤーからメッセージの受信確認がありませんでした。メッセージの表示が遅れるか、表示されない可能性があります。"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -53662,6 +54712,12 @@
       "value": "接続を確認できませんでした。"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "サーバーの環境でこの設定が指定されているかを確認できませんでした。編集するにはページを再読み込みしてください。"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -54200,6 +55256,30 @@
     {
       "type": 0,
       "value": "チャンネルを更新できませんでした"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "再読み込みすると現在の値が表示されます。このページの設定が変更された場合、または保存済みのパスワードやキーを編集した場合は、すべての編集が取り消されます。それ以外の場合、編集は保持されます。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "再読み込み"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "設定を再読み込みできませんでした。もう一度お試しください。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "設定が別の場所で変更されました"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -59546,6 +60626,24 @@
       "value": "別のモデルに切り替えるには埋め込みをリセットする必要があり、すべての埋め込みが削除されます。同じモデルを提供する別のプロバイダーへの変更は、再起動後に適用されます。"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "ディスカバーに追加"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "おすすめの行をディスカバーページに追加できませんでした。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "おすすめの行をディスカバーページに追加しました。"
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -59568,6 +60666,44 @@
     {
       "type": 0,
       "value": "ライブラリにないタイトルのうち、サーバーがおすすめ候補として保持する数です。各タイトルはTMDBで検索され、エンベディングされます。エンベディングは通常低コストですが、数を増やすとエンベディングプロバイダーによってはコストや時間が増え、ストレージも多く使用します。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "ディスカバーページにはまだおすすめの行が表示されていません。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめを実行するには、上の「おすすめを有効にする」をオンにしてサーバーを再起動してください。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "リクエストは現在オフです。視聴者がディスカバーページを見られるように、"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "リクエストの設定"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "でオンにしてください。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "ディスカバーページを開く"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -68600,6 +69736,20 @@
       "value": "）。"
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "環境変数でストレージの設定が指定されている間（"
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "）は、ここでストレージを移動できません。先にこれらの変数の設定を解除し、すべてのAPIサーバーを再起動してください。"
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -69670,6 +70820,26 @@
       "value": "回"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "このスケジュールはバックアップの設定で決まります。"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "サーバー › バックアップ"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "で変更してください。"
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -69960,10 +71130,66 @@
       "value": "最近のエラー"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "更新に失敗しました。詳細は管理者向けの診断情報を確認してください。"
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "現在のスケジュールを確認"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -70396,6 +71622,18 @@
     {
       "type": 0,
       "value": "AutoscanのWebhook再試行"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Siloが埋め込みフォントをビットレートに含めなくなる前にスキャンされた、ASS字幕を含むMKVファイルのヘッダーを再度読み取り、実際にはストリーミングしないビットレートを理由にトランスコードされないようにします。"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "埋め込みフォントを含むファイルのビットレートを補正"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -78965,25 +80203,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "テレビをサインインできませんでした。もう一度お試しください。"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "アプリに次の表示があることを確認してください"
+      "value": "サインインを承認できませんでした。もう一度お試しください。"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "テレビに次の表示があることを確認してください"
+      "value": "このコードが一致することを確認してください"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "テレビまたはアプリに表示されたコードを入力"
+      "value": "デバイスに表示されたコードを入力"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -78995,13 +80227,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "アカウントでテレビやその他のデバイスにサインインします。"
+      "value": "テレビ、アプリ、その他のデバイスをサインインします。"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "テレビにサインイン"
+      "value": "サインインを承認"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -79013,7 +80245,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "テレビを承認するには、"
+      "value": "このサインインを承認するには、"
     },
     {
       "type": 1,
@@ -79021,13 +80253,13 @@
     },
     {
       "type": 0,
-      "value": "としての表示を終了してください。テレビをサインインできるのはそのアカウント本人だけです。"
+      "value": "としての表示を終了してください。デバイスを承認できるのはそのアカウント本人だけです。"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "テレビを承認するには、このユーザーとしての表示を終了してください。テレビをサインインできるのはそのアカウント本人だけです。"
+      "value": "このサインインを承認するには、このユーザーとしての表示を終了してください。デバイスを承認できるのはそのアカウント本人だけです。"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -79045,39 +80277,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "そのコードが見つかりませんでした。テレビに表示されたコードを確認してください。"
+      "value": "そのコードが見つかりませんでした。コードを確認して、もう一度お試しください。"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "今はしない"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "古いテレビアプリでは、代わりに"
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "と表示されます。"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "今目の前にあるデバイスだけを承認してください。"
+      "value": "拒否"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "今目の前にあるテレビだけを承認してください。"
+      "value": "自分でサインインを始めた場合にのみ承認してください。"
     }
   ],
   "web.auth.activate.playOn": [
@@ -79099,7 +80311,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "このテレビを使う人は誰でも、あなたのプロフィールから選択できます。PINが設定されたプロフィールはロックされたままです。"
+      "value": "承認すると、このデバイスからプロフィールにアクセスできるようになります。PINが設定されたプロフィールはロックされたままです。"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -79146,6 +80358,16 @@
       "value": "にリクエスト"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "リクエスト："
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 1,
@@ -79159,7 +80381,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "このテレビは待機を終了しました。テレビでもう一度始めてください。"
+      "value": "このデバイスは待機を終了しました。デバイスでもう一度サインインを始めてください。"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -79168,10 +80390,34 @@
       "value": "このサインインは拒否されました。"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "完了しました。"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "がサインインしています。"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "のサインインが完了しました。"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "このコードは期限切れです。テレビに新しいコードが表示されています。そのコードを使用してください。"
+      "value": "このコードは有効期限が切れました。デバイスで新しいコードを取得して、もう一度お試しください。"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -79255,25 +80501,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "そのテレビはすでにサインインしています。"
+      "value": "このデバイスはすでにサインインしています。"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "このテレビは承認され、サインインを完了しています。"
+      "value": "このデバイスは承認済みで、サインインを完了しています。"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "完了しました。テレビがサインインしています。"
+      "value": "完了しました。デバイスがサインインしています。"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "テレビがサインインしました。"
+      "value": "デバイスのサインインが完了しました。"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -79317,13 +80563,13 @@
     },
     {
       "type": 0,
-      "value": "をサインインしますか？"
+      "value": "のサインインを許可しますか？"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "このデバイスをサインインしますか？"
+      "value": "このデバイスのサインインを許可しますか？"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -79335,7 +80581,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "このテレビを承認するには、"
+      "value": "このサインインを承認するには、"
     },
     {
       "type": 1,
@@ -79349,7 +80595,7 @@
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "テレビをサインイン"
+      "value": "サインインを承認"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -80379,7 +81625,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "デバイスをサインインできませんでした。もう一度お試しください。"
+      "value": "サインインを承認できませんでした。もう一度お試しください。"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -98881,6 +100127,12 @@
       "value": "表示内容"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "このサーバーが管理しています。表示内容はここでは変更できません。表示内容を選ぶには、独自の行を追加してください。"
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -99191,6 +100443,12 @@
       "value": "翻訳中…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "このエクスポート以降に追加されたサーバーの行を非表示："
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -99209,6 +100467,12 @@
     {
       "type": 0,
       "value": "に追加され、以前ここで追加したセクションは置き換えられます。このサーバーのセクションに加えた変更はそのまま残ります。"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "このファイルのエクスポート後にこのサーバーの行が変更されたため、非表示にする行を下で選択してください。"
     }
   ],
   "web.home.layout.checking": [
@@ -99259,6 +100523,22 @@
     {
       "type": 0,
       "value": "「視聴済みを非表示」をオンにします。"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "で選択した行を非表示にします。そこにあるほかの行は変更されません。"
     }
   ],
   "web.home.layout.import": [
@@ -99363,6 +100643,24 @@
     {
       "type": 0,
       "value": "のレイアウトを置き換えます。"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": "（"
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "）"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -99564,6 +100862,12 @@
     {
       "type": 0,
       "value": "無題のセクション"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "このファイルにないサーバーの行を非表示："
     }
   ],
   "web.home.page.customize": [
@@ -102264,6 +103568,12 @@
     {
       "type": 0,
       "value": "ヒーローバナー・Webのみ"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "サーバー"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -114961,6 +116271,16 @@
       "value": "1ページ目に戻る"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "ページに移動"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -115047,6 +116367,16 @@
     {
       "type": 0,
       "value": "追加リクエストのページ"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "ページは検索結果の範囲外です。"
     }
   ],
   "web.requests.toAdd.series": [

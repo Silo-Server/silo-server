@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -44,6 +45,27 @@ func TestGoTestArgsAnchorsEveryName(t *testing.T) {
 	}
 	if got := goTestArgs(pins, true); !reflect.DeepEqual(got[len(got)-2:], []string{"./internal/b", "./internal/a"}) {
 		t.Fatalf("shared database package order changed: %q", got)
+	}
+}
+
+func TestGoTestArgsPrioritizesSlowPackagesFirst(t *testing.T) {
+	pins := []pin{
+		{"./internal/small", "TestS1"},
+		{"./internal/small", "TestS2"},
+		{"./internal/small", "TestS3"},
+		{"./cmd/silo", "TestCmd"},
+		{"./internal/catalog", "TestC1"},
+		{"./internal/catalog", "TestC2"},
+		{"./internal/backup", "TestB1"},
+	}
+	got := goTestArgs(pins, false)
+	wantDirs := []string{"./internal/backup", "./internal/catalog", "./cmd/silo", "./internal/small"}
+	if dirs := got[len(got)-4:]; !reflect.DeepEqual(dirs, wantDirs) {
+		t.Fatalf("dirs = %q, want %q", dirs, wantDirs)
+	}
+	wantShared := []string{"./internal/small", "./cmd/silo", "./internal/catalog", "./internal/backup"}
+	if dirs := goTestArgs(pins, true); !reflect.DeepEqual(dirs[len(dirs)-4:], wantShared) {
+		t.Fatalf("shared dirs = %q, want %q", dirs[len(dirs)-4:], wantShared)
 	}
 }
 
@@ -139,6 +161,24 @@ func TestCheck(t *testing.T) {
 				event("run", "internal/b", "TestTwo", ""),
 			want: []string{"UNFINISHED ./internal/b TestTwo"},
 		},
+		{
+			name: "package failed outside tests (e.g. clone or TestMain failure)",
+			stream: event("run", "internal/a", "TestOne", "") +
+				event("pass", "internal/a", "TestOne", "") +
+				event("output", "internal/b", "", "dbpins: copy database failed\n") +
+				event("fail", "internal/b", "", ""),
+			want: []string{
+				"MISSING ./internal/b TestTwo",
+				"FAIL " + testModule + "/internal/b (package failed outside tests)",
+			},
+		},
+		{
+			name:   "package failed in TestMain teardown after tests passed",
+			stream: passing + event("fail", "internal/b", "", ""),
+			want: []string{
+				"FAIL " + testModule + "/internal/b (package failed outside tests)",
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var passthrough strings.Builder
@@ -157,18 +197,31 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-// The wrapper repoints a database variable only when it names the template,
-// however its host, port and options are spelled, and never passes its own
-// variables on.
+func TestSummarizeRunReportsNonExitWaitErrorsAlongsideMissingPins(t *testing.T) {
+	res := &results{tests: map[testKey]*testResult{}, failedPackages: map[string]bool{}}
+	pins := []pin{{"./internal/backup", "TestA"}}
+	_, problems := summarizeRun(res, pins, testModule, errors.New("signal: killed"))
+	want := []string{
+		"MISSING ./internal/backup TestA",
+		"go test: signal: killed",
+	}
+	if !reflect.DeepEqual(problems, want) {
+		t.Fatalf("problems = %q, want %q", problems, want)
+	}
+}
+
+// cloneEnv drops the wrapper's own variables and repoints a database variable
+// only when it names the template, however its host, port and options are
+// spelled.
 func TestCloneEnv(t *testing.T) {
 	const template = "postgres://u:p@localhost:5432/silo_test?sslmode=disable"
 	const clone = "postgres://u:p@localhost:5432/dbpins_x?sslmode=disable"
 	got := cloneEnv([]string{
+		cloneTemplateEnv + "=" + template,
+		cloneRunEnv + "=0123abcd",
 		"SILO_TEST_DATABASE_URL=" + template,
 		"SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL=postgresql://u:p@127.0.0.1/other?dbname=silo_test",
 		"OTHER=" + template,
-		cloneTemplateEnv + "=" + template,
-		cloneRunEnv + "=abcd",
 	}, template, clone)
 	want := []string{
 		"SILO_TEST_DATABASE_URL=" + clone,
@@ -216,5 +269,22 @@ func TestCloneNameFitsPostgres(t *testing.T) {
 	}
 	if len(name) > 63 || !strings.HasPrefix(name, clonePrefix+"0123abcd_") || !strings.Contains(name, "another_long_package_name_") {
 		t.Fatalf("clone name %q (%d bytes)", name, len(name))
+	}
+}
+
+func TestExecArg(t *testing.T) {
+	for input, want := range map[string]string{
+		"/tmp/dbpins":       "/tmp/dbpins",
+		"/tmp/my dir/bin":   "'/tmp/my dir/bin'",
+		"/tmp/o'brien/bin":  `"/tmp/o'brien/bin"`,
+		`/tmp/a "b"/dbpins`: `'/tmp/a "b"/dbpins'`,
+	} {
+		got, err := execArg(input)
+		if err != nil || got != want {
+			t.Fatalf("execArg(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	if _, err := execArg(`/tmp/a'b"c/dbpins`); err == nil {
+		t.Fatal("execArg accepted path with both quote kinds")
 	}
 }

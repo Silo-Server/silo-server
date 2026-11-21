@@ -29,7 +29,8 @@ type AdminNodeKeyOutput struct {
 func registerAdminNodeKey(reg *Registry) {
 	op := Operation{Operation: humaOp("POST", Prefix+"/admin/nodes/{id}/key", "issueAdminNodeKey", "admin-nodes", "Issue a new key for a transcode node and return it once. Each call rotates: the previous key stops working on this server at once and on other servers and proxies within seconds. The node's running streams fail until it restarts with the new key; drain the node first to avoid that. A disabled node can take a key. Never replay an uncertain issue; issue again instead."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 	op.DefaultStatus = http.StatusCreated
-	// A proxy node signs with the shared secret and takes no key.
+	// A proxy node signs with the shared secret and takes no key, and a node
+	// the deployment configuration owns takes its key from there.
 	op.Errors = []int{http.StatusConflict}
 	Register(reg, op, func(ctx context.Context, in *AdminNodeCommandInput) (*AdminNodeKeyOutput, error) {
 		id, err := adminNodeCommandID(in)
@@ -40,6 +41,9 @@ func registerAdminNodeKey(reg *Registry) {
 			return nil, unavailable("administrator nodes")
 		}
 		key, err := reg.deps.AdminNodeKeys.IssueAdminNodeKey(ctx, id)
+		if errors.Is(err, nodepool.ErrNodeDeploymentManaged) {
+			return nil, nodeDeploymentManagedProblem()
+		}
 		if errors.Is(err, nodepool.ErrNodeKeyNotIssuable) {
 			return nil, NewProblem(TypeConflict, "Only transcode nodes take a node key.")
 		}
@@ -48,4 +52,10 @@ func registerAdminNodeKey(reg *Registry) {
 		}
 		return &AdminNodeKeyOutput{CacheControl: adminNodeKeyCacheControl, Body: AdminNodeKey{NodeKey: key}}, nil
 	})
+}
+
+// nodeDeploymentManagedProblem refuses an admin key issue or delete on a node
+// the API servers' deployment configuration owns.
+func nodeDeploymentManagedProblem() *Problem {
+	return NewProblem(TypeNodeDeploymentManaged, "This node is set by the server's deployment configuration. Remove it there and restart the API servers to manage it here.")
 }

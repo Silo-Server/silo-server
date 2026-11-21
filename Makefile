@@ -55,7 +55,7 @@ dev-proxy:
 # defaults to 8090 so it does not collide with dev-backend on 8080.
 dev-transcode:
 	@test -n "$$SILO_CORE_URL" || { echo 'dev-transcode: set SILO_CORE_URL to the main server URL, e.g. http://localhost:8080' >&2; exit 1; }
-	@test -n "$$SILO_NODE_KEY" || { echo 'dev-transcode: set SILO_NODE_KEY to the key issued for this node on the admin nodes page' >&2; exit 1; }
+	@test -n "$$SILO_NODE_KEY$$SILO_NODE_KEY_FILE" || { echo 'dev-transcode: set SILO_NODE_KEY (or SILO_NODE_KEY_FILE) to the key issued for this node on the admin nodes page' >&2; exit 1; }
 	MODE=transcode PORT=$${PORT:-8090} go run ./cmd/silo/
 
 # Lint Go and frontend code
@@ -311,9 +311,11 @@ ifneq ($(CONTRACT_GO_TESTS),0)
 endif
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
 		base=$$(git merge-base $(BASE_REF) HEAD) && \
-		{ git show "$$base:$(APIV2_OPENAPI)" > "$$tmp/base.json" 2>/dev/null || : ; } && \
-		go run ./cmd/apiv2-contract-diff -base "$$tmp/base.json" -revision $(APIV2_OPENAPI) -contracts contracts/api/v2 \
-		|| { echo "::error::$(APIV2_OPENAPI) has an unapproved breaking change against $$base; see contracts/api/v2/breaking-approvals.schema.json"; exit 1; }
+		base_entry=$$(git ls-tree --name-only "$$base" -- "$(APIV2_OPENAPI)") && \
+		{ [ -z "$$base_entry" ] || git show "$$base:$(APIV2_OPENAPI)" > "$$tmp/base.json" \
+			|| { echo "::error::failed to read $(APIV2_OPENAPI) at $$base"; exit 1; }; } && \
+		{ go run ./cmd/apiv2-contract-diff -base "$$tmp/base.json" -revision $(APIV2_OPENAPI) -contracts contracts/api/v2 \
+			|| { echo "::error::$(APIV2_OPENAPI) has an unapproved breaking change against $$base; see contracts/api/v2/breaking-approvals.schema.json"; exit 1; }; }
 
 # Regenerate the native API v2 contract fixtures through the real v2 router.
 # The bodies are what the server answers, byte for byte, for synthetic

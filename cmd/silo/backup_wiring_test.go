@@ -154,7 +154,7 @@ func TestBeforeMigrateBackupOnAnOldSchemaDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hook := beforeMigrateBackup(bc, db.pool, cipher, time.Minute)
+	hook := beforeMigrateBackup(bc, db.pool, cipher, time.Minute, nil)
 	otherServer := backup.New(backup.Options{Pool: db.pool, Locker: backup.PostgresLocker{Pool: db.pool}})
 	var checked bool
 	err = database.MigrateAtStartup(ctx, db.pool, migrations.FS, "sql", database.StartupOptions{
@@ -208,6 +208,9 @@ func restoreOldSchemaBackup(t *testing.T, db oldSchemaDatabase, secretKey []byte
 	t.Setenv("SECRET_KEY", string(secretKey))
 	t.Setenv("DATABASE_URL", db.url)
 	t.Setenv("REDIS_URL", "")
+	for _, name := range []string{"SECRET_KEY_FILE", "DATABASE_URL_FILE", "REDIS_URL_FILE"} {
+		t.Setenv(name, "")
+	}
 	noEnv := filepath.Join(t.TempDir(), "no.env")
 	run := func(args ...string) string {
 		t.Helper()
@@ -259,4 +262,27 @@ func passwordless(t *testing.T, raw string) string {
 		u.User = url.User(u.User.Username())
 	}
 	return u.String()
+}
+
+type storedBackupSettings map[string]string
+
+func (s storedBackupSettings) Get(_ context.Context, key string) (string, error) { return s[key], nil }
+
+// SILO_BACKUP_ENABLED set in the deploy that also upgrades applies to the
+// backup taken before the migrations, which runs before startup stores it; the
+// other SILO_BACKUP_* variables wait for startup.
+func TestEnvBackupSettingsOverlayStored(t *testing.T) {
+	values := map[string]string{"SILO_BACKUP_ENABLED": "false", "SILO_BACKUP_KEEP": "1"}
+	env, err := config.ReadEnvSettings(func(name string) string { return values[name] }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only SILO_BACKUP_ENABLED applies before startup stores the rest: a
+	// lower keep must not rotate copies away before the migrations succeed.
+	settings := withEnvBackupSettings(storedBackupSettings{"backup.enabled": "true", "backup.keep": "9"}, env)
+	for key, want := range map[string]string{"backup.enabled": "false", "backup.keep": "9"} {
+		if got, _ := settings.Get(t.Context(), key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
 }

@@ -134,7 +134,8 @@ the drill for that.
 The check value is HKDF-SHA256 over `SECRET_KEY` with info
 `silo/backup-key-check/v1`, 8 bytes, written as 16 hex digits in groups of 4
 (`secret.KeyCheckValue`, beside the data key derivation in
-`internal/secret/cipher.go`). `silo secret check` reads a key on stdin and
+`internal/secret/cipher.go`). `silo secret check` reads a key from the first line
+of stdin, or with `--file` from a key file read as `SECRET_KEY_FILE` is, and
 prints the value, so an operator can tell which key a backup needs without
 showing either key.
 
@@ -413,9 +414,10 @@ the deletion of a complete upload, and the restore job.
   same daily trigger; one backs up and the others record the skip. A
   scheduled run that takes the lock after another server already backed up
   its slot skips too ("skipped: tonight's backup already ran on another
-  server"): a successful nightly records its slot, the latest `backup.time`
-  at or before it started in its server's local time zone, in
-  `backup_status.last_nightly_slot`, and a scheduled run skips when the
+  server"): a successful nightly records the slot it took the lock for, the
+  latest `backup.time` at or before that moment in its server's local time
+  zone, in `backup_status.last_nightly_slot`; a `backup.time` change while
+  it runs does not move it. A scheduled run skips when the
   recorded slot is later than its own previous slot (the same wall-clock
   time a calendar day earlier, so each night across a daylight saving
   change backs up once). Servers in different time zones, or a
@@ -598,9 +600,11 @@ previous release left:
   deleted after it was taken: artwork, avatars, or branding replaced or
   removed since stay as they are now, and a restored row may name a file
   that is gone.
-- It reads only `server_settings` rows, with defaults for keys the old
+- It reads the `server_settings` rows, with defaults for keys the old
   release never wrote: the first upgrade to a release with backups finds no
-  `backup.*` rows and backs up to the default destination. Blob storage comes
+  `backup.*` rows and backs up to the default destination. The one
+  setting it takes from the environment is `SILO_BACKUP_ENABLED`, over
+  `backup.enabled`. Blob storage comes
   from the stored settings, as at startup, opened without recording anything.
 - The core inventory checks each table with `to_regclass`, so tables the old
   schema lacks are recorded as absent. `pg_dump` excludes the same table data
@@ -620,7 +624,11 @@ lock still held through `Up`, when:
 - `SILO_SKIP_BACKUP_BEFORE_MIGRATE=true` is set. It applies to the process it
   is set on; remove it after that start. A value that is not a boolean does
   not skip;
-- `backup.enabled` is `false`;
+- the effective `backup.enabled` is `false`: `SILO_BACKUP_ENABLED` when it is
+  set, as it will be once startup stores it, otherwise the stored value. Every
+  server that migrates reads that variable, `--migrate-only` included; the
+  other `SILO_BACKUP_*` variables wait for startup, so a lower
+  `SILO_BACKUP_KEEP` rotates nothing away before the migrations succeed;
 - the user store is SQLite (backups refuse there, and the upgrade that imports
   it must not be blocked; the warning tells the admin to back up the database
   and the SQLite file themselves);
@@ -1110,12 +1118,13 @@ is ambiguous, and so is any candidate when two of the backup's sections
 share that page, type, and title, since the title then identifies neither.
 So two such sections restore as two, and a re-run finds each by its id. A matched section that differs lists what a restore replaces
 (title, position, featured, item limit, enabled, web only, configuration,
-and missing items of its managed collection), and a restore replaces its
+and missing items of its managed collection) as change codes, which clients
+show in the interface language, and a restore replaces its
 configuration as an admin save would. A restore writes `web_only` as the
 backup has it on a featured row, whether it creates or replaces the
 section, so a web-only hero row never comes back on the apps. Only a collection the section manages stands for the
 carried one: a managed section pointed at an ordinary collection since the
-backup lists "collection replaced", whatever that collection holds, and the
+backup lists `collection_replaced`, whatever that collection holds, and the
 restore points it back at its managed collection (the one still here with
 its management key, or a new one). The key's section id and each
 `library:<id>` it names are this server's (`remapManagementKey`), and a
@@ -1775,8 +1784,10 @@ create and list, so it does not depend on nightly backups running.
 ## Full restore
 
 Full restore is the offline `silo backup restore` command, never an API
-operation. `SECRET_KEY`, `DATABASE_URL`, and bucket credentials come from the
-environment (or `-env`); nothing comes from the database being replaced.
+operation. `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL` and bucket credentials
+come from the environment (or `-env`), each from the file its `_FILE` variant
+names when that is set, as the server reads them; nothing comes from the
+database being replaced.
 `--from` is a local backup folder (the folder at a local destination, or a
 downloaded copy), or a bucket folder,
 `s3://<bucket>/<key prefix>/backups/<server-id>/<id>`, reached with
@@ -2025,7 +2036,7 @@ fails on one in no list or in two, and on a listed name that is not a table,
 so a new table needs a decision before it ships; a layer that adds one
 classifies it.
 
-Sensitive settings (`catalog.SensitiveSettingKeys`) are classified the same
+Sensitive settings (`serversettings.SensitiveSettingKeys`) are classified the same
 way in `internal/backup/settings_secrets.go`. The signing keys Silo
 generates for the tokens it issues (`auth.jwt_secret`, which signs sessions,
 download and artwork links, backup object links, OAuth state, and cursors,

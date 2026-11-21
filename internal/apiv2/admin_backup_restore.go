@@ -46,17 +46,18 @@ type AdminBackupRestoreCollection struct {
 	LocalID      string   `json:"local_id,omitempty" doc:"The collection here: for a manual collection the one with the same name in the mapped library, for a template collection the one the same template created for the mapped library"`
 	TemplateID   string   `json:"template_id,omitempty" doc:"A template collection's template in the collection template catalog"`
 	BundleID     string   `json:"bundle_id,omitempty" doc:"The template bundle that created a template collection"`
-	Changes      []string `json:"changes,omitempty" doc:"A template collection's fields the admin changed from the template's defaults that a restore writes here: title, description, visibility, featured, sort order, item sort, source, sync schedule, poster, backdrop"`
+	Changes      []string `json:"changes,omitempty" enum:"title,description,visibility,featured,sort_order,item_sort,source,sync_schedule,poster,backdrop,libraries" doc:"What a restore writes to a template collection here: the fields the admin changed from the template's defaults, and libraries when it adds the collection to more of them"`
 }
 
 // AdminBackupRestoreHomeSection is a backup page section against this
 // server.
 type AdminBackupRestoreHomeSection struct {
-	Scope       string   `json:"scope" enum:"home,library"`
-	LibraryID   *ID      `json:"library_id,omitempty" doc:"The library here whose page holds the section"`
-	SectionType string   `json:"section_type"`
-	LocalID     string   `json:"local_id,omitempty" doc:"The matching section here: the same id on the server that took the backup, else the one section of the page with the same type and title"`
-	Changes     []string `json:"changes,omitempty" doc:"What a restore replaces in the section here: title, position, featured, item limit, enabled, web only, configuration, and N collection items"`
+	Scope                  string   `json:"scope" enum:"home,library"`
+	LibraryID              *ID      `json:"library_id,omitempty" doc:"The library here whose page holds the section"`
+	SectionType            string   `json:"section_type"`
+	LocalID                string   `json:"local_id,omitempty" doc:"The matching section here: the same id on the server that took the backup, else the one section of the page with the same type and title"`
+	Changes                []string `json:"changes,omitempty" enum:"type,title,title_translation,position,featured,item_limit,enabled,web_only,collection_replaced,configuration,collection_items" doc:"What a restore replaces in the section here"`
+	MissingCollectionItems int      `json:"missing_collection_items,omitempty" doc:"With the collection_items change: the items of the backup's collection, in this server's catalog, that the section's collection here lacks and a restore adds"`
 }
 
 type AdminBackupRestoreItem struct {
@@ -89,7 +90,7 @@ type AdminBackupRestoreAccount struct {
 	Match             string                               `json:"match" enum:"account_id,restored,username_email,new" doc:"account_id: the backup is this server's and the account id exists; restored: an earlier restore of this backup's server created it; username_email: the one account here whose username or email is this account's username or email; new: restoring creates it"`
 	Target            string                               `json:"target" doc:"What a restore selection names for this account: the local account id, or new"`
 	LocalID           *ID                                  `json:"local_id,omitempty" doc:"The matched account here"`
-	LocalUsername     string                               `json:"local_username,omitempty"`
+	LocalUsername     string                               `json:"local_username,omitempty" doc:"The matched account's username, or its email when it has none"`
 	Group             string                               `json:"group,omitempty" doc:"The account's access group in the backup; a new account joins the group of that name here"`
 	PolicyDifferences []AdminBackupRestorePolicyDifference `json:"policy_differences" doc:"For a new account, what this server's policy would grant beyond the backup's; any difference makes it unselectable"`
 	LibrariesLeftOut  int                                  `json:"libraries_left_out" doc:"Library entries of the account's own library list with no library here; they are dropped, never widened"`
@@ -410,7 +411,8 @@ func adminBackupRestoreSetOf(p *backup.RestorePreview) AdminBackupRestoreSet {
 				item.Account = adminBackupRestoreAccountOf(a)
 			}
 			if h := it.HomeSection; h != nil {
-				item.HomeSection = &AdminBackupRestoreHomeSection{Scope: h.Scope, LibraryID: idOfIntPtr(h.LibraryID), SectionType: h.SectionType, LocalID: h.LocalID, Changes: h.Changes}
+				item.HomeSection = &AdminBackupRestoreHomeSection{Scope: h.Scope, LibraryID: idOfIntPtr(h.LibraryID), SectionType: h.SectionType, LocalID: h.LocalID, Changes: h.Changes,
+					MissingCollectionItems: h.MissingCollectionItems}
 			}
 			section.Items = append(section.Items, item)
 		}

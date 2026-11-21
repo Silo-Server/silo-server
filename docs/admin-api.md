@@ -357,6 +357,7 @@ configuration, last health result, and last stored hardware inventory. See
 | `drain_requested` | bool | An administrator asked this transcode node to drain: it stays listed and health-checked, but new work goes to other nodes while its sessions finish. See [node drain (v2)](#node-drain-v2). Always `false` on a proxy. |
 | `drain_state` | string | What the node reported on its last health check: `none`, `draining` (after a drain request or SIGTERM, while it finishes its work) or `drained` (nothing left; safe to stop). `none` for a proxy, a node that predates draining, and a node that did not answer. |
 | `key_issued` | bool | A node key has been issued to this transcode node. The key itself is shown only in the response that issues it. Always `false` on a proxy. See [node keys (v2)](#node-keys-v2). |
+| `deployment_managed` | bool | The API servers' deployment configuration (`SILO_TRANSCODE_NODES`) lists this transcode node and supplies its key. Key issue and delete refuse it with `409 node_deployment_managed`. See [node keys (v2)](#node-keys-v2). |
 | `source_access` | string | How this transcode node reads source media: `local` through its own library mount at the API servers' paths, `core` over HTTP from the API servers. Omitted on a proxy. See [node source access (v2)](#node-source-access-v2). |
 | `active_jobs`, `egress_kbps` | int | Last health-reported load. `egress_kbps` is a rolling average and is currently non-zero for proxy nodes only. |
 | `group` | string \| null | Co-location group. A group is only eligible while every enabled member is healthy. |
@@ -381,8 +382,8 @@ configuration, last health result, and last stored hardware inventory. See
 `hw_accel_override` and `hw_device_override` override the cluster-wide
 `playback.hw_accel` and `playback.hw_device` settings for one node.
 `hw_accel_override` takes the same values as the cluster setting — `auto`,
-`qsv`, `vaapi`, `nvenc`, `none`. Absent means inherit; there is no separate
-"inherit" value to set.
+`qsv`, `vaapi`, `nvenc`, `videotoolbox`, `none`. Absent means inherit; there
+is no separate "inherit" value to set.
 
 They exist for a heterogeneous deployment: one CPU-only node in a QSV cluster
 sets `none` for itself instead of forcing every node onto the lowest common
@@ -838,11 +839,11 @@ indistinguishable from omission.
 
 `200 OK` with the updated node, `404 Not Found` for an unknown id,
 `422 validation_failed` when `hw_accel_override` is not one of `auto`, `qsv`,
-`vaapi`, `nvenc`, `none` (matched case-insensitively and stored lowercase, as
-`playback.hw_accel` is). The node pools are reloaded afterwards, so remote
-dispatch honors a new override immediately; the target node itself picks it up
-on its next config reload — see "Acceleration overrides" above for what waits
-for a restart.
+`vaapi`, `nvenc`, `videotoolbox`, `none` (matched case-insensitively and
+stored lowercase, as `playback.hw_accel` is). The node pools are reloaded
+afterwards, so remote dispatch honors a new override immediately; the target
+node itself picks it up on its next config reload — see "Acceleration
+overrides" above for what waits for a restart.
 
 `download_artifact_dir_override` (an absolute path; `null` or empty restores the
 inherited directory) and `download_artifact_max_bytes_override` (bytes, `0` for no
@@ -887,7 +888,10 @@ answering server before the `204`, and from the other API servers and proxies
 once `node_pool_changed` reaches them: nothing signs requests to the node or
 accepts its calls, so its sessions stop serving viewers (relays answer them as
 "node unavailable" and do not move them). The call sends the node nothing. Like PUT, it needs the node's `config_etag` in
-`If-Match`: `428` without one, `412` when it is stale.
+`If-Match`: `428` without one, `412` when it is stale. A node with
+`deployment_managed` returns `409 node_deployment_managed` after those checks:
+the next API server start would create it again (see
+[node keys (v2)](#node-keys-v2)).
 
 ## `POST /api/v2/admin/nodes/{id}/check`
 
@@ -996,7 +1000,7 @@ Top-level (and each node's own report):
 
 | Field | Type | Meaning |
 |---|---|---|
-| `resolved` | string | The backend that would actually be used: `nvenc`, `qsv`, `vaapi`, or `none`. An explicitly configured backend wins even when its probe failed — read `detected_backends` for why. |
+| `resolved` | string | The backend that would actually be used: `nvenc`, `qsv`, `vaapi`, `videotoolbox`, or `none`. An explicitly configured backend wins even when its probe failed — read `detected_backends` for why. |
 | `render_devices` | string[] | Every accessible `/dev/dri/renderD*` path. |
 | `render_device_details` | object[] | One entry per device (see below). |
 | `intel_detected` | bool | An Intel GPU is present in the inventory. |
@@ -1021,7 +1025,7 @@ Top-level (and each node's own report):
 
 | Field | Type | Meaning |
 |---|---|---|
-| `backend` | string | `nvenc`, `qsv`, or `vaapi`. |
+| `backend` | string | `nvenc`, `qsv`, `vaapi`, or `videotoolbox`. |
 | `verified` | bool | At least one candidate device passed a real single-frame encode, not just an FFmpeg build-flag listing. |
 | `devices` | string[] | Every candidate considered for this backend. |
 | `device` | string | The candidate whose probe passed. Empty for NVENC, which addresses its GPU through CUDA rather than a render node. |
@@ -3506,7 +3510,9 @@ key, so drain it first. A disabled node can take a key. The operation requires a
 administrator, rejects demo mode, takes no body and is non_retryable: after a
 lost response, issue again rather than replaying. A proxy node returns 409 (a
 proxy takes no key), a missing node 404, a server without the data cipher 503,
-invalid IDs 422, and repository failures a private 500 problem.
+invalid IDs 422, and repository failures a private 500 problem. A node with
+`deployment_managed` returns `409 node_deployment_managed`: its key comes from
+the API servers' deployment configuration.
 
 The key is stored encrypted in `stream_nodes.node_key_ciphertext` (see
 [secret encryption](architecture/secret-encryption.md)). It is a credential, not
@@ -3514,6 +3520,15 @@ configuration: issuing it advances neither `config_etag` nor the pool
 generation. `GET /api/v2/admin/nodes/capabilities` advertises `node_keys: true`
 when this server can issue keys. The node starts with this key and the API's
 URL; see [transcode nodes](architecture/transcode-nodes.md).
+
+API servers can instead create transcode nodes and their keys from
+`SILO_TRANSCODE_NODES` or `SILO_TRANSCODE_NODES_FILE`
+([declared nodes](architecture/transcode-nodes.md#declared-nodes)). Such a
+node's row reports `deployment_managed: true`; `issueAdminNodeKey` and
+`deleteAdminNode` (after its `If-Match` check) refuse it with
+`409 node_deployment_managed` until an API server starts with a declaration
+that no longer lists it. Its other fields stay editable. The capabilities
+response advertises `deployment_nodes: true` when this server supports it.
 
 ### Force reload nodes (v2)
 

@@ -17,6 +17,7 @@ import {
 import {
   buildSchemaValues,
   fieldIsVisible,
+  isSecretField,
   ownValue,
   parseFieldTypes,
 } from "@/components/admin/plugins/schemaFormUtils";
@@ -166,12 +167,8 @@ export function signInSetupLayout(installation: PluginInstallation): SignInSetup
   return layout;
 }
 
-function isSecret(field: PluginAdminFormField) {
-  return field.secret || field.control === "PASSWORD";
-}
-
 function hasSavedValue(entry: SignInConfigEntry, field: PluginAdminFormField): boolean {
-  if (isSecret(field)) {
+  if (isSecretField(field)) {
     return entry.configuredSecrets.includes(field.key);
   }
   const value = entry.saved?.[field.key];
@@ -232,7 +229,7 @@ export function fieldChanged(
   field: PluginAdminFormField,
 ): boolean {
   if (!draft || entry.managedFields.includes(field.key)) return false;
-  if (isSecret(field)) {
+  if (isSecretField(field)) {
     const typed = draft.values[field.key];
     return (typeof typed === "string" && typed !== "") || draft.clearSecrets.includes(field.key);
   }

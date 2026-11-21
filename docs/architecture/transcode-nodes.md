@@ -66,7 +66,9 @@ bytes, and text that re-encodes to itself.
   so issuing a key moves neither `config_etag` nor the pool generation. After a
   `SECRET_KEY` change the ciphertexts no longer decrypt and every node is
   keyless until it is issued a new key (see
-  [secret encryption](secret-encryption.md)).
+  [secret encryption](secret-encryption.md)); a
+  [declared node](#declared-nodes) takes its key again at the next API server
+  start.
 - **Issue and rotate.** `POST /api/v2/admin/nodes/{id}/key`
   (`Repository.IssueNodeKey`, `NodeHandler.IssueAdminNodeKey`) returns
   `201 {"node_key": "..."}` with `Cache-Control: no-store`, once. Every call
@@ -99,6 +101,78 @@ bytes, and text that re-encodes to itself.
 - **Unique address.** Two transcode nodes cannot be saved at one canonical URL
   (`nodepool.ErrTranscodeNodeURLTaken`, `409`), because the registry finds a node
   by that address.
+
+### Declared nodes
+
+An API server (integrated or `api` mode) can create transcode nodes and their
+keys from its deployment configuration, so a declarative deployment needs no
+admin step per node. It reads one document from `SILO_TRANSCODE_NODES` (JSON)
+or `SILO_TRANSCODE_NODES_FILE` (a YAML or JSON regular file up to 1 MiB);
+setting both stops startup, and a blank value counts as unset
+(`nodepool.ReadNodeProvisioning`):
+
+```yaml
+apiVersion: 1
+nodes:
+  gpu-1:
+    url: http://gpu-1:8090
+    key: { fromFile: /run/secrets/gpu-1-node-key }   # or { fromEnv: GPU1_NODE_KEY }
+```
+
+A key is always a reference, never inline, so the document can live where
+secrets do not. The operator chooses each node's id by the key it writes:
+`silo node-key generate --id <n>` prints one, or a secret store can template
+`snk1_<n>_` followed by 43 base64url characters of 32 random bytes. A declared
+id is at most 2147483646, so the identity sequence always has room. The node
+gets the same key in `SILO_NODE_KEY`. Field names match exactly and an unknown
+one is refused. Parse errors name the variable and the node, never a key or an
+unknown field's name, where a misplaced key could sit.
+
+`nodepool.ProvisionTranscodeNodes` applies the document at startup, before the
+first pool and credential loads, in one transaction under the transcode URL
+lock and an `EXCLUSIVE` lock on `stream_nodes`. Row locks, writes and
+`nextval` wait; plain reads go on; API servers starting together run one after
+the other. A weaker mode admits the `SELECT ... FOR UPDATE` that admin edits and
+node declarations take without the URL lock, and the two deadlock when both then
+write that row.
+Every decision is made before anything is written, so a refusal changes
+nothing, and any refusal stops startup:
+
+- A declared id with no row is created: transcode, enabled, with the declared
+  name and URL and the key, and the identity sequence is moved past it first
+  with `ALTER SEQUENCE ... RESTART`, which rolls back with a failed pass (a
+  `setval` would not, and the retry would refuse the ids as used).
+  Only an id the sequence has never handed out is created, so no id ever names
+  two machines. The URL is checked against every row, proxies included, as a
+  node's own declaration is.
+- A row the deployment manages keeps its ciphertext when the declared key is
+  the stored one, and takes the declared key otherwise (rotation, or a stored
+  key that no longer decrypts after a `SECRET_KEY` change).
+- An unmanaged transcode row is adopted only when it already holds the declared
+  key. A proxy row, a keyless row, or one with another key stops startup: a
+  declaration never takes over a row it did not create, so an existing node
+  comes under the document only with the key it already holds.
+- A managed row the document no longer lists is released. `nodes: {}` releases
+  every node; an API server with neither variable set leaves them as they are.
+
+`stream_nodes.deployment_managed` records ownership. While it is set, key
+issue (`Repository.IssueNodeKey`, in its `UPDATE`) and delete
+(`AdminConfigurationStore.Delete`, after the `If-Match` guard, under the row
+lock) refuse with `ErrNodeDeploymentManaged`, so every API server refuses
+alike. A released node keeps its row and key and is managed in the admin API
+again; releasing does not revoke the key, rotating it does. Name and URL are
+used only to create a row; afterwards they belong to the node's own
+[declaration](#registration) or the administrator. When the pass changed
+anything it publishes `node_pool_changed`; a missed event is caught by the
+periodic registry and pool reloads.
+
+Every API server needs the same document, or the last to start wins. A
+declared key changes only when an API server starts with the new one; until the
+node restarts with it, its running streams fail, as after an admin rotation.
+`ALTER SEQUENCE` needs the role that owns `stream_nodes`, which every API server
+already uses to run migrations. An API server that predates
+`deployment_managed` ignores the document and still lets an administrator issue
+a key or delete the node.
 
 ### Credential registry
 
@@ -195,11 +269,11 @@ cipher or event bus.
 | Variable | |
 |---|---|
 | `SILO_CORE_URL` | Required. Absolute `http` or `https` URL of the API. With several API replicas, use their load-balanced address. A plain-HTTP URL that is not loopback logs a warning at startup. |
-| `SILO_NODE_KEY` | Required. A malformed key refuses startup (`transcodeNodeKey`). |
+| `SILO_NODE_KEY` | Required (or `SILO_NODE_KEY_FILE` naming a file that holds it; surrounding whitespace is removed from either): the key an administrator issued, or the one the API servers' [declaration](#declared-nodes) references. A malformed key, or both variables set, refuses startup (`transcodeNodeKey`). |
 | `PORT` | Listen port, default `8080`. |
 | `SILO_NODE_DRAIN_TIMEOUT` | See [node drain](node-drain.md). |
 | `SILO_NODE_NAME`, `SILO_NODE_URL`, `SILO_NODE_GROUP`, `SILO_NODE_MAX_TRANSCODES`, `SILO_NODE_SOURCE_ACCESS`, `SILO_NODE_HW_ACCEL`, `SILO_NODE_HW_DEVICE`, `SILO_NODE_DOWNLOAD_ARTIFACT_DIR`, `SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES` | Optional. The node's declaration of its own row; see [Registration](#registration). A bad value refuses startup, naming the variable (`nodedeclare.FromEnv`). |
-| `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY`, `NODE_URL`, `NODE_NAME` | Ignored, with one warning, so a shared env file keeps working. `NODE_URL` and `NODE_NAME` stay ignored although the node declares a URL and name: an env file shared with a proxy sets them, and honoring them would rewrite rows on upgrade. |
+| `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY` (and their `_FILE` variants), `NODE_URL`, `NODE_NAME` | Ignored, with one warning, so a shared env file keeps working. `NODE_URL` and `NODE_NAME` stay ignored although the node declares a URL and name: an env file shared with a proxy sets them, and honoring them would rewrite rows on upgrade. |
 
 Before its first configuration read the node sends its declaration
 ([Registration](#registration)), so the configuration it loads already

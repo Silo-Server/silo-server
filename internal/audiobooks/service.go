@@ -12,13 +12,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scanner"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // SettingsReader is the minimal slice of the server-settings store that
 // the audiobooks service needs. The production implementation is
-// internal/catalog.ServerSettingsRepo (or whatever silo names that helper at
+// internal/serversettings.ServerSettingsRepo (or whatever silo names that helper at
 // wiring time); tests pass a fake.
 type SettingsReader interface {
 	GetString(ctx context.Context, key string) (string, error)
@@ -45,7 +46,7 @@ type ABSHandlerDeps struct {
 	Pool     *pgxpool.Pool
 	Items    *catalog.ItemRepository
 	Files    *scanner.FileRepository
-	Settings catalog.SettingsStore // encrypting decorator in production
+	Settings serversettings.SettingsStore // encrypting decorator in production
 	// Auth signs ABS clients in and rechecks each token's profile. Nil
 	// leaves standalone login unavailable.
 	Auth           *SiloCredValidator
