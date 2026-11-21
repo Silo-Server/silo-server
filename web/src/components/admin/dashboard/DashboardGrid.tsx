@@ -220,9 +220,17 @@ export function DashboardGrid({
       if (!isCustomizing) return;
       const id = findWidgetIdFromEvent(event);
       if (!id) return;
+      // One gesture at a time: a link or image inside a widget stays draggable
+      // while another pointer resizes.
+      if (resizeSessionRef.current) {
+        event.preventDefault();
+        return;
+      }
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", id);
-      dragSourceRef.current = event.target as Node;
+      // The native target: a selection drag starts from a Text node, which
+      // React reports as its parent element.
+      dragSourceRef.current = event.nativeEvent.target as Node;
       setDraggedId(id);
     },
     [findWidgetIdFromEvent, isCustomizing],
@@ -369,6 +377,9 @@ export function DashboardGrid({
       // menu and never delivers the matching pointerup, which would leave the
       // resize session stuck.
       if (!event.isPrimary || event.button !== 0) return;
+      // One gesture at a time: a mouse press is primary even while a touch
+      // resizes or drags.
+      if (resizeSessionRef.current || dragSourceRef.current) return;
       const widget = getDashboardWidget(id);
       event.preventDefault();
       event.stopPropagation();
@@ -721,6 +732,10 @@ export function DashboardGrid({
                   // a specific spot; clicking (the keyboard path) appends.
                   draggable
                   onDragStart={(event) => {
+                    if (resizeSessionRef.current) {
+                      event.preventDefault();
+                      return;
+                    }
                     event.dataTransfer.setData(WIDGET_ADD_DRAG_TYPE, widget.id);
                     event.dataTransfer.effectAllowed = "copy";
                     dragSourceRef.current = event.currentTarget;
