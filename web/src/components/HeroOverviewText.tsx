@@ -6,11 +6,12 @@
  */
 export function HeroOverviewText({ overview }: { overview: string }) {
   return (
-    <p
-      dir="auto"
-      className="bidi-text text-foreground/72 line-clamp-2 text-sm leading-7 sm:line-clamp-3 sm:text-base"
-    >
-      {overview}
-    </p>
+    // The text sits in a block inside the clamp so `.bidi-clamp` can tell when
+    // the clamp cuts it (see app.css).
+    <div className="bidi-clamp text-foreground/72 line-clamp-2 text-sm leading-7 sm:line-clamp-3 sm:text-base">
+      <p dir="auto" className="bidi-text">
+        {overview}
+      </p>
+    </div>
   );
 }

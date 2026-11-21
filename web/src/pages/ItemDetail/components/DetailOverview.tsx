@@ -84,6 +84,7 @@ export default function DetailOverview({
       <p
         ref={textRef}
         dir="auto"
+        data-clamp-cut={(clamp && !expanded && overflowing) || undefined}
         className={`bidi-text text-muted-foreground leading-7 ${
           compact ? "text-sm" : "text-foreground/72 text-sm sm:text-[0.9375rem]"
         } ${clamp && !expanded ? CLAMP_CLASSES[clampLines] : ""}`}

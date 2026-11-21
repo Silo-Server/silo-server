@@ -80,13 +80,13 @@ export default function EpisodeCardCaption({
       )}
       {overview && (
         // Three lines are reserved, as on the Apple card, so short descriptions
-        // keep the row's cards the same height.
-        <p
-          dir="auto"
-          className="bidi-text text-muted-foreground line-clamp-3 min-h-[3lh] text-xs leading-relaxed"
-        >
-          {overview}
-        </p>
+        // keep the row's cards the same height. The text sits in a block
+        // inside the clamp so `.bidi-clamp` can tell when the clamp cuts it.
+        <div className="bidi-clamp text-muted-foreground line-clamp-3 min-h-[3lh] text-xs leading-relaxed">
+          <p dir="auto" className="bidi-text">
+            {overview}
+          </p>
+        </div>
       )}
     </div>
   );
