@@ -1,6 +1,11 @@
 import { Fragment, memo, useId, useState, type ReactNode } from "react";
 
-import type { RestoreItem, RestoreSectionId, RestoreSetting } from "@/api/v2/adminBackupRestore";
+import type {
+  RestoreChange,
+  RestoreItem,
+  RestoreSectionId,
+  RestoreSetting,
+} from "@/api/v2/adminBackupRestore";
 import { RestartBadge } from "@/components/settings/RestartBadge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -175,6 +180,38 @@ function SettingsDiff({ item }: { item: RestoreItem }) {
   );
 }
 
+/** The label of each change code but collection_items, which carries a count. */
+const CHANGE_LABELS: Record<Exclude<RestoreChange, "collection_items">, MessageKey> = {
+  type: "web.admin.backups.restore.rows.change.type",
+  title: "web.admin.backups.restore.rows.change.title",
+  title_translation: "web.admin.backups.restore.rows.change.titleTranslation",
+  position: "web.admin.backups.restore.rows.change.position",
+  featured: "web.admin.backups.restore.rows.change.featured",
+  item_limit: "web.admin.backups.restore.rows.change.itemLimit",
+  enabled: "web.admin.backups.restore.rows.change.enabled",
+  web_only: "web.admin.backups.restore.rows.change.webOnly",
+  collection_replaced: "web.admin.backups.restore.rows.change.collectionReplaced",
+  configuration: "web.admin.backups.restore.rows.change.configuration",
+  description: "web.admin.backups.restore.rows.change.description",
+  visibility: "web.admin.backups.restore.rows.change.visibility",
+  sort_order: "web.admin.backups.restore.rows.change.sortOrder",
+  item_sort: "web.admin.backups.restore.rows.change.itemSort",
+  source: "web.admin.backups.restore.rows.change.source",
+  sync_schedule: "web.admin.backups.restore.rows.change.syncSchedule",
+  poster: "web.admin.backups.restore.rows.change.poster",
+  backdrop: "web.admin.backups.restore.rows.change.backdrop",
+  libraries: "web.admin.backups.restore.rows.change.libraries",
+};
+
+/** One entry of a row's change list in the interface language. */
+function changeLabel(t: Translate, item: RestoreItem, change: RestoreChange): string {
+  if (change === "collection_items") {
+    const count = item.home_section?.missing_collection_items ?? 0;
+    return t("web.admin.backups.restore.rows.change.collectionItems", { count, count_text: count });
+  }
+  return t(CHANGE_LABELS[change]);
+}
+
 /** Whether a row has anything for its chevron to open; cheap, unlike building it. */
 function hasItemDetails(item: RestoreItem): boolean {
   return Boolean(
@@ -192,7 +229,8 @@ function hasItemDetails(item: RestoreItem): boolean {
 /** What a row's chevron opens; null when there is nothing more to say. */
 function itemDetails(t: Translate, item: RestoreItem): ReactNode {
   const why = item.message || (item.reason ? t(REASON_SENTENCES[item.reason]) : undefined);
-  const changes = item.home_section?.changes ?? item.collection?.changes ?? [];
+  const changes: readonly RestoreChange[] =
+    item.home_section?.changes ?? item.collection?.changes ?? [];
   const settings = (item.settings ?? []).some((setting) => setting.status !== "on_this_server");
   const paths = item.library && item.library.paths.length > 1 ? item.library.paths : [];
   const missingPaths = item.library?.missing_paths ?? [];
@@ -237,7 +275,7 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
         <p className="text-muted-foreground">{t("web.admin.backups.restore.rows.changes")}</p>
         <ul className="text-muted-foreground list-disc ps-5">
           {changes.map((change) => (
-            <li key={change}>{change}</li>
+            <li key={change}>{changeLabel(t, item, change)}</li>
           ))}
         </ul>
       </div>

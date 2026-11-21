@@ -1117,12 +1117,13 @@ is ambiguous, and so is any candidate when two of the backup's sections
 share that page, type, and title, since the title then identifies neither.
 So two such sections restore as two, and a re-run finds each by its id. A matched section that differs lists what a restore replaces
 (title, position, featured, item limit, enabled, web only, configuration,
-and missing items of its managed collection), and a restore replaces its
+and missing items of its managed collection) as change codes, which clients
+show in the interface language, and a restore replaces its
 configuration as an admin save would. A restore writes `web_only` as the
 backup has it on a featured row, whether it creates or replaces the
 section, so a web-only hero row never comes back on the apps. Only a collection the section manages stands for the
 carried one: a managed section pointed at an ordinary collection since the
-backup lists "collection replaced", whatever that collection holds, and the
+backup lists `collection_replaced`, whatever that collection holds, and the
 restore points it back at its managed collection (the one still here with
 its management key, or a new one). The key's section id and each
 `library:<id>` it names are this server's (`remapManagementKey`), and a
