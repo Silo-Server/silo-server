@@ -25,6 +25,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -76,7 +77,7 @@ type selectiveSeed struct {
 	secretKey    string
 }
 
-func seedSelective(t *testing.T, pool *pgxpool.Pool, settings *catalog.EncryptedSettingsRepo, store blobstore.Store) selectiveSeed {
+func seedSelective(t *testing.T, pool *pgxpool.Pool, settings *serversettings.EncryptedSettingsRepo, store blobstore.Store) selectiveSeed {
 	t.Helper()
 	ctx := t.Context()
 	suffix := randomHex(t, 4)
@@ -185,7 +186,7 @@ func reportOutcomes(r *SelectiveReport) map[string]string {
 type selectiveFixture struct {
 	pool     *pgxpool.Pool
 	svc      *Service
-	settings *catalog.EncryptedSettingsRepo
+	settings *serversettings.EncryptedSettingsRepo
 	store    blobstore.Store
 	serverID string
 	// calls lists every library follow-up run, created the ones that
@@ -226,7 +227,7 @@ func newSelectiveFixtureOn(t *testing.T, pool *pgxpool.Pool, dsn string) *select
 		t.Fatal(err)
 	}
 	f := &selectiveFixture{pool: pool, store: store, serverID: "selective-" + randomHex(t, 4),
-		settings: catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)}
+		settings: serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), cipher)}
 	f.svc = New(Options{
 		Pool: pool, DatabaseURL: dsn, Settings: f.settings, Cipher: cipher, KeyCheck: keyCheck, ManifestKey: manifestKey,
 		Stores: blobstore.Stores{Assets: store, Operational: store}, Destination: NewStoreDestination(store),

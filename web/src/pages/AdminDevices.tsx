@@ -1,5 +1,5 @@
 import { DeviceConnections } from "@/components/admin/DeviceConnections";
-import { Children, isValidElement, useMemo, useState, type ReactNode } from "react";
+import { Children, isValidElement, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import {
   Activity,
@@ -507,7 +507,10 @@ export default function AdminDevices() {
             )}
           </div>
 
-          <div className="overlay-scroll max-h-[max(calc(100vh-22rem),10rem)] flex-1 overflow-y-auto lg:max-h-[max(calc(100vh-18rem),10rem)]">
+          <div
+            data-device-list
+            className="overlay-scroll max-h-[max(calc(100vh-22rem),10rem)] flex-1 overflow-y-auto lg:max-h-[max(calc(100vh-18rem),10rem)]"
+          >
             {isLoading ? (
               <div className="space-y-1.5 p-2.5">
                 {Array.from({ length: 5 }).map((_, i) => (
@@ -1351,6 +1354,18 @@ function DeviceGroup({
   );
 }
 
+/** How long after a pointer press or release a row's focus counts as coming from it. */
+const POINTER_FOCUS_WINDOW_MS = 1000;
+
+/** Scrolls the device list so its group's sticky header no longer covers `row`. */
+function revealRowUnderHeader(row: HTMLElement) {
+  const header = row.closest("section")?.querySelector("header");
+  const list = row.closest<HTMLElement>("[data-device-list]");
+  if (!header || !list) return;
+  const overlap = header.getBoundingClientRect().bottom - row.getBoundingClientRect().top;
+  if (overlap > 0) list.scrollTop -= overlap;
+}
+
 function DeviceRow({
   device,
   isAnomaly,
@@ -1363,6 +1378,8 @@ function DeviceRow({
   activeProfileId: string | null;
 }) {
   const t = useT();
+  const lastPointerDown = useRef(Number.NEGATIVE_INFINITY);
+  const lastPointerUp = useRef(Number.NEGATIVE_INFINITY);
   const kind = classifyPlatform(device.device_platform);
   const profileSuffix = activeProfileId ? `?profile=${encodeURIComponent(activeProfileId)}` : "";
   const href = `/admin/devices/${device.user_id}/${encodeURIComponent(device.device_id)}${profileSuffix}`;
@@ -1371,6 +1388,31 @@ function DeviceRow({
   return (
     <Link
       to={href}
+      // The margin keeps a row that keyboard focus scrolls to clear of its
+      // group's sticky header. Firefox doesn't scroll a partly covered row on
+      // focus, and a larger minimum font can make the header taller than the
+      // margin, so move the row out from under the header here. Not for a
+      // pointer press: it focuses on mousedown (or on a tap), and moving the
+      // row then would land the release elsewhere and lose the click. Times,
+      // not a flag: a touch held longer than the window still focuses just
+      // after its release, and a press that never focuses (a right-click, a
+      // press on the focused row) ages out instead of blocking the keyboard.
+      onPointerDown={() => {
+        lastPointerDown.current = performance.now();
+      }}
+      onPointerUp={() => {
+        lastPointerUp.current = performance.now();
+      }}
+      onFocus={(e) => {
+        const now = performance.now();
+        if (
+          now - lastPointerDown.current < POINTER_FOCUS_WINDOW_MS ||
+          now - lastPointerUp.current < POINTER_FOCUS_WINDOW_MS
+        ) {
+          return;
+        }
+        revealRowUnderHeader(e.currentTarget);
+      }}
       className={cn(
         "group relative flex scroll-mt-10 items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors",
         active ? "bg-surface-hover/70" : "hover:bg-surface-hover/40",
@@ -1386,7 +1428,7 @@ function DeviceRow({
       <PlatformTile kind={kind} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="text-foreground truncate text-[13px] font-medium">
+          <span dir="auto" className="text-foreground truncate text-[13px] font-medium">
             {device.device_name || t("web.admin.devices.unnamedDevice")}
           </span>
           {isAnomaly && (

@@ -169,7 +169,9 @@ function GlobalSearchResultRow({
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{item.title}</div>
+          <div dir="auto" className="bidi-text truncate text-sm font-medium">
+            {item.title}
+          </div>
           <div className="text-muted-foreground text-xs">
             {item.year > 0
               ? t("web.search.yearAndType", { year: item.year, type: typeLabel })
@@ -275,7 +277,9 @@ function GlobalSearchPersonRow({
         </div>
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{person.name}</div>
+        <div dir="auto" className="bidi-text truncate text-sm font-medium">
+          {person.name}
+        </div>
         <div className="text-muted-foreground text-xs">{t("web.search.person")}</div>
       </div>
       {isSelected && <EnterKeyHint />}
