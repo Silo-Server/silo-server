@@ -711,7 +711,9 @@ export default function AISettings() {
   // save can undo a tile's edits without going through this page.
   const tileValues = (keys: readonly string[]) =>
     keys.map((key) => form.getValue(key)).join("\u0000");
-  const textTested = tileValues(TEXT_AI_KEYS);
+  // The text tile tests the model it shows, which falls back to the subtitle
+  // model while none is set.
+  const textTested = [tileValues(TEXT_AI_KEYS), currentModel].join("\u0000");
   const speechTested = tileValues(SPEECH_AI_KEYS);
   const textDirty = TEXT_AI_KEYS.some((key) => form.isDirty(key));
   const speechDirty = SPEECH_AI_KEYS.some((key) => form.isDirty(key));
