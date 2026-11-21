@@ -8,7 +8,6 @@ import {
   useMemo,
   useRef,
   type MouseEvent,
-  type ReactNode,
 } from "react";
 import { Link } from "react-router";
 import { Info, ChevronLeft, ChevronRight, Play, Pause, BookOpen } from "lucide-react";
@@ -283,43 +282,12 @@ export default function HeroBanner({
     libraryId,
   });
 
-  // Previous, play/pause and next in one dark pill, in the order media
-  // players use. Each button is 44px wide and its hit area 44px tall. The pill
-  // backs the controls (and the phone counter) so they stay readable over a
-  // bright backdrop.
+  // Previous, play/pause and next share one dark pill, in the order media
+  // players use. Each button is 44px wide and its hit area 44px tall. Below
+  // lg, the scroll margin brings a focused button out from under the sticky
+  // header.
   const slideButtonClass =
-    "relative flex h-8 w-11 items-center justify-center rounded-full text-white/85 transition-colors after:absolute after:inset-x-0 after:-inset-y-1.5 after:content-[''] hover:text-white";
-  const slideControls = (counter?: ReactNode) => (
-    <div className="flex items-center rounded-full border border-white/10 bg-black/60 backdrop-blur-md">
-      {counter}
-      <button
-        type="button"
-        onClick={prev}
-        aria-label={t("web.home.hero.previousSlide")}
-        className={slideButtonClass}
-      >
-        <ChevronLeft className="size-4" />
-      </button>
-      <button
-        type="button"
-        onClick={togglePause}
-        aria-label={
-          autoplaying ? t("web.home.hero.pauseSlideshow") : t("web.home.hero.playSlideshow")
-        }
-        className={slideButtonClass}
-      >
-        {autoplaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-      </button>
-      <button
-        type="button"
-        onClick={next}
-        aria-label={t("web.home.hero.nextSlide")}
-        className={slideButtonClass}
-      >
-        <ChevronRight className="size-4" />
-      </button>
-    </div>
-  );
+    "relative flex h-8 w-11 scroll-mt-24 items-center justify-center rounded-full text-white/85 transition-colors after:absolute after:inset-x-0 after:-inset-y-1.5 after:content-[''] hover:text-white lg:scroll-mt-0";
 
   const handlePlayClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (activeAudiobookPlaying == null) {
@@ -388,7 +356,9 @@ export default function HeroBanner({
           // A tall title block grows the hero rather than overflowing it;
           // the top padding keeps the title off the top edge (and, below
           // sm, clear of the slide controls) when that happens.
-          reserveHeaderSpace ? "pt-36 sm:pt-28 lg:pt-32" : "pt-16",
+          reserveHeaderSpace
+            ? cn(slides.length > 1 ? "pt-36" : "pt-24", "sm:pt-28 lg:pt-32")
+            : "pt-16",
         )}
       >
         <div className="w-full max-w-[1380px]">
@@ -454,45 +424,75 @@ export default function HeroBanner({
         {slides[activeIndex]?.title}
       </div>
 
+      {/* Slide controls. They sit in a band the content's padding keeps
+          empty, so the title, details and buttons never run under them:
+          below sm in the top corner, inside the top padding (lower when
+          `reserveHeaderSpace` leaves room for the marquee header); on sm+
+          in the bottom corner, inside the bottom padding. One set of
+          buttons serves every width, so focus survives a resize. */}
       {slides.length > 1 && (
-        <>
-          {/* Slide controls. Each cluster sits in a band the content's
-              padding keeps empty, so the title, details and buttons never run
-              under it: below sm in the top corner, inside the top padding
-              (lower when `reserveHeaderSpace` leaves room for the marquee
-              header); on sm+ in the bottom corner, inside the bottom padding. */}
-          <div
-            className={cn("absolute end-4 z-20 sm:hidden", reserveHeaderSpace ? "top-24" : "top-4")}
-          >
-            {slideControls(
-              <div className="hero-slide-counter ps-3.5 pe-1 text-white/85" aria-hidden="true">
-                <span className="num">{padded(activeIndex + 1)}</span>
-                {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a separator glyph, not text */}
-                <span>/</span>
-                <span>{padded(slideCount)}</span>
-              </div>,
-            )}
+        <div
+          className={cn(
+            "absolute end-4 z-20 flex items-center gap-3 sm:end-6 sm:top-auto sm:bottom-2 lg:end-10 lg:bottom-6 xl:end-12",
+            reserveHeaderSpace ? "top-24" : "top-4",
+          )}
+        >
+          <div className="hero-slide-counter hidden sm:inline-flex" aria-hidden="true">
+            <span className="num">{padded(activeIndex + 1)}</span>
+            <span className="sep" />
+            <span>{padded(slideCount)}</span>
           </div>
-          <div className="absolute end-6 bottom-2 z-20 hidden items-center gap-3 sm:flex lg:end-10 lg:bottom-6 xl:end-12">
-            <div className="hero-slide-counter" aria-hidden="true">
-              <span className="num">{padded(activeIndex + 1)}</span>
-              <span className="sep" />
-              <span>{padded(slideCount)}</span>
-            </div>
-            <div
-              className="hero-progress-rail w-20 md:w-36"
-              data-paused={autoplaying ? "false" : "true"}
-              aria-hidden="true"
-            >
-              {/* The key restarts the animation in lockstep with the
+          <div
+            className="hero-progress-rail hidden w-20 sm:block md:w-36"
+            data-paused={autoplaying ? "false" : "true"}
+            aria-hidden="true"
+          >
+            {/* The key restarts the animation in lockstep with the
                   setInterval timer: on slide change, and on unpause (which
                   starts a fresh 8s cycle). Pausing mid-cycle freezes the bar
                   via `animation-play-state: paused` without remounting. */}
-              <span key={`${activeIndex}-${playCycle}`} />
-            </div>
-            {slideControls()}
+            <span key={`${activeIndex}-${playCycle}`} />
           </div>
-        </>
+          {/* On phones the counter rides in the pill, which backs it over
+                bright artwork. */}
+          <div className="flex items-center rounded-full border border-white/10 bg-black/60 backdrop-blur-md">
+            <div
+              className="hero-slide-counter ps-3.5 pe-1 text-white/85 sm:hidden"
+              aria-hidden="true"
+            >
+              <span className="num">{padded(activeIndex + 1)}</span>
+              {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a separator glyph, not text */}
+              <span>/</span>
+              <span>{padded(slideCount)}</span>
+            </div>
+            <button
+              type="button"
+              onClick={prev}
+              aria-label={t("web.home.hero.previousSlide")}
+              className={slideButtonClass}
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={togglePause}
+              aria-label={
+                autoplaying ? t("web.home.hero.pauseSlideshow") : t("web.home.hero.playSlideshow")
+              }
+              className={slideButtonClass}
+            >
+              {autoplaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+            </button>
+            <button
+              type="button"
+              onClick={next}
+              aria-label={t("web.home.hero.nextSlide")}
+              className={slideButtonClass}
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          </div>
+        </div>
       )}
     </section>
   );
