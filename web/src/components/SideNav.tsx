@@ -80,10 +80,12 @@ export function SideNavItem({
         <Icon className="h-[18px] w-[18px]" />
       </span>
       {/* Wraps so a badge that grows with the text size moves under the label
-          instead of splitting the label or itself across lines. */}
-      <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1">
+          instead of splitting the label or itself across lines. Beside the
+          label the badge sits at the row's end; alone on its line it starts
+          under the label. */}
+      <span className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-2.5 gap-y-1">
         <span className="line-clamp-2 min-w-0 break-words">{label}</span>
-        {badge && <span className="ms-auto whitespace-nowrap">{badge}</span>}
+        {badge && <span className="whitespace-nowrap">{badge}</span>}
       </span>
     </>
   );
