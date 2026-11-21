@@ -9,6 +9,9 @@ ALTER TABLE public.stream_nodes
 -- +goose Down
 -- A node pinned to VideoToolbox goes back to inheriting the cluster setting,
 -- and a field its environment declared is no longer locked to that value.
+-- The table lock the ALTERs need comes first: taken after the UPDATE, it could
+-- deadlock with a node's health write waiting on a row the UPDATE changed.
+LOCK TABLE public.stream_nodes IN ACCESS EXCLUSIVE MODE;
 UPDATE public.stream_nodes
 SET hw_accel_override = NULL,
     env_managed = array_remove(env_managed, 'hw_accel_override')
