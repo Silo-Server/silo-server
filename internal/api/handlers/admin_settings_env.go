@@ -68,6 +68,8 @@ func CheckDeploymentSettings(stored map[string]string, env config.EnvSettings, d
 		}
 	}
 
+	skipBindingsOutsideDeclaration(prospective, normalized, declaredBy)
+
 	if err := validateProspectiveAdminSettings(adminSettingsValidationSnapshot(prospective, normalized), redisBootstrapAvailable); err != nil {
 		vars := checked.VarsFor(nil)
 		if declaredChanged {
@@ -76,6 +78,29 @@ func CheckDeploymentSettings(stored map[string]string, env config.EnvSettings, d
 		return nil, fmt.Errorf("the settings from the environment are invalid (%s): %w", strings.Join(vars, ", "), err)
 	}
 	return checked, nil
+}
+
+// skipBindingsOutsideDeclaration leaves out of the startup check each stored
+// provider binding the deployment can't have broken: one the environment
+// doesn't set that names a provider the document doesn't declare (with no
+// document, every stored binding). Declaring never removes a provider, so
+// such a binding is as valid as it was, and one already naming a missing
+// provider (as a restore into another deployment can leave) stays the
+// admin's to fix instead of stopping startup.
+func skipBindingsOutsideDeclaration(prospective, fromEnvironment map[string]string, declaredBy string) {
+	registry, err := config.ParseAIProviderRegistry(prospective[config.AIProvidersSettingKey])
+	if err != nil {
+		return // The registry check reports it.
+	}
+	for _, key := range config.AIProviderBindingKeys() {
+		if _, set := fromEnvironment[key]; set {
+			continue
+		}
+		provider, found := registry.Find(strings.TrimSpace(prospective[key]))
+		if !found || declaredBy == "" || provider.ManagedBy != declaredBy {
+			prospective[key] = ""
+		}
+	}
 }
 
 // storageLocationKeys are the settings rejectArtworkIdentityChange compares.

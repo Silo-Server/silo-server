@@ -418,6 +418,11 @@ func ValidateAIProviderBindings(values map[string]string) error {
 		if id == "" {
 			continue
 		}
+		// The text binding is idle while the ChatGPT plan serves text, as in
+		// AIProviderUsers, so it needs no provider until the plan is left.
+		if binding.job == AIJobText && strings.TrimSpace(values[AIAuthModeSettingKey]) == aiAuthModeChatGPT {
+			continue
+		}
 		provider, ok := registry.Find(id)
 		if !ok {
 			return fmt.Errorf("the %s provider %q is not connected", binding.label, id)

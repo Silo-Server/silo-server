@@ -134,6 +134,25 @@ func TestCheckDeploymentSettingsBindsDeclaredProvider(t *testing.T) {
 	if _, err := CheckEnvironmentSettings(nil, env, false); err == nil || !strings.Contains(err.Error(), "SILO_RECOMMENDATIONS_PROVIDER") {
 		t.Errorf("provider not declared: error = %v, want one naming SILO_RECOMMENDATIONS_PROVIDER", err)
 	}
+
+	// A stored binding the document can't have broken, such as one a restore
+	// into another deployment left naming a provider that's gone, doesn't stop
+	// startup; one to a declared provider that can't serve it does.
+	if _, err := CheckDeploymentSettings(map[string]string{config.AITextProviderSettingKey: "openai-1a2b3c"}, env, declared, "SILO_CONFIG_FILE", false); err != nil {
+		t.Errorf("stored binding to a missing provider: %v", err)
+	}
+	if _, err := CheckDeploymentSettings(map[string]string{config.AITextProviderSettingKey: "local-embed"}, env, declared, "SILO_CONFIG_FILE", false); err == nil || !strings.Contains(err.Error(), "SILO_CONFIG_FILE") {
+		t.Errorf("stored binding to a declared provider that can't serve it: error = %v, want one naming SILO_CONFIG_FILE", err)
+	}
+	// The same holds with no document, when only the variables touch the
+	// bindings, and for a text binding the ChatGPT plan leaves idle.
+	connected := config.AIProviderRegistry{Providers: []config.AIProvider{embed}}.Encode()
+	if _, err := CheckDeploymentSettings(map[string]string{config.AIProvidersSettingKey: connected, config.AITextProviderSettingKey: "openai-1a2b3c"}, env, nil, "", false); err != nil {
+		t.Errorf("variables only, stored binding to a missing provider: %v", err)
+	}
+	if _, err := CheckDeploymentSettings(map[string]string{config.AIAuthModeSettingKey: "chatgpt", config.AITextProviderSettingKey: "local-embed"}, env, declared, "SILO_CONFIG_FILE", false); err != nil {
+		t.Errorf("idle text binding under the ChatGPT plan: %v", err)
+	}
 }
 
 // A provider the deployment declares is listed with its variable, and the

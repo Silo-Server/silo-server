@@ -378,23 +378,32 @@ export default function AdminRecommendations() {
 
   useEffect(() => {
     if (!settings) return;
+    // A key the environment sets takes the server's value over any draft, so
+    // a draft from before the takeover can't come back, and be saved on
+    // blur, once the variable is removed.
+    const managed = sensitiveData?.managed_by_env_vars ?? {};
     const next: RecLocalValues = {};
     for (const field of getAllRecommendationFields()) {
       if (field.type === "password" || field.type === "toggle") continue;
       const serverVal = settings[field.key] || field.defaultValue || "";
-      if (!(field.key in localValues)) {
+      if (!(field.key in localValues) || managed[field.key]) {
         next[field.key] = serverVal;
       }
     }
     setLocalValues((prev) => {
       const merged: RecLocalValues = { ...prev };
       for (const [key, value] of Object.entries(next)) {
-        if (!(key in merged)) {
+        if (!(key in merged) || managed[key]) {
           merged[key] = value;
         }
       }
       return merged;
     });
+    setDirtyKeys((prev) =>
+      [...prev].some((key) => managed[key])
+        ? new Set([...prev].filter((key) => !managed[key]))
+        : prev,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- seeds only keys missing from localValues; depending on it would rerun on every edit
   }, [settings, sensitiveData]);
 
