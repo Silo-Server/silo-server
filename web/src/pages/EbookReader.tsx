@@ -643,7 +643,7 @@ export default function EbookReader() {
 
   if (error || !item || item.type !== "ebook") {
     return (
-      <div className="page-shell py-10">
+      <div className="page-shell relative py-10">
         <PageBack />
         <div className="text-muted-foreground mt-10 text-sm">{t("web.reader.page.notFound")}</div>
       </div>
@@ -687,7 +687,7 @@ export default function EbookReader() {
 
   if (!selectedFile) {
     return (
-      <div className="page-shell py-10">
+      <div className="page-shell relative py-10">
         <PageBack />
         <div className="text-muted-foreground mt-10 text-sm">{t("web.reader.page.noFiles")}</div>
       </div>
