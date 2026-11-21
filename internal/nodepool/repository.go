@@ -448,17 +448,18 @@ func (i UpdateNodeInput) ValidateFor(node *Node) error {
 // internal/config/admin_settings.go and the CHECK constraint on
 // stream_nodes.hw_accel_override: a per-node override may only name a backend
 // the cluster-wide setting could also name.
-var hwAccelOverrideValues = []string{hwAccelAuto, hwAccelQSV, hwAccelVAAPI, hwAccelNVENC, hwAccelNone}
+var hwAccelOverrideValues = []string{hwAccelAuto, hwAccelQSV, hwAccelVAAPI, hwAccelNVENC, hwAccelVideoToolbox, hwAccelNone}
 
 const (
 	// hwAccelAuto asks the node to resolve its own backend against live
 	// hardware at session start; dispatch passes it through untouched for
 	// exactly that reason.
-	hwAccelAuto  = "auto"
-	hwAccelQSV   = "qsv"
-	hwAccelVAAPI = "vaapi"
-	hwAccelNVENC = "nvenc"
-	hwAccelNone  = "none"
+	hwAccelAuto         = "auto"
+	hwAccelQSV          = "qsv"
+	hwAccelVAAPI        = "vaapi"
+	hwAccelNVENC        = "nvenc"
+	hwAccelVideoToolbox = "videotoolbox"
+	hwAccelNone         = "none"
 )
 
 // sameURL is true when an update leaves the row addressing the same worker.
