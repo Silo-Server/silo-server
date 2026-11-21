@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import type { FormEvent } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
@@ -15,6 +15,21 @@ import { librarySummary } from "../librarySummary";
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
 import { useStepSummary } from "../useStep";
 import { useWizardContext } from "../WizardContext";
+
+const PATH_SEPARATOR = ", ";
+
+/**
+ * One folder path for a left-to-right line. Each folder name is its own
+ * isolate, so the slashes read left to right even between two Arabic names
+ * (`/وسائط/أفلام`), and a copied path has no added characters.
+ */
+function FolderPath({ path }: { path: string }) {
+  return path
+    .split(/([\\/])/)
+    .map((part, position) =>
+      position % 2 === 1 || part === "" ? part : <bdi key={position}>{part}</bdi>,
+    );
+}
 
 /**
  * Name, type, and folders for one library. Creating and editing share the
@@ -143,10 +158,24 @@ export function LibraryStep() {
                 <Icon className="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{library.name}</p>
-                  <p className="text-muted-foreground truncate text-xs">
+                  {/* The paths cut themselves short, so in a right-to-left language a
+                      long list still shows its first folders; whitespace-pre keeps the
+                      space before them, which a flex item would drop. The type keeps
+                      its width and is cut only when it alone is wider than the row. */}
+                  <p className="text-muted-foreground flex overflow-hidden text-xs whitespace-pre">
                     {t("web.setup.library.rowDetail", {
-                      type: meta.label,
-                      paths: library.paths.join(", "),
+                      type: <span className="max-w-full shrink-0 truncate">{meta.label}</span>,
+                      // A string would get one FSI … PDI isolate, which copies along.
+                      paths: (
+                        <span dir="ltr" className="min-w-0 truncate">
+                          {library.paths.map((path, position) => (
+                            <Fragment key={position}>
+                              {position > 0 ? PATH_SEPARATOR : null}
+                              <FolderPath path={path} />
+                            </Fragment>
+                          ))}
+                        </span>
+                      ),
                     })}
                   </p>
                 </div>
