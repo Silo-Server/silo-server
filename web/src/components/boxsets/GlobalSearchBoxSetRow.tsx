@@ -66,7 +66,9 @@ export function GlobalSearchBoxSetRow({
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-medium">{boxSet.title}</span>
+          <span dir="auto" className="bidi-text truncate text-sm font-medium">
+            {boxSet.title}
+          </span>
           <span className="border-border text-muted-foreground shrink-0 rounded-full border px-1.5 py-px text-[0.5625rem] font-semibold tracking-[0.12em] uppercase">
             {t("web.detail.boxSet.label")}
           </span>
