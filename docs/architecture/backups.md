@@ -134,7 +134,8 @@ the drill for that.
 The check value is HKDF-SHA256 over `SECRET_KEY` with info
 `silo/backup-key-check/v1`, 8 bytes, written as 16 hex digits in groups of 4
 (`secret.KeyCheckValue`, beside the data key derivation in
-`internal/secret/cipher.go`). `silo secret check` reads a key on stdin and
+`internal/secret/cipher.go`). `silo secret check` reads a key from the first line
+of stdin, or with `--file` from a key file read as `SECRET_KEY_FILE` is, and
 prints the value, so an operator can tell which key a backup needs without
 showing either key.
 
@@ -1783,8 +1784,10 @@ create and list, so it does not depend on nightly backups running.
 ## Full restore
 
 Full restore is the offline `silo backup restore` command, never an API
-operation. `SECRET_KEY`, `DATABASE_URL`, and bucket credentials come from the
-environment (or `-env`); nothing comes from the database being replaced.
+operation. `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL` and bucket credentials
+come from the environment (or `-env`), each from the file its `_FILE` variant
+names when that is set, as the server reads them; nothing comes from the
+database being replaced.
 `--from` is a local backup folder (the folder at a local destination, or a
 downloaded copy), or a bucket folder,
 `s3://<bucket>/<key prefix>/backups/<server-id>/<id>`, reached with
@@ -2033,7 +2036,7 @@ fails on one in no list or in two, and on a listed name that is not a table,
 so a new table needs a decision before it ships; a layer that adds one
 classifies it.
 
-Sensitive settings (`catalog.SensitiveSettingKeys`) are classified the same
+Sensitive settings (`serversettings.SensitiveSettingKeys`) are classified the same
 way in `internal/backup/settings_secrets.go`. The signing keys Silo
 generates for the tokens it issues (`auth.jwt_secret`, which signs sessions,
 download and artwork links, backup object links, OAuth state, and cursors,

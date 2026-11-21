@@ -1057,7 +1057,7 @@ function PreparationDetails({
             prep.requesters.map((r, i) => (
               <div
                 key={`${r.user_id}-${r.device_id ?? "web"}-${i}`}
-                className="grid min-w-0 grid-cols-[1fr_auto] items-baseline gap-x-2"
+                className="flex min-w-0 flex-wrap items-baseline gap-x-2"
               >
                 <span className="min-w-0 font-medium wrap-anywhere text-[var(--terminal-fg)]">
                   {r.profile_name
@@ -1067,11 +1067,11 @@ function PreparationDetails({
                       })
                     : requesterName(r)}
                 </span>
-                <span className="text-[10px] text-[var(--terminal-muted)]">
+                {/* Moves under the name when both don't fit, rather than squeezing it. */}
+                <span className="ms-auto min-w-0 text-end text-[10px] wrap-anywhere text-[var(--terminal-muted)]">
                   {downloadEntryStatus(r.status).label}
                 </span>
-                {/* Full width: a long translated status only shares a line with the name, which wraps. */}
-                <span className="col-span-2 truncate text-[10px] text-[var(--terminal-muted)]">
+                <span className="basis-full truncate text-[10px] text-[var(--terminal-muted)]">
                   {requesterDevice(r)}
                 </span>
               </div>

@@ -1,4 +1,4 @@
-import { memo, useId, useState } from "react";
+import { memo, useId, useLayoutEffect, useRef, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 
 import type { RestoreDataTypeId, RestoreItem, RestoreProfile } from "@/api/v2/adminBackupRestore";
@@ -76,6 +76,22 @@ function ProfileRow({
   const detail = same
     ? t("web.admin.backups.restore.users.matches")
     : [profileDetail(t, profile), pendingSummary(profile.data_types)].filter(Boolean).join(" · ");
+  // Only a name still wider than the row after wrapping is clipped: one with a run
+  // no line break can split, such as many joined emoji. Clipping a name that fits
+  // would trim letters whose ink reaches past their edge, such as a leading "j".
+  const nameRef = useRef<HTMLLabelElement>(null);
+  const [nameOverflows, setNameOverflows] = useState(false);
+  useLayoutEffect(() => {
+    const name = nameRef.current;
+    if (!name) return;
+    // A name that fits can measure a fraction of a pixel wider than its box.
+    const measure = () => setNameOverflows(name.scrollWidth > name.clientWidth + 1);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(name);
+    return () => observer.disconnect();
+  }, [profile.name]);
   return (
     <li className="flex items-start gap-3 py-1.5">
       <Checkbox
@@ -87,17 +103,19 @@ function ProfileRow({
       />
       <div className="min-w-0 flex-1">
         {/* When the name and detail don't fit on one line, the detail moves under the
-            name, and a name wider than the row wraps. Part of a name that can't wrap,
-            such as one long run of joined emoji, is clipped sideways at the row's edge:
-            block makes the words around it wrap at the row's width, and the 0.25em of
-            padding, offset by a negative margin, keeps letters whole that reach past their
-            edge, such as a leading "j" or the end of some Telugu names. */}
+            name, and a name wider than the row wraps; as a block, its words wrap at the
+            row's width. A name that still overflows is clipped sideways at the row's end
+            edge, and its title shows it in full. The start padding, offset by a negative
+            margin, keeps a first letter whole whose ink reaches before its box, such as
+            a leading "j". */}
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <Label
+            ref={nameRef}
             htmlFor={controlId}
             title={profile.name}
             className={cn(
-              "-mx-[0.25em] block min-w-0 overflow-x-clip px-[0.25em] text-sm wrap-anywhere",
+              "block min-w-0 text-sm wrap-anywhere",
+              nameOverflows && "-ms-[0.25em] overflow-x-clip ps-[0.25em]",
               !selectable && "text-muted-foreground",
             )}
           >
@@ -187,17 +205,20 @@ export const AccountRow = memo(function AccountRow({
   ]
     .filter(Boolean)
     .join(" · ");
+  // With no username on either side, the name is the email the row is labelled with.
+  const destination = account.local_username || account.username || item.label;
   const status = !item.selectable
     ? null
     : merges
-      ? t("web.admin.backups.restore.users.mergeInto", {
-          name: account.local_username || account.username,
-        })
+      ? t("web.admin.backups.restore.users.mergeInto", { name: destination })
       : t("web.admin.backups.restore.users.newAccount");
+  const administrator = t("web.admin.backups.restore.users.administrator");
   // Laid out like ItemRow (RestoreRows.tsx): a narrow row wraps the name above the
-  // contact line and leaves out the admin badge, profile count and merge status, so
-  // they never squeeze the name. Its details show the merge status, the admin role
-  // and the profiles.
+  // contact line. The admin badge, profile count and merge status would leave a 42rem
+  // row's name and contact about 220 px, so below 52rem the row shows only the badge's
+  // icon, and the merge status only when it names another account; the details show
+  // the admin role and the status. The badge can cut a long merge destination short,
+  // so the details show a merge in full at every width.
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
@@ -214,7 +235,8 @@ export const AccountRow = memo(function AccountRow({
             htmlFor={controlId}
             title={item.label}
             className={cn(
-              "block shrink-0 text-sm font-medium @max-2xl:wrap-anywhere @2xl:max-w-[45%] @2xl:truncate @2xl:[&_wbr]:hidden",
+              "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
+              contact && "@2xl:max-w-[45%] @2xl:truncate @2xl:[&_wbr]:hidden",
               !item.selectable && "text-muted-foreground",
             )}
           >
@@ -224,23 +246,28 @@ export const AccountRow = memo(function AccountRow({
             // Without the pending summary the line is the email (the label is the
             // username), which reads left to right in any language and so keeps its
             // start when cut short. With the summary first, the line follows the page.
+            // w-fit keeps a short line under the name, on the page's start side;
+            // max-w-full stops a long one at the column's width so it is still cut short.
             <span
               title={contact}
               dir={pending ? undefined : "ltr"}
-              className="text-muted-foreground min-w-0 truncate text-xs"
+              className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs"
             >
               {contact}
             </span>
           ) : null}
         </div>
         {account.admin ? (
-          <span className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[11px] @2xl:inline-flex">
+          <span
+            title={administrator}
+            className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[11px] @2xl:inline-flex"
+          >
             <ShieldCheck aria-hidden="true" className="size-3.5" />
-            {t("web.admin.backups.restore.users.administrator")}
+            <span className="sr-only @[52rem]:not-sr-only">{administrator}</span>
           </span>
         ) : null}
         {account.profiles.length > 0 ? (
-          <span className="text-muted-foreground hidden shrink-0 text-[11px] whitespace-nowrap @2xl:inline">
+          <span className="text-muted-foreground hidden shrink-0 text-[11px] whitespace-nowrap @[52rem]:inline">
             {t("web.admin.backups.restore.users.profileCount", {
               count: account.profiles.length,
               count_text: account.profiles.length,
@@ -248,7 +275,13 @@ export const AccountRow = memo(function AccountRow({
           </span>
         ) : null}
         {status ? (
-          <span title={status} className="hidden max-w-40 shrink-0 truncate text-xs @2xl:inline">
+          <span
+            title={status}
+            className={cn(
+              "hidden max-w-40 shrink-0 truncate text-xs @[52rem]:inline",
+              merges && destination !== item.label && "@2xl:inline",
+            )}
+          >
             {status}
           </span>
         ) : null}
@@ -267,11 +300,13 @@ export const AccountRow = memo(function AccountRow({
       </div>
       {open ? (
         <div id={detailsId} className="space-y-1 ps-7 pb-3">
-          {status ? <p className="text-[13px] wrap-anywhere @2xl:hidden">{status}</p> : null}
-          {account.admin ? (
-            <p className="text-muted-foreground text-xs @2xl:hidden">
-              {t("web.admin.backups.restore.users.administrator")}
+          {status ? (
+            <p className={cn("text-[13px] wrap-anywhere", !merges && "@[52rem]:hidden")}>
+              {status}
             </p>
+          ) : null}
+          {account.admin ? (
+            <p className="text-muted-foreground text-xs @[52rem]:hidden">{administrator}</p>
           ) : null}
           {/* One block per status, as in ProfileRow. */}
           {why ? (

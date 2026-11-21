@@ -133,6 +133,8 @@ export function DashboardGrid({
     id: WidgetId;
     /** The resize handle the session started from. */
     handle: Element;
+    /** The pointer that pressed it; other pointers' moves and releases are ignored. */
+    pointerId: number;
     title: string;
     startX: number;
     /** 1, or -1 right to left, where the handle grows the widget leftward. */
@@ -220,9 +222,17 @@ export function DashboardGrid({
       if (!isCustomizing) return;
       const id = findWidgetIdFromEvent(event);
       if (!id) return;
+      // One gesture at a time: a link or image inside a widget stays draggable
+      // while another pointer resizes.
+      if (resizeSessionRef.current) {
+        event.preventDefault();
+        return;
+      }
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", id);
-      dragSourceRef.current = event.target as Node;
+      // The native target: a selection drag starts from a Text node, which
+      // React reports as its parent element.
+      dragSourceRef.current = event.nativeEvent.target as Node;
       setDraggedId(id);
     },
     [findWidgetIdFromEvent, isCustomizing],
@@ -369,6 +379,9 @@ export function DashboardGrid({
       // menu and never delivers the matching pointerup, which would leave the
       // resize session stuck.
       if (!event.isPrimary || event.button !== 0) return;
+      // One gesture at a time: a mouse press is primary even while a touch
+      // resizes or drags.
+      if (resizeSessionRef.current || dragSourceRef.current) return;
       const widget = getDashboardWidget(id);
       event.preventDefault();
       event.stopPropagation();
@@ -379,6 +392,7 @@ export function DashboardGrid({
       resizeSessionRef.current = {
         id,
         handle: event.currentTarget,
+        pointerId: event.pointerId,
         title: t(widget.titleKey),
         startX: event.clientX,
         inlineSign: isRightToLeft(event.currentTarget) ? -1 : 1,
@@ -451,7 +465,7 @@ export function DashboardGrid({
   const handleResizePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
       const session = resizeSessionRef.current;
-      if (!session) return;
+      if (session?.pointerId !== event.pointerId) return;
       session.latestClientX = event.clientX;
       session.latestClientY = event.clientY;
       applyResizePreview();
@@ -465,7 +479,7 @@ export function DashboardGrid({
   const handleResizePointerEnd = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
       const session = resizeSessionRef.current;
-      if (!session) return;
+      if (session?.pointerId !== event.pointerId) return;
       endResize();
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
@@ -645,15 +659,17 @@ export function DashboardGrid({
                   </div>
 
                   {/* One handle for both axes, straddling the bottom-right
-                      corner. Column spans (and row heights) only apply from lg
-                      up, so the handle is hidden below that. */}
+                      corner. Column spans (and row heights) only apply in the
+                      12-column layout, from lg and 1024px up (see
+                      .admin-widget-grid in app.css), so the handle is hidden
+                      below that. */}
                   {canResize && (
                     <button
                       type="button"
                       aria-label={t("web.admin.dashboard.grid.resizeLabel", { title })}
                       title={t("web.admin.dashboard.grid.resizeHint")}
                       className={cn(
-                        "border-border bg-background/95 hover:border-primary hover:bg-primary/30 focus-visible:ring-ring absolute -end-1.5 -bottom-1.5 z-20 hidden h-3.5 w-3.5 cursor-nwse-resize touch-none rounded-[4px] border shadow-md focus-visible:ring-2 focus-visible:outline-none lg:block rtl:cursor-nesw-resize",
+                        "border-border bg-background/95 hover:border-primary hover:bg-primary/30 focus-visible:ring-ring absolute -end-1.5 -bottom-1.5 z-20 hidden h-3.5 w-3.5 cursor-nwse-resize touch-none rounded-[4px] border shadow-md focus-visible:ring-2 focus-visible:outline-none lg:min-[1024px]:block rtl:cursor-nesw-resize",
                         isWidgetResizing && "border-primary bg-primary/30",
                       )}
                       onPointerDown={(event) =>
@@ -721,6 +737,10 @@ export function DashboardGrid({
                   // a specific spot; clicking (the keyboard path) appends.
                   draggable
                   onDragStart={(event) => {
+                    if (resizeSessionRef.current) {
+                      event.preventDefault();
+                      return;
+                    }
                     event.dataTransfer.setData(WIDGET_ADD_DRAG_TYPE, widget.id);
                     event.dataTransfer.effectAllowed = "copy";
                     dragSourceRef.current = event.currentTarget;

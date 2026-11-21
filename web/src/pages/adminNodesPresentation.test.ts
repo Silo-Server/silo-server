@@ -67,7 +67,7 @@ describe("describeNodeGPU", () => {
       backend: {
         label: "QSV",
         state: "failed",
-        badgeClass: "bg-warning/10 text-warning border-warning/15",
+        badgeClass: "bg-warning/10 text-warning-label border-warning/15",
         title: "QSV probe failed: h264_qsv smoke encode failed: device busy",
       },
       failures: [],
