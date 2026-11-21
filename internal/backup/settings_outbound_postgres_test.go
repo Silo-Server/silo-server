@@ -7,10 +7,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 // checkOutboundSettings: a full restore keeps the live mail route as a
@@ -68,7 +68,7 @@ func checkOutboundSettings(t *testing.T, loader PGLoader, pool *pgxpool.Pool, ds
 	// provider, and the next start converts no provider back from what is left.
 	checkAIReset := func(when string) {
 		t.Helper()
-		ai, err := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(restored), cipher).
+		ai, err := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(restored), cipher).
 			GetMany(ctx, append(config.AIConnectionSettingKeys(), "recommendations.enabled")...)
 		if err != nil {
 			t.Fatal(err)

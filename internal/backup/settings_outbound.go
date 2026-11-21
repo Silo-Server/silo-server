@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 // settingOff is a switch setting turned off.
@@ -159,7 +160,7 @@ func (b outboundBundle) clear(ctx context.Context, tx pgx.Tx, cipher *secret.Cip
 		return err
 	}
 	for key, value := range b.off {
-		if cipher != nil && catalog.SensitiveSettingKeys[key] {
+		if cipher != nil && serversettings.SensitiveSettingKeys[key] {
 			sealed, err := cipher.Encrypt(value, secret.SettingsAAD(key))
 			if err != nil {
 				return err
