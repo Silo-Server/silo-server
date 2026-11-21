@@ -10,7 +10,11 @@ import { PathList } from "@/components/PathList";
 import { RestartBadge } from "@/components/settings/RestartBadge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { useOverflowsInline } from "@/hooks/useOverflowsInline";
+import {
+  NARROW_OVERFLOW_CLIP,
+  OVERFLOW_CLIP,
+  useOverflowsInline,
+} from "@/hooks/useOverflowsInline";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import {
   Table,
@@ -448,7 +452,7 @@ export const ItemRow = memo(function ItemRow({
               className={cn(
                 "align-with-page block w-fit max-w-full",
                 hasDetail && "@2xl:truncate @2xl:[&_wbr]:hidden",
-                nameOverflows && (hasDetail ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
+                nameOverflows && (hasDetail ? NARROW_OVERFLOW_CLIP : OVERFLOW_CLIP),
               )}
             >
               <BreakableKey value={label} />
@@ -504,8 +508,8 @@ export const ItemRow = memo(function ItemRow({
  * A row of the "match this server" list: no choice to make, so just the name.
  * The name wraps rather than being cut short, so names that differ only at the
  * end stay apart; the detail moves under it when the two don't fit on one line.
- * Part of a name that can't wrap is clipped at the row's edge, as in ProfileRow
- * (RestoreUsers.tsx), so the scrolling list never scrolls sideways.
+ * A name with a part that can't wrap is clipped at the row's edge only while it
+ * overflows, as in ItemRow, so the scrolling list never scrolls sideways.
  */
 export const SameRow = memo(function SameRow({
   item,
@@ -518,14 +522,19 @@ export const SameRow = memo(function SameRow({
 }) {
   useT();
   const label = displayLabel(item);
+  const [nameRef, nameOverflows] = useOverflowsInline<HTMLSpanElement>(label);
   return (
     <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-[13px]">
       {/* The name reads in its own direction, so a part that can't wrap is clipped
           at the name's end rather than its start; its lines line up with the page's. */}
       <span
+        ref={nameRef}
         title={label}
         dir={nameDir(item)}
-        className="align-with-page -mx-[0.25em] block min-w-0 overflow-x-clip px-[0.25em] text-pretty wrap-anywhere"
+        className={cn(
+          "align-with-page block min-w-0 text-pretty wrap-anywhere",
+          nameOverflows && OVERFLOW_CLIP,
+        )}
       >
         <BreakableKey value={label} />
       </span>

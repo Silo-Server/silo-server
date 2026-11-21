@@ -1,10 +1,14 @@
-import { memo, useId, useLayoutEffect, useRef, useState } from "react";
+import { memo, useId, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 
 import type { RestoreDataTypeId, RestoreItem, RestoreProfile } from "@/api/v2/adminBackupRestore";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
+import {
+  NARROW_OVERFLOW_CLIP,
+  OVERFLOW_CLIP,
+  useOverflowsInline,
+} from "@/hooks/useOverflowsInline";
 import { useT, type Translate } from "@/i18n";
 import { emailDir } from "@/lib/direction";
 import { cn } from "@/lib/utils";
@@ -103,19 +107,7 @@ function ProfileRow({
   // Only a name still wider than the row after wrapping is clipped: one with a run
   // no line break can split, such as many joined emoji. Clipping a name that fits
   // would trim letters whose ink reaches past their edge, such as a leading "j".
-  const nameRef = useRef<HTMLLabelElement>(null);
-  const [nameOverflows, setNameOverflows] = useState(false);
-  useLayoutEffect(() => {
-    const name = nameRef.current;
-    if (!name) return;
-    // A name that fits can measure a fraction of a pixel wider than its box.
-    const measure = () => setNameOverflows(name.scrollWidth > name.clientWidth + 1);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(name);
-    return () => observer.disconnect();
-  }, [profile.name]);
+  const [nameRef, nameOverflows] = useOverflowsInline<HTMLLabelElement>(profile.name);
   return (
     <li className="flex items-start gap-3 py-1.5">
       <Checkbox
@@ -141,7 +133,7 @@ function ProfileRow({
             dir="auto"
             className={cn(
               "align-with-page block min-w-0 text-sm wrap-anywhere",
-              nameOverflows && "-ms-[0.25em] overflow-x-clip ps-[0.25em]",
+              nameOverflows && OVERFLOW_CLIP,
               !selectable && "text-muted-foreground",
             )}
           >
@@ -279,7 +271,7 @@ export const AccountRow = memo(function AccountRow({
               className={cn(
                 "align-with-page block w-fit max-w-full",
                 hasContact && "@2xl:truncate @2xl:[&_wbr]:hidden",
-                nameOverflows && (hasContact ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
+                nameOverflows && (hasContact ? NARROW_OVERFLOW_CLIP : OVERFLOW_CLIP),
               )}
             >
               <BreakableKey value={item.label} />
@@ -367,7 +359,7 @@ export const AccountRow = memo(function AccountRow({
               className={cn(
                 "text-[13px] wrap-anywhere",
                 !merges && "@[52rem]:hidden",
-                mergeOverflows && "overflow-x-clip",
+                mergeOverflows && OVERFLOW_CLIP,
               )}
             >
               {status}
