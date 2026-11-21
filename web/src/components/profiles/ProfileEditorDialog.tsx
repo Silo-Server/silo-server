@@ -65,6 +65,7 @@ import {
   type ProfileEditorSave,
   type ValidationErrors,
 } from "./ProfileEditorDialog.model";
+import { getInitial } from "@/lib/text";
 
 export type { ProfileEditorSave } from "./ProfileEditorDialog.model";
 
@@ -392,7 +393,7 @@ function ProfileEditorForm({
                 />
               ) : null}
               <AvatarFallback className="bg-surface text-primary text-3xl font-bold">
-                {(draft.name || profile?.name || "?").charAt(0).toUpperCase()}
+                {getInitial(draft.name || profile?.name || "?")}
               </AvatarFallback>
             </Avatar>
             <div className="text-center">

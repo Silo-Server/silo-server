@@ -285,7 +285,12 @@ function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () =
             )}
           </div>
           {group.description && (
-            <p className="text-muted-foreground mt-0.5 line-clamp-2 text-sm">{group.description}</p>
+            <p
+              dir="auto"
+              className="align-with-page text-muted-foreground mt-0.5 line-clamp-2 text-sm"
+            >
+              {group.description}
+            </p>
           )}
         </div>
         <span className="bg-secondary text-secondary-foreground shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium">

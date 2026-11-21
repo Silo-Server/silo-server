@@ -56,7 +56,7 @@ import {
   useUpsertLibraryRootOverride,
 } from "@/hooks/queries/admin/libraries";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 // Not translated: a sample year.
@@ -240,7 +240,7 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                         <Badge variant="secondary">{root.type_confidence}</Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-end text-xs tabular-nums">
-                        {root.observed_file_count}
+                        {numberText(root.observed_file_count)}
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1">
@@ -282,7 +282,7 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                     </Badge>
                   </CardField>
                   <CardField label={t("web.admin.libraries.column.files")}>
-                    <span className="tabular-nums">{root.observed_file_count}</span>
+                    <span className="tabular-nums">{numberText(root.observed_file_count)}</span>
                   </CardField>
                 </CardFields>
                 {row.evidence ? (
@@ -470,7 +470,10 @@ function RootOverrideDialog({
         <DialogHeader className="max-sm:border-border max-sm:shrink-0 max-sm:border-b max-sm:ps-4 max-sm:pe-2 max-sm:pt-[calc(0.75rem+env(safe-area-inset-top))] max-sm:pb-3">
           <div className="flex items-start gap-3">
             <div className="flex min-w-0 flex-1 flex-col gap-2 max-sm:text-start">
-              <DialogTitle>{t("web.admin.libraries.rootOverride.title")}</DialogTitle>
+              {/* From sm up the built-in close button shows beside this title. */}
+              <DialogTitle className="sm:pe-6">
+                {t("web.admin.libraries.rootOverride.title")}
+              </DialogTitle>
               {/* The fixed phone header holds the full root path; a long one
                   scrolls here instead of squeezing the form below. */}
               <DialogDescription className="break-words max-sm:max-h-[25dvh] max-sm:overflow-y-auto">

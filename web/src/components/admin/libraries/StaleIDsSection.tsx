@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/table";
 import { flattenStaleMediaIDs, useStaleMediaIDs } from "@/hooks/queries/admin/libraries";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 import { formatDateTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 
@@ -109,7 +109,7 @@ export function StaleIDsSection() {
               {pag.rows.map((s) => (
                 <TableRow key={staleIDKey(s)}>
                   <TableCell className="font-medium">{s.title}</TableCell>
-                  <TableCell className="tabular-nums">{s.year}</TableCell>
+                  <TableCell className="tabular-nums">{numberText(s.year)}</TableCell>
                   <TableCell className="text-sm">{s.library_name}</TableCell>
                   <TableCell>
                     <Badge variant="outline">{s.provider}</Badge>
@@ -134,7 +134,7 @@ export function StaleIDsSection() {
               <h3 className="font-medium break-words">{s.title}</h3>
               <CardFields>
                 <CardField label={t("web.admin.libraries.column.year")}>
-                  <span className="tabular-nums">{s.year}</span>
+                  <span className="tabular-nums">{numberText(s.year)}</span>
                 </CardField>
                 <CardField label={t("web.admin.libraries.column.library")}>
                   {s.library_name}

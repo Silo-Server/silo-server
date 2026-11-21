@@ -18,6 +18,7 @@ import type {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
 import { useT, type MessageKey } from "@/i18n";
 import { formatTime } from "@/lib/datetime";
 import { DATA_TYPE_LABELS, dataCountsPhrase, titleList } from "@/lib/profileDataTypes";
@@ -89,14 +90,14 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
         : null,
   ].filter((detail): detail is string => Boolean(detail));
   const label = displayLabel(item);
+  const [columnRef, columnOverflows] = useOverflowsInline<HTMLDivElement>(item);
   return (
     <li className="border-border/60 flex items-start gap-3 border-b py-3 last:border-b-0">
       <outcome.Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", outcome.tone)} />
-      {/* Part of a name that can't wrap, such as one long run of joined emoji, is clipped
-          sideways at the row's edge, in the item's line and in its profiles' lines; the words
-          around it still wrap. The 0.25em of padding, offset by a negative margin, keeps
-          letters whole whose ink reaches past their edge. */}
-      <div className="-mx-[0.25em] min-w-0 flex-1 overflow-x-clip px-[0.25em]">
+      {/* Only while a line is still wider than the row after wrapping, such as one holding a
+          long run of joined emoji in a name or a note, does the row clip sideways at its end
+          edge; the words around the run still wrap, and a name's title shows it in full. */}
+      <div ref={columnRef} className={cn("min-w-0 flex-1", columnOverflows && OVERFLOW_CLIP)}>
         <p className="text-sm wrap-anywhere">
           {t("web.admin.backups.restore.run.itemLine", {
             // <bdi>, not the isolate characters a string value gets in right-to-left languages:
@@ -266,6 +267,13 @@ function downloadReport(job: RestoreJob) {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * The report's actions are never wider than the page: a label too long for
+ * the row wraps inside its button instead of running past the right edge.
+ */
+const RUN_ACTION =
+  "h-auto min-h-9 max-w-full py-1.5 text-start text-balance wrap-anywhere whitespace-normal";
+
 export interface RestoreRunProps {
   job: RestoreJob;
   /** This server's backups, to name the recovery point by its time. */
@@ -403,12 +411,12 @@ export function RestoreRun({
 
       <div className="flex flex-wrap gap-2">
         {report ? (
-          <Button variant="outline" onClick={() => downloadReport(job)}>
+          <Button variant="outline" className={RUN_ACTION} onClick={() => downloadReport(job)}>
             <Download data-icon="inline-start" aria-hidden="true" />
             {t("web.admin.backups.restore.run.downloadReport")}
           </Button>
         ) : null}
-        <Button variant="outline" onClick={onChooseAgain}>
+        <Button variant="outline" className={RUN_ACTION} onClick={onChooseAgain}>
           {t("web.admin.backups.restore.run.chooseAgain")}
         </Button>
       </div>

@@ -4,6 +4,7 @@ import type { RestoreDataTypeId, RestoreSet } from "@/api/v2/adminBackupRestore"
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "@/pages/admin-settings/FieldGroup";
@@ -41,12 +42,11 @@ export interface RestoreReviewProps {
 const REFUSAL_ACTION = "h-auto min-h-8 max-w-full py-1 text-balance whitespace-normal";
 
 /**
- * The plan's sentences as a bulleted list, here and in the Choose step's summary. The part
- * of a name that can't wrap, such as one long run of joined emoji, is clipped sideways at
- * the list's edge; the words around it still wrap. The clip has 0.25em of padding, offset by
- * a negative margin, so letters whose ink reaches past their edge stay whole. It sits on the
- * end side only: the start padding already gives that room and holds the bullets, which
- * clipping each item would cut off.
+ * The plan's sentences as a bulleted list, here and in the Choose step's summary. Only while a
+ * sentence is still wider than the list after wrapping, such as one holding a long run of
+ * joined emoji, does the list clip sideways at its end edge; the words around the run still
+ * wrap. Clipping a list that fits would cut, in Firefox, the marks above its first line and
+ * below its last. The start padding holds the bullets, inside the clip.
  */
 export function PlanSentences({
   sentences,
@@ -56,15 +56,21 @@ export function PlanSentences({
   className?: string;
 }) {
   const t = useT();
+  const texts = sentences.map((sentence) =>
+    t("web.admin.backups.restore.plan.sentence", { sentence }),
+  );
+  const [ref, overflows] = useOverflowsInline<HTMLUListElement>(texts.join("\n"));
   return (
     <ul
+      ref={ref}
       className={cn(
-        "-me-[0.25em] list-disc space-y-1.5 overflow-x-clip ps-5 pe-[0.25em] text-sm wrap-anywhere",
+        "list-disc space-y-1.5 ps-5 text-sm wrap-anywhere",
+        overflows && "overflow-x-clip",
         className,
       )}
     >
-      {sentences.map((sentence, position) => (
-        <li key={position}>{t("web.admin.backups.restore.plan.sentence", { sentence })}</li>
+      {texts.map((text, position) => (
+        <li key={position}>{text}</li>
       ))}
     </ul>
   );
@@ -87,6 +93,9 @@ export function RestoreReview({
   const t = useT();
   const plan = restorePlan(set, selection, dataTypes);
   const caveats = restoreCaveats(set, selection);
+  const [caveatsRef, caveatsOverflow] = useOverflowsInline<HTMLUListElement>(
+    caveats.map((caveat) => `${caveat.label}: ${caveat.text}`).join("\n"),
+  );
   // Back and Restore are disabled while the request runs, which drops a focused one to the
   // page. When the server refuses, focus moves to the refusal's action, or to the alert when
   // it has none, unless the admin has put focus somewhere else in the meantime.
@@ -108,9 +117,15 @@ export function RestoreReview({
           label={t("web.admin.backups.restore.review.leftOut")}
           description={t("web.admin.backups.restore.review.leftOutDescription")}
         >
-          {/* Clips a name that can't wrap like PlanSentences, but on both sides: this list
-              has no start padding or bullets. The name's title shows it in full. */}
-          <ul className="-mx-[0.25em] space-y-2 overflow-x-clip px-[0.25em] py-3.5 text-sm wrap-anywhere">
+          {/* Clips only while a name can't wrap to fit, as PlanSentences does. The name's
+              title shows it in full. */}
+          <ul
+            ref={caveatsRef}
+            className={cn(
+              "space-y-2 py-3.5 text-sm wrap-anywhere",
+              caveatsOverflow && OVERFLOW_CLIP,
+            )}
+          >
             {caveats.map((caveat) => (
               <li key={caveat.key}>
                 {t("web.admin.backups.restore.review.caveat", {
