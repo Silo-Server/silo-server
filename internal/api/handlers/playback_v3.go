@@ -262,37 +262,6 @@ func seekAnchorProgressiveProbeWindowV3() time.Duration {
 	return window
 }
 
-// seekAnchorRetryFirstOutputWindowV3 is the wall-clock window a viewer's
-// explicit retry gets for a copy-video seek anchor plus the rebuilt transport.
-//
-// The first attempt keeps the 8 s window above because it is still startup
-// latency: the viewer has asked to play, not to wait. A retry is different —
-// the viewer has seen the refusal and pressed Try again, so they have agreed
-// to wait. The retry is still bounded: it may spend the probe's own
-// CopySeekProbeTimeout (15 s, three times the first attempt's 5 s) and the same
-// 3 s transport reserve, an 18 s window. That stays inside the 43 s virtual
-// start phase and the 45 s first-party client abort, so the answer reaches the
-// viewer instead of racing the client's own deadline. It is deliberately not
-// unbounded: a provider that cannot answer in 15 s is treated as unable to
-// anchor, and the retry falls back to the copy stream's keyframe origin instead
-// of spending the viewer's whole budget on one probe.
-var seekAnchorRetryFirstOutputWindowV3 = 18 * time.Second
-
-// seekAnchorRetryProbeWindowV3 is what a retry may spend on its anchor probe:
-// the retry's first-output window less the transport's own share, capped by the
-// probe's per-attempt ceiling. On the current numbers it is exactly
-// playback.CopySeekProbeTimeout (15 s), three times the first attempt's 5 s.
-func seekAnchorRetryProbeWindowV3() time.Duration {
-	window := seekAnchorRetryFirstOutputWindowV3 - seekAnchorTransportReserveV3
-	if window <= 0 {
-		return 0
-	}
-	if window > playback.CopySeekProbeTimeout {
-		window = playback.CopySeekProbeTimeout
-	}
-	return window
-}
-
 type serverBitrateCapContextKeyV3 struct{}
 
 func withServerBitrateCapV3(ctx context.Context, capKbps int) context.Context {
@@ -3348,12 +3317,6 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		default:
 			slog.InfoContext(r.Context(), "protocol v3 planned playback failed", failureAttrs...)
 		}
-		// Remember a retryable seek-anchor refusal so the viewer's next start
-		// for this file is treated as the retry it is. It is recorded here,
-		// after every same-release retry and alternate walk this request owns,
-		// so the first attempt still refuses once and shows one card; only a
-		// later start can consume the mark.
-		h.recordCopySeekAnchorRefusalV3(profileID, requestedFile.ID, statusErr)
 		persistedResponse, persistErr := h.startFailureDecisionV3(persistCtx, userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, statusErr)
 		if persistErr != nil {
 			return playback.DecisionResponseV3{}, startTerminalPersistOperationErrorV3(persistCtx, persistErr, statusErr)
@@ -5277,26 +5240,10 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 	requested := result.Plan.Timeline.SourceStartSeconds
 	switch result.Plan.Delivery {
 	case playback.DeliveryRemuxProgressiveV3, playback.DeliveryRemuxHLSV3:
-		// A start that follows a retryable seek-anchor refusal for this same
-		// profile and requested file is the viewer's retry. There is no wire
-		// field for it: the client answers the card with a fresh start at the
-		// position continuity left on screen, so the server remembers the
-		// refusal it just answered (see copySeekAnchorRefusalTracker).
-		refusalKey := ""
-		if session != nil {
-			refusalKey = seekAnchorRefusalKey(session.ProfileID, session.RequestedMediaFileID)
-		}
-		seekRetry := false
-		clearSeekRetry := func() {}
-		if h != nil && h.copySeekAnchorRefusals != nil {
-			seekRetry = h.copySeekAnchorRefusals.pending(refusalKey)
-			clearSeekRetry = func() { h.copySeekAnchorRefusals.clear(refusalKey) }
-		}
 		// Audio-only remuxes have no copied video keyframe to resolve. Keep the
 		// requested position as their exact stream origin: the chunked output
 		// clock restarts at zero and later seeks require another server reanchor.
 		if file != nil && file.IsAudioOnly() {
-			clearSeekRetry()
 			configureCopyRemuxTimelineV3(result.Plan, requested)
 			return preparedTimelineV3{seekSeconds: requested, streamOriginSeconds: requested}, nil
 		}
@@ -5339,7 +5286,6 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 					"anchor_seconds", cachedOrigin,
 					"start_segment_number", cachedSegment,
 				)
-				clearSeekRetry()
 				configureCopyRemuxTimelineV3(result.Plan, cachedOrigin)
 				return preparedTimelineV3{seekSeconds: requested, streamOriginSeconds: cachedOrigin, startSegmentNumber: cachedSegment, copySeekAnchorResolved: true}, nil
 			}
@@ -5514,15 +5460,7 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 			progressiveProbeWindow := time.Duration(0)
 			anchorStarted := time.Now()
 			if progressiveSeek {
-				if seekRetry {
-					// The viewer has explicitly asked to wait, so the retry's
-					// probe is no longer bounded by the first attempt's
-					// first-output window. It gets the larger, still bounded
-					// retry window instead.
-					progressiveProbeWindow = seekAnchorRetryProbeWindowV3()
-				} else {
-					progressiveProbeWindow = seekAnchorProgressiveProbeWindowV3()
-				}
+				progressiveProbeWindow = seekAnchorProgressiveProbeWindowV3()
 			}
 			for attempt := 1; attempt <= 2; attempt++ {
 				// Release the previous attempt's budget before deriving this
@@ -5534,16 +5472,7 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 				resolveFailure = nil
 				indexBudgetElapsed = false
 				attemptStarted := time.Now()
-				adaptiveBudget := copySeekAnchorAdaptiveBudgetFor(file, ffmpegPath, sourceIdentity)
-				if seekRetry {
-					// Grant the retry at least the extended probe window even
-					// when the link's own measurement is smaller: the point of
-					// the viewer's retry is that this attempt is allowed to wait
-					// longer than the first one did. The caller's deadline and
-					// the retry window still bound it below.
-					adaptiveBudget = max(adaptiveBudget, seekAnchorRetryProbeWindowV3())
-				}
-				attemptBudget, reserved, remaining := copySeekAnchorAttemptBudget(ctx, adaptiveBudget, attempt == 1)
+				attemptBudget, reserved, remaining := copySeekAnchorAttemptBudget(ctx, copySeekAnchorAdaptiveBudgetFor(file, ffmpegPath, sourceIdentity), attempt == 1)
 				if progressiveSeek && progressiveProbeWindow > 0 {
 					// The probe may not outlive the part of the seek window the
 					// transport is not already using for its own start. A fast
@@ -5557,18 +5486,6 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 					} else if attemptBudget > windowLeft {
 						attemptBudget = windowLeft
 					}
-				}
-				if seekRetry && attempt == 1 {
-					slog.InfoContext(ctx, "copy-video seek anchor retry granted an extended probe window",
-						"component", "api",
-						"playback_session_id", session.ID,
-						"requested_seek_seconds", requested,
-						"delivery", result.Plan.Delivery,
-						"seek_retry", true,
-						"first_attempt_probe_window", seekAnchorProgressiveProbeWindowV3(),
-						"retry_probe_window", seekAnchorRetryProbeWindowV3(),
-						"probe_budget", attemptBudget,
-					)
 				}
 				if attempt == 1 {
 					retryReserved = reserved
@@ -5607,16 +5524,6 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 						}
 						err = resolveErr
 						if !anchorBudgetElapsed {
-							break
-						}
-						if seekRetry {
-							// The viewer's retry has spent its extended window
-							// on the resolve. Do not spend another one on an
-							// internal retry: answer this attempt's classified
-							// failure instead. A failed resolve is already a
-							// different remedy (the provider could not be
-							// reached), not the anchor refusal the viewer just
-							// answered.
 							break
 						}
 						if !retryReserved {
@@ -5716,14 +5623,6 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 					break
 				}
 				if anchorBudgetElapsed {
-					if seekRetry {
-						// The viewer's retry has now spent the extended window
-						// it was granted. Do not start another probe inside
-						// the same request: fall through to the keyframe-origin
-						// start below, so the retry is answered with playback
-						// rather than a second identical refusal.
-						break
-					}
 					if !retryReserved {
 						slog.WarnContext(ctx, "copy-video seek anchor probe retry skipped: insufficient remaining budget",
 							"component", "api",
@@ -5793,33 +5692,6 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 					// could retry.
 					return preparedTimelineV3{}, resolveFailure
 				}
-				if seekRetry && ctx.Err() == nil {
-					// The viewer answered the first refusal with Try again, so
-					// this start must not answer with the same card a second
-					// time. The anchor probe could not observe a keyframe
-					// inside the extended retry window; start the copy stream
-					// from the keyframe FFmpeg's own input seek resolves at the
-					// requested position instead. The plan keeps the requested
-					// position as its origin and copy_seek_anchor_resolved=false,
-					// which is the unanchored shape: the client starts at its
-					// zero, the transport begins at the preceding keyframe, and
-					// the copied pre-roll is bounded by one GOP. That is the
-					// documented copy-video seek invariant, not a failure, and
-					// it never seeks forward.
-					clearSeekRetry()
-					slog.WarnContext(ctx, "copy-video seek anchor unavailable on the viewer's retry; starting from the keyframe without it instead of refusing again",
-						"component", "api",
-						"playback_session_id", session.ID,
-						"requested_seek_seconds", requested,
-						"copy_seek_anchor_resolved", false,
-						"reason", "retry_anchor_unavailable",
-						"delivery", result.Plan.Delivery,
-						"retry_probe_window", seekAnchorRetryProbeWindowV3(),
-						"error", err,
-					)
-					configureCopyRemuxTimelineV3(result.Plan, requested)
-					return preparedTimelineV3{seekSeconds: requested, streamOriginSeconds: requested}, nil
-				}
 				if indexBudgetElapsed && ctx.Err() == nil {
 					// The keyframe index could not be read inside the start
 					// budget (a slow provider, not a verdict on the release).
@@ -5884,7 +5756,6 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 						"probe_budget_hint", copySeekAnchorProbeBudgetHint(ffmpegPath, sourceIdentity, playback.DefaultSegmentDuration),
 						"error", err,
 					)
-					clearSeekRetry()
 					configureCopyRemuxTimelineV3(result.Plan, requested)
 					return preparedTimelineV3{seekSeconds: requested, streamOriginSeconds: requested}, nil
 				}
@@ -5910,7 +5781,6 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 				return preparedTimelineV3{}, &transportErrorV3{reason: transcodeStartFailedReasonV3, message: remuxSeekPositionFailureMessageV3, retryable: true, cause: err, seekFailure: seekFailure}
 			}
 		}
-		clearSeekRetry()
 		configureCopyRemuxTimelineV3(result.Plan, origin)
 		return preparedTimelineV3{seekSeconds: requested, streamOriginSeconds: origin, startSegmentNumber: startSegment, copySeekAnchorResolved: true}, nil
 	case playback.DeliveryTranscodeHLSV3:
@@ -12751,11 +12621,6 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 						cause:     transportErr.cause,
 					}
 				}
-				// A seek-anchor refusal here is the one the client turns into
-				// its Try again card. Remember it against the session's
-				// requested row so the fresh start that card issues is treated
-				// as the retry and cannot answer with the same refusal.
-				h.recordCopySeekAnchorRefusalV3(session.ProfileID, record.RequestedMediaFileID, transportErr)
 				return playback.DecisionResponseV3{}, *record, nil, transportErr
 			}
 			applyTransportToneMapModeV3(&result, transport)

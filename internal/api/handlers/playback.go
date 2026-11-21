@@ -686,12 +686,6 @@ type PlaybackHandler struct {
 	// retrying the same candidate after a transient provider (upstream 5xx)
 	// anchor failure. Nil uses the real timer wait.
 	copySeekAnchorBackoff func(ctx context.Context, d time.Duration) bool
-	// copySeekAnchorRefusals remembers retryable seek-anchor refusals this
-	// handler answered, so the viewer's next start for the same profile and
-	// requested file is treated as the retry it is (see
-	// playback_seek_anchor_retry.go). It is handler-scoped rather than
-	// process-wide so test fixtures do not share one refusal history.
-	copySeekAnchorRefusals *copySeekAnchorRefusalTracker
 	// autoTranscodePipelineV3 is a test seam for the hw_accel=auto fallback
 	// pipeline; nil uses playback.NewAutoTranscodePipeline.
 	autoTranscodePipelineV3 func(context.Context, playback.TranscodeOpts) *playback.AutoTranscodePipeline
@@ -1002,7 +996,6 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 		realtimeCommands:       make(map[string]playbackCommandRecord),
 		tm:                     playback.NewTranscodeManager(),
 		PlanStoreV3:            playback.NewMemoryPlanStoreV3(),
-		copySeekAnchorRefusals: &copySeekAnchorRefusalTracker{marks: make(map[string]time.Time)},
 		// Detached virtual work is parented to this until the router replaces
 		// it with the server lifecycle context.
 		ServiceContext: context.Background(),

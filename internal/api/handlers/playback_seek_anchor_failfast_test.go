@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -32,7 +31,6 @@ func TestPrepareTransportTimelineSlowAnchorIndexTimeoutStartsWithoutTheAnchor(t 
 	defer func() { copySeekAnchorSeekResolveTimeout = previous }()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	resetCopySeekAnchorRefusals(t, handler)
 	var probes atomic.Int32
 	handler.copySeekAnchor = func(ctx context.Context, _ string, _ string, _ float64, _ int) (float64, int, error) {
 		probes.Add(1)
@@ -98,7 +96,6 @@ func TestPrepareTransportTimelineSlowAnchorIndexRefusesAProgressiveRemuxStart(t 
 	defer func() { copySeekAnchorSeekResolveTimeout = previous }()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	resetCopySeekAnchorRefusals(t, handler)
 	var probes atomic.Int32
 	handler.copySeekAnchor = func(ctx context.Context, _ string, _ string, _ float64, _ int) (float64, int, error) {
 		probes.Add(1)
@@ -162,138 +159,6 @@ func TestSeekAnchorProgressiveProbeWindowFitsTheFirstOutputWindow(t *testing.T) 
 	}
 }
 
-// TestSeekAnchorRetryProbeWindowIsLargerAndBounded pins the retry numbers. The
-// first attempt keeps its 5 s probe (8 s first-output window less the 3 s
-// transport reserve). A viewer's retry gets the probe's full 15 s cap and the
-// same 3 s transport reserve, an 18 s window: three times the first attempt,
-// still bounded, and inside both the 43 s start phase and the 45 s client abort.
-func TestSeekAnchorRetryProbeWindowIsLargerAndBounded(t *testing.T) {
-	if got := seekAnchorProgressiveProbeWindowV3(); got != 5*time.Second {
-		t.Fatalf("first-attempt probe window = %v, want 5s", got)
-	}
-	if got := seekAnchorRetryFirstOutputWindowV3; got != 18*time.Second {
-		t.Fatalf("retry first-output window = %v, want 18s", got)
-	}
-	if got := seekAnchorRetryProbeWindowV3(); got != 15*time.Second {
-		t.Fatalf("retry probe window = %v, want the 15s probe cap", got)
-	}
-	if seekAnchorRetryProbeWindowV3() <= seekAnchorProgressiveProbeWindowV3() {
-		t.Fatal("retry probe window must be larger than the first attempt's")
-	}
-	if seekAnchorRetryProbeWindowV3() > playback.CopySeekProbeTimeout {
-		t.Fatalf("retry probe window = %v, want it bounded by the %v probe cap", seekAnchorRetryProbeWindowV3(), playback.CopySeekProbeTimeout)
-	}
-}
-
-func resetCopySeekAnchorRefusals(t *testing.T, handler *PlaybackHandler) {
-	t.Helper()
-	previous := handler.copySeekAnchorRefusals
-	handler.copySeekAnchorRefusals = &copySeekAnchorRefusalTracker{marks: make(map[string]time.Time)}
-	t.Cleanup(func() { handler.copySeekAnchorRefusals = previous })
-}
-
-// TestPrepareTransportTimelineRetryNeverRefusesTheSameSeekTwice walks the
-// state transition the viewer's one affordance relies on. The first attempt
-// refuses fast inside its 5 s window and records the refusal the start handler
-// answers with the retry card. The next start for the same profile and file is
-// the retry: it is granted the 15 s probe window (asserted exactly, not merely
-// "larger"), and when that probe still cannot answer it returns a playable
-// plan from the copy stream's keyframe origin instead of a second identical
-// refusal. The mark is cleared on that success.
-func TestPrepareTransportTimelineRetryNeverRefusesTheSameSeekTwice(t *testing.T) {
-	previousWindow, previousReserve := seekAnchorFirstOutputWindowV3, seekAnchorTransportReserveV3
-	seekAnchorFirstOutputWindowV3, seekAnchorTransportReserveV3 = 40*time.Millisecond, 20*time.Millisecond
-	defer func() {
-		seekAnchorFirstOutputWindowV3, seekAnchorTransportReserveV3 = previousWindow, previousReserve
-	}()
-
-	const (
-		profileID = "profile-seek-retry"
-		fileID    = 1614975
-	)
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	resetCopySeekAnchorRefusals(t, handler)
-	var probes atomic.Int32
-	var grantedMu sync.Mutex
-	var granted []time.Duration
-	handler.copySeekAnchor = func(ctx context.Context, _ string, _ string, _ float64, _ int) (float64, int, error) {
-		probes.Add(1)
-		if deadline, ok := ctx.Deadline(); ok {
-			grantedMu.Lock()
-			granted = append(granted, time.Until(deadline))
-			grantedMu.Unlock()
-		}
-		if probes.Load() == 1 {
-			// The first attempt spends its whole tiny window and refuses.
-			<-ctx.Done()
-			return 0, 0, ctx.Err()
-		}
-		// The retry's probe still cannot answer. Returning the deadline
-		// immediately keeps the test fast while exercising the same branch a
-		// real 15 s expiry reaches.
-		return 0, 0, context.DeadlineExceeded
-	}
-	newPlan := func(id string) *playback.PlanV3 {
-		return &playback.PlanV3{
-			PlanID:   id,
-			Delivery: playback.DeliveryRemuxProgressiveV3,
-			Timeline: playback.TimelineV3{SourceStartSeconds: 919.35, PlayerStartSeconds: 919.35},
-		}
-	}
-
-	firstPlan := newPlan("plan:first-refusal")
-	_, firstErr := handler.prepareTransportTimelineV3(
-		context.Background(),
-		&playback.Session{ID: "session-first", ProfileID: profileID, RequestedMediaFileID: fileID},
-		&models.MediaFile{ID: fileID, FilePath: "/media/episode-seek-retry.mkv"},
-		playback.PlannerResultV3{Plan: firstPlan, PlayMethod: playback.PlayRemux},
-	)
-	if firstErr == nil || !firstErr.retryable || !firstErr.seekFailure || firstErr.reason != transcodeStartFailedReasonV3 {
-		t.Fatalf("first answer = %#v, want one retryable seek refusal", firstErr)
-	}
-	// This is what the start handler records before it answers the card.
-	handler.recordCopySeekAnchorRefusalV3(profileID, fileID, firstErr)
-	key := seekAnchorRefusalKey(profileID, fileID)
-	if !handler.copySeekAnchorRefusals.pending(key) {
-		t.Fatal("the first refusal left no retry mark")
-	}
-
-	retryPlan := newPlan("plan:retry-fallback")
-	timeline, retryErr := handler.prepareTransportTimelineV3(
-		context.Background(),
-		&playback.Session{ID: "session-retry", ProfileID: profileID, RequestedMediaFileID: fileID},
-		&models.MediaFile{ID: fileID, FilePath: "/media/episode-seek-retry.mkv"},
-		playback.PlannerResultV3{Plan: retryPlan, PlayMethod: playback.PlayRemux},
-	)
-	if retryErr != nil {
-		t.Fatalf("retry answer = %#v, want a playable keyframe-origin fallback, not a second refusal", retryErr)
-	}
-	if got := probes.Load(); got != 2 {
-		t.Fatalf("probes = %d, want one for the first attempt and one for the retry", got)
-	}
-	grantedMu.Lock()
-	firstGranted, retryGranted := granted[0], granted[1]
-	grantedMu.Unlock()
-	if firstGranted > 100*time.Millisecond {
-		t.Fatalf("first probe budget = %v, want the shrunken first-attempt window", firstGranted)
-	}
-	if retryGranted < seekAnchorRetryProbeWindowV3()-100*time.Millisecond || retryGranted > seekAnchorRetryProbeWindowV3() {
-		t.Fatalf("retry probe budget = %v, want the %v retry window", retryGranted, seekAnchorRetryProbeWindowV3())
-	}
-	if timeline.copySeekAnchorResolved {
-		t.Fatalf("timeline = %#v, want the unanchored keyframe-origin shape", timeline)
-	}
-	if timeline.seekSeconds != 919.35 || timeline.streamOriginSeconds != 919.35 {
-		t.Fatalf("timeline = %#v, want the copy stream to start at the requested 919.35 s keyframe origin", timeline)
-	}
-	if retryPlan.Timeline.PlayerStartSeconds != 0 || retryPlan.Timeline.StreamOriginSeconds != 919.35 {
-		t.Fatalf("plan timeline = %#v, want the unanchored origin the client reads", retryPlan.Timeline)
-	}
-	if handler.copySeekAnchorRefusals.pending(key) {
-		t.Fatal("a playable retry left the refusal mark behind")
-	}
-}
-
 // TestPrepareTransportTimelineProgressiveSeekAnchorFailsInsideTheWindow proves
 // a progressive-remux anchor probe that cannot answer is bounded by the seek's
 // first-output window, not by the probe's own cap. It answers the existing
@@ -314,7 +179,6 @@ func TestPrepareTransportTimelineProgressiveSeekAnchorFailsInsideTheWindow(t *te
 	defer func() { copySeekAnchorProbeBudgetHint = previousHint }()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	resetCopySeekAnchorRefusals(t, handler)
 	var probes atomic.Int32
 	var granted time.Duration
 	handler.copySeekAnchor = func(ctx context.Context, _ string, _ string, _ float64, _ int) (float64, int, error) {
@@ -360,7 +224,6 @@ func TestPrepareTransportTimelineProgressiveSeekAnchorFailsInsideTheWindow(t *te
 // existing bounded retry still runs; only the final routing changes.
 func TestPrepareTransportTimelineTransientAnchorMarksSeek(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	resetCopySeekAnchorRefusals(t, handler)
 	var probes atomic.Int32
 	handler.copySeekAnchor = func(context.Context, string, string, float64, int) (float64, int, error) {
 		probes.Add(1)
