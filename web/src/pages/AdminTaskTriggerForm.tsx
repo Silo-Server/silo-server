@@ -49,8 +49,10 @@ const TRIGGER_FIELD_WIDTH = "w-full sm:w-fit sm:min-w-40 sm:max-w-full";
 // In em so the box grows with its own text size. 11.5em holds the widest "None"
 // placeholder measured, Croatian "Bez ograničenja" (167 px at 16 px text and
 // 152 px at 14 px in Firefox), beside the number spinners Firefox and Safari
-// always draw.
-const MAX_RUNTIME_INPUT_WIDTH = "w-full sm:w-[11.5em]";
+// always draw. Firefox's minimum font size enlarges the text without changing
+// em, so where field-sizing is supported the box may also grow to fit its text.
+const MAX_RUNTIME_INPUT_WIDTH =
+  "w-full sm:w-[11.5em] sm:field-sizing-content sm:supports-[field-sizing:content]:min-w-fit";
 
 type IntervalUnit = "seconds" | "minutes" | "hours";
 
