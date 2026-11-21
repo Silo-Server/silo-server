@@ -165,7 +165,9 @@ func (n nodeInstaller) installLocked(ctx context.Context, given nodeInstallSetti
 	if err != nil {
 		return err
 	}
-	n.dropStaleBackups()
+	if err := n.dropStaleBackups(); err != nil {
+		return err
+	}
 	// The new node.env keeps the drain, so it sets the new plist's ExitTimeOut
 	// and, with the drain the running node's plist recorded, bounds its stop.
 	if n.newDrain, err = nodeEnvDrainTimeout(extra); err != nil {
@@ -332,15 +334,73 @@ func (p nodeInstallPaths) swapPending() string { return filepath.Join(p.dir, ".s
 // installedFiles are the files a swap replaces.
 func (p nodeInstallPaths) installedFiles() []string { return []string{p.binary, p.env, p.key} }
 
+// swapCheckpoint records the LaunchAgent state before a swap begins, inside
+// .swap-pending, so a retry after an interrupted swap rolls back to the
+// original plist and loaded state rather than the interrupted run's.
+type swapCheckpoint struct {
+	HasPlist bool   `json:"has_plist"`
+	Loaded   bool   `json:"loaded"`
+	Plist    []byte `json:"plist,omitempty"`
+}
+
+func (n nodeInstaller) readSwapCheckpoint() (swapCheckpoint, bool, error) {
+	data, err := os.ReadFile(n.paths.swapPending()) //nolint:gosec // G304: the installer's own swap marker.
+	if errors.Is(err, fs.ErrNotExist) {
+		return swapCheckpoint{}, false, nil
+	}
+	if err != nil {
+		return swapCheckpoint{}, false, err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return swapCheckpoint{}, false, nil
+	}
+	var cp swapCheckpoint
+	if err := json.Unmarshal(data, &cp); err != nil {
+		return swapCheckpoint{}, false, fmt.Errorf("read swap marker %s: %w", n.paths.swapPending(), err)
+	}
+	return cp, true, nil
+}
+
+func (n nodeInstaller) writeSwapCheckpoint(oldPlist []byte, oldLoaded bool) error {
+	data, err := json.Marshal(swapCheckpoint{
+		HasPlist: oldPlist != nil,
+		Loaded:   oldLoaded,
+		Plist:    oldPlist,
+	})
+	if err != nil {
+		return err
+	}
+	return writeNodeFile(n.paths.swapPending(), data, 0o600)
+}
+
 // dropStaleBackups removes the .old files a finished run left behind, so a
-// later rollback can't restore an older install than the one that ran.
-func (n nodeInstaller) dropStaleBackups() {
-	if _, err := os.Stat(n.paths.swapPending()); err == nil {
-		return
+// later rollback can't restore an older install than the one that ran. Any
+// stat error other than missing stops the run instead of deleting backups.
+func (n nodeInstaller) dropStaleBackups() error {
+	_, err := os.Stat(n.paths.swapPending())
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("check swap marker %s: %w", n.paths.swapPending(), err)
 	}
 	for _, path := range n.paths.installedFiles() {
 		_ = os.Remove(path + ".old")
 	}
+	return nil
+}
+
+// commitSwap clears the swap marker and only then deletes the .old backups. If
+// clearing the marker fails, the backups stay in place and the error is
+// returned so the next run does not mistake partial cleanup for a pending swap.
+func (n nodeInstaller) commitSwap() error {
+	if err := os.Remove(n.paths.swapPending()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("the new node is running, but clearing %s failed (%w); backups were kept", n.paths.swapPending(), err)
+	}
+	for _, path := range n.paths.installedFiles() {
+		_ = os.Remove(path + ".old")
+	}
+	return nil
 }
 
 func readInstalledFile(path string) ([]byte, error) {
@@ -370,18 +430,34 @@ func (n nodeInstaller) install(ctx context.Context, settings nodeInstallSettings
 		discardStaged(swaps)
 		return err
 	}
-	oldPlist, err := os.ReadFile(n.paths.plist)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		discardStaged(swaps)
-		return err
-	}
-	oldLoaded, err := n.stopRunning(ctx, oldPlist != nil)
+	cp, hasCheckpoint, err := n.readSwapCheckpoint()
 	if err != nil {
 		discardStaged(swaps)
 		return err
 	}
+	currentPlist, err := os.ReadFile(n.paths.plist)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		discardStaged(swaps)
+		return err
+	}
+	currentLoaded, err := n.stopRunning(ctx, currentPlist != nil)
+	if err != nil {
+		discardStaged(swaps)
+		return err
+	}
+	oldPlist, oldLoaded := currentPlist, currentLoaded
+	if hasCheckpoint {
+		if cp.HasPlist {
+			oldPlist = cp.Plist
+		} else {
+			oldPlist = nil
+		}
+		oldLoaded = cp.Loaded
+	}
 	logStart := fileSize(n.paths.log)
-	err = writeNodeFile(n.paths.swapPending(), nil, 0o600)
+	if !hasCheckpoint {
+		err = n.writeSwapCheckpoint(oldPlist, oldLoaded)
+	}
 	if err == nil {
 		err = swapIn(swaps)
 	}
@@ -398,10 +474,8 @@ func (n nodeInstaller) install(ctx context.Context, settings nodeInstallSettings
 	if err != nil {
 		return n.failInstall(ctx, err, swaps, oldPlist, oldLoaded, logStart)
 	}
-	// The swap is committed once the marker is gone; every backup goes after.
-	_ = os.Remove(n.paths.swapPending())
-	for _, path := range n.paths.installedFiles() {
-		_ = os.Remove(path + ".old")
+	if err := n.commitSwap(); err != nil {
+		return err
 	}
 	return n.reportInstalled(settings, oldPort, drained)
 }
@@ -593,11 +667,14 @@ func (n nodeInstaller) rollback(ctx context.Context, swaps []nodeInstallSwap, ol
 		return err
 	}
 	// The previous install is whole again, so the swap is over.
-	_ = os.Remove(n.paths.swapPending())
-	if oldPlist == nil || !oldLoaded {
-		return nil
+	markerErr := os.Remove(n.paths.swapPending())
+	if errors.Is(markerErr, fs.ErrNotExist) {
+		markerErr = nil
 	}
-	return n.bootstrap(ctx)
+	if oldPlist == nil || !oldLoaded {
+		return markerErr
+	}
+	return errors.Join(markerErr, n.bootstrap(ctx))
 }
 
 func uninstallNode(out io.Writer) error {

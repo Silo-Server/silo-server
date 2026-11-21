@@ -380,7 +380,9 @@ func TestDropStaleBackupsFollowsTheSwapMarker(t *testing.T) {
 	if err := os.WriteFile(n.paths.swapPending(), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	n.dropStaleBackups()
+	if err := n.dropStaleBackups(); err != nil {
+		t.Fatalf("dropStaleBackups with marker: %v", err)
+	}
 	if got := countBackups(); got != 3 {
 		t.Fatalf("with the marker, %d of 3 backups kept; want all", got)
 	}
@@ -388,9 +390,26 @@ func TestDropStaleBackupsFollowsTheSwapMarker(t *testing.T) {
 	if err := os.Remove(n.paths.swapPending()); err != nil {
 		t.Fatal(err)
 	}
-	n.dropStaleBackups()
+	if err := n.dropStaleBackups(); err != nil {
+		t.Fatalf("dropStaleBackups without marker: %v", err)
+	}
 	if got := countBackups(); got != 0 {
 		t.Fatalf("without the marker, %d backups left; want none", got)
+	}
+
+	// A stat error other than missing (such as a non-directory path component)
+	// must fail and leave backups untouched.
+	writeBackups()
+	bad := n
+	bad.paths.dir = filepath.Join(n.paths.dir, "not-a-dir")
+	if err := os.WriteFile(bad.paths.dir, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := bad.dropStaleBackups(); err == nil {
+		t.Fatal("dropStaleBackups succeeded when statting the swap marker failed")
+	}
+	if got := countBackups(); got != 3 {
+		t.Fatalf("after marker stat error, %d of 3 backups kept; want all", got)
 	}
 }
 
@@ -543,5 +562,59 @@ func TestRollbackRestoresExistingBinaryBackupWhenUnstaged(t *testing.T) {
 	}
 	if _, err := os.Stat(n.paths.swapPending()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("swap marker still exists: %v", err)
+	}
+}
+
+// The swap checkpoint preserves the original plist and loaded state across an
+// interrupted upgrade so a failing retry restores and restarts the original
+// LaunchAgent.
+func TestSwapCheckpointPreservesOriginalLaunchAgentState(t *testing.T) {
+	n := fakeInstaller(t)
+	if err := os.MkdirAll(n.paths.dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.writeSwapCheckpoint([]byte("original plist"), true); err != nil {
+		t.Fatalf("writeSwapCheckpoint: %v", err)
+	}
+	cp, ok, err := n.readSwapCheckpoint()
+	if err != nil || !ok || !cp.HasPlist || !cp.Loaded || string(cp.Plist) != "original plist" {
+		t.Fatalf("readSwapCheckpoint = %+v, %v, %v; want original plist and loaded=true", cp, ok, err)
+	}
+	// A first install has no previous plist and was not loaded.
+	if err := n.writeSwapCheckpoint(nil, false); err != nil {
+		t.Fatalf("writeSwapCheckpoint(nil): %v", err)
+	}
+	cp, ok, err = n.readSwapCheckpoint()
+	if err != nil || !ok || cp.HasPlist || cp.Loaded || cp.Plist != nil {
+		t.Fatalf("readSwapCheckpoint(nil) = %+v, %v, %v; want no plist and loaded=false", cp, ok, err)
+	}
+}
+
+// If clearing the swap marker fails, commitSwap returns an error and keeps all
+// backups intact rather than deleting them.
+func TestCommitSwapKeepsBackupsWhenMarkerRemovalFails(t *testing.T) {
+	n := fakeInstaller(t)
+	if err := os.MkdirAll(n.paths.dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range n.paths.installedFiles() {
+		if err := os.WriteFile(path+".old", []byte("backup"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Make .swap-pending a non-empty directory so os.Remove fails reliably.
+	if err := os.Mkdir(n.paths.swapPending(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(n.paths.swapPending(), "block"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.commitSwap(); err == nil {
+		t.Fatal("commitSwap succeeded when removing .swap-pending failed")
+	}
+	for _, path := range n.paths.installedFiles() {
+		if _, err := os.Stat(path + ".old"); err != nil {
+			t.Fatalf("backup %s.old was deleted despite failed marker removal: %v", path, err)
+		}
 	}
 }
