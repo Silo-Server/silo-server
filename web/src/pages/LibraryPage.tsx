@@ -453,6 +453,7 @@ export default function LibraryPage() {
           libraryName={library.name}
           libraryType={libraryType}
           overlay={useOverlay}
+          activeTab={activeTab}
           onShuffle={
             isShuffleLibraryType(libraryType)
               ? () => startShuffle({ kind: "library", id: String(library.id) })

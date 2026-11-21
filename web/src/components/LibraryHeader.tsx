@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Tabs as TabsPrimitive } from "radix-ui";
 import { Shuffle } from "lucide-react";
+import { edgeMask, useScrollStrip } from "@/hooks/useScrollStrip";
 import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { isAudiobookLibraryType } from "@/pages/libraryPageSearchParams";
@@ -16,6 +17,8 @@ interface LibraryHeaderProps {
    * and switches to a glass surface once the user scrolls past a threshold.
    */
   overlay?: boolean;
+  /** The selected tab, kept in view when the tabs scroll sideways. */
+  activeTab: LibraryTab;
   availableTabs?: readonly LibraryTab[];
   /** Starts a shuffle of the whole library; omitted where nothing can shuffle. */
   onShuffle?: () => void;
@@ -44,6 +47,7 @@ export default function LibraryHeader({
   libraryName,
   libraryType = "",
   overlay = false,
+  activeTab,
   availableTabs = DEFAULT_TABS,
   onShuffle,
   shuffleDisabled = false,
@@ -51,6 +55,13 @@ export default function LibraryHeader({
   const t = useT();
   const tabLabels = isAudiobookLibraryType(libraryType) ? AUDIOBOOK_TAB_LABELS : TAB_LABELS;
   const [pastThreshold, setPastThreshold] = useState(false);
+  // The active tab stops clear of the edge fade, which the strip pins to 24px
+  // so the two match at any text size.
+  const {
+    ref: tabStrip,
+    edges,
+    measure,
+  } = useScrollStrip<HTMLDivElement>(`[role="tab"][data-state="active"]`, activeTab, 24);
 
   useEffect(() => {
     if (!overlay) return;
@@ -72,12 +83,15 @@ export default function LibraryHeader({
     >
       {/* Eyebrow is hidden on mobile — the top nav already identifies the
           current page, and at narrow widths it would either crowd out the
-          tab pills or truncate to "LIBRAR…". */}
-      <div className="hidden min-w-0 items-center gap-4 sm:flex">
-        <p className="hero-eyebrow truncate">
-          <span>{t("web.library.header.eyebrow")}</span>
+          tab pills or truncate to "LIBRAR…". From sm up it takes the room the
+          controls leave, so it gives way before the tabs have to scroll: first
+          the "Library /" prefix goes, so the library name stays readable, then
+          the whole eyebrow. */}
+      <div className="@container hidden min-w-0 flex-1 items-center gap-4 sm:flex">
+        <p className="hero-eyebrow truncate @max-[6rem]:hidden">
+          <span className="@max-[14rem]:hidden">{t("web.library.header.eyebrow")}</span>
           {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a divider glyph, not text */}
-          <span className="hero-eyebrow-divider">/</span>
+          <span className="hero-eyebrow-divider @max-[14rem]:hidden">/</span>
           <span className="hero-eyebrow-strong">{libraryName}</span>
         </p>
       </div>
@@ -99,14 +113,32 @@ export default function LibraryHeader({
           </div>
         )}
         <TabsPrimitive.List
-          className="marquee-tab-bar"
+          className="marquee-tab-bar min-w-0 p-0"
           aria-label={t("web.library.header.tabsLabel")}
         >
-          {availableTabs.map((tab) => (
-            <TabsPrimitive.Trigger key={tab} value={tab} className="marquee-tab-trigger">
-              {t(tabLabels[tab])}
-            </TabsPrimitive.Trigger>
-          ))}
+          {/* Tabs that don't fit (phones, longer translations) scroll sideways
+              inside the pill instead of running off the screen. The fade sits
+              on this inner strip rather than around the pill: a masked
+              ancestor would stop the pill's backdrop blur from reaching the
+              hero behind it. Firefox would make the scrolling strip its own
+              Tab stop; the arrow keys already move between the tabs. */}
+          <div
+            ref={tabStrip}
+            tabIndex={-1}
+            onScroll={measure}
+            className={cn(
+              "min-w-0 overflow-x-auto overflow-y-hidden rounded-full p-1 [--strip-fade:24px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+              edgeMask(edges),
+            )}
+          >
+            <div className="flex w-max items-center gap-[0.15rem]">
+              {availableTabs.map((tab) => (
+                <TabsPrimitive.Trigger key={tab} value={tab} className="marquee-tab-trigger">
+                  {t(tabLabels[tab])}
+                </TabsPrimitive.Trigger>
+              ))}
+            </div>
+          </div>
         </TabsPrimitive.List>
       </div>
     </header>
