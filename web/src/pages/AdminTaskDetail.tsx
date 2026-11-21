@@ -248,7 +248,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
             {metrics.due_samples.map((entry) => (
               <tr key={entry.content_id} className="border-border border-b last:border-b-0">
                 <td className="px-4 py-2">
-                  <div className="font-medium">{refreshSampleTitle(t, entry)}</div>
+                  <div className="font-medium wrap-anywhere">{refreshSampleTitle(t, entry)}</div>
                   <div className="text-muted-foreground text-xs">
                     {refreshItemTypeLabel(t, entry.type)}
                   </div>
