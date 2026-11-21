@@ -507,7 +507,7 @@ export default function AdminDevices() {
             )}
           </div>
 
-          <div className="overlay-scroll max-h-[calc(100vh-22rem)] flex-1 scroll-pt-10 overflow-y-auto lg:max-h-[calc(100vh-18rem)]">
+          <div className="overlay-scroll max-h-[max(calc(100vh-22rem),10rem)] flex-1 scroll-pt-10 overflow-y-auto lg:max-h-[max(calc(100vh-18rem),10rem)]">
             {isLoading ? (
               <div className="space-y-1.5 p-2.5">
                 {Array.from({ length: 5 }).map((_, i) => (
