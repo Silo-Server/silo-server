@@ -192,7 +192,11 @@ function MarkerHistoryRow({ row }: { row: MarkerEditAuditEntry }) {
         {/* An address or user agent reads left to right in any language, so an
             IPv6 address keeps its order and a cut one keeps its start; w-fit
             keeps it on the page's start side. */}
-        <div dir="ltr" className="text-muted-foreground w-fit max-w-[13rem] truncate text-xs">
+        <div
+          dir="ltr"
+          className="text-muted-foreground w-fit max-w-[13rem] truncate text-xs"
+          title={row.client_ip ?? row.user_agent}
+        >
           {row.client_ip ?? row.user_agent ?? ""}
         </div>
       </TableCell>
