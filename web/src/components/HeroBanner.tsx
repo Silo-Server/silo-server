@@ -37,6 +37,20 @@ import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
 // it stays out of the launch bundle; the plain overview shows meanwhile.
 const HeroOverview = lazy(() => import("./HeroOverview"));
 
+/** What holds the slideshow: the pointer over the hero, or focus inside it. */
+type HoldReason = "hover" | "focus";
+type Holds = Record<HoldReason, boolean>;
+
+/**
+ * Ends one hold. The pointer leaving also ends a focus hold whose focus is no
+ * longer inside. It never sets a hold, so holds Play cleared stay off.
+ */
+function releaseHold(holds: Holds, reason: HoldReason, focusInside: boolean): Holds {
+  return reason === "hover"
+    ? { hover: false, focus: holds.focus && focusInside }
+    : { ...holds, focus: false };
+}
+
 interface HeroBannerProps {
   items: SectionItem[];
   maxSlides?: number;
@@ -196,24 +210,43 @@ export default function HeroBanner({
     setActiveIndex((current) => (current - 1 + slides.length) % slides.length);
   }, [slides.length]);
 
-  // Two separate reasons stop the slideshow. Hovering or focusing the hero
-  // holds it only while the pointer or focus stays inside; the Pause/Play
-  // button records the user's choice, which hover and focus never change.
-  // Under reduced motion the slideshow starts stopped and runs only after the
-  // user presses Play.
+  // Two separate reasons stop the slideshow. The pointer over the hero or
+  // focus inside it holds it, and the hold ends only once both have left.
+  // The Pause/Play button records the user's choice, which hover and focus
+  // never change. Under reduced motion the slideshow starts stopped and runs
+  // only after the user presses Play.
   const reduceMotion = usePrefersReducedMotion();
-  const [held, setHeld] = useState(false);
+  const [holds, setHolds] = useState<Holds>({ hover: false, focus: false });
+  const held = holds.hover || holds.focus;
   const [choice, setChoice] = useState<"play" | "pause" | null>(null);
   const wantsPlay = choice === "play" || (choice === null && !reduceMotion);
   // What actually happens: drives the timer and the progress rail.
   const autoplaying = wantsPlay && !held;
-  const hold = useCallback(() => setHeld(true), []);
+  // A mouse press while the pointer is over the hero ends the focus hold,
+  // and the focus that press moves onto a button does not start one, so the
+  // slideshow still resumes when the pointer leaves, as it did before hover
+  // and focus were split. `pressing` lasts from that press to the focus it
+  // causes, its release, its context menu, or the pointer leaving.
+  const pressing = useRef(false);
+  // Whether the pointer is over the hero. Unlike the hover hold, Play does
+  // not clear it.
+  const pointerInside = useRef(false);
+  const hold = useCallback((reason: HoldReason) => {
+    setHolds((h) => (h[reason] ? h : { ...h, [reason]: true }));
+  }, []);
   // Starting to play bumps playCycle so the rail animation restarts at
   // scaleX(0) in sync with the fresh 8s interval started below.
-  const release = useCallback(() => {
-    if (held && wantsPlay) setPlayCycle((c) => c + 1);
-    setHeld(false);
-  }, [held, wantsPlay]);
+  const release = useCallback(
+    (reason: HoldReason) => {
+      // Firefox removes a focused control (Translate, once pressed) without
+      // a blur, so the pointer leaving rechecks where focus is.
+      const focusInside = !!sectionRef.current?.contains(document.activeElement);
+      const nextHolds = releaseHold(holds, reason, focusInside);
+      if (held && !nextHolds.hover && !nextHolds.focus && wantsPlay) setPlayCycle((c) => c + 1);
+      setHolds((h) => releaseHold(h, reason, focusInside));
+    },
+    [held, holds, wantsPlay],
+  );
   const togglePause = useCallback(() => {
     if (wantsPlay) {
       setChoice("pause");
@@ -221,7 +254,7 @@ export default function HeroBanner({
     }
     // Pressing Play starts the slideshow now, even under the pointer.
     setChoice("play");
-    setHeld(false);
+    setHolds({ hover: false, focus: false });
     setPlayCycle((c) => c + 1);
   }, [wantsPlay]);
 
@@ -315,11 +348,33 @@ export default function HeroBanner({
       )}
       aria-roledescription="carousel"
       aria-label={t("web.home.hero.carouselLabel")}
-      onMouseEnter={hold}
-      onMouseLeave={release}
-      onFocus={hold}
+      onMouseEnter={() => {
+        pointerInside.current = true;
+        hold("hover");
+      }}
+      onMouseLeave={() => {
+        pointerInside.current = false;
+        pressing.current = false;
+        release("hover");
+      }}
+      onMouseDown={() => {
+        // A screen reader's simulated click has no pointer over the hero.
+        if (!pointerInside.current) return;
+        pressing.current = true;
+        release("focus");
+      }}
+      onMouseUp={() => {
+        pressing.current = false;
+      }}
+      onContextMenu={() => {
+        pressing.current = false;
+      }}
+      onFocus={() => {
+        if (pressing.current) pressing.current = false;
+        else hold("focus");
+      }}
       onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget)) release();
+        if (!e.currentTarget.contains(e.relatedTarget)) release("focus");
       }}
     >
       {/* Preload the slide that comes next while the hero is shown; retain
