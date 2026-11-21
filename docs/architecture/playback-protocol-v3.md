@@ -1330,17 +1330,13 @@ like an absent one, so a later replan that offers HLS again still gets it.
 
 Every other control message in this protocol travels client → server. This one
 does not: `plan_invalidated` is the protocol's **server-initiated control
-push** (administrator commands share the same socket, §2.5), and it exists
-because the server can learn a route is wrong *after* the plan is
-already playing.
+push** (administrator commands share the same socket, §2.5), for a server that
+learns a route is wrong *after* the plan is already playing.
 
-The concrete case is H.264 stream-copy safety. Some encoders redefine the same
-`pic_parameter_set_id` in-band with conflicting content, which cannot be copied
-into an avc1/fMP4 segment (§4). Detecting it means reading the opening seconds
-of the source, which on remote storage costs seconds — so the server no longer
-waits for it. An unresolved verdict plans **optimistically** (a remux is
-allowed), the scan runs behind the issued plan, and if it comes back unsafe the
-plan that was handed out has to be taken back.
+No server path sends it today. It was built for the H.264 copy-safety verdict,
+which no longer withdraws a playing copy (§6.1.1). The command, its reason
+`video_copy_unsafe` and the client contract below stay, so a later server-side
+withdrawal can use them without a client release.
 
 The push is a realtime **command** on the session control socket
 (`GET /playback/sessions/{session_id}/control/ws`) — acked and answered like
@@ -1368,9 +1364,8 @@ A client that advertises `plan_invalidated_v1` in `client_features` promises to:
 1. send `{"type":"ack","command_id":"…","session_id":"…","status":"accepted"}`
    immediately,
 2. run its ordinary recovery replan — `operation: "failure_recovery"`, with the
-   invalidated plan's `plan_attempt_key` in `attempted_plan_keys` so the copy
-   route is excluded deterministically (the now-persisted verdict excludes it
-   too), and
+   invalidated plan's `plan_attempt_key` in `attempted_plan_keys` so the
+   withdrawn route is excluded deterministically, and
 3. send `{"type":"result","command_id":"…","session_id":"…","status":"completed"}`
    when the replan is done.
 
@@ -1381,89 +1376,43 @@ alone does not stop the clock), or a `rejected` result, and the session is
 terminated instead. That is deliberate, and it is the whole
 backwards-compatibility story: a client shipped before this token sees its
 session end, runs the recovery it already has, and its fresh attempt is planned
-against the persisted verdict — which lands it on a transcode. No client has to
+against whatever made the server withdraw the plan. No client has to
 implement anything to stay correct; the feature only buys a seamless switch
 instead of a stopped session.
 
-An inconclusive scan changes nothing: nothing is persisted, no command is
-pushed, and live sessions keep the route they were given. Only a positive
-"this source cannot be copied" verdict withdraws a plan.
+#### 6.1.1 H.264 copy safety
 
-Three scoping rules keep the stop from firing where it cannot help:
+Some encoders redefine the same `pic_parameter_set_id` in-band with conflicting
+content. Decoders that apply in-band parameter sets (Media3 on Android, for
+example) play a stream copy of such a source. Decoders that use only the
+sample entry's parameter sets (VideoToolbox, browser Media Source Extensions)
+fail on it, the same way for every copy delivery.
 
-- **The verdict is about the effective file.** A session whose *requested*
-  edition turned out to be copy-unsafe, but which is streaming a different
-  edition after the 4K guard or a version replan, is left alone: the bytes it is
-  serving are copy-safe.
-- **A session still being established is given time.** A session exists in the
-  session manager before its attempt record is written and long before its
-  client can open a realtime channel. A verdict landing inside that window would
-  see a session it cannot tell and stop one that is mid-start, so a session that
-  would otherwise be stopped waits out `CopySafetySessionSettleWindow` and is
-  examined once more; by then it is normally reachable and gets the command.
-- **Jellyfin-compatibility sessions are exempt.** That surface decides direct
-  stream from the device profile and the catalog version, never from the
-  copy-safety verdict, so a stopped compat client reconnects onto the identical
-  remux. The stop is only correct for clients whose recovery re-decides the
-  route, which for a Silo client means planning against the persisted verdict.
+The planner therefore gives a copy-unsafe source (`source.video_copy_unsafe`)
+**one stream copy per recovery**. Its first plan is chosen as for any source.
+When a recovery replan's attempted keys already hold one of its copy plans, no
+other copy delivery is offered and the next route is the encode
+(`copy_routes_exhausted`). A strict decoder costs at most two failed routes:
+direct play, then the copy. The attempted keys are the only state, so a user
+intent replan, which clears them, gets one copy again. Any failure of a copy
+plan counts, including a network one.
 
-That persisted verdict is read from the `media_files` row on every path that
-plans a route — start, replan, and the v2 resolver — not only from the probe
-ensurer's in-memory stamp. A replan that did not see it would simply walk from
-one stream-copy delivery to the other.
+Detecting the condition means reading the opening seconds of the source, which
+on remote storage costs seconds, so a play never waits for it. An unresolved
+verdict plans as copy-safe. `CopySafetyRace` scans behind the issued plan and
+persists the verdict on the `media_files` row, where every replan reads it. The
+verdict never stops a copy that is playing, and a copy revived after a replica
+restart, a node loss or a rehome is rebuilt like any other recipe: a copy that
+plays has proven the decoder handles it, and one that does not reports the
+failure that starts the recovery. A failure that comes before the verdict is
+known walks to the next copy delivery, as for any source.
 
-Delivery is in-process: the replica that owns the session owns its realtime
-connection, so a verdict resolved on one node acts on the sessions that node is
-serving.
+The verdict write is conditional on the row still holding the size and mtime
+that were scanned. A file rewritten in place while the scan read it produces a
+verdict about bytes nobody is serving, and that verdict is not persisted.
 
-The row is what covers the gap that leaves. A signed stream URL is a durable
-capability the client replays on whichever replica answers next, and a replica
-that dies between persisting a verdict and pushing the invalidation takes the
-only notifier that knew about it with it. The replacement replica has no live
-session, so it rebuilds one from the recipe card — which would replay the exact
-remux the verdict condemned. The serve routes therefore re-read the persisted
-verdict for a video stream-copy recipe (a progressive remux, or an HLS transport
-whose video target is `copy`) and refuse with the ordinary playback-session
-not-found when the row says the source is unsafe. The client's existing recovery
-mints a fresh attempt, which plans against the same row and lands on a
-transcode. Transcode reconstruction is untouched: re-encoding the bitstream is
-unaffected by conflicting parameter sets.
-
-On the HLS routes the check runs *before* the session is rebuilt, not before the
-transport is. Rebuilding registers the playback session against the user's
-stream caps, so a later refusal would leave a session nobody serves holding a
-slot the replacement attempt needs; and an HLS recipe pinned to a transcode node
-is revived by proxying to that node, a path that never reaches a local transport
-rebuild at all. The progressive route decides after the load, because the same
-file lookup serves its other preflight checks, and tears the reconstructed
-session back down when it refuses.
-
-The row alone is not the whole answer, in two directions.
-
-A verdict can be **known but unwritten**: the scan reached it and the
-`media_files` write failed, so it lives only in the memo of the process that
-reached it, and the row cannot tell that apart from "never scanned". The revival
-gate therefore asks the row first and the local scanner second, and the scanner
-retries the failed write — without ffmpeg — while it answers.
-
-A verdict can be **not yet reached at all**, which is the ordinary optimistic
-case and is allowed. But the gate runs once, at the revival request, while a
-progressive remux is a single response that runs for the length of the title:
-nothing later re-examines it, and the replica that is racing for the verdict can
-only reach its own sessions. So a revival the verdict does not condemn
-*re-engages the race on the reviving replica*, which makes the session it just
-built the property of a race running here. That pass costs no ffmpeg when the
-answer is already known locally or on the row; it re-runs the notification for
-the sessions this replica now holds.
-
-Two smaller rules keep that machinery honest. A race request that arrives while
-a scan for the same file is running is folded into one follow-up pass rather
-than dropped, because the sessions a pass acts on are the ones that exist when
-it runs and a replan can commit a replacement stream-copy mid-scan. And the
-verdict write is conditional on the row still holding the size and mtime that
-were scanned: a file rewritten in place while the scan read it produces a
-verdict about bytes nobody is serving, which is neither persisted nor pushed at
-any session.
+The Jellyfin-compatibility surface does not read the verdict. It decides direct
+stream from the device profile and the catalog version.
 
 ### 6.2 A lost connection is not a failed route
 
