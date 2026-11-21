@@ -243,12 +243,12 @@ function LibraryGroupRows({
         className="text-foreground gap-1.5 text-[13px] font-medium"
       >
         {/* One run of text, so the count follows the name's last word. A name
-            with no spaces still breaks to fit. The count is an inline block, so
-            it moves to the next line whole, and a name written in the other
-            direction can't pull its number away from it. */}
+            with no spaces still breaks to fit. The name keeps its own direction,
+            so a name in another script can't pull the count across it. The count
+            is an inline block, so it moves to the next line whole. */}
         <span className="wrap-anywhere">
           {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
-          {name}{" "}
+          <span className="bidi-text">{name}</span>{" "}
           <span className="text-muted-foreground inline-block max-w-full font-normal tabular-nums">
             {stateCountsText(countStates(items))}
           </span>
