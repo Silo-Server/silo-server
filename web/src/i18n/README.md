@@ -142,7 +142,8 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   Where such text is cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
   stylesheet), it also takes `dir="auto"`, or Firefox and WebKit cut it and draw the
   "…" at the page's end of the line instead of the text's. `.bidi-text` keeps a short
-  one on the page's start side, so it needs no `w-fit`.
+  one on the page's start side, so it needs no `w-fit`. The mixed-direction limit above
+  applies here too.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also
