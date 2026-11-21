@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/envutil"
 )
 
 // EnvScope says where a setting set by an environment variable applies.
@@ -134,14 +136,37 @@ type EnvSetting struct {
 type EnvSettings []EnvSetting
 
 // ReadEnvSettings returns the settings the environment sets. A blank or unset
-// variable sets nothing. Each value is normalized the way an admin save
-// normalizes it, and an invalid value is an error naming the variable.
-func ReadEnvSettings(getenv func(string) string) (EnvSettings, error) {
+// variable sets nothing. A setting whose key is in secretKeys (the settings
+// stored encrypted) can instead be read from the file its _FILE variant
+// names; the setting then records that variable as the one that sets it.
+// Each value is normalized the way an admin save normalizes it, and an
+// invalid value is an error naming the variable.
+func ReadEnvSettings(getenv func(string) string, secretKeys map[string]bool) (EnvSettings, error) {
 	var out EnvSettings
 	for _, v := range envSettingVars {
-		raw := strings.TrimSpace(getenv(v.Var))
-		if raw == "" {
-			continue
+		var raw string
+		fromFile := false
+		if secretKeys[v.Key] {
+			var (
+				usedVar string
+				err     error
+			)
+			if raw, usedVar, err = envutil.LookupSecret(getenv, v.Var); err != nil {
+				return nil, err
+			}
+			fromFile = usedVar != v.Var
+			v.Var = usedVar
+		} else {
+			raw = getenv(v.Var)
+		}
+		// Direct values trim whitespace and treat blank as unset. Values from
+		// _FILE already passed LookupSecret's blank check and keep everything
+		// past the single removed line ending intact.
+		if !fromFile {
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				continue
+			}
 		}
 		normalized, err := NormalizeAdminSetting(v.Key, raw)
 		if err != nil {

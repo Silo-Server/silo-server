@@ -11,7 +11,7 @@ import (
 
 func readEnv(t *testing.T, env map[string]string) config.EnvSettings {
 	t.Helper()
-	settings, err := config.ReadEnvSettings(func(name string) string { return env[name] })
+	settings, err := config.ReadEnvSettings(func(name string) string { return env[name] }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
