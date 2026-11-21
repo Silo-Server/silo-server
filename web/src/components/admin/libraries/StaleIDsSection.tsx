@@ -111,15 +111,17 @@ export function StaleIDsSection() {
             <TableBody>
               {pag.rows.map((s) => (
                 <TableRow key={staleIDKey(s)}>
-                  {/* The title takes the width the other columns leave and truncates,
-                      so a long title can't push the table past its section. */}
-                  <TableCell className="w-full max-w-0 font-medium">
-                    <span dir="auto" className="block w-fit max-w-full truncate" title={s.title}>
+                  {/* The title and library name wrap, so a long one can't push the
+                      table past its section; the title takes the width left over. */}
+                  <TableCell className="w-full font-medium whitespace-normal">
+                    <span dir="auto" className="align-with-page block w-fit max-w-full break-words">
                       {s.title}
                     </span>
                   </TableCell>
                   <TableCell className="tabular-nums">{numberText(s.year)}</TableCell>
-                  <TableCell className="text-sm">{s.library_name}</TableCell>
+                  <TableCell className="text-sm break-words whitespace-normal">
+                    {s.library_name}
+                  </TableCell>
                   <TableCell>
                     <Badge variant="outline">{s.provider}</Badge>
                   </TableCell>

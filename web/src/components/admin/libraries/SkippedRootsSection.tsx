@@ -154,7 +154,9 @@ export function SkippedRootsSection() {
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm">{root.library_name}</TableCell>
+                      <TableCell className="text-sm break-words whitespace-normal">
+                        {root.library_name}
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={REASON_BADGE_CLASS}>
                           {root.reason}
