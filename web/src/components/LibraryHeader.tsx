@@ -113,18 +113,16 @@ export default function LibraryHeader({
             </button>
           </div>
         )}
-        <TabsPrimitive.List
-          className="marquee-tab-bar min-w-0 p-0"
-          aria-label={t("web.library.header.tabsLabel")}
-        >
-          {/* Tabs that don't fit (phones, longer translations) scroll sideways
-              inside the pill instead of running off the screen. The fade sits
-              on this inner strip rather than around the pill: a masked
-              ancestor would stop the pill's backdrop blur from reaching the
-              hero behind it. Firefox would make the scrolling strip its own
-              Tab stop; the arrow keys already move between the tabs. */}
+        {/* Tabs that don't fit (phones, longer translations) scroll sideways
+            inside the pill instead of running off the screen. The fade sits on
+            the inner strip rather than around the pill: a masked ancestor would
+            stop the pill's backdrop blur from reaching the hero behind it. The
+            tab list sits inside the strip so it holds its tabs directly. */}
+        <div className="marquee-tab-bar min-w-0 p-0">
           <div
             ref={tabStrip}
+            // Firefox would make the scrolling strip its own Tab stop; the
+            // arrow keys already move between the tabs.
             tabIndex={-1}
             onScroll={measure}
             onFocus={(event) => {
@@ -138,15 +136,18 @@ export default function LibraryHeader({
               edgeMask(edges),
             )}
           >
-            <div className="flex w-max items-center gap-[0.15rem]">
+            <TabsPrimitive.List
+              className="flex w-max items-center gap-[0.15rem]"
+              aria-label={t("web.library.header.tabsLabel")}
+            >
               {availableTabs.map((tab) => (
                 <TabsPrimitive.Trigger key={tab} value={tab} className="marquee-tab-trigger">
                   {t(tabLabels[tab])}
                 </TabsPrimitive.Trigger>
               ))}
-            </div>
+            </TabsPrimitive.List>
           </div>
-        </TabsPrimitive.List>
+        </div>
       </div>
     </header>
   );
