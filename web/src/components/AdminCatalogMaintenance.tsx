@@ -42,7 +42,11 @@ import {
   type PathRewriteRow,
   updatePathRewrite,
 } from "./adminCatalogMaintenancePathRewrites";
-import { formatExportProgressLabel, formatJobProgress } from "./adminCatalogMaintenanceFormatters";
+import {
+  formatExportProgressLabel,
+  formatJobProgress,
+  jobStatusLabel,
+} from "./adminCatalogMaintenanceFormatters";
 import { PathText } from "@/components/PathText";
 import { Download, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { copyTextToClipboard } from "@/lib/clipboard";
@@ -538,7 +542,7 @@ export default function AdminCatalogMaintenance() {
                               : "outline"
                         }
                       >
-                        {job.status}
+                        {jobStatusLabel(job.status, t)}
                       </Badge>
                       <span className="text-sm font-medium">{describeImportJob(t, job)}</span>
                       <span className="text-muted-foreground text-xs">
@@ -646,7 +650,7 @@ export default function AdminCatalogMaintenance() {
                               : "outline"
                         }
                       >
-                        {job.status}
+                        {jobStatusLabel(job.status, t)}
                       </Badge>
                       <span className="text-sm font-medium">{scopeLabel}</span>
                       <span className="text-muted-foreground text-xs">
