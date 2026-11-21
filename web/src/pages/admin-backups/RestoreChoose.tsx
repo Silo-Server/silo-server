@@ -598,6 +598,7 @@ export function RestoreChoose({
   const index = useMemo(() => indexItems(set), [set]);
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeRef, noticeScrolls] = useScrolls();
+  const [noticeTextRef, noticeOverflows] = useOverflowsInline<HTMLSpanElement>(notice);
   const libraries = useAdminLibraries();
   const names = useMemo(() => libraryNames(set, libraries.data ?? []), [set, libraries.data]);
   const plan = restorePlan(set, selection, dataTypes);
@@ -735,13 +736,14 @@ export function RestoreChoose({
               tabIndex={noticeScrolls ? 0 : undefined}
               className="overlay-scroll focus-visible:outline-ring -mx-[0.25em] rounded-sm px-[0.25em] text-[13px] wrap-anywhere text-amber-600 focus-visible:outline-2 focus-visible:outline-offset-2 lg:max-h-32 lg:min-h-0 lg:overflow-y-auto dark:text-amber-400"
             >
-              {/* A block child, so useScrolls sees the text grow. It clips
-                  sideways a name that can't wrap, such as a run of joined
-                  emoji; a clip on the notice itself would still let script
-                  and find-in-page scroll it. The 0.25em of padding, offset by
-                  a negative margin, keeps letters whole whose ink reaches past
-                  their edge; the notice's matching padding holds that room. */}
-              <span className="-mx-[0.25em] block overflow-x-clip px-[0.25em]">{notice}</span>
+              {/* A block child, so useScrolls sees the text grow. Only while a
+                  name can't wrap to fit, such as a run of joined emoji, does it
+                  clip sideways; a clip on the notice itself would still let
+                  script and find-in-page scroll it. The notice's padding holds
+                  the clip's start room. */}
+              <span ref={noticeTextRef} className={cn("block", noticeOverflows && OVERFLOW_CLIP)}>
+                {notice}
+              </span>
             </p>
           ) : null}
           <Button className="w-full lg:shrink-0" disabled={selection.size === 0} onClick={onReview}>
