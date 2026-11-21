@@ -1,5 +1,5 @@
 import { DeviceConnections } from "@/components/admin/DeviceConnections";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import {
   Activity,
@@ -50,7 +50,6 @@ import { formatDecimal } from "@/lib/numberFormat";
 import { joinList } from "@/lib/appLocale";
 import { formatDate } from "@/lib/datetime";
 import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
-import { isKeyboardFocus } from "@/hooks/useIntentPrefetch";
 
 // ─────────────────────────────────────────────────────────────────────
 // types & constants
@@ -508,7 +507,10 @@ export default function AdminDevices() {
             )}
           </div>
 
-          <div className="overlay-scroll max-h-[max(calc(100vh-22rem),10rem)] flex-1 overflow-y-auto lg:max-h-[max(calc(100vh-18rem),10rem)]">
+          <div
+            data-device-list
+            className="overlay-scroll max-h-[max(calc(100vh-22rem),10rem)] flex-1 overflow-y-auto lg:max-h-[max(calc(100vh-18rem),10rem)]"
+          >
             {isLoading ? (
               <div className="space-y-1.5 p-2.5">
                 {Array.from({ length: 5 }).map((_, i) => (
@@ -1314,6 +1316,15 @@ function DeviceGroup({
   );
 }
 
+/** Scrolls the device list so its group's sticky header no longer covers `row`. */
+function revealRowUnderHeader(row: HTMLElement) {
+  const header = row.closest("section")?.querySelector("header");
+  const list = row.closest<HTMLElement>("[data-device-list]");
+  if (!header || !list) return;
+  const overlap = header.getBoundingClientRect().bottom - row.getBoundingClientRect().top;
+  if (overlap > 0) list.scrollTop -= overlap;
+}
+
 function DeviceRow({
   device,
   isAnomaly,
@@ -1326,6 +1337,7 @@ function DeviceRow({
   activeProfileId: string | null;
 }) {
   const t = useT();
+  const pointerDown = useRef(false);
   const kind = classifyPlatform(device.device_platform);
   const profileSuffix = activeProfileId ? `?profile=${encodeURIComponent(activeProfileId)}` : "";
   const href = `/admin/devices/${device.user_id}/${encodeURIComponent(device.device_id)}${profileSuffix}`;
@@ -1334,21 +1346,27 @@ function DeviceRow({
   return (
     <Link
       to={href}
-      // The margin keeps a focused row clear of its group's sticky header.
-      // Firefox doesn't scroll a partly visible row on focus, so do it here,
-      // but only for keyboard focus (a mouse press focuses on mousedown, and
-      // moving the row would lose the click) and only when the header covers
-      // the row, so a row that's already clear doesn't move.
+      // The margin keeps a row that keyboard focus scrolls to clear of its
+      // group's sticky header. Firefox doesn't scroll a partly covered row on
+      // focus, and a larger minimum font can make the header taller than the
+      // margin, so move the row out from under the header here. Not for a
+      // pointer press: it focuses on mousedown (or on a tap), and moving the
+      // row then would land the release elsewhere and lose the click.
+      onPointerDown={() => {
+        pointerDown.current = true;
+      }}
+      onPointerCancel={() => {
+        pointerDown.current = false;
+      }}
+      onBlur={() => {
+        pointerDown.current = false;
+      }}
       onFocus={(e) => {
-        const row = e.currentTarget;
-        const header = row.closest("section")?.querySelector("header");
-        if (
-          isKeyboardFocus(row) &&
-          header &&
-          row.getBoundingClientRect().top < header.getBoundingClientRect().bottom
-        ) {
-          row.scrollIntoView({ block: "nearest" });
+        if (pointerDown.current) {
+          pointerDown.current = false;
+          return;
         }
+        revealRowUnderHeader(e.currentTarget);
       }}
       className={cn(
         "group relative flex scroll-mt-10 items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors",
