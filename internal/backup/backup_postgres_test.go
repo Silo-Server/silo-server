@@ -850,6 +850,9 @@ func checkOutboundSettings(t *testing.T, loader PGLoader, pool *pgxpool.Pool, ds
 		if writes, _, err := config.PlanAIProviderConversion(ai); err != nil || writes != nil {
 			t.Fatalf("%s: the next start converts %v (%v), want nothing", when, writes, err)
 		}
+		if registry, err := config.ParseAIProviderRegistry(ai[config.AIProvidersSettingKey]); err != nil || len(registry.Providers) != 0 {
+			t.Fatalf("%s: AI providers %v (%v), want none", when, registry.Providers, err)
+		}
 	}
 	if _, _, err := loader.CarryOutboundSettings(ctx, into, dsn, cipher); err != nil {
 		t.Fatal(err)
