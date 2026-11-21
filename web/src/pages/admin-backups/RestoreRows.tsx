@@ -209,7 +209,9 @@ function changeLabel(t: Translate, item: RestoreItem, change: RestoreChange): st
     const count = item.home_section?.missing_collection_items ?? 0;
     return t("web.admin.backups.restore.rows.change.collectionItems", { count, count_text: count });
   }
-  return t(CHANGE_LABELS[change]);
+  // Response enums are additive: a code this build has no label for, or an
+  // older server's English word, shows as sent rather than blank.
+  return Object.hasOwn(CHANGE_LABELS, change) ? t(CHANGE_LABELS[change]) : change;
 }
 
 /** Whether a row has anything for its chevron to open; cheap, unlike building it. */
