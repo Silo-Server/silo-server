@@ -14838,7 +14838,7 @@
   "web.admin.backups.key.explanation": [
     {
       "type": 0,
-      "value": "تتطلب استعادة أي نسخة مفتاح SECRET_KEY الخاص بهذا الخادم. لا يعرض Silo المفتاح أبدًا ولا يحتفظ بنسخة منه في أي مكان آخر. إذا كان المفتاح موجودًا فقط في ملف .env على هذا الخادم وتعطّل القرص، فلن يمكن استعادة هذه النسخ الاحتياطية، ولن يستطيع أحد استردادها."
+      "value": "تتطلب استعادة أي نسخة مفتاح SECRET_KEY الخاص بهذا الخادم. لا يعرض Silo المفتاح أبدًا ولا يحتفظ بنسخة منه في أي مكان آخر. إذا كان المفتاح موجودًا فقط في ملف \u200E.env على هذا الخادم وتعطّل القرص، فلن يمكن استعادة هذه النسخ الاحتياطية، ولن يستطيع أحد استردادها."
     }
   ],
   "web.admin.backups.key.heading": [
@@ -32710,7 +32710,7 @@
   "web.admin.common.connectionCheck.result.meilisearchRedirected": [
     {
       "type": 0,
-      "value": "أعاد Meilisearch توجيه الفحص إلى عنوان آخر. أدخل العنوان الذي يعيد التوجيه إليه، مثل عنوان URL الذي يبدأ بـ https://، ثم أدخل مفتاح API مرة أخرى."
+      "value": "أعاد Meilisearch توجيه الفحص إلى عنوان آخر. أدخل العنوان الذي يعيد التوجيه إليه، مثل عنوان URL الذي يبدأ بـ https://\u200E، ثم أدخل مفتاح API مرة أخرى."
     }
   ],
   "web.admin.common.connectionCheck.result.redisConnected": [
@@ -35488,7 +35488,7 @@
   "web.admin.common.libraryEditor.metadata.localMetadataDescription": [
     {
       "type": 0,
-      "value": "يقرأ ملفات .nfo والصور الفنية المحفوظة بجوار الوسائط. يعمل أولًا في كل مستوى، لذا تتقدم قيمه على المزودين البعيدين؛ والحقول التي تقفلها أثناء تعديل عنصر تتقدم على كليهما."
+      "value": "يقرأ ملفات \u200E.nfo والصور الفنية المحفوظة بجوار الوسائط. يعمل أولًا في كل مستوى، لذا تتقدم قيمه على المزودين البعيدين؛ والحقول التي تقفلها أثناء تعديل عنصر تتقدم على كليهما."
     }
   ],
   "web.admin.common.libraryEditor.metadata.noProviders": [
@@ -90561,7 +90561,7 @@
   "web.admin.settings.notifications.serverChannels.namePlaceholder": [
     {
       "type": 0,
-      "value": "المجتمع #new-content"
+      "value": "المجتمع \u200E#new-content"
     }
   ],
   "web.admin.settings.notifications.serverChannels.noEvents": [
@@ -99718,7 +99718,7 @@
   "web.admin.settings.security.localNetwork.description": [
     {
       "type": 0,
-      "value": "يتيح لكل حساب استيراد السجل من خوادم Plex وEmby وJellyfin ومزامنته معها على عناوين الشبكة المحلية مثل 192.168.x.x أو localhost. يستطيع المسؤولون ذلك دائمًا."
+      "value": "يتيح لكل حساب استيراد السجل من خوادم Plex وEmby وJellyfin ومزامنته معها على عناوين الشبكة المحلية مثل \u200E192.168.x.x أو localhost. يستطيع المسؤولون ذلك دائمًا."
     }
   ],
   "web.admin.settings.security.localNetwork.group": [
@@ -104609,13 +104609,13 @@
   "web.admin.tasks.task.backfill_hdr10_plus.description": [
     {
       "type": 0,
-      "value": "يقرأ الإطار الأول من فيديو HDR الذي فُحص قبل أن يكتشف Silo تنسيق HDR10+، مرة واحدة لكل ملف، لكي تُصنَّف ملفات HDR10+ على أنها HDR10+ بدلًا من HDR10."
+      "value": "يقرأ الإطار الأول من فيديو HDR الذي فُحص قبل أن يكتشف Silo تنسيق HDR10+\u200E، مرة واحدة لكل ملف، لكي تُصنَّف ملفات HDR10+\u200E على أنها HDR10+\u200E بدلًا من HDR10."
     }
   ],
   "web.admin.tasks.task.backfill_hdr10_plus.name": [
     {
       "type": 0,
-      "value": "اكتشاف فيديو HDR10+"
+      "value": "اكتشاف فيديو HDR10+\u200E"
     }
   ],
   "web.admin.tasks.task.backfill_matroska_track_numbers.description": [
@@ -117350,7 +117350,7 @@
   "web.audiobooks.player.speedTitle": [
     {
       "type": 0,
-      "value": "سرعة التشغيل (shift+. / shift+,)"
+      "value": "سرعة التشغيل (shift+\u200E. / shift+\u200E,\u200E)"
     }
   ],
   "web.audiobooks.player.startFailed": [
@@ -128793,7 +128793,7 @@
   "web.collections.copy.mdblistLinkInvalid": [
     {
       "type": 0,
-      "value": "الصق رابط قائمة على mdblist.com، مثل https://mdblist.com/lists/…"
+      "value": "الصق رابط قائمة على mdblist.com، مثل https://mdblist.com/lists/…\u200E"
     }
   ],
   "web.collections.copy.mdblistSearchOffProfile": [
@@ -153979,7 +153979,7 @@
   "web.home.rows.seasonal.listInvalid": [
     {
       "type": 0,
-      "value": "استخدم رابط قائمة MDBList عامة (https://mdblist.com/lists/…)."
+      "value": "استخدم رابط قائمة MDBList عامة (https://mdblist.com/lists/…\u200E)."
     }
   ],
   "web.home.rows.seasonal.nameMissing": [
@@ -157055,7 +157055,7 @@
   "web.item.split.imdbPlaceholder": [
     {
       "type": 0,
-      "value": "معرّف IMDb \u200F(tt…)"
+      "value": "معرّف IMDb \u200F(tt…\u200E)"
     }
   ],
   "web.item.split.loadingFiles": [
@@ -171744,7 +171744,7 @@
   "web.settings.connectApps.glance.needsPin": [
     {
       "type": 0,
-      "value": "يتطلب #PIN"
+      "value": "يتطلب \u200E#PIN"
     }
   ],
   "web.settings.connectApps.glance.rename": [
@@ -172070,7 +172070,7 @@
   "web.settings.connectApps.troubleshooting.hashPasswordAnswer": [
     {
       "type": 0,
-      "value": "اكتبها كاملة وأضف #PIN على أي حال. يقسم Silo عند آخر # فقط."
+      "value": "اكتبها كاملة وأضف \u200E#PIN على أي حال. يقسم Silo عند آخر # فقط."
     }
   ],
   "web.settings.connectApps.troubleshooting.hashPasswordQuestion": [
@@ -172098,7 +172098,7 @@
     },
     {
       "type": 0,
-      "value": "»، أو كان ملف شخصي واحد فقط بلا PIN. إضافة #ProfileName تعمل دائمًا."
+      "value": "»، أو كان ملف شخصي واحد فقط بلا PIN. إضافة \u200E#ProfileName تعمل دائمًا."
     }
   ],
   "web.settings.connectApps.troubleshooting.noProfileQuestion": [
@@ -177752,7 +177752,7 @@
   "web.settings.overlays.badge.resolutionHdr.description": [
     {
       "type": 0,
-      "value": "شارة واحدة تجمع الدقة والنطاق الديناميكي (مثل «4K DV»، «4K HDR10+»، «1080p HDR»)"
+      "value": "شارة واحدة تجمع الدقة والنطاق الديناميكي (مثل «4K DV»، «4K HDR10+\u200E»، «1080p HDR»)"
     }
   ],
   "web.settings.overlays.badge.resolutionHdr.label": [
@@ -184337,7 +184337,7 @@
   "web.settings.yourData.import.fileHint": [
     {
       "type": 0,
-      "value": "ملف .json من «تصدير بياناتي»، بحجم أقصاه "
+      "value": "ملف \u200E.json من «تصدير بياناتي»، بحجم أقصاه "
     },
     {
       "type": 1,
