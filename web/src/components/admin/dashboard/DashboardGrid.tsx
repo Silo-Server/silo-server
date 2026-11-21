@@ -4,7 +4,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { GripVertical, Plus, X } from "lucide-react";
 import {
   Sheet,
@@ -39,6 +39,14 @@ const WIDGET_ADD_DRAG_TYPE = "application/x-silo-widget-add";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * The widget order and sizes, which together place every widget on the grid.
+ * A range or view change leaves it alone.
+ */
+function layoutGeometry(entries: DashboardLayout["entries"]): string {
+  return entries.map((entry) => `${entry.id}:${entry.span}:${entry.rows}`).join(",");
 }
 
 interface DropIndicator {
@@ -94,6 +102,8 @@ export function DashboardGrid({
     handle: Element;
     /** The pointer that pressed it; other pointers' moves and releases are ignored. */
     pointerId: number;
+    /** `layoutGeometry` of the layout the start size and position were measured on. */
+    geometry: string;
     title: string;
     startX: number;
     /** 1, or -1 right to left, where the handle grows the widget leftward. */
@@ -356,6 +366,7 @@ export function DashboardGrid({
         id,
         handle: event.currentTarget,
         pointerId: event.pointerId,
+        geometry: layoutGeometry(entries),
         title: t(widget.titleKey),
         startX: event.clientX,
         inlineSign: isRightToLeft(event.currentTarget) ? -1 : 1,
@@ -376,8 +387,22 @@ export function DashboardGrid({
       };
       setResizePreview({ id, span: currentSpan, rows: currentRows });
     },
-    [isCustomizing, t],
+    [entries, isCustomizing, t],
   );
+
+  // Another control can change the layout under a pointer resize: Reset or a
+  // Remove activated from the keyboard while the mouse holds a handle, or a
+  // different server layout arriving. The session's start size and position
+  // belong to the old layout, so the resize ends without saving rather than
+  // writing a size from before the change. This runs before the browser can
+  // deliver the release.
+  useLayoutEffect(() => {
+    const session = resizeSessionRef.current;
+    if (session && session.geometry !== layoutGeometry(entries)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the session lives in a ref, which a render cannot clear; ending it before paint keeps the release from saving
+      endResize();
+    }
+  }, [endResize, entries]);
 
   /**
    * Recomputes the previewed size from the session's latest pointer position.
