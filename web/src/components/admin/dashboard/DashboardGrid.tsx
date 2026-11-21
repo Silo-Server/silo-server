@@ -645,15 +645,17 @@ export function DashboardGrid({
                   </div>
 
                   {/* One handle for both axes, straddling the bottom-right
-                      corner. Column spans (and row heights) only apply from lg
-                      up, so the handle is hidden below that. */}
+                      corner. Column spans (and row heights) only apply in the
+                      12-column layout, from lg and 1024px up (see
+                      .admin-widget-grid in app.css), so the handle is hidden
+                      below that. */}
                   {canResize && (
                     <button
                       type="button"
                       aria-label={t("web.admin.dashboard.grid.resizeLabel", { title })}
                       title={t("web.admin.dashboard.grid.resizeHint")}
                       className={cn(
-                        "border-border bg-background/95 hover:border-primary hover:bg-primary/30 focus-visible:ring-ring absolute -end-1.5 -bottom-1.5 z-20 hidden h-3.5 w-3.5 cursor-nwse-resize touch-none rounded-[4px] border shadow-md focus-visible:ring-2 focus-visible:outline-none lg:block rtl:cursor-nesw-resize",
+                        "border-border bg-background/95 hover:border-primary hover:bg-primary/30 focus-visible:ring-ring absolute -end-1.5 -bottom-1.5 z-20 hidden h-3.5 w-3.5 cursor-nwse-resize touch-none rounded-[4px] border shadow-md focus-visible:ring-2 focus-visible:outline-none lg:min-[1024px]:block rtl:cursor-nesw-resize",
                         isWidgetResizing && "border-primary bg-primary/30",
                       )}
                       onPointerDown={(event) =>
