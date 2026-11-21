@@ -186,8 +186,10 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   at the start of its last line. `.bidi-text` keeps a short one on the page's start
   side, so it needs no `w-fit`. The mixed-direction limit above applies here too.
   Clamped text also needs a cut signal, or Chrome drops its "…" (`.bidi-clamp` in
-  `app.css`): set `data-clamp-cut` where the component already measures the cut, and
-  otherwise put the text in a block inside a `.bidi-clamp` box.
+  `app.css`): where the component already measures the cut, set `data-clamp-cut` on the
+  clamped `.bidi-text` element (a title must, since its tight line height makes its box
+  scroll with nothing cut); otherwise make the `.bidi-text` element a block that is the
+  direct child of a clamped `.bidi-clamp` box.
 - A path shown as text, cut or not, takes `dir="ltr"` and renders through
   `PathText` (`src/components/PathText.tsx`), which keeps each folder name in its
   own direction; without it, folders named in Arabic swap places. An email cut with

@@ -778,8 +778,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      the clamp cuts it. A title can't use the query: its glyphs reach past its
      tight line height, so its box scrolls a few pixels with nothing cut. Only
      Chromium has scroll-state queries, so Firefox and WebKit keep the page's
-     alignment, where they draw the "…" correctly. :dir() keeps text that
-     runs the page's way from restyling when it's cut. */
+     alignment, where they draw the "…" correctly. :dir() limits both rules to
+     text that runs the other way from the element it sits in; text that runs
+     that element's way is already at its start and doesn't restyle. */
   .bidi-clamp {
     container-type: scroll-state;
   }
@@ -790,7 +791,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
   }
   @supports (container-type: scroll-state) {
-    .bidi-text[data-clamp-cut] {
+    :dir(ltr) > .bidi-text[data-clamp-cut]:dir(rtl),
+    :dir(rtl) > .bidi-text[data-clamp-cut]:dir(ltr) {
       text-align: start;
     }
   }
