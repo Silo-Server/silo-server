@@ -8,8 +8,9 @@ const wizardMock = vi.fn();
 vi.mock("../WizardContext", () => ({ useWizardContext: () => wizardMock() }));
 
 const updateMock = vi.fn();
-// One object for every render, as React Query returns stable data; a new one
-// each time would restart the step's editor load on every re-render.
+// Keep `data` the same object across renders, as React Query does. A new one
+// re-runs the step's load effect, whose cleanup cancels an editor read still
+// in flight and leaves the row loading.
 const providersQuery = {
   data: {
     providers: [
