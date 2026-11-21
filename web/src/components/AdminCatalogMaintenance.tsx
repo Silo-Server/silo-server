@@ -761,11 +761,7 @@ function describeExportJob(t: Translate, job: AdminJob) {
 }
 
 function describeImportJob(t: Translate, job: AdminJob): ReactNode {
-  const importRequest = job.request_payload as {
-    source_label?: string;
-    source_key?: string;
-  };
-  const label = importRequest.source_label || importRequest.source_key;
+  const label = (job.request_payload as { source_label?: string }).source_label;
   // The server's label is the remote URL, a file name, or "Export job <id>": untranslated text
   // that reads left to right in every language. bdi, not isolate characters, keeps copies clean.
   return label ? (
