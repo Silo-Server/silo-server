@@ -19,6 +19,7 @@ import {
   requiredPrimary,
   toggleKeys,
 } from "./restoreModel";
+import { useOverflowsInline } from "./useOverflowsInline";
 
 function droppedLibraries(t: Translate, count: number): string {
   return t("web.admin.backups.restore.users.droppedLibraries", {
@@ -161,6 +162,9 @@ export const AccountRow = memo(function AccountRow({
   const controlId = useId();
   const detailsId = useId();
   const [open, setOpen] = useState(false);
+  const [nameRef, nameOverflows] = useOverflowsInline<HTMLLabelElement>(item.label);
+  // The merge line exists only while the details are open, so opening them measures it.
+  const [mergeRef, mergeOverflows] = useOverflowsInline<HTMLParagraphElement>(open && item);
   const account = item.account;
   if (!account) return null;
   const chosen = new Set(chosenProfiles ? chosenProfiles.split("\u0000") : []);
@@ -197,8 +201,9 @@ export const AccountRow = memo(function AccountRow({
   // Laid out like ItemRow (RestoreRows.tsx): a narrow row wraps the name above the
   // contact line and leaves out the admin badge, profile count and merge status, so
   // they never squeeze the name. Its details show the merge status, the admin role
-  // and the profiles. As in ItemRow, a narrow row clips the part of a name that can't
-  // wrap: in the label, and in the merge status, which names the account it merges into.
+  // and the profiles. As in ItemRow, a narrow row clips a name sideways only while part
+  // of it can't wrap to fit: in the label, and in the merge status, which names the
+  // account it merges into.
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
@@ -212,10 +217,12 @@ export const AccountRow = memo(function AccountRow({
         />
         <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
           <Label
+            ref={nameRef}
             htmlFor={controlId}
             title={item.label}
             className={cn(
-              "block shrink-0 text-sm font-medium @max-2xl:-mx-[0.25em] @max-2xl:overflow-x-clip @max-2xl:px-[0.25em] @max-2xl:wrap-anywhere @2xl:max-w-[45%] @2xl:truncate @2xl:[&_wbr]:hidden",
+              "block shrink-0 text-sm font-medium @max-2xl:wrap-anywhere @2xl:max-w-[45%] @2xl:truncate @2xl:[&_wbr]:hidden",
+              nameOverflows && "@max-2xl:overflow-x-clip",
               !item.selectable && "text-muted-foreground",
             )}
           >
@@ -270,8 +277,12 @@ export const AccountRow = memo(function AccountRow({
         <div id={detailsId} className="space-y-1 ps-7 pb-3">
           {status ? (
             <p
+              ref={mergeRef}
               title={status}
-              className="-mx-[0.25em] overflow-x-clip px-[0.25em] text-[13px] wrap-anywhere @2xl:hidden"
+              className={cn(
+                "text-[13px] wrap-anywhere @2xl:hidden",
+                mergeOverflows && "overflow-x-clip",
+              )}
             >
               {status}
             </p>

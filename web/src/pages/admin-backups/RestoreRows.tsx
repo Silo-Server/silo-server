@@ -24,6 +24,7 @@ import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 import { RowDisclosure } from "./Disclosure";
 import { itemState, type ItemState } from "./restoreGroups";
 import { REASON_SENTENCES, displayLabel, toggleKeys } from "./restoreModel";
+import { useOverflowsInline } from "./useOverflowsInline";
 
 /** Toggles item keys; stable for the page's life so memoized rows don't re-render. */
 export type ToggleKeys = (keys: string[], checked: boolean) => void;
@@ -316,6 +317,7 @@ export const ItemRow = memo(function ItemRow({
   const details = open ? itemDetails(t, item) : null;
   const hasDetails = hasItemDetails(item);
   const label = displayLabel(item);
+  const [nameRef, nameOverflows] = useOverflowsInline<HTMLLabelElement>(label);
   // The row is its own container, since its width depends on the admin sidebar and
   // restore summary as much as on the viewport. A narrow row wraps the whole name
   // above the muted detail, so names that differ only at the end stay apart.
@@ -333,14 +335,15 @@ export const ItemRow = memo(function ItemRow({
         <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
           {/* block: Label is a flex box, which would clip the name without an ellipsis.
               Chromium breaks at <wbr> even under nowrap, so a one-line row hides them.
-              A narrow row clips sideways any part of the name that can't wrap, such as
-              one long run of joined emoji; the 0.25em of padding, offset by a negative
-              margin, keeps letters whole whose ink reaches past their edge. */}
+              A narrow row clips a name sideways only while part of it can't wrap to
+              fit, such as one long run of joined emoji. */}
           <Label
+            ref={nameRef}
             htmlFor={controlId}
             title={label}
             className={cn(
-              "block shrink-0 text-sm font-medium @max-2xl:-mx-[0.25em] @max-2xl:overflow-x-clip @max-2xl:px-[0.25em] @max-2xl:wrap-anywhere @2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden",
+              "block shrink-0 text-sm font-medium @max-2xl:wrap-anywhere @2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden",
+              nameOverflows && "@max-2xl:overflow-x-clip",
               !item.selectable && "text-muted-foreground",
             )}
           >
