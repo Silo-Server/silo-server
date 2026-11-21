@@ -108,7 +108,7 @@ export function RestoreReview({
           {/* Row and label share a line height, so the checkbox's one-line box stays on
               the label's first line when it wraps. */}
           <div className="flex items-start gap-2 leading-5">
-            <span className="flex h-lh shrink-0 items-center">
+            <span className="flex min-h-lh shrink-0 items-center">
               <Checkbox
                 id="restore-accept-unauthenticated"
                 checked={acceptUnauthenticated}

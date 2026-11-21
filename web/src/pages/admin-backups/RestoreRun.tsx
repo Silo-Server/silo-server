@@ -142,16 +142,16 @@ function AccountReport({
             return (
               <li key={profile.id}>
                 <p className="flex items-start gap-1.5 text-[13px]">
-                  <span className="flex h-lh shrink-0 items-center">
+                  <span className="flex min-h-lh shrink-0 items-center">
                     <outcome.Icon aria-hidden="true" className={cn("size-3.5", outcome.tone)} />
                   </span>
                   <span>
-                    {/* The outcome wraps as a unit after the name, so its "·" stays with the
-                        word it introduces; the gap is the name's margin, which a wrapped
-                        outcome leaves behind at the end of the line. */}
+                    {/* The outcome moves to the next line as a unit, so its "·" stays with the
+                        word it introduces, and wraps inside itself only when it can't fit on a
+                        line. The gap is the name's margin, left behind at the end of the line. */}
                     <span className="me-1.5 font-medium">{profile.label}</span>
                     <wbr />
-                    <span className="text-muted-foreground whitespace-nowrap">
+                    <span className="text-muted-foreground inline-block">
                       {t("web.admin.backups.restore.run.profileOutcome", {
                         outcome: profile.created
                           ? t("web.admin.backups.restore.outcome.created")
