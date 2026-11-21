@@ -100,7 +100,9 @@ export function CollectionPosterCard({
           ) : null}
         </div>
         <div className="px-0.5 pt-2.5">
-          <div className="truncate text-[0.8125rem] font-semibold">{collection.title}</div>
+          <div dir="auto" className="bidi-text truncate text-[0.8125rem] font-semibold">
+            {collection.title}
+          </div>
           {subline}
         </div>
       </ViewTransitionLink>
