@@ -374,11 +374,11 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Disconnect a provider and discard its key. A provider a job uses cannot be deleted. */
+    /** Disconnect a provider and discard its key. A provider a job uses cannot be deleted, and one the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment. */
     delete: operations["deleteAdminAIProvider"];
     options?: never;
     head?: never;
-    /** Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request. */
+    /** Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request. A provider the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment. */
     patch: operations["updateAdminAIProvider"];
     trace?: never;
   };
@@ -14302,6 +14302,8 @@ export interface components {
       capabilities: ("chat" | "embeddings" | "speech")[];
       has_api_key: boolean;
       id: string;
+      /** @description The variable in the server's environment that declares this provider, such as SILO_CONFIG_FILE, when the deployment declares it. Updating or deleting such a provider is 422 validation_failed with code managed_by_environment. */
+      managed_by_env_var?: string;
       name: string;
       /** @enum {string} */
       type: "openai" | "gemini" | "openrouter" | "groq" | "ollama" | "whisper" | "custom";

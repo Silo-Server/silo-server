@@ -10,6 +10,7 @@ import (
 )
 
 func TestInvalidDatabaseURLDoesNotDiscloseCredentials(t *testing.T) {
+	t.Setenv("DATABASE_URL_FILE", "")
 	t.Setenv("DATABASE_URL", "postgres://test-user:test-password@localhost:invalid/db")
 	var output bytes.Buffer
 	err := run(t.Context(), []string{"--env="}, &output)
@@ -23,6 +24,7 @@ func TestInvalidDatabaseURLDoesNotDiscloseCredentials(t *testing.T) {
 
 func TestUnreachableDatabase(t *testing.T) {
 	// An absent Unix socket cannot reach a running database or depend on a port race.
+	t.Setenv("DATABASE_URL_FILE", "")
 	t.Setenv("DATABASE_URL", "host="+filepath.Join(t.TempDir(), "absent")+" port=5432 user=test dbname=test sslmode=disable")
 	t.Setenv("SECRET_KEY", "")
 	t.Setenv("SILO_MIGRATE_TIMEOUT", "1s")
@@ -41,6 +43,7 @@ func TestUnreachableDatabase(t *testing.T) {
 }
 
 func TestCanceledContext(t *testing.T) {
+	t.Setenv("DATABASE_URL_FILE", "")
 	t.Setenv("DATABASE_URL", "host="+filepath.Join(t.TempDir(), "absent")+" user=test dbname=test")
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
