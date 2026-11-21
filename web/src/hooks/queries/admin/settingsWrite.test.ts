@@ -414,10 +414,10 @@ it("lets a refused settings save through after a reload, keeping the edits only 
   const { result } = renderHook(
     () =>
       useSettingsForm({
+        // server.log_level belongs to another page.
         keys: [
           "branding.server_name",
           "branding.login_subtitle",
-          "server.log_level",
           "download.artifact_dir",
           "email.smtp_host",
           "email.smtp_password",
@@ -454,7 +454,7 @@ it("lets a refused settings save through after a reload, keeping the edits only 
   act(() => result.current.setValue("branding.login_subtitle", "Hello there"));
   // Unset, so no snapshot carries it.
   act(() => result.current.setValue("download.artifact_dir", "/srv/artifacts"));
-  // The other administrator then saves a setting this admin didn't edit.
+  // The other administrator then saves a setting on another page.
   stored = { ...stored, "server.log_level": "warn" };
   tag = '"tagB"';
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -466,7 +466,6 @@ it("lets a refused settings save through after a reload, keeping the edits only 
   // Each refusal is reported once, by the form, with a way to reload.
   expect(vi.mocked(toast.error).mock.calls).toHaveLength(2);
   await reloadAfterRefusal();
-  expect(result.current.getValue("server.log_level")).toBe("warn");
   expect([...result.current.dirtyKeys].sort()).toEqual([
     "branding.login_subtitle",
     "branding.server_name",
@@ -501,6 +500,19 @@ it("lets a refused settings save through after a reload, keeping the edits only 
   expect(result.current.getValue("branding.server_name")).toBe("Casa");
   expect(result.current.getValue("email.smtp_host")).toBe("");
   expect(result.current.getValue("email.smtp_password")).toBe("");
+
+  // A setting on this page that this admin didn't edit changes: the edits
+  // were made against a page that is gone, so Reload undoes them too.
+  act(() => result.current.setValue("download.artifact_dir", "/srv/other"));
+  stored = { ...stored, "branding.login_subtitle": "Changed again" };
+  tag = '"tagE"';
+  await act(async () => {
+    await expect(result.current.save()).rejects.toBeInstanceOf(Error);
+  });
+  await reloadAfterRefusal();
+  expect(result.current.dirtyCount).toBe(0);
+  expect(result.current.getValue("branding.login_subtitle")).toBe("Changed again");
+  expect(result.current.getValue("download.artifact_dir")).toBe("/srv/artifacts");
 });
 it("keeps every edit when a reload after a refused save can't read which secrets are set", async () => {
   const stored = { "branding.server_name": "Silo", "server.log_level": "info" };

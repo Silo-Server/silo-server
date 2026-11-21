@@ -95,6 +95,14 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   useEffect(() => {
     dirtyRef.current = dirty;
   }, [dirty]);
+  // What the page shows for the settings nobody has edited, and which of its
+  // secrets are set; a reload after a refused save compares with these.
+  const shownSettings = useRef(settings);
+  const shownConfigured = useRef(sensitiveData?.configured);
+  useEffect(() => {
+    shownSettings.current = settings;
+    shownConfigured.current = sensitiveData?.configured;
+  }, [settings, sensitiveData]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -305,9 +313,10 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   }, []);
 
   // After a refused save, the admin asked for the settings as they are now.
-  // The edits are kept only if every one can be vouched for: its setting still
-  // shows what it showed when the edit began, and it isn't a saved password or
-  // key, which no snapshot shows. Otherwise all of them are undone. Edits on a
+  // The edits are kept only if nothing on this page changed meanwhile (an
+  // edited setting still shows what it showed when its edit began, the others
+  // what the page showed) and none is a saved password or key, which no
+  // snapshot shows. Otherwise all of them are undone. Edits on a
   // page go together (a server address and its password, a search provider
   // and its connection), so keeping some could save a mix nobody entered.
   // Reads refs and fresh results only, so a toast holding an old copy still
@@ -316,6 +325,8 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     if (reloading.current || savePending.current) return;
     const generation = draftGeneration.current;
     const baseline = editBaseline.current;
+    const shown = shownSettings.current;
+    const shownSecrets = shownConfigured.current;
     reloading.current = true;
     try {
       // The status is read after the settings, so a secret set by the time of
@@ -344,9 +355,11 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         toast.error(t("web.admin.settings.hooks.settings.conflict.reloadFailed"));
         return;
       }
+      const valueIn = (values: SettingsValues | undefined, key: string) =>
+        values && Object.hasOwn(values, key) ? values[key] : undefined;
       const changed = (key: string) => {
         const was = editedOver.current.get(key);
-        const now = Object.hasOwn(fresh, key) ? fresh[key] : undefined;
+        const now = valueIn(fresh, key);
         if (!was || was.value !== now) return true;
         return now === undefined && (was.secretSet || configured.includes(key));
       };
@@ -354,7 +367,15 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       const unverifiable = (key: string) =>
         changed(key) || (REDIS_KEYS.includes(key) && configured.includes("redis.url"));
       const drafts = [...dirtyRef.current];
-      const replaced = drafts.some(unverifiable) ? drafts : [];
+      // A setting on this page that nobody here edited, changed since the page
+      // last showed it: the edits were made against a page that is gone.
+      const pageChanged = stableKeys.some(
+        (key) =>
+          !dirtyRef.current.has(key) &&
+          (valueIn(shown, key) !== valueIn(fresh, key) ||
+            (shownSecrets ?? []).includes(key) !== configured.includes(key)),
+      );
+      const replaced = pageChanged || drafts.some(unverifiable) ? drafts : [];
       // Retire a ChatGPT sign-in callback that started before this reload.
       saveEpoch.current++;
       for (const key of replaced) {
@@ -376,7 +397,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     } finally {
       reloading.current = false;
     }
-  }, [dismissConflict, refetch, refetchSensitiveStatus]);
+  }, [dismissConflict, refetch, refetchSensitiveStatus, stableKeys]);
 
   const save = useCallback(
     async (selectedKeys?: string[]) => {
