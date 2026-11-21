@@ -1879,9 +1879,17 @@ from it whole, so an SMTP host and password changed since the backup stay
 changed. A unit the live server lacks, and every unit of another
 deployment's backup or a separate restore, keeps the backup's other values
 with its secrets cleared and its switch off, and the command lists it for
-re-entry. `TestEveryCredentialSettingIsDecided` fails on an encrypted
-setting that is neither in a unit nor this server's own (signing keys,
-storage, Redis, the web push key pair).
+re-entry. When the AI providers' unit is cleared, the job bindings
+(`config.AIProviderBindingKeys`), which name entries of the provider list,
+go with it, and the list is left empty at the current conversion version
+(encrypted when the restore has this server's key), so the next start
+builds no provider from the backup's legacy endpoint settings or the
+Ollama default (`config.PlanAIProviderConversion`). A binding left without
+its list, as a restore with another key leaves it, clears the unit too. A
+full restore then takes the list and bindings from the live server with its
+server-specific settings (below). `TestEveryCredentialSettingIsDecided`
+fails on an encrypted setting that is neither in a unit nor this server's
+own (signing keys, storage, Redis, the web push key pair).
 
 A full restore also keeps every server-specific setting (`SettingKindServerSpecific`:
 the server's identity and public URL, storage, Redis, search, AI
