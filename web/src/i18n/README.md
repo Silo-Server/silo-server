@@ -126,12 +126,14 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   `dir="auto"` leaves an empty field's example in the page's direction, and
   `type="url"` rejects addresses without a scheme.
 - A name that can be in either script and is cut with `truncate` (a username, say) takes
-  `dir="auto"`: it reads in the direction of its first letter, so the cut keeps the name's
-  first characters (a name without letters reads left to right). In a name that mixes
-  scripts, the part written the other way can still lose its own start; no `dir` avoids
-  that for every name. Where the box would stretch (a block, a `flex-col` child), size it
-  to its text with `w-fit max-w-full` so a short name stays on the page's start side. A
-  `flex-1` item can't be sized that way: keep `flex-1` on a wrapper and put the name in a
+  `dir="auto"`: it reads in the direction of its first strong character (a letter, or
+  right-to-left punctuation such as `؟`), and left to right when it has none, as a name
+  made only of digits does. A name in one script then keeps its start. In a name that
+  mixes directions, a part that runs the other way, such as a long run of digits before
+  Arabic letters, can still lose its own start; no `dir` avoids that for every name.
+  Where the box would stretch (a block, a `flex-col` child), size it to its text with
+  `w-fit max-w-full` so a short name stays on the page's start side. A `flex-1` item
+  can't be sized that way: keep `flex-1` on a wrapper and put the name in a
   `block w-fit max-w-full` span inside it. Don't use `.bidi-text` for this: its
   `unicode-bidi: plaintext` drops the "…" in Firefox and cuts the start in WebKit.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
