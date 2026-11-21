@@ -78,11 +78,13 @@ export default function DetailTitle({
       scheduleFit();
     });
     observer.observe(heading);
-    // Theme preferences can change the rem-based font without changing width.
+    // Theme preferences can change the rem-based font, and the interface
+    // language the letter-spacing (`:lang(ar)` in app.css), without changing
+    // the width.
     const typographyObserver = new MutationObserver(scheduleFit);
     typographyObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-text-scale", "data-text-weight"],
+      attributeFilter: ["data-text-scale", "data-text-weight", "lang"],
     });
     window.addEventListener("resize", scheduleFit);
     document.fonts?.addEventListener("loadingdone", scheduleFit);
