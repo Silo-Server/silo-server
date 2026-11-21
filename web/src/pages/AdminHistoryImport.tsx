@@ -336,6 +336,7 @@ function SourceDialog({
           <div className="space-y-1.5">
             <Label htmlFor="src-url">{t("web.admin.historyImport.sourceDialog.serverUrl")}</Label>
             <Input
+              dir="ltr"
               id="src-url"
               placeholder={hints.url}
               value={baseURL}
