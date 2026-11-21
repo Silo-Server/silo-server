@@ -450,12 +450,12 @@ export function downloadEntryStatus(status: string) {
     case "revoked":
       return {
         label: t("web.admin.downloads.deviceCopies.status.revoked"),
-        className: "text-warning bg-warning/10",
+        className: "text-warning-label bg-warning/10",
       };
     case "failed":
       return {
         label: t("web.admin.downloads.deviceCopies.status.failed"),
-        className: "text-destructive bg-destructive/10",
+        className: "text-destructive-label bg-destructive/10",
       };
     case "cancelled":
       return {
