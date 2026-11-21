@@ -7,15 +7,16 @@
 
 import { classParts, classTokenVisitors } from "./class-tokens.js";
 
-const PX_SIZE = /^text-\[(\d+(?:\.\d+)?)px\]/;
+const PX_SIZE = /^text-\[(length:)?(\d+(?:\.\d+)?)px\]/;
 
 /** The rem form of one class token, or null when it isn't a pixel font size. */
 function remClass(token) {
   const { variants, lead, utility, trail } = classParts(token);
   const match = PX_SIZE.exec(utility);
   if (match === null) return null;
-  const rem = `text-[${Number(match[1]) / 16}rem]`;
-  return variants + lead + rem + utility.slice(match[0].length) + trail;
+  const [whole, hint = "", px] = match;
+  const rem = `text-[${hint}${Number(px) / 16}rem]`;
+  return variants + lead + rem + utility.slice(whole.length) + trail;
 }
 
 export default {

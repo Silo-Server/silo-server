@@ -52,6 +52,9 @@ function Poster({ index, className }: { index: number; className?: string }) {
   );
 }
 
+/* eslint-disable silo/text-size-in-rem -- A picture, not text: its sample rows
+   keep their size inside the fixed-height frame, as poster overlays follow
+   their card rather than the Text Size setting. */
 /** The decorative picture at the top of each card, after the mockup. */
 function Stage({ kind }: { kind: CollectionKind }) {
   const t = useT();
@@ -64,7 +67,7 @@ function Stage({ kind }: { kind: CollectionKind }) {
           <span
             key={title}
             className={cn(
-              "text-foreground/85 grid h-9 grid-cols-[14px_22px_1fr] items-center gap-2.5 rounded-[10px] px-2.5 text-[0.78125rem] font-medium",
+              "text-foreground/85 grid h-[36px] grid-cols-[14px_22px_1fr] items-center gap-2.5 rounded-[10px] px-2.5 text-[12.5px] font-medium",
               tile,
               index === 1 && "translate-x-2.5 -rotate-[1.5deg] bg-white/[0.09] shadow-lg",
             )}
@@ -88,7 +91,7 @@ function Stage({ kind }: { kind: CollectionKind }) {
             <span
               key={rule}
               className={cn(
-                "text-foreground/85 inline-flex h-6 items-center rounded-[7px] px-[9px] text-[0.71875rem] font-medium whitespace-nowrap",
+                "text-foreground/85 inline-flex h-[24px] items-center rounded-[7px] px-[9px] text-[11.5px] font-medium whitespace-nowrap",
                 index < 2 ? "bg-[color-mix(in_srgb,var(--tint)_22%,transparent)]" : tile,
               )}
             >
@@ -117,12 +120,12 @@ function Stage({ kind }: { kind: CollectionKind }) {
           <span
             key={name}
             className={cn(
-              "flex h-9 items-center gap-2.5 rounded-[11px] px-3 text-[0.78125rem] font-semibold",
+              "flex h-[36px] items-center gap-2.5 rounded-[11px] px-3 text-[12.5px] font-semibold",
               tile,
             )}
           >
             <span
-              className="grid size-6 place-items-center rounded-md text-[0.625rem] font-extrabold text-white"
+              className="grid size-[24px] place-items-center rounded-md text-[10px] font-extrabold text-white"
               style={{ background: color }}
             >
               {mark}
@@ -151,6 +154,7 @@ function Stage({ kind }: { kind: CollectionKind }) {
     </span>
   );
 }
+/* eslint-enable silo/text-size-in-rem -- the rest of the file is text and follows the setting. */
 
 /** A separator, the same in every language. */
 const DOT = "·";

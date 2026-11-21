@@ -1,8 +1,13 @@
 // Shared by the rules that rewrite Tailwind class tokens in place.
 
-/** Splits a class token into its variants (`md:`, `data-[state=open]:`), `!` before or after (v3 and v4 forms), and the utility. */
+/**
+ * Splits a class token into its variants (`md:`, `data-[state=open]:`,
+ * `[&:hover]:`), `!` before or after (v3 and v4 forms), and the utility. A
+ * colon inside brackets, as in `text-[length:13px]`, belongs to its segment.
+ */
 export function classParts(token) {
-  const [, variants, lead, utility, trail] = /^((?:[^\s:"'`]+:)*)(!?)(.*?)(!?)$/.exec(token);
+  const [, variants, lead, utility, trail] =
+    /^((?:(?:[^\s:"'`[\]]|\[[^\]]*\])+:)*)(!?)(.*?)(!?)$/.exec(token);
   return { variants, lead, utility, trail };
 }
 
