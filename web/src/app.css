@@ -1295,9 +1295,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   /* ── Glass Surfaces ──────────────────────────────────────── */
   /* Frosted glass effect for floating controls, overlay panels.
      Usage: <div class="glass">...</div>
-     Put -webkit-backdrop-filter before backdrop-filter. The production
-     build's CSS minifier merges the pair and keeps only the later one, so
-     the reverse order leaves Chrome and Firefox with no blur. */
+     Put -webkit-backdrop-filter before backdrop-filter. `vite build` runs
+     this file through Lightning CSS, which drops a backdrop-filter that is
+     followed by its -webkit- form, leaving Chrome and Firefox with no blur.
+     In this order it ships both. `pnpm run budget:check` fails on a built
+     rule with only the -webkit- form. */
   .glass {
     background: color-mix(in srgb, var(--surface) 70%, transparent);
     -webkit-backdrop-filter: blur(20px) saturate(1.2);

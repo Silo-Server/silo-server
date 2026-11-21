@@ -8,9 +8,9 @@
 // gated.
 //
 // It fails when the vendor chunk is missing or imports another chunk, since
-// its URL then stops surviving releases, and when dist/index.html loads a
+// its URL then stops surviving releases, when dist/index.html loads a
 // stylesheet or classic script from another origin that holds back first
-// paint.
+// paint, and when a built stylesheet has a rule whose blur only Safari draws.
 //
 // Usage: node scripts/check-bundle-budget.mjs
 import { existsSync, readFileSync } from "node:fs";
@@ -118,6 +118,26 @@ export function renderBlockingFailures(blocking) {
   );
 }
 
+/**
+ * Lists the selectors of rules in a built stylesheet that set
+ * -webkit-backdrop-filter without backdrop-filter. Chrome and Firefox read only
+ * the unprefixed property, so they draw such a surface without blur. The build's
+ * Lightning CSS pass produces these from `backdrop-filter: X;` followed by
+ * `-webkit-backdrop-filter: X;`; see the glass section of src/app.css.
+ */
+export function webkitOnlyBackdropRules(css) {
+  const selectors = [];
+  for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const properties = new Set(
+      body.split(";").map((declaration) => declaration.split(":")[0].trim().toLowerCase()),
+    );
+    if (properties.has("-webkit-backdrop-filter") && !properties.has("backdrop-filter")) {
+      selectors.push(selector.trim());
+    }
+  }
+  return selectors;
+}
+
 function brotliSize(bytes) {
   return brotliCompressSync(bytes, {
     params: { [constants.BROTLI_PARAM_QUALITY]: 11 },
@@ -138,18 +158,28 @@ function measure() {
   });
   const html = readFileSync(path.join(distDir, "index.html"), "utf8");
   const blocking = crossOriginRenderBlocking(html);
+  const stylesheets = new Set(Object.values(manifest).flatMap((chunk) => chunk.css ?? []));
+  const backdropFailures = [...stylesheets].flatMap((file) =>
+    webkitOnlyBackdropRules(readFileSync(path.join(distDir, file), "utf8")).map(
+      (selector) =>
+        `${file}: ${selector} sets -webkit-backdrop-filter without backdrop-filter, ` +
+        "so Chrome and Firefox draw it without blur. " +
+        "Declare backdrop-filter after -webkit-backdrop-filter in the source.",
+    ),
+  );
   return {
     files,
     blocking,
     chunkCount: Object.values(manifest).filter((chunk) => chunk.file.endsWith(".js")).length,
     vendorFailures: vendorChunkFailures(manifest),
+    backdropFailures,
   };
 }
 
 function main(argv) {
   if (argv.length > 0) throw new Error(`unknown argument: ${argv.join(" ")}`);
 
-  const { files, blocking, chunkCount, vendorFailures } = measure();
+  const { files, blocking, chunkCount, vendorFailures, backdropFailures } = measure();
   for (const { file, raw, brotli } of files) {
     console.log(`  ${file}  ${raw} B raw, ${brotli} B brotli`);
   }
@@ -159,7 +189,7 @@ function main(argv) {
       `${chunkCount} JS chunks in the manifest`,
   );
 
-  const failures = [...vendorFailures, ...renderBlockingFailures(blocking)];
+  const failures = [...vendorFailures, ...renderBlockingFailures(blocking), ...backdropFailures];
   for (const failure of failures) console.error(`bundle check: ${failure}`);
   if (failures.length === 0) console.log("bundle check: passed");
   return failures.length === 0 ? 0 : 1;
