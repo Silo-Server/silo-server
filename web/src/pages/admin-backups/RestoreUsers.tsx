@@ -169,19 +169,19 @@ export const AccountRow = memo(function AccountRow({
   ]
     .filter(Boolean)
     .join(" · ");
+  const destination = account.local_username || account.username;
   const status = !item.selectable
     ? null
     : merges
-      ? t("web.admin.backups.restore.users.mergeInto", {
-          name: account.local_username || account.username,
-        })
+      ? t("web.admin.backups.restore.users.mergeInto", { name: destination })
       : t("web.admin.backups.restore.users.newAccount");
   const administrator = t("web.admin.backups.restore.users.administrator");
   // Laid out like ItemRow (RestoreRows.tsx): a narrow row wraps the name above the
   // contact line. The admin badge, profile count and merge status would leave a 42rem
   // row's name and contact about 220 px, so below 56rem the row shows only the badge's
-  // icon and the details show the admin role and the status. The badge can cut a long
-  // merge destination short, so the details show a merge in full at every width.
+  // icon, and the merge status only when it names another account; the details show
+  // the admin role and the status. The badge can cut a long merge destination short,
+  // so the details show a merge in full at every width.
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
@@ -198,10 +198,8 @@ export const AccountRow = memo(function AccountRow({
             htmlFor={controlId}
             title={item.label}
             className={cn(
-              "block max-w-full shrink-0 text-sm font-medium",
-              contact
-                ? "@max-2xl:wrap-anywhere @2xl:max-w-[45%] @2xl:truncate @2xl:[&_wbr]:hidden"
-                : "wrap-anywhere",
+              "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
+              contact && "@2xl:max-w-[45%] @2xl:truncate @2xl:[&_wbr]:hidden",
               !item.selectable && "text-muted-foreground",
             )}
           >
@@ -238,7 +236,13 @@ export const AccountRow = memo(function AccountRow({
           </span>
         ) : null}
         {status ? (
-          <span title={status} className="hidden max-w-40 shrink-0 truncate text-xs @4xl:inline">
+          <span
+            title={status}
+            className={cn(
+              "hidden max-w-40 shrink-0 truncate text-xs @4xl:inline",
+              merges && destination !== item.label && "@2xl:inline",
+            )}
+          >
             {status}
           </span>
         ) : null}

@@ -295,10 +295,8 @@ export const ItemRow = memo(function ItemRow({
             htmlFor={controlId}
             title={label}
             className={cn(
-              "block max-w-full shrink-0 text-sm font-medium",
-              secondary
-                ? "@max-2xl:wrap-anywhere @2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden"
-                : "wrap-anywhere",
+              "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
+              secondary && "@2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden",
               !item.selectable && "text-muted-foreground",
             )}
           >
