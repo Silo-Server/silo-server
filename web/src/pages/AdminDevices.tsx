@@ -1316,6 +1316,9 @@ function DeviceGroup({
   );
 }
 
+/** How long after a pointer press a row's focus counts as coming from it (a tap focuses on release). */
+const POINTER_FOCUS_WINDOW_MS = 1000;
+
 /** Scrolls the device list so its group's sticky header no longer covers `row`. */
 function revealRowUnderHeader(row: HTMLElement) {
   const header = row.closest("section")?.querySelector("header");
@@ -1337,7 +1340,7 @@ function DeviceRow({
   activeProfileId: string | null;
 }) {
   const t = useT();
-  const pointerDown = useRef(false);
+  const lastPointerDown = useRef(Number.NEGATIVE_INFINITY);
   const kind = classifyPlatform(device.device_platform);
   const profileSuffix = activeProfileId ? `?profile=${encodeURIComponent(activeProfileId)}` : "";
   const href = `/admin/devices/${device.user_id}/${encodeURIComponent(device.device_id)}${profileSuffix}`;
@@ -1351,21 +1354,14 @@ function DeviceRow({
       // focus, and a larger minimum font can make the header taller than the
       // margin, so move the row out from under the header here. Not for a
       // pointer press: it focuses on mousedown (or on a tap), and moving the
-      // row then would land the release elsewhere and lose the click.
+      // row then would land the release elsewhere and lose the click. A press
+      // that never focuses (a right-click, a press on the focused row) just
+      // ages out instead of blocking the next keyboard focus.
       onPointerDown={() => {
-        pointerDown.current = true;
-      }}
-      onPointerCancel={() => {
-        pointerDown.current = false;
-      }}
-      onBlur={() => {
-        pointerDown.current = false;
+        lastPointerDown.current = performance.now();
       }}
       onFocus={(e) => {
-        if (pointerDown.current) {
-          pointerDown.current = false;
-          return;
-        }
+        if (performance.now() - lastPointerDown.current < POINTER_FOCUS_WINDOW_MS) return;
         revealRowUnderHeader(e.currentTarget);
       }}
       className={cn(
