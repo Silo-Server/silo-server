@@ -4,6 +4,7 @@ import { AlertTriangle, FolderOpen, XIcon } from "lucide-react";
 
 import type { Library, LibraryRoot } from "@/api/types";
 import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDiagnosticsSection";
+import { PathCode, PathText } from "@/components/PathText";
 import {
   CARD_ACTION_CLASS,
   CardActions,
@@ -224,7 +225,7 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                             className="text-muted-foreground block w-fit max-w-full truncate text-[11px]"
                             dir="ltr"
                           >
-                            {root.root_path}
+                            <PathText path={root.root_path} />
                           </code>
                           {row.evidence !== null ? (
                             <div className="text-muted-foreground truncate text-[11px]">
@@ -479,7 +480,7 @@ function RootOverrideDialog({
               <DialogDescription className="break-words max-sm:max-h-[25dvh] max-sm:overflow-y-auto">
                 {t("web.admin.libraries.rootOverride.description", {
                   path: root.root_path,
-                  code: (chunks) => <code className="break-all">{chunks}</code>,
+                  code: (chunks) => <PathCode className="wrap-anywhere">{chunks}</PathCode>,
                 })}
               </DialogDescription>
             </div>
