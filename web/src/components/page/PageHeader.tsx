@@ -28,7 +28,7 @@ export function PageHeader({ title, subtitle, actions, eyebrow, className }: Pag
     >
       <div className="min-w-0 space-y-2">
         {eyebrow}
-        <h1 className="text-[1.75rem] leading-[1.15] font-bold tracking-[-0.035em] text-balance sm:text-[2rem]">
+        <h1 className="text-[1.75rem] leading-[1.15] font-bold tracking-[-0.035em] text-balance break-words hyphens-auto sm:text-[2rem]">
           {title}
         </h1>
         {subtitle ? (
