@@ -294,9 +294,13 @@ function AddAllowedTitle({
             const already = allowedIds.has(item.content_id);
             return (
               <li key={item.content_id} className="flex items-center gap-2 px-3 py-2 text-sm">
-                <span className="min-w-0 flex-1 truncate">
-                  {item.title}
-                  <span className="text-muted-foreground ms-1.5 text-xs">
+                {/* Only the title is cut, and it keeps its start in either script;
+                    the year and type stay after it in the page's direction. */}
+                <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                  <span dir="auto" className="min-w-0 truncate">
+                    {item.title}
+                  </span>
+                  <span className="text-muted-foreground shrink-0 text-xs">
                     {[
                       item.year ? numberText(item.year) : null,
                       t("web.profiles.allowedTitles.resultType", { type: item.type }),
