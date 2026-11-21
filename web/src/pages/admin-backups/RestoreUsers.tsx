@@ -19,13 +19,32 @@ import {
   requiredPrimary,
   toggleKeys,
 } from "./restoreModel";
-import { useOverflowsInline } from "./useOverflowsInline";
+import { OVERFLOW_CLIP, useOverflowsInline } from "./useOverflowsInline";
 
 function droppedLibraries(t: Translate, count: number): string {
   return t("web.admin.backups.restore.users.droppedLibraries", {
     count,
     count_text: count,
   });
+}
+
+/**
+ * A policy difference, which quotes the access group's name as it is. The status stops at
+ * the row's width and the sentence shrinks to it, so its words wrap there; a group name that
+ * still overflows, such as one long run of joined emoji, is clipped sideways only while it
+ * does, as the other restore names are.
+ */
+function PolicyDifferenceStatus({ sentence }: { sentence: string }) {
+  const [ref, overflows] = useOverflowsInline<HTMLSpanElement>(sentence);
+  return (
+    <div className="*:max-w-full">
+      <SettingFieldStatus tone="warn">
+        <span ref={ref} className={cn("min-w-0", overflows && OVERFLOW_CLIP)}>
+          {sentence}
+        </span>
+      </SettingFieldStatus>
+    </div>
+  );
 }
 
 function profileDetail(t: Translate, profile: RestoreProfile): string {
@@ -345,11 +364,10 @@ export const AccountRow = memo(function AccountRow({
           ) : null}
           {!item.selectable
             ? account.policy_differences.map((difference) => (
-                <div key={difference.field}>
-                  <SettingFieldStatus tone="warn">
-                    {policyDifferenceSentence(account.group, difference)}
-                  </SettingFieldStatus>
-                </div>
+                <PolicyDifferenceStatus
+                  key={difference.field}
+                  sentence={policyDifferenceSentence(account.group, difference)}
+                />
               ))
             : null}
           {account.libraries_left_out > 0 ? (
