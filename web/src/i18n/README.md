@@ -164,16 +164,17 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   words must stay and the name is cut, make the line a
   `flex overflow-hidden whitespace-pre` box: the words become flex items that keep the
   page's direction and don't shrink, and `whitespace-pre` keeps the spaces at their
-  edges. That suits translated words only: user text there would keep its line
-  breaks. A rich-text tag that wraps the name (`<strong>{name}</strong>`) is the flex
+  edges. User text on the line (a note, a device name) is its own `dir="auto"`
+  `truncate` element too, whose `nowrap` folds any line breaks `pre` would keep. A
+  rich-text tag that wraps the name (`<strong>{name}</strong>`) is the flex
   item, so it needs `overflow-hidden` too, or the name can't shrink inside it. Where
   the row can squeeze the line narrower than its words (the impersonation banner),
   the words shrink too, but only once the name is down to a letter and "…"
   (`wordsYieldLast` in `ImpersonationBanner.tsx`); where the row has other text that
   doesn't shrink, cap it (`max-w-1/2 truncate`) so the line keeps room. When the text
-  after the name is cut first, which includes user text such as a note, keep the
-  line's `truncate` and make the name an
-  `inline-block max-w-full truncate align-bottom` span.
+  after the name is cut first (a suggestion's note, a requester's device), give the
+  name `max-w-full shrink-0`: the name is then cut only when it alone fills the line
+  (`SuggestionList.tsx`).
 - Titles, names, taglines and overviews from metadata use `.bidi-text` (`app.css`).
   Where such text is cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
   stylesheet), it also takes `dir="auto"`. Without it, text that runs the other way
