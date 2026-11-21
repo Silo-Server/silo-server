@@ -200,7 +200,13 @@ function PolicyDomainCard({ domain, documents, onSelect }: PolicyDomainCardProps
                   if (event.key === "Enter" || event.key === " ") onSelect(document.id);
                 }}
               >
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">{document.name}</span>
+                {/* The outer span takes the free space so the status and controls stay at
+                    the end; the name inside keeps its start when cut, in either script. */}
+                <span className="min-w-0 flex-1">
+                  <span dir="auto" className="block w-fit max-w-full truncate text-sm font-medium">
+                    {document.name}
+                  </span>
+                </span>
                 <PolicyStatusPill status={policyDocumentStatus(document)} />
                 <span className="text-muted-foreground hidden text-xs sm:block">
                   {t("web.admin.access.policy.overrides.updated", {

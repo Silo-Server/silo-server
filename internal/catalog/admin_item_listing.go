@@ -78,6 +78,10 @@ type AdminCatalogItem struct {
 	// Cast and Crew of a movie or series, loaded only with filter.People.
 	Cast []CastCredit
 	Crew []CrewCredit
+	// PosterPath is the stored poster of a movie or series, or of an
+	// episode's series; PosterOwnerID is the content ID it belongs to.
+	PosterPath    string
+	PosterOwnerID string
 }
 
 // AdminCatalogVersion is one present file of an item. Video facts come from
@@ -140,7 +144,7 @@ func (r *ItemRepository) ListAdminCatalogItems(ctx context.Context, filter Admin
 			&item.SeasonNumber, &item.EpisodeNumber, &item.Genres, &item.ContentRating, &item.Studios, &item.Networks,
 			&item.RatingIMDB, &item.RatingTMDB, &item.RatingRTCritic, &item.RatingRTAudience,
 			&item.ReleaseDate, &item.FirstAirDate, &item.LastAirDate, &item.AirDate,
-			&item.AddedAt, &item.LibraryIDs); err != nil {
+			&item.PosterPath, &item.PosterOwnerID, &item.AddedAt, &item.LibraryIDs); err != nil {
 			rows.Close()
 			return page, fmt.Errorf("scanning admin catalog item: %w", err)
 		}
@@ -188,8 +192,9 @@ func adminCatalogPageQuery(filter AdminCatalogItemFilter, after string, limit in
 		idsParam = bind(filter.ContentIDs)
 	}
 	// branch fills in the walk for one table pair: the parent row (alias p),
-	// its membership table and that table's id column.
-	branch := func(columns, parent, membership, idColumn string, conditions ...string) string {
+	// its membership table and that table's id column. join adds a join on
+	// p's own columns, which keeps the walk's order.
+	branch := func(columns, parent, membership, idColumn, join string, conditions ...string) string {
 		from, key := parent+" p", "p.content_id"
 		if libraryParam != "" {
 			from = membership + " sel JOIN " + parent + " p ON p.content_id = sel." + idColumn
@@ -197,6 +202,7 @@ func adminCatalogPageQuery(filter AdminCatalogItemFilter, after string, limit in
 			// Repeating the bound on p lets a merge join start mid-table.
 			conditions = append(conditions, "sel.media_folder_id = "+libraryParam, "p.content_id > $1")
 		}
+		from += join
 		conditions = append(conditions, key+" > $1", "m.added_at IS NOT NULL")
 		switch {
 		case addedParam != "" && libraryParam != "":
@@ -236,20 +242,23 @@ func adminCatalogPageQuery(filter AdminCatalogItemFilter, after string, limit in
 				NULL::int AS season_number, NULL::int AS episode_number,
 				p.genres, coalesce(p.content_rating, ''), p.studios, p.networks,
 				p.rating_imdb, p.rating_tmdb, p.rating_rt_critic, p.rating_rt_audience,
-				to_char(p.release_date, 'YYYY-MM-DD'), p.first_air_date, p.last_air_date, NULL::text`,
-			"media_items", "media_item_libraries", "content_id", "p.type = ANY("+bind(itemTypes)+"::text[])"))
+				to_char(p.release_date, 'YYYY-MM-DD'), p.first_air_date, p.last_air_date, NULL::text,
+				coalesce(p.poster_path, '') AS poster_path, p.content_id::text AS poster_owner_id`,
+			"media_items", "media_item_libraries", "content_id", "", "p.type = ANY("+bind(itemTypes)+"::text[])"))
 	}
 	if filter.Type == "" || filter.Type == AdminCatalogTypeEpisode {
 		branches = append(branches, branch(`p.content_id, 'episode'::text, coalesce(p.title, ''),
 				coalesce(extract(year FROM p.air_date)::int, 0), ''::text,
-				p.imdb_id, p.tmdb_id, p.tvdb_id, p.series_id::text,
-				(SELECT s.title FROM media_items s WHERE s.content_id = p.series_id),
+				p.imdb_id, p.tmdb_id, p.tvdb_id, p.series_id::text, s.title,
 				p.season_number, p.episode_number,
 				NULL::text[], ''::text, NULL::text[], NULL::text[],
 				NULL::double precision, NULL::double precision, NULL::int, NULL::int,
-				NULL::text, NULL::text, NULL::text, to_char(p.air_date, 'YYYY-MM-DD')`,
+				NULL::text, NULL::text, NULL::text, to_char(p.air_date, 'YYYY-MM-DD'),
+				coalesce(s.poster_path, '') AS poster_path, p.series_id::text AS poster_owner_id`,
+			// One probe of the series row gives the title, the poster and the
+			// check that the parent is a series.
 			"episodes", "episode_libraries", "episode_id",
-			"EXISTS (SELECT 1 FROM media_items s WHERE s.content_id = p.series_id AND s.type = 'series')"))
+			" JOIN media_items s ON s.content_id = p.series_id AND s.type = 'series'"))
 	}
 	return `SELECT * FROM (` + strings.Join(branches, "\nUNION ALL\n") + `) page
 		ORDER BY content_id COLLATE "C"

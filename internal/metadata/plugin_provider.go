@@ -205,7 +205,7 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 		return nil, err
 	}
 
-	providerIDs, err := structFromStringMap(query.ProviderIDs)
+	providerIDs, err := structFromStringMap(pluginRequestProviderIDs(query.ContentType, query.ProviderIDs))
 	if err != nil {
 		return nil, fmt.Errorf("encode provider ids for plugin search: %w", err)
 	}
@@ -239,7 +239,7 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 			TitleIsFallback:  result.GetTitleIsFallback(),
 			OriginalLanguage: result.GetOriginalLanguage(),
 			Year:             int(result.GetYear()),
-			ProviderIDs:      mergePluginProviderIDs(p.capabilityID, result.GetProviderId(), result.GetProviderIds()),
+			ProviderIDs:      p.searchResultProviderIDs(query.ContentType, result),
 			ImageURL:         p.remoteArtwork(ctx, result.GetImageUrl()),
 			Overview:         result.GetOverview(),
 			Provider:         p.Slug(),
@@ -254,6 +254,7 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 // second case ProviderId is empty and the plugin reads the IDs it needs from
 // ProviderIds.
 func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (*MetadataResult, error) {
+	req.ProviderIDs = pluginRequestProviderIDs(req.ContentType, req.ProviderIDs)
 	providerID := req.ProviderIDs[p.capabilityID]
 	if providerID == "" && !p.hasLookupProviderID(req.ProviderIDs) {
 		return nil, nil
@@ -287,10 +288,12 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 	if !models.AdvisoryAgeApplies(req.ContentType) {
 		advisoryAge, advisorySource = 0, ""
 	}
+	resultIDs, workClaims := splitPluginWorkClaims(p.capabilityID, req.ContentType, mergePluginProviderIDs(p.capabilityID, response.GetItem().GetProviderId(), response.GetItem().GetProviderIds()), response.GetItem().GetMetadata())
 
 	return &MetadataResult{
 		HasMetadata:          true,
-		ProviderIDs:          mergePluginProviderIDs(p.capabilityID, response.GetItem().GetProviderId(), response.GetItem().GetProviderIds()),
+		ProviderIDs:          resultIDs,
+		WorkClaims:           workClaims,
 		Title:                response.GetItem().GetTitle(),
 		OriginalTitle:        response.GetItem().GetOriginalTitle(),
 		TitleAliases:         titleAliasesFromPlugin(response.GetItem().GetTitleAliases(), p.Slug()),
@@ -405,6 +408,7 @@ func (p *PluginProvider) GetPersonDetail(ctx context.Context, req PersonDetailRe
 // capability also declared lookup_images: an enrichment provider such as
 // MDBList has no artwork, so it is not asked.
 func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]RemoteImage, error) {
+	req.ProviderIDs = pluginRequestProviderIDs(req.ContentType, req.ProviderIDs)
 	providerID := req.ProviderIDs[p.capabilityID]
 	if providerID == "" && (!p.lookupImages || !p.hasLookupProviderID(req.ProviderIDs)) {
 		return nil, nil
@@ -496,6 +500,7 @@ func imageMetadataBool(md *structpb.Struct, key string) *bool {
 }
 
 func (p *PluginProvider) GetSeasons(ctx context.Context, req SeasonsRequest) ([]SeasonResult, error) {
+	req.ProviderIDs = pluginRequestProviderIDs(req.ContentType, req.ProviderIDs)
 	providerID := req.ProviderIDs[p.capabilityID]
 	if providerID == "" {
 		return nil, nil
@@ -617,28 +622,6 @@ func (p *PluginProvider) ResolveImageURLs(ctx context.Context, paths []string, v
 		return nil, err
 	}
 	return response.GetUrls(), nil
-}
-
-func mergePluginProviderIDs(capabilityID, providerID string, ids *structpb.Struct) map[string]string {
-	merged := stringMapFromStruct(ids)
-	if providerID != "" {
-		merged[capabilityID] = providerID
-	}
-	return merged
-}
-
-func stringMapFromStruct(value *structpb.Struct) map[string]string {
-	result := make(map[string]string)
-	if value == nil {
-		return result
-	}
-	for key, raw := range value.AsMap() {
-		text, ok := raw.(string)
-		if ok && text != "" {
-			result[key] = text
-		}
-	}
-	return result
 }
 
 // ratingsFromStruct reads the four flat ratings a plugin sends. IMDb and TMDB
@@ -859,24 +842,6 @@ func keywordsFromPluginMetadata(value *structpb.Struct) []string {
 		keywords = append(keywords, text)
 	}
 	return keywords
-}
-
-func structFromStringMap(value map[string]string) (*structpb.Struct, error) {
-	if len(value) == 0 {
-		return nil, nil
-	}
-
-	converted := make(map[string]any, len(value))
-	for key, entry := range value {
-		if entry == "" {
-			continue
-		}
-		converted[key] = entry
-	}
-	if len(converted) == 0 {
-		return nil, nil
-	}
-	return structpb.NewStruct(converted)
 }
 
 // videosFromRecords maps SDK VideoRecords into domain RemoteVideos, stamping

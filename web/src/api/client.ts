@@ -343,7 +343,7 @@ function detectDeviceName(): string {
   return `${browser} on ${platform}`;
 }
 
-function getDeviceHeaders(): Record<string, string> {
+export function getDeviceHeaders(): Record<string, string> {
   const deviceId = getOrCreateDeviceId();
   return {
     "X-Silo-Device-Id": deviceId,

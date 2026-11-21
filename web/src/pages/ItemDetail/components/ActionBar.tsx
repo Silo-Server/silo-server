@@ -78,7 +78,7 @@ import { isRightToLeft, readingArrowKey } from "@/lib/direction";
 // animating can stall the main thread on image-heavy movie and series pages.
 const responsivePrimaryActionClass =
   "transform-gpu transition-transform duration-150 motion-safe:hover:scale-[1.02] motion-safe:active:scale-[0.98]";
-const responsivePlayActionClass = `${responsivePrimaryActionClass} hover:bg-primary motion-reduce:hover:bg-primary/90`;
+const responsivePlayActionClass = `${responsivePrimaryActionClass} hover:bg-primary motion-reduce:hover:bg-primary-hover`;
 const staticGlassActionClass = "transition-none";
 const overflowMenuClass =
   "detail-overflow-menu border-border bg-popover text-popover-foreground fixed z-50 max-h-[calc(100vh-1rem)] w-max max-w-[calc(100vw-2rem)] min-w-0 overflow-y-auto rounded-md border p-1 shadow-md";
@@ -432,13 +432,28 @@ export default function ActionBar({
     displayedPlayLabel
   );
 
-  const progressOverlay =
+  // A thin bar in the pill's bottom padding, under the label, so the label
+  // stays on the solid accent. The fill is the label color (it reads wherever
+  // the label does); the faint track keeps 3:1 against it on every accent. A
+  // play pill showing the bar grows with its text (playSizeClass), so a larger
+  // font never pushes the label into the bar. In forced colors the track is a
+  // hollow outline and the fill solid, both ButtonText, which always contrasts
+  // with the button face.
+  const progressBar =
     playProgress != null && playProgress > 0 && playProgress < 100 ? (
       <span
-        className="border-primary-foreground/40 bg-primary-foreground/20 pointer-events-none absolute inset-y-0 start-0 border-e-2"
-        style={{ width: `${playProgress}%` }}
-      />
+        data-resume-progress
+        className="bg-primary-foreground/10 absolute inset-x-4 bottom-1.5 h-[3px] rounded-full forced-colors:bg-transparent forced-colors:outline forced-colors:outline-[ButtonText]"
+      >
+        <span
+          className="bg-primary-foreground absolute inset-y-0 start-0 min-w-1 rounded-full forced-colors:bg-[ButtonText]"
+          style={{ width: `${playProgress}%` }}
+        />
+      </span>
     ) : null;
+
+  // 44px at normal size either way; with the bar, the pill grows with its text.
+  const playSizeClass = progressBar ? "h-auto min-h-11 py-2.5" : "h-11";
 
   const openPlayChoiceDialog = () => setPlayChoiceOpen(true);
   const currentHref = useMemo(
@@ -1073,29 +1088,29 @@ export default function ActionBar({
           showPlayChoiceDialog ? (
             <Button
               onClick={openPlayChoiceDialog}
-              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
+              className={`${responsivePlayActionClass} relative ${playSizeClass} cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
               {playText}
-              {progressOverlay}
+              {progressBar}
             </Button>
           ) : selectedVersion ? (
             <Button
               onClick={() => handleSelectedVersionPlay(false)}
-              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
+              className={`${responsivePlayActionClass} relative ${playSizeClass} cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
               {playText}
-              {progressOverlay}
+              {progressBar}
             </Button>
           ) : (
             <Button
               onClick={() => startPlaybackFromHref(playHref)}
-              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
+              className={`${responsivePlayActionClass} relative ${playSizeClass} cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
               {playText}
-              {progressOverlay}
+              {progressBar}
             </Button>
           )
         ) : (

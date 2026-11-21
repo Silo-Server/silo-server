@@ -36,6 +36,7 @@ type AuthBinding struct {
 	DisplayOrder   int
 	AutoProvision  bool
 	DefaultLogin   bool
+	CallbackMode   string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -50,8 +51,9 @@ type TaskBinding struct {
 }
 
 type RuntimeConfigStore struct {
-	pool   *pgxpool.Pool
-	cipher *secret.Cipher
+	provisionWriter *ProvisionWriter
+	pool            *pgxpool.Pool
+	cipher          *secret.Cipher
 }
 
 // plugin_runtime_configs.config_value is intentionally an opaque, whole-row
@@ -77,20 +79,55 @@ func (s *RuntimeConfigStore) PutGlobalConfig(
 	key string,
 	value map[string]any,
 ) error {
-	if value == nil {
-		value = map[string]any{}
-	}
-	valueJSON, err := encodeRuntimeConfigValue(s.cipher, installationID, key, value)
-	if err != nil {
-		return fmt.Errorf("marshaling plugin runtime config: %w", err)
-	}
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := lockPluginInstallation(ctx, tx, installationID); err != nil {
+			return err
+		}
+		ownership, err := LoadProvisionOwnership(ctx, tx, installationID)
+		if err != nil {
+			return err
+		}
+		current, err := readGlobalConfigInTx(ctx, tx, s.cipher, installationID, key)
+		if err != nil {
+			return err
+		}
+		if value == nil {
+			value = map[string]any{}
+		}
+		merged := preserveOwnedConfig(ownership.ConfigFields[key], current, value)
+		if current != nil && SameConfig(current, merged) {
+			return nil
+		}
+		if current == nil && len(merged) == 0 && len(ownership.ConfigFields[key]) > 0 {
+			return nil
+		}
+		return upsertGlobalConfig(ctx, tx, s.cipher, installationID, key, merged)
+	})
+}
 
-	_, err = s.pool.Exec(ctx, `
+func readGlobalConfigInTx(ctx context.Context, tx pgx.Tx, cipher *secret.Cipher, installationID int, key string) (map[string]any, error) {
+	var raw []byte
+	err := tx.QueryRow(ctx, `SELECT config_value FROM plugin_runtime_configs
+		WHERE plugin_installation_id = $1 AND config_key = $2`, installationID, key).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading plugin runtime config: %w", err)
+	}
+	return decodeRuntimeConfigValue(cipher, installationID, key, raw)
+}
+
+func upsertGlobalConfig(ctx context.Context, tx pgx.Tx, cipher *secret.Cipher, installationID int, key string, value map[string]any) error {
+	valueJSON, err := encodeRuntimeConfigValue(cipher, installationID, key, value)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
 		INSERT INTO plugin_runtime_configs (plugin_installation_id, config_key, config_value)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (plugin_installation_id, config_key) DO UPDATE SET
-			config_value = EXCLUDED.config_value,
-			updated_at = NOW()
+			config_value = EXCLUDED.config_value, updated_at = NOW()
 	`, installationID, key, valueJSON)
 	if err != nil {
 		return fmt.Errorf("upserting plugin runtime config: %w", err)
@@ -110,6 +147,20 @@ func (s *RuntimeConfigStore) CompareAndSwapGlobalConfig(
 	value map[string]any,
 	expectedUpdatedAt *time.Time,
 ) (bool, error) {
+	return s.compareAndSwapGlobalConfig(ctx, installationID, key, value, expectedUpdatedAt, nil, nil, nil)
+}
+
+func (s *RuntimeConfigStore) compareAndSwapGlobalConfig(
+	ctx context.Context,
+	installationID int,
+	key string,
+	value map[string]any,
+	expectedUpdatedAt *time.Time,
+	expectedPackage *Installation,
+	clears map[string]struct{},
+	validate func() error,
+) (bool, error) {
+
 	if value == nil {
 		value = map[string]any{}
 	}
@@ -127,13 +178,33 @@ func (s *RuntimeConfigStore) CompareAndSwapGlobalConfig(
 	// InstallationStore.Update takes this lock first; acquiring it here keeps
 	// the FK key-share lock and generation update in one order and prevents a
 	// concurrent lifecycle update from deadlocking with a config save.
-	var parentID int
-	if err := tx.QueryRow(ctx, `SELECT id FROM plugin_installations WHERE id = $1 FOR NO KEY UPDATE`, installationID).Scan(&parentID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	if err := lockPluginInstallation(ctx, tx, installationID); err != nil {
+		if errors.Is(err, ErrInstallationNotFound) {
 			return false, nil
 		}
-		return false, fmt.Errorf("lock plugin installation for config update: %w", err)
+		return false, err
 	}
+	if expectedPackage != nil {
+		var version, path string
+		if err := tx.QueryRow(ctx, `SELECT version, install_path FROM plugin_installations WHERE id = $1`, installationID).Scan(&version, &path); err != nil {
+			return false, err
+		}
+		if version != expectedPackage.Version || path != expectedPackage.InstallPath {
+			return false, ErrInstallationChanged
+		}
+	}
+
+	matches, err := s.checkOwnedConfigCAS(ctx, tx, installationID, key, value, expectedUpdatedAt, clears)
+	if err != nil || !matches {
+		return false, err
+	}
+
+	if validate != nil {
+		if err := validate(); err != nil {
+			return false, err
+		}
+	}
+
 	var tag pgconn.CommandTag
 	if expectedUpdatedAt == nil {
 		tag, err = tx.Exec(ctx, `
@@ -163,6 +234,47 @@ func (s *RuntimeConfigStore) CompareAndSwapGlobalConfig(
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit plugin config update: %w", err)
+	}
+	return true, nil
+}
+
+func (s *RuntimeConfigStore) checkOwnedConfigCAS(
+	ctx context.Context, tx pgx.Tx, installationID int, key string, value map[string]any,
+	expectedUpdatedAt *time.Time, clears map[string]struct{},
+) (bool, error) {
+	ownership, err := LoadProvisionOwnership(ctx, tx, installationID)
+	if err != nil {
+		return false, err
+	}
+	fields := ownership.ConfigFields[key]
+	if len(fields) == 0 {
+		return true, nil
+	}
+	var updatedAt time.Time
+	var raw []byte
+	err = tx.QueryRow(ctx, `SELECT config_value, updated_at FROM plugin_runtime_configs
+		WHERE plugin_installation_id = $1 AND config_key = $2`, installationID, key).Scan(&raw, &updatedAt)
+	found := err == nil
+	if !found && !errors.Is(err, pgx.ErrNoRows) {
+		return false, fmt.Errorf("reading config for compare-and-swap: %w", err)
+	}
+	switch {
+	case expectedUpdatedAt == nil && found, expectedUpdatedAt != nil && !found:
+		return false, nil
+	case found && !updatedAt.Equal(*expectedUpdatedAt):
+		return false, nil
+	}
+	for _, field := range fields {
+		if _, clearing := clears[field]; clearing {
+			return false, &ManagedByEnvironmentError{Field: "config." + key + "." + field}
+		}
+	}
+	current, err := decodeRuntimeConfigValue(s.cipher, installationID, key, raw)
+	if err != nil {
+		return false, err
+	}
+	if err := requireUnchangedOwnedConfig(key, fields, current, value); err != nil {
+		return false, err
 	}
 	return true, nil
 }
@@ -382,6 +494,8 @@ func backfillEncryptedConfigs(
 // come from different installations.
 var ErrAuthProviderAlreadyEnabled = errors.New("another external sign-in provider is already enabled")
 
+var ErrAuthBindingIneligible = errors.New("enabled sign-in binding is incompatible with the installed plugin")
+
 // authBindingsLock serializes auth binding writes so two concurrent enables
 // cannot both pass the one-provider check.
 const authBindingsLock = "silo:plugin_auth_bindings"
@@ -401,46 +515,153 @@ func AuthBindingIsNetworkSQL(installation, capability string) string {
 // (network identity or not), or of the same installation, is enabled.
 func (s *RuntimeConfigStore) UpsertAuthBinding(ctx context.Context, binding AuthBinding) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, authBindingsLock); err != nil {
-			return fmt.Errorf("locking plugin auth bindings: %w", err)
+		if err := lockAuthBindings(ctx, tx); err != nil {
+			return err
+		}
+		if err := lockPluginInstallation(ctx, tx, binding.InstallationID); err != nil {
+			return err
+		}
+		ownership, err := LoadProvisionOwnership(ctx, tx, binding.InstallationID)
+		if err != nil {
+			return err
+		}
+		if fields := ownership.BindingFields[binding.CapabilityID]; len(fields) > 0 {
+			if err := requireUnchangedOwnedBinding(ctx, tx, binding, fields); err != nil {
+				return err
+			}
+		}
+		if binding.CallbackMode != "" {
+			var modes []string
+			err := tx.QueryRow(ctx, `SELECT COALESCE(metadata->'auth_modes', '[]'::jsonb)
+				FROM plugin_capabilities WHERE plugin_installation_id = $1 AND capability_type = 'auth_provider.v1' AND capability_id = $2`,
+				binding.InstallationID, binding.CapabilityID).Scan(&modes)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("reading auth capability modes: %w", err)
+			}
+			if err := ValidateAuthCallbackMode(binding.CallbackMode, modes); err != nil {
+				return err
+			}
+		}
+
+		if err := upsertAuthBindingInTx(ctx, tx, binding); err != nil {
+			return err
 		}
 		if binding.Enabled {
-			var other bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS (
-				SELECT 1 FROM plugin_auth_bindings b
-				WHERE b.enabled AND NOT (b.plugin_installation_id = $1 AND b.capability_id = $2)
-					AND (b.plugin_installation_id = $1
-						OR `+AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id")+` =
-							`+AuthBindingIsNetworkSQL("$1::bigint", "$2::text")+`))`,
-				binding.InstallationID, binding.CapabilityID).Scan(&other); err != nil {
-				return fmt.Errorf("checking enabled plugin auth bindings: %w", err)
-			}
-			if other {
-				return ErrAuthProviderAlreadyEnabled
-			}
-		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO plugin_auth_bindings (
-				plugin_installation_id, capability_id, enabled, display_order, auto_provision, default_login
-			) VALUES ($1, $2, $3, $4, $5, $6)
-			ON CONFLICT (plugin_installation_id, capability_id) DO UPDATE SET
-				enabled = EXCLUDED.enabled,
-				display_order = EXCLUDED.display_order,
-				auto_provision = EXCLUDED.auto_provision,
-				default_login = EXCLUDED.default_login,
-				updated_at = NOW()
-		`,
-			binding.InstallationID,
-			binding.CapabilityID,
-			binding.Enabled,
-			binding.DisplayOrder,
-			binding.AutoProvision,
-			binding.DefaultLogin,
-		); err != nil {
-			return fmt.Errorf("upserting plugin auth binding: %w", err)
+			return validateInstallationAuthBindings(ctx, tx, binding.InstallationID)
 		}
 		return nil
+
 	})
+}
+
+func lockAuthBindings(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, authBindingsLock); err != nil {
+		return fmt.Errorf("locking plugin auth bindings: %w", err)
+	}
+	return nil
+}
+
+func validateEnabledAuthBinding(ctx context.Context, tx pgx.Tx, binding AuthBinding) error {
+	var other bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM plugin_auth_bindings b JOIN plugin_installations i ON i.id = b.plugin_installation_id
+		WHERE b.enabled AND i.enabled AND NOT (b.plugin_installation_id = $1 AND b.capability_id = $2)
+			AND (b.plugin_installation_id = $1
+				OR `+AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id")+` =
+					`+AuthBindingIsNetworkSQL("$1::bigint", "$2::text")+`))`,
+		binding.InstallationID, binding.CapabilityID).Scan(&other); err != nil {
+		return fmt.Errorf("checking enabled plugin auth bindings: %w", err)
+	}
+	if other {
+		return ErrAuthProviderAlreadyEnabled
+	}
+	return nil
+}
+
+func validateInstallationAuthBindings(ctx context.Context, tx pgx.Tx, installationID int) error {
+	rows, err := tx.Query(ctx, `
+		SELECT b.capability_id, b.callback_mode, COALESCE(c.metadata->'auth_modes', '[]'::jsonb),
+		       c.capability_id IS NOT NULL, i.enabled
+		FROM plugin_auth_bindings b
+		JOIN plugin_installations i ON i.id = b.plugin_installation_id
+		LEFT JOIN plugin_capabilities c ON c.plugin_installation_id = i.id
+			AND c.capability_type = 'auth_provider.v1' AND c.capability_id = b.capability_id
+		WHERE b.plugin_installation_id = $1 AND b.enabled`, installationID)
+	if err != nil {
+		return err
+	}
+	type bindingEligibility struct {
+		CapabilityID  string
+		CallbackMode  string
+		AuthModes     []string
+		HasCapability bool
+		Active        bool
+	}
+	bindings, err := pgx.CollectRows(rows, pgx.RowToStructByPos[bindingEligibility])
+	if err != nil {
+		return err
+	}
+	for _, binding := range bindings {
+		if !binding.HasCapability ||
+			(binding.CallbackMode == AuthCallbackStable && ValidateAuthCallbackMode(binding.CallbackMode, binding.AuthModes) != nil) {
+			return fmt.Errorf("%w: %s", ErrAuthBindingIneligible, binding.CapabilityID)
+		}
+		if binding.Active {
+			if err := validateEnabledAuthBinding(ctx, tx, AuthBinding{InstallationID: installationID, CapabilityID: binding.CapabilityID}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func requireUnchangedOwnedBinding(ctx context.Context, tx pgx.Tx, input AuthBinding, fields []string) error {
+	var current AuthBinding
+	err := tx.QueryRow(ctx, `SELECT enabled, display_order, auto_provision, default_login, callback_mode
+		FROM plugin_auth_bindings WHERE plugin_installation_id = $1 AND capability_id = $2`,
+		input.InstallationID, input.CapabilityID).
+		Scan(&current.Enabled, &current.DisplayOrder, &current.AutoProvision, &current.DefaultLogin, &current.CallbackMode)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("reading plugin auth binding for ownership: %w", err)
+	}
+	for _, field := range fields {
+		changed := false
+		switch field {
+		case "enabled":
+			changed = current.Enabled != input.Enabled
+		case "display_order":
+			changed = current.DisplayOrder != input.DisplayOrder
+		case "auto_provision":
+			changed = current.AutoProvision != input.AutoProvision
+		case "default_login":
+			changed = current.DefaultLogin != input.DefaultLogin
+		case "callback", "callback_mode":
+			changed = input.CallbackMode != "" && current.CallbackMode != input.CallbackMode
+		}
+		if err != nil || changed {
+			return &ManagedByEnvironmentError{Field: "auth_binding." + field}
+		}
+	}
+	return nil
+}
+
+func upsertAuthBindingInTx(ctx context.Context, tx pgx.Tx, binding AuthBinding) error {
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO plugin_auth_bindings (
+			plugin_installation_id, capability_id, enabled, display_order, auto_provision, default_login, callback_mode
+		) VALUES ($1, $2, $3, $4, $5, $6, COALESCE(NULLIF($7, ''), 'installation'))
+		ON CONFLICT (plugin_installation_id, capability_id) DO UPDATE SET
+			enabled = EXCLUDED.enabled,
+			display_order = EXCLUDED.display_order,
+			auto_provision = EXCLUDED.auto_provision,
+			default_login = EXCLUDED.default_login,
+			callback_mode = COALESCE(NULLIF($7, ''), plugin_auth_bindings.callback_mode),
+			updated_at = NOW()
+	`, binding.InstallationID, binding.CapabilityID, binding.Enabled, binding.DisplayOrder,
+		binding.AutoProvision, binding.DefaultLogin, binding.CallbackMode); err != nil {
+		return fmt.Errorf("upserting plugin auth binding: %w", err)
+	}
+	return nil
 }
 
 func (s *RuntimeConfigStore) GetAuthBinding(
@@ -450,7 +671,7 @@ func (s *RuntimeConfigStore) GetAuthBinding(
 ) (*AuthBinding, error) {
 	var binding AuthBinding
 	err := s.pool.QueryRow(ctx, `
-		SELECT plugin_installation_id, capability_id, enabled, display_order, auto_provision, default_login, created_at, updated_at
+		SELECT plugin_installation_id, capability_id, enabled, display_order, auto_provision, default_login, callback_mode, created_at, updated_at
 		FROM plugin_auth_bindings
 		WHERE plugin_installation_id = $1 AND capability_id = $2
 	`, installationID, capabilityID).Scan(
@@ -460,6 +681,7 @@ func (s *RuntimeConfigStore) GetAuthBinding(
 		&binding.DisplayOrder,
 		&binding.AutoProvision,
 		&binding.DefaultLogin,
+		&binding.CallbackMode,
 		&binding.CreatedAt,
 		&binding.UpdatedAt,
 	)
@@ -474,7 +696,7 @@ func (s *RuntimeConfigStore) GetAuthBinding(
 
 func (s *RuntimeConfigStore) ListAuthBindings(ctx context.Context) ([]*AuthBinding, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT plugin_installation_id, capability_id, enabled, display_order, auto_provision, default_login, created_at, updated_at
+		SELECT plugin_installation_id, capability_id, enabled, display_order, auto_provision, default_login, callback_mode, created_at, updated_at
 		FROM plugin_auth_bindings
 		ORDER BY display_order ASC, plugin_installation_id ASC, capability_id ASC
 	`)
@@ -493,6 +715,7 @@ func (s *RuntimeConfigStore) ListAuthBindings(ctx context.Context) ([]*AuthBindi
 			&binding.DisplayOrder,
 			&binding.AutoProvision,
 			&binding.DefaultLogin,
+			&binding.CallbackMode,
 			&binding.CreatedAt,
 			&binding.UpdatedAt,
 		); err != nil {

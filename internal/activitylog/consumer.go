@@ -137,7 +137,7 @@ func (c *Consumer) insertRows(ctx context.Context, entries []LogEntry) error {
 			logstream.SafeText(e.NodeID), logstream.SafeText(e.Method), logstream.SafeText(e.Path),
 			logstream.SafeText(e.PathPattern), e.StatusCode, auditmutation.BoundUserAgent(e.UserAgent), e.DurationMs)
 	}
-	b.WriteString(" RETURNING id, timestamp, client_ip::text, user_id, impersonator_user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''), COALESCE(request_id, ''), COALESCE(node_id, ''), method, path, COALESCE(path_pattern, ''), COALESCE(status_code, 0), COALESCE(user_agent, ''), COALESCE(duration_ms, 0)")
+	b.WriteString(" RETURNING id, timestamp, host(client_ip), user_id, impersonator_user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''), COALESCE(request_id, ''), COALESCE(node_id, ''), method, path, COALESCE(path_pattern, ''), COALESCE(status_code, 0), COALESCE(user_agent, ''), COALESCE(duration_ms, 0)")
 
 	rows, err := c.pool.Query(ctx, b.String(), args...)
 	if err != nil {

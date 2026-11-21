@@ -19,7 +19,10 @@ export interface UICustomizationValue {
   /** The server can merge shortcut item mutations without lost updates. */
   supportsAtomicShortcuts: boolean;
   isLoading: boolean;
-  /** Capability or effective-value loading failed, so whole-document editors must stay closed. */
+  /**
+   * No capabilities answer has arrived, or the effective-value read failed, so
+   * whole-document editors must stay closed.
+   */
   isUnavailable: boolean;
 }
 

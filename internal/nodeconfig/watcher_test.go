@@ -46,6 +46,24 @@ func TestApplySettingsAppliesRedisDBToTheSavedURLOnly(t *testing.T) {
 	}
 }
 
+// A process setting from the environment is never stored, so every reload
+// must lay it over the stored value again.
+func TestApplySettingsOverlaysProcessSettingsOnEveryLoad(t *testing.T) {
+	stored := map[string]string{"auth.jwt_secret": testJWTSecret, "scanner.workers": "2"}
+	w := newTestWatcher(t, BootstrapOverrides{Settings: map[string]string{"scanner.workers": "9"}})
+	for range 2 {
+		if err := w.applySettings(t.Context(), stored); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if got := w.Config().Scanner.Workers; got != 9 {
+			t.Fatalf("scanner workers = %d, want the 9 the environment sets", got)
+		}
+	}
+	if stored["scanner.workers"] != "2" {
+		t.Errorf("the stored snapshot was changed to %q", stored["scanner.workers"])
+	}
+}
+
 // A config without auth.jwt_secret would let anyone sign stream tokens the
 // node then honors. The first load must fail rather than start the node, and a
 // reload must keep the last config that had a secret.

@@ -1,7 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, Info, Pencil, ShieldCheck, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
+import {
+  captureProfileRequestContext,
+  isCapturedProfileAuthorityActive,
+  type ProfileRequestContextSnapshot,
+} from "@/api/client";
+import { v2ErrorText } from "@/api/v2/request";
 import type { UserDevice } from "@/api/types";
 import { useT } from "@/i18n";
 import { PageHeader } from "@/components/page/PageHeader";
@@ -33,6 +39,7 @@ import {
   useSetSettingValue,
   useStoredSettingValues,
 } from "@/hooks/queries/settingValues";
+import { useAutosavedDraft } from "@/hooks/useAutosavedDraft";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { deviceSettingKeysForRevision } from "@/lib/settingsDisplay";
@@ -321,12 +328,13 @@ function DeviceDetail({
     enabled: canUseDeviceSettings,
   });
 
-  // The subtitle appearance panel edits its object locally so dragging a
-  // colour or opacity feels instant, persisting each patch as it lands. The
-  // server value reasserts itself whenever the panel is (re)opened.
+  // The subtitle appearance panel shows each change at once and saves it in
+  // the background; a change the server rejects drops back out of the panel.
+  // The server value reasserts itself whenever the panel is (re)opened.
   const [appearanceOpen, setAppearanceOpen] = useState(false);
-  const [appearance, setAppearance] = useState<SubtitleAppearance | null>(null);
   const appearanceSetting = settings[SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE];
+  const appearance = useAutosavedDraft(parseSubtitleAppearance(appearanceSetting?.value));
+  const appearanceAuthority = useRef<ProfileRequestContextSnapshot | null>(null);
   const appearanceChangedHere = appearanceSetting?.scope === "profile_device";
 
   const changedCount = device.changed_count;
@@ -436,16 +444,13 @@ function DeviceDetail({
                 ) {
                   return;
                 }
+                appearance.discardQueued();
                 clearDevice.mutate(
                   { deviceId: device.device_id, profileId: targetProfileId },
                   {
                     onSuccess: () => toast.success(t("web.settings.device.resetDone")),
                     onError: (error) =>
-                      toast.error(
-                        error instanceof Error
-                          ? error.message
-                          : t("web.settings.device.resetFailed"),
-                      ),
+                      toast.error(v2ErrorText(error, t("web.settings.device.resetFailed"))),
                   },
                 );
               }}
@@ -469,11 +474,7 @@ function DeviceDetail({
                   {
                     onSuccess: () => toast.success(t("web.settings.device.forgotten")),
                     onError: (error) =>
-                      toast.error(
-                        error instanceof Error
-                          ? error.message
-                          : t("web.settings.device.forgetFailed"),
-                      ),
+                      toast.error(v2ErrorText(error, t("web.settings.device.forgetFailed"))),
                   },
                 );
               }}
@@ -545,9 +546,7 @@ function DeviceDetail({
               { key, value, identity },
               {
                 onError: (error) =>
-                  toast.error(
-                    error instanceof Error ? error.message : t("web.settings.device.saveFailed"),
-                  ),
+                  toast.error(v2ErrorText(error, t("web.settings.device.saveFailed"))),
               },
             )
           }
@@ -556,49 +555,60 @@ function DeviceDetail({
               { key, identity },
               {
                 onError: (error) =>
-                  toast.error(
-                    error instanceof Error
-                      ? error.message
-                      : t("web.settings.device.settingResetFailed"),
-                  ),
+                  toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed"))),
               },
             )
           }
           onOpenPanel={() => {
-            setAppearance(parseSubtitleAppearance(appearanceSetting?.value));
+            appearance.reset(parseSubtitleAppearance(appearanceSetting?.value));
             setAppearanceOpen(true);
           }}
         />
       )}
 
       <SubtitleAppearancePanelView
-        open={appearanceOpen && appearance !== null}
-        value={appearance ?? parseSubtitleAppearance(undefined)}
+        open={appearanceOpen}
+        value={appearance.value}
         onChange={(patch) => {
-          const next = { ...(appearance ?? parseSubtitleAppearance(undefined)), ...patch };
-          setAppearance(next);
-          setValue.mutate(
-            { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, value: next, identity },
-            {
-              onError: (error) =>
-                toast.error(
-                  error instanceof Error ? error.message : t("web.settings.device.saveFailed"),
-                ),
-            },
-          );
+          // A queued save goes out once the one in flight settles, and the
+          // request carries whichever profile is active then. Drop it if the
+          // person has switched profiles since, so it can't land on another
+          // one: before this edit merges into it, and again when it is sent.
+          const previous = appearanceAuthority.current;
+          if (previous && !isCapturedProfileAuthorityActive(previous)) {
+            appearance.discardQueued();
+          }
+          const authority = captureProfileRequestContext();
+          appearanceAuthority.current = authority;
+          const save = async (next: SubtitleAppearance) => {
+            if (authority && !isCapturedProfileAuthorityActive(authority)) {
+              throw new Error("profile changed before the save was sent");
+            }
+            try {
+              await setValue.mutateAsync({
+                key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE,
+                value: next,
+                identity,
+                // The panel shows its own draft, so the next queued save
+                // needn't wait for the settings reads to refetch.
+                refreshInBackground: true,
+              });
+            } catch (error) {
+              toast.error(v2ErrorText(error, t("web.settings.device.saveFailed")));
+              throw error;
+            }
+          };
+          appearance.edit(patch, save);
         }}
         onClose={() => setAppearanceOpen(false)}
         canReset={appearanceChangedHere}
         onReset={() => {
+          appearance.discardQueued();
           clearValue.mutate(
             { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, identity },
             {
               onError: (error) =>
-                toast.error(
-                  error instanceof Error
-                    ? error.message
-                    : t("web.settings.device.settingResetFailed"),
-                ),
+                toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed"))),
             },
           );
           setAppearanceOpen(false);
@@ -612,7 +622,7 @@ function DeviceDetail({
           device.custom_name || device.device_name || t("web.settings.device.appearance.thisDevice")
         }
         status={
-          setValue.isPending
+          appearance.saving
             ? t("web.settings.device.saving")
             : t("web.settings.device.appearance.savedAutomatically")
         }
@@ -661,10 +671,7 @@ function DeviceNameEditor({
           );
           onDone();
         },
-        onError: (error) =>
-          toast.error(
-            error instanceof Error ? error.message : t("web.settings.device.renameFailed"),
-          ),
+        onError: (error) => toast.error(v2ErrorText(error, t("web.settings.device.renameFailed"))),
       },
     );
   };

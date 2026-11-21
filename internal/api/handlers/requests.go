@@ -43,15 +43,3 @@ type RequestService interface {
 	Follow(ctx context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) (mediarequests.RequestState, error)
 	Unfollow(ctx context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) error
 }
-
-type RequestsHandler struct {
-	service RequestService
-}
-
-func NewRequestsHandler(service RequestService) *RequestsHandler {
-	return &RequestsHandler{service: service}
-}
-
-// Service is the request service this handler routes to; the v2 listener
-// calls the same value so both surfaces share one store and one policy.
-func (h *RequestsHandler) Service() RequestService { return h.service }

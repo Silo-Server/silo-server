@@ -118,7 +118,12 @@ function ExtraCard({ extra, onPlay }: { extra: ItemExtra; onPlay: () => void }) 
         </div>
       </div>
       <div className="px-0.5">
-        <span className="text-foreground block truncate text-[0.8125rem] font-medium">{title}</span>
+        <span
+          dir="auto"
+          className="bidi-text text-foreground block truncate text-[0.8125rem] font-medium"
+        >
+          {title}
+        </span>
         {extra.duration_seconds != null && extra.duration_seconds > 0 && (
           <span className="text-muted-foreground block text-[0.6875rem] tabular-nums">
             {numberText(formatClock(extra.duration_seconds))}

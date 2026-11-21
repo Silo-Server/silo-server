@@ -205,6 +205,9 @@ export function RequestSeasonsDialog({
           <Button variant="outline" onClick={() => close(false)}>
             {t("common.cancel")}
           </Button>
+          {/* The label lists the picked seasons, so it can be wider than the dialog: the
+              button shrinks beside Cancel and the list ends in "…", while the words around
+              it stay whole, since the verb comes after the list in some languages. */}
           <Button
             onClick={submit}
             disabled={
@@ -214,14 +217,22 @@ export function RequestSeasonsDialog({
               (!serverChooses && selected.length === 0) ||
               createRequest.isPending
             }
-            className="gap-2"
+            className="min-w-0 shrink gap-2"
           >
             {(createRequest.isPending || refreshing) && <Loader2 className="size-4 animate-spin" />}
-            {selected.length > 0
-              ? t("web.requests.seasons.requestSeasons", { seasons: formatSeasonList(selected) })
-              : serverChooses
-                ? t("web.requests.seasons.requestSeries")
-                : t("web.requests.request")}
+            <span className="flex min-w-0 whitespace-pre">
+              {selected.length > 0 ? (
+                t("web.requests.seasons.requestSeasons", {
+                  seasons: <span className="truncate">{formatSeasonList(selected)}</span>,
+                })
+              ) : (
+                <span className="truncate">
+                  {serverChooses
+                    ? t("web.requests.seasons.requestSeries")
+                    : t("web.requests.request")}
+                </span>
+              )}
+            </span>
           </Button>
         </DialogFooter>
       </DialogContent>

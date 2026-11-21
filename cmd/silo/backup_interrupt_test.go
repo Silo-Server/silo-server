@@ -129,7 +129,8 @@ func TestBackupInterruptCleansUp(t *testing.T) {
 			cmd := exec.Command(os.Args[0], "-test.run=^TestBackupInterruptHelper$")
 			cmd.Dir = work
 			cmd.Env = append(os.Environ(), interruptHelperEnv+"="+string(raw), "SECRET_KEY="+masterKey,
-				envBackupS3Endpoint+"="+srv.URL, envBackupS3AccessKey+"=a", envBackupS3SecretKey+"=s", envBackupS3PathStyle+"=true")
+				envBackupS3Endpoint+"="+srv.URL, envBackupS3AccessKey+"=a", envBackupS3SecretKey+"=s", envBackupS3PathStyle+"=true",
+				"SECRET_KEY_FILE=", envBackupS3AccessKey+"_FILE=", envBackupS3SecretKey+"_FILE=")
 			var output bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &output, &output
 			if err := cmd.Start(); err != nil {

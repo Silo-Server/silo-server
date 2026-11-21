@@ -47,6 +47,10 @@ import (
 // TranscodeStartRequest is the JSON body for POST /transcode/start.
 type TranscodeStartRequest struct {
 	SessionID string `json:"session_id"`
+	// StartID is an opaque id the core picks for this one start. A release
+	// that names it ends the job only while this start's job still runs, so a
+	// late release cannot end a newer start under the same transport id.
+	StartID string `json:"start_id,omitempty"`
 	// PlaybackSessionID, UserID, ProfileID and MediaFileID are the playback
 	// session the transcode serves. The node files its session record and
 	// stream telemetry under them; it reads no stream token to learn them.
@@ -461,6 +465,21 @@ type Server struct {
 	// reconstruction. It is always acquired before lifecycleMu or mu.
 	reloadMu   sync.RWMutex
 	activeJobs atomic.Int32
+	// jobCap is the node's own job cap, 0 for none; admission guards
+	// admitted, the new work it let in that activeJobs does not count yet,
+	// remuxSeen, when each progressive remux transport was last served, and
+	// continuing, the overlap allowances granted per playback session and
+	// not yet registered. See jobcap.go.
+	jobCap          atomic.Int32
+	admission       sync.Mutex
+	admitted        int
+	remuxSeen       map[string]time.Time
+	continuing      map[string]int
+	remuxSeenPruned time.Time
+	// declaredHWAccel and artifactBudget are what the node's operator
+	// declared; see SetDeclaredHWAccel and SetArtifactBudget.
+	declaredHWAccel string
+	artifactBudget  atomic.Int64
 	// inFlight counts requests for work activeJobs does not count; see
 	// trackInFlight.
 	inFlight atomic.Int32
@@ -1053,6 +1072,11 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errNodeDraining, http.StatusServiceUnavailable)
 		return
 	}
+	slot, refused := s.admitPreparation(w, req)
+	if refused {
+		return
+	}
+	defer slot.release()
 
 	cfg := s.watcher.Config()
 	if cfg == nil {
@@ -1109,6 +1133,19 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 		writeDownloadPrepareResult(w, result)
 		return
 	}
+	if slot == nil {
+		// Admission was skipped because this artifact looked prepared or
+		// in preparation, but what is there does not answer this request
+		// (another recipe), so the node has to encode after all. Admitted
+		// before the receipt goes, so a refusal leaves the artifact that is
+		// there usable for the recipe it answers.
+		admitted, refused := s.admitNewPreparation(w)
+		if refused {
+			return
+		}
+		slot = admitted
+		defer slot.release()
+	}
 	if err := invalidateDownloadArtifactReceipt(outputPath); err != nil {
 		http.Error(w, "failed to invalidate download artifact receipt", http.StatusInternalServerError)
 		return
@@ -1116,7 +1153,7 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 
 	jobCtx, cancelJob := sourceContext(r.Context(), source)
 	defer cancelJob()
-	s.activeJobs.Add(1)
+	s.countJob(slot)
 	defer s.activeJobs.Add(-1)
 	if s.tracker != nil {
 		trackingID := "download-" + req.ArtifactID
@@ -1717,6 +1754,17 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid copy-fmp4 recipe", http.StatusBadRequest)
 		return
 	}
+	// A start that replaces a session this node runs (an audio switch, a
+	// Jellyfin retry), or a new transport for a playback session it serves
+	// (a quality switch or replan), continues a job the node holds, so the
+	// cap never refuses it. Admitted before the source opens, so a refusal
+	// costs the core nothing.
+	slot, releaseAdmission, admitted := s.admitStart(req, time.Now())
+	if !admitted {
+		writeAtCapacity(w)
+		return
+	}
+	defer releaseAdmission()
 	// The session owns the source once it registers, across FFmpeg restarts
 	// and seeks; until then every return closes it.
 	source, ok := s.openJobSource(w, r, req.SourceGrant)
@@ -1793,7 +1841,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		SegmentDuration:            req.SegmentDuration,
 		SegmentRetentionSeconds:    cfg.Playback.SegmentRetentionSeconds,
 		FFmpegPath:                 cfg.Playback.FFmpegPath,
-		HWAccel:                    req.HWAccel,
+		HWAccel:                    s.jobHWAccel(req.HWAccel, req.ToneMapMode == tonemap.ModeHardware),
 		// This node's configured device (or device list — StartTranscode
 		// resolves it to one GPU), matching what reconstruction uses so fresh
 		// and reconstructed sessions balance identically.
@@ -1958,7 +2006,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	unlock()
-	s.activeJobs.Add(1)
+	s.countJob(slot)
 	s.armSessionThrottler(session, req.ThrottleSeconds)
 
 	w.WriteHeader(http.StatusAccepted)
@@ -2405,6 +2453,36 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	}
 	claims := resolution.Recipe.ToClaims()
 	theme := claims.PlayMethod == streamtoken.PlayMethodThemeAAC
+	playbackSessionID := resolution.PlaybackSessionID
+	if playbackSessionID == "" {
+		playbackSessionID = transportID
+	}
+	// A GET for a playback session this node serves, or served within the
+	// idle lifetime, is a viewer seeking or coming back: it continues a job
+	// the node holds. Any other is new work and takes its slot here, before
+	// the source opens, so a refusal costs the core no open, and before the
+	// remux is registered, so a request the cap turns away is never what
+	// another request for the same playback session continues.
+	// A HEAD starts and registers nothing, so it holds neither a slot nor
+	// the allowance a GET for the same playback session may need.
+	var (
+		slot      *jobSlot
+		overlap   *continuation
+		continues bool
+	)
+	if r.Method != http.MethodHead {
+		overlap, continues = s.claimContinuation(playbackSessionID, time.Now())
+		defer overlap.release()
+		if !continues {
+			admitted, ok := s.admitJob()
+			if !ok {
+				writeAtCapacity(w)
+				return
+			}
+			slot = admitted
+			defer slot.release()
+		}
+	}
 	// A GET opens its source once, before admission, and holds it for the
 	// request; a source the core withdraws ends it. HEAD reads no media.
 	var source nodesource.Source
@@ -2464,10 +2542,6 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	defer cancelSource()
 	ctx, cancel := context.WithCancel(sourceCtx)
 	requestID := s.progressiveRemuxSequence.Add(1)
-	playbackSessionID := resolution.PlaybackSessionID
-	if playbackSessionID == "" {
-		playbackSessionID = transportID
-	}
 	abort := make(chan struct{})
 	stop := sync.OnceFunc(func() {
 		cancel()
@@ -2510,8 +2584,13 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		close(done)
 	}()
 
-	s.activeJobs.Add(1)
+	// The remux is registered above, so it counts as running from here: its
+	// slot when it was new work, the overlap allowance when it continued.
+	s.countJob(slot)
+	overlap.release()
 	defer s.activeJobs.Add(-1)
+	s.noteRemux(playbackSessionID, time.Now())
+	defer func() { s.noteRemux(playbackSessionID, time.Now()) }()
 	if s.tracker != nil {
 		startedAt, startedAtSource := resolvedStart(resolution)
 		trackerType := "remux"
@@ -2617,25 +2696,63 @@ func (s *Server) progressiveRemuxStopped(transportID string) bool {
 	return s.stoppedProgressiveRemuxes[transportID].After(time.Now())
 }
 
+// releaseSupersededLocked reports whether the HLS job under transportID is
+// not the one a release (a stop with fence=0) was sent for, so the release
+// must leave it running. A release that names a start ends only that start's
+// job. One that names none, a retire of the node a transport left, ends the
+// job it found on arrival or a rebuild published while it waited: that
+// rebuild resolved before the move off this node committed, since the core
+// refuses one whose route names another node. It leaves a job a start
+// published while it waited. A stop that ends the session for good is fenced
+// and ends any job. The caller holds mu.
+func (s *Server) releaseSupersededLocked(transportID, startID string, arrived *playback.TranscodeSession) bool {
+	session, ok := s.sessions[transportID]
+	if !ok {
+		return false
+	}
+	identity := s.identities[transportID]
+	if startID != "" {
+		return identity.startID != startID
+	}
+	return session != arrived && !identity.rebuilt
+}
+
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
+	fenced := r.URL.Query().Get(playback.TranscodeStopFenceQueryParam) != "0"
+	startID := r.URL.Query().Get(playback.TranscodeStopStartIDQueryParam)
+	// A release is sent in the background and can arrive after a newer start
+	// of the same transport id. Note the job it found on arrival: a start
+	// published while it waits for the lifecycle lock is newer than it.
+	var arrived *playback.TranscodeSession
+	if !fenced && startID == "" {
+		s.mu.RLock()
+		arrived = s.sessions[sessionID]
+		s.mu.RUnlock()
+	}
 
 	// Serialize against in-flight starts and reconstructs. A RequireReady
 	// start registers its job only after the readiness wait; a stop racing
 	// that wait (the API rolling back a timed-out start) would otherwise miss
 	// the map and 404, orphaning the just-spawned ffmpeg until the idle
 	// reaper finds it. Blocking here until the start registers turns that
-	// miss into a normal teardown.
+	// miss into a normal teardown. A release does the same only for the start
+	// it names: one without a start id leaves the job such a start publishes,
+	// though not a rebuild (releaseSupersededLocked).
 	unlock := s.lockSessionLifecycle(sessionID)
 	defer unlock()
 
 	// The core deletes the transport's stored recipe before it calls here;
 	// the node keeps only its in-memory fences.
-	fenced := r.URL.Query().Get(playback.TranscodeStopFenceQueryParam) != "0"
 	s.mu.Lock()
 	now := time.Now()
 	s.pruneStopFencesLocked(now)
 	progressive, progressiveFound := s.progressiveRemuxes[sessionID]
+	if !fenced && !progressiveFound && s.releaseSupersededLocked(sessionID, startID, arrived) {
+		s.mu.Unlock()
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
 	// An HLS job is tracked under the transport id it started with, which for a
 	// native v3 transcode is not its card's SessionID. Only a progressive remux
 	// still running here is tracked under the viewer's playback session id; one

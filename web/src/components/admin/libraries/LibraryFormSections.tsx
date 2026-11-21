@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useLibraryRealtimeMonitoring } from "@/hooks/queries/admin/libraries";
-import { useAppLanguage, useT, type Translate } from "@/i18n";
+import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { extraKindGroupLabel, PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
 import { languageOptions } from "@/player/utils/languageNames";
@@ -331,7 +331,7 @@ function ProviderLevelSection({
         type="button"
         onClick={() => setCollapsed(!collapsed)}
         aria-expanded={!collapsed}
-        className="text-primary hover:text-primary/80 mb-1.5 flex min-h-11 items-center gap-1.5 text-start text-xs font-semibold tracking-wider uppercase sm:min-h-0"
+        className="text-primary mb-1.5 flex min-h-11 items-center gap-1.5 text-start text-xs font-semibold tracking-wider uppercase hover:underline sm:min-h-0"
       >
         {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
         {contentLevelLabel(level)}
@@ -443,7 +443,7 @@ function BoxSetFields({ form }: { form: LibraryFormController }) {
                         : "text-muted-foreground hover:text-foreground",
                     )}
                   >
-                    {count}
+                    {numberText(count)}
                   </button>
                 );
               })}

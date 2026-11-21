@@ -1694,15 +1694,20 @@ func (h *ItemsHandler) leafUserData(ctx context.Context, userID int, profileID, 
 // marking watched or clearing the resume point moves the progress timestamp
 // without a new version being played. A Jellyfin-protocol play records no
 // choice, so its file shows only for a movie never started natively.
+// A restored choice without a local file ID can supply the edition hint.
 func applyVersionChoice(userData *catalog.SeasonUserData, choice *userstore.SeriesPlaybackPreference) *catalog.SeasonUserData {
-	if choice == nil || choice.FileID == 0 {
+	if choice == nil {
+		return userData
+	}
+	if choice.FileID <= 0 && (choice.EditionKey == "" || userData != nil && userData.LastFileID != nil && *userData.LastFileID > 0) {
 		return userData
 	}
 	if userData == nil {
 		userData = &catalog.SeasonUserData{}
 	}
-	fileID := choice.FileID
-	userData.LastFileID = &fileID
+	if choice.FileID > 0 {
+		userData.LastFileID = new(choice.FileID)
+	}
 	userData.LastResolution = stringPtrOrNil(choice.Resolution)
 	hdr := choice.HDR
 	userData.LastHDR = &hdr
@@ -1792,6 +1797,21 @@ func applyEffectiveEditionPreference(userData *catalog.SeasonUserData, target **
 	}
 	if target != nil && *target == nil {
 		*target = userData.LastEditionKey
+	}
+}
+
+func projectEditionPreference(aliases catalog.EditionAliases, userData *catalog.SeasonUserData, effective **string) {
+	if userData != nil && userData.LastEditionKey != nil {
+		key := *userData.LastEditionKey
+		if grouped := aliases.Key(key); grouped != key {
+			userData.LastEditionKey = new(grouped)
+		}
+	}
+	if *effective != nil {
+		key := **effective
+		if grouped := aliases.Key(key); grouped != key {
+			*effective = new(grouped)
+		}
 	}
 }
 

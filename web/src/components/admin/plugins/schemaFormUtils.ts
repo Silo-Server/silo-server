@@ -1,7 +1,19 @@
 import type { PluginAdminForm, PluginAdminFormCondition, PluginAdminFormField } from "@/api/types";
 import { t as appT, type MessageKey, type TextValues } from "@/i18n";
+import { startsRightToLeft } from "@/lib/direction";
 
 export type SchemaOption = { value: string; label: string };
+
+/**
+ * record[key] when key is the record's own property. A plugin's field key
+ * such as "constructor" would otherwise read Object.prototype.
+ */
+export function ownValue<T>(
+  record: Readonly<Record<string, T>> | undefined,
+  key: string,
+): T | undefined {
+  return record !== undefined && Object.hasOwn(record, key) ? record[key] : undefined;
+}
 
 function stringify(value: unknown): string {
   if (typeof value === "boolean") return value ? "true" : "false";
@@ -25,7 +37,8 @@ function conditionValue(
   values: Record<string, unknown>,
   fields?: PluginAdminFormField[],
 ): unknown {
-  if (values[key] !== undefined) return values[key];
+  const value = ownValue(values, key);
+  if (value !== undefined) return value;
   return fields?.find((field) => field.key === key)?.default_value;
 }
 
@@ -288,7 +301,45 @@ export function effectiveValue(
   field: PluginAdminFormField,
   values: Record<string, unknown>,
 ): unknown {
-  return values[field.key] !== undefined ? values[field.key] : field.default_value;
+  const value = ownValue(values, field.key);
+  return value !== undefined ? value : field.default_value;
+}
+
+/** Whether a field holds a secret, which renders masked. */
+export function isSecretField(field: PluginAdminFormField): boolean {
+  return field.secret || field.control === "PASSWORD";
+}
+
+/**
+ * Whether a field renders as a multi-line text box. A secret never does: a
+ * textarea can't mask what is typed, so a secret stays a masked single-line
+ * input even when its plugin also marks it multiline.
+ */
+export function rendersMultiline(field: PluginAdminFormField): boolean {
+  return !isSecretField(field) && (field.control === "TEXTAREA" || field.multiline);
+}
+
+/**
+ * The `dir` of a plugin form's text control on a right-to-left page. Typed
+ * values are mostly machine strings (paths, URLs, LDAP filters, client IDs)
+ * that would draw backwards there (`/mnt/media` as `mnt/media/`). "auto" takes
+ * the direction from the value's first letter, so those read left to right
+ * while text typed in Arabic or Hebrew stays right to left. A masked value
+ * keeps one edge whatever its text, and a known path field reads left to right
+ * like the other path inputs. "auto" ignores the placeholder, so an empty field
+ * takes its placeholder's direction: usually an untranslated path or URL from
+ * the schema, sometimes translated text such as a saved secret's hint. A
+ * left-to-right page already draws these values in order and is left alone.
+ */
+export function textDirection(
+  pageDir: "ltr" | "rtl",
+  text: string,
+  placeholder: string | undefined,
+  alwaysLeftToRight: boolean,
+): "auto" | "ltr" | "rtl" | undefined {
+  if (pageDir !== "rtl") return undefined;
+  if (!text) return startsRightToLeft(placeholder ?? "") ? "rtl" : "ltr";
+  return alwaysLeftToRight ? "ltr" : "auto";
 }
 
 export function fieldIsVisible(
@@ -340,11 +391,12 @@ export function buildSchemaValues(
     if (!fieldIsVisible(descriptor, field, draft)) continue; // don't persist hidden fields' stale values
     // Fall back to the declared default for untouched fields so an unmodified
     // default persists exactly as it is displayed.
-    const rawSource = draft[field.key] !== undefined ? draft[field.key] : field.default_value;
-    const coerced = coerceFieldValue(field, rawSource, fieldTypes?.[field.key]);
+    const rawSource = effectiveValue(field, draft);
+    const fieldType = ownValue(fieldTypes, field.key);
+    const coerced = coerceFieldValue(field, rawSource, fieldType);
     if (coerced === undefined) {
-      if (options?.explicitClears && !field.secret && field.control !== "PASSWORD") {
-        out[field.key] = clearedFieldValue(field, fieldTypes?.[field.key]);
+      if (options?.explicitClears && !isSecretField(field)) {
+        out[field.key] = clearedFieldValue(field, fieldType);
       }
       continue;
     }

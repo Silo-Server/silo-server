@@ -123,7 +123,7 @@ func (h *AdminLogsSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	validated, claims, err := h.Validate(r.Context(), identity)
 	if err != nil {
-		http.Error(w, "log stream authority expired", http.StatusUnauthorized)
+		refuseSocketHandshake(w, err, "log stream authority expired")
 		return
 	}
 	if claims.Role != eventsAdminRole {
@@ -134,30 +134,15 @@ func (h *AdminLogsSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if identity.AccessExpiresAt.Before(deadline) {
 		deadline = identity.AccessExpiresAt
 	}
-	ctx, cancel := context.WithDeadline(validated, deadline)
-	defer cancel()
-	go func() {
-		interval := h.checkInterval
-		if interval <= 0 {
-			interval = eventsSessionCheckInterval
+	ctx, cancel := socketLifetime(validated, deadline)
+	defer cancel(nil)
+	go recheckSocketAuthority(ctx, cancel, h.checkInterval, func(checkCtx context.Context) error {
+		_, current, err := h.Validate(checkCtx, identity)
+		if err == nil && current.Role != eventsAdminRole {
+			err = errSocketAccessChanged
 		}
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
-				_, current, err := h.Validate(checkCtx, identity)
-				stop()
-				if err != nil || current.Role != eventsAdminRole {
-					cancel()
-					return
-				}
-			}
-		}
-	}()
+		return err
+	})
 	h.Logs.serveLogStream(w, r.WithContext(ctx), websocket.Upgrader{Subprotocols: []string{AdminLogsSocketProtocol}, EnableCompression: true, CheckOrigin: func(r *http.Request) bool {
 		return socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load()))
 	}})
