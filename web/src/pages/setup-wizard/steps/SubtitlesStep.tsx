@@ -153,8 +153,7 @@ function ProviderRow({
   useEffect(() => {
     if (!refocusAfterReload.current || draft.saveFailed) return;
     refocusAfterReload.current = false;
-    const active = document.activeElement;
-    if (active && active !== document.body && active.isConnected) return;
+    if (document.activeElement !== document.body) return;
     switchRef.current?.focus();
   }, [draft.saveFailed]);
 
@@ -166,7 +165,8 @@ function ProviderRow({
     // A locked row says why it is locked, and Continue waits on it.
     status = (
       <SettingFieldStatus tone="warn">
-        <span className="min-w-0 [overflow-wrap:anywhere]">
+        {/* A live region, so a failed reload's new message is announced. */}
+        <span role="status" className="min-w-0 [overflow-wrap:anywhere]">
           {draft.loadFailed
             ? t("web.admin.settings.providers.subtitles.loadFailed")
             : t("web.admin.settings.providers.subtitles.saveNotConfirmed")}
@@ -461,7 +461,9 @@ export function SubtitlesStep() {
       footnote={t("web.setup.subtitles.footnote")}
     >
       <StepSection>
-        {providers.isError ? (
+        {/* A failed refresh keeps the rows it already has, so a locked row's
+            Reload stays reachable; the error view is only for a first load. */}
+        {providers.isError && !providers.data ? (
           <div className="py-4">
             <p className="text-sm font-medium">{t("web.setup.subtitles.listLoadFailed")}</p>
             <p className="text-muted-foreground mt-1 text-xs">
