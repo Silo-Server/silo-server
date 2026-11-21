@@ -89,8 +89,13 @@ function ProfileLabel({ profile, note }: { profile: Profile; note?: string }) {
         <AvatarFallback>{profile.name.slice(0, 1).toUpperCase()}</AvatarFallback>
       </Avatar>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm font-medium">{profile.name}</span>
-        <span className="text-muted-foreground text-xs">
+        {/* A cut name keeps its start in either script; w-fit keeps a short one
+            on the page's start side. */}
+        <span dir="auto" className="w-fit max-w-full truncate text-sm font-medium">
+          {profile.name}
+        </span>
+        {/* contain-inline-size: the note added after a copy doesn't move CopyRow's button. */}
+        <span className="text-muted-foreground text-xs contain-inline-size">
           {[limit && t("web.profiles.allow.limit", { limit }), note].filter(Boolean).join(" · ")}
         </span>
       </span>
@@ -128,19 +133,25 @@ function CopyRow({ profile, collectionId }: { profile: Profile; collectionId: st
   const copy = useAllowCollectionTitles();
   const [added, setAdded] = useState<number | null>(null);
   return (
-    <li className="flex items-center gap-3 rounded-md px-2 py-2">
-      <ProfileLabel
-        profile={profile}
-        note={
-          added === null
-            ? undefined
-            : t("web.profiles.allow.allowedTitles", { count: added, count_text: added })
-        }
-      />
+    // Wraps: when the name, or 8rem for the limit line beneath it, doesn't fit beside
+    // the button, the button moves to the end of its own line, and its label wraps
+    // when even that line is too narrow.
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md px-2 py-2">
+      <span className="flex min-w-[min(8rem,100%)] flex-auto items-center gap-3">
+        <ProfileLabel
+          profile={profile}
+          note={
+            added === null
+              ? undefined
+              : t("web.profiles.allow.allowedTitles", { count: added, count_text: added })
+          }
+        />
+      </span>
       <Button
         type="button"
         variant="outline"
         size="sm"
+        className="ms-auto h-auto min-h-8 max-w-full py-1 text-center whitespace-normal"
         disabled={copy.isPending}
         onClick={() =>
           copy.mutate({ profileId: profile.id, collectionId }, { onSuccess: (n) => setAdded(n) })
