@@ -100,14 +100,13 @@ function AdminLayoutContent() {
     return () => desktopMedia.removeEventListener("change", closeMobileNavigation);
   }, []);
 
-  // Below lg, `clip` rather than `hidden`: `hidden` makes this wrapper a scroll
-  // container that never scrolls, so the phone header's sticky positioning
-  // would stick to it and scroll away with the page. `flow-root` keeps the
-  // header's top margin inside the wrapper, as `hidden` did. From lg, where
-  // that header is hidden, the wrapper keeps `hidden`, and the pages'
-  // `lg:sticky` and `xl:sticky` elements stay inert as they have been.
+  // `clip` rather than `hidden`: `hidden` makes this wrapper a scroll container
+  // that never scrolls, so every `sticky` element on an admin page (the phone
+  // header, a page's pinned panel) would stick to it and scroll away with the
+  // page. `flow-root` keeps the phone header's top margin inside the wrapper,
+  // as `hidden` did.
   return (
-    <div className="bg-background relative flow-root min-h-[100dvh] overflow-x-clip lg:overflow-x-hidden">
+    <div className="bg-background relative flow-root min-h-[100dvh] overflow-x-clip">
       <AdminSectionCommandDialog
         sections={adminSearchSections}
         open={commandOpen}
@@ -203,7 +202,9 @@ function AdminLayoutContent() {
       {/* `lg:pt-16` starts the content below the fixed activity control
           (top-5 below any banner, h-9 → it ends 3.5rem down). With less, a page
           header's right-aligned buttons sit underneath them until the capped
-          content column pulls away from the viewport's right edge.
+          content column pulls away from the viewport's right edge. A side
+          panel that sticks on desktop starts 4rem below any banner for the
+          same reason.
           `--page-gutter` is published so fixed page chrome (the collection
           editor's save bar) can line up with the content column.
           `scroll-mt-24` keeps Skip to content's jump clear of the phone

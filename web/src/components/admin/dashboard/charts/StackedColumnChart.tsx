@@ -23,9 +23,10 @@ export interface StackedColumnChartProps {
   /**
    * Take the height of the parent instead of `height`, so the columns follow
    * the widget's row height. The marks are laid out in CSS rather than in a
-   * viewBox, so a taller box simply gives every column more room. Below lg
-   * the rows are content-sized, and `.admin-chart-fill` in app.css keeps the
-   * plot at a fixed-height chart's 10rem instead.
+   * viewBox, so a taller box simply gives every column more room. Below the
+   * dashboard's 12-column layout the rows are content-sized, and
+   * `.admin-chart-fill` in app.css keeps the plot at a fixed-height chart's
+   * 10rem instead.
    */
   fill?: boolean;
   formatValue?: (value: number) => string;

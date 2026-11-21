@@ -75,6 +75,8 @@ import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 /** Under this width Arrange has no drag: ⋯ opens a sheet that moves the card. */
 const NARROW_QUERY = "(max-width: 1023px)";
+/** From this width (Tailwind's `xl`) the viewer preview is pinned beside the board. */
+const PINNED_PREVIEW_QUERY = "(min-width: 80rem)";
 
 type OrderReads = Awaited<ReturnType<typeof fetchAdminBoardOrderSnapshot>>;
 type OrderRead = Awaited<ReturnType<typeof fetchAdminGroupOrderSnapshot>>;
@@ -169,6 +171,7 @@ export function GroupsBoard({
   const t = useT();
   const queryClient = useQueryClient();
   const narrow = useMediaQuery(NARROW_QUERY);
+  const previewPinned = useMediaQuery(PINNED_PREVIEW_QUERY);
   const { data: capabilities } = useAdminCollectionCapabilities();
   const canEdit = capabilities?.groups === true;
 
@@ -633,11 +636,18 @@ export function GroupsBoard({
       </div>
 
       {narrow ? null : (
+        // From xl it sits beside the board, pinned below the admin shell's
+        // activity control and any impersonation banner. A long preview is
+        // taller than the window, so it scrolls inside itself, and takes
+        // keyboard focus there to be scrolled. The cap leaves room for the
+        // 2rem of page padding below the board, or the end of the page would
+        // push the preview back up under the control.
         <ViewerPreview
           libraryName={libraryName}
           shelves={shelves}
           isVisible={isVisible}
-          className="xl:sticky xl:top-6"
+          focusable={previewPinned}
+          className="overlay-scroll xl:sticky xl:top-[calc(4rem+var(--impersonation-banner-height))] xl:max-h-[calc(100dvh-6rem-var(--impersonation-banner-height)-var(--playback-bar-clearance,0px))] xl:overflow-y-auto"
         />
       )}
 
