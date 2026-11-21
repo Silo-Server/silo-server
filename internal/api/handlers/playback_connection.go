@@ -147,28 +147,32 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 // is not bound, and neither is a progressive remux, which has no segment lead
 // wherever it runs.
 //
-// An unknown answer for a remote transcode counts as bound, so no limit is
-// learned. The core cannot reach the node (unreachable lists the nodes the
-// replan already found not answering), the node no longer runs the transport,
-// or it failed the read: each is a server-side fault that stalls the client
-// whatever its link, as a node dying mid-stream does. Not learning loses only
-// memory, since the replan still plans under the client's estimate and a slow
-// link stalls and is learned again; a wrong limit pins every file the device
-// plays to a lower quality for a day.
+// An unknown answer counts as bound, so no limit is learned. A node on the
+// session's route does not answer (unreachable lists the transcode node and
+// egress proxy the replan already found not answering, whatever the delivery),
+// the node no longer runs the transport or failed the read, or an HLS session
+// has no transcode on this replica and none on a node, as while one is being
+// rebuilt: each is a server-side fault that stalls the client whatever its
+// link, as a node dying mid-stream does. Not learning loses only memory, since
+// the replan still plans under the client's estimate and a slow link stalls
+// and is learned again; a wrong limit pins every file the device plays to a
+// lower quality for a day.
 func (h *PlaybackHandler) transcodeOutputBoundV3(ctx context.Context, sessionID string, unreachable map[string]struct{}) bool {
+	if len(unreachable) > 0 {
+		return true
+	}
 	if h.tm == nil {
 		return false
 	}
 	session, err := h.sessionMgr.GetSession(sessionID)
 	if err != nil || session.TranscodeNodeURL == "" {
-		local := h.tm.GetTranscodeSession(sessionID)
-		return local != nil && local.OutputBoundsClient()
+		if local := h.tm.GetTranscodeSession(sessionID); local != nil {
+			return local.OutputBoundsClient()
+		}
+		return err == nil && session.OutputProtocol == playback.OutputProtocolHLS
 	}
 	if session.OutputProtocol == playback.OutputProtocolHTTP {
 		return false
-	}
-	if _, down := unreachable[session.TranscodeNodeURL]; down {
-		return true
 	}
 	bound, err := h.tm.RemoteOutputBound(ctx, remoteTransportID(session), session.TranscodeNodeURL)
 	if err != nil {

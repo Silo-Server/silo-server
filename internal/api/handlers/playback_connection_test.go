@@ -553,7 +553,9 @@ func TestConnectionReadingsDB(t *testing.T) {
 // A transcode on a remote node is judged by the node that runs it. When the
 // core cannot get that answer, the node may be gone or failing, which stalls
 // the client whatever its link: the stall counts as the server's and no limit
-// is learned from it. A session with no transcode anywhere still records.
+// is learned from it. So does any node on the route the replan found not
+// answering, and an HLS session whose transcode runs nowhere the replica can
+// see. A session with no transcode, such as direct play, still records.
 func TestTranscodeOutputBoundAsksTheRemoteNode(t *testing.T) {
 	const transportID = "session-remote-plan0001"
 	for _, tc := range []struct {
@@ -561,7 +563,10 @@ func TestTranscodeOutputBoundAsksTheRemoteNode(t *testing.T) {
 		status      int
 		body        string
 		unreachable bool
+		// deadProxy is an egress proxy the replan found not answering.
+		deadProxy   bool
 		local       bool
+		hls         bool
 		progressive bool
 		want        bool
 	}{
@@ -571,7 +576,12 @@ func TestTranscodeOutputBoundAsksTheRemoteNode(t *testing.T) {
 		{name: "node fails the read", status: http.StatusServiceUnavailable, want: true},
 		{name: "node answers garbage", status: http.StatusOK, body: `not json`, want: true},
 		{name: "replan found the node unreachable", status: http.StatusOK, body: `{"output_bound":false}`, unreachable: true, want: true},
-		{name: "no transcode on this replica or a node", local: true, want: false},
+		{name: "direct play with no transcode on this replica or a node", local: true, want: false},
+		{name: "direct play through an egress proxy the replan found unreachable", local: true, deadProxy: true, want: true},
+		// The session plays HLS, but its transcode is on no node and not on
+		// this replica, as while it is being rebuilt: the answer is unknown.
+		{name: "HLS session with no transcode on this replica or a node", local: true, hls: true, want: true},
+		{name: "remote progressive remux on a node the replan found unreachable", status: http.StatusNotFound, progressive: true, unreachable: true, want: true},
 		// A progressive remux has no segment lead, as on this replica, and
 		// its request may already have ended, so the node is not asked.
 		{name: "remote progressive remux", status: http.StatusNotFound, progressive: true, want: false},
@@ -593,11 +603,17 @@ func TestTranscodeOutputBoundAsksTheRemoteNode(t *testing.T) {
 			if tc.progressive {
 				session.OutputContainer, session.OutputProtocol = playback.OutputContainerFMP4, playback.OutputProtocolHTTP
 			}
+			if tc.hls {
+				session.OutputProtocol = playback.OutputProtocolHLS
+			}
 			manager.RegisterReconstructed(session)
 			handler := newKeyedPlaybackHandler(manager)
 			var unreachable map[string]struct{}
 			if tc.unreachable {
 				unreachable = map[string]struct{}{node.URL: {}}
+			}
+			if tc.deadProxy {
+				unreachable = map[string]struct{}{"http://egress-proxy.invalid": {}}
 			}
 
 			if got := handler.transcodeOutputBoundV3(t.Context(), session.ID, unreachable); got != tc.want {

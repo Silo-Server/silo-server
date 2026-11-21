@@ -2296,10 +2296,11 @@ can measure use the bandwidth probe ([playback-api.md](../playback-api.md#bandwi
 A transcode is a single HLS rendition, so the player cannot step down on its
 own. A client on `auto` whose playback keeps rebuffering sends a
 `quality_change` replan that keeps `quality_preference: "auto"` and lowers
-`bandwidth_estimate_kbps` below the bitrate that stalled, with
-`bandwidth_estimate_source: "observed_rebuffer"`; the planner then re-runs
-`auto` against the lower estimate, and the server records a learned limit
-(see [Buffering quality](#buffering-quality-native-v2)). The
+`bandwidth_estimate_kbps` below the bitrate that stalled; the planner then
+re-runs `auto` against the lower estimate. With slow-link evidence the replan
+also carries `bandwidth_estimate_source: "observed_rebuffer"`, and the server
+records a learned limit (see [Buffering quality](#buffering-quality-native-v2));
+without it the replan has no source and records nothing. The
 [buffering-quality design](../design/2026-10-17-buffering-quality.md) defines
 when every client does this: after two stalls of at least a second within two
 minutes, or one stall of six seconds. Stall time in the first ten seconds of a
@@ -2708,17 +2709,19 @@ restarting is waiting on the server. An FFmpeg that failed is judged like a
 running one, by its output's lead over the client. A progressive remux has no
 segment lead and is never judged bound.
 
-When the remote answer is unknown, the stall counts as the server's and
-records nothing: the replan found the node unreachable, the node no longer runs
-the transport, or the read failed or took longer than two seconds. A node
-older than the read answers it as unknown, so its transcodes teach no limit
-until it is upgraded. Each is a
+When the answer is unknown, the stall counts as the server's and records
+nothing: the replan found a node on the session's route unreachable (its
+transcode node or its egress proxy, whatever the delivery), the node no longer
+runs the transport, the read failed or took longer than two seconds, or the
+session plays HLS but its transcode runs neither on the replica that answers
+nor on a node, as while it is being rebuilt or when another API replica runs
+it. A node older than the read answers it as unknown, so its transcodes teach
+no limit until it is upgraded. Each is a
 server-side fault that stalls a client on any link, as a node dying mid-stream
 does. Skipping the record loses only memory, since the replan still plans under
 the estimate and a slow link stalls and is learned again, while a wrong limit
 lowers every file the device plays for a day. The read is made only for a
-replan that would otherwise record. A transcode running on another API replica
-is not visible to the one that answers the replan and still records.
+replan that would otherwise record.
 
 An Auto start or replan without `bandwidth_estimate_kbps` plans with the
 connection's current reading, the one `GET /api/v2/playback/connection`
