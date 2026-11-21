@@ -127,8 +127,8 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   `type="url"` rejects addresses without a scheme.
 - Shown text (not an input) whose URL, path, or file name can hold Arabic or Hebrew
   segments, such as a library folder or an import source, goes through `PathText`
-  (`src/components/PathText.tsx`): left to right overall, each `/`-separated segment in its
-  own direction. A plain `dir="ltr"` box swaps two adjacent Arabic or Hebrew segments.
+  (`src/components/PathText.tsx`): left to right overall, each part between `/ ? & = #` in
+  its own direction. A plain `dir="ltr"` box swaps two adjacent Arabic or Hebrew segments.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also
