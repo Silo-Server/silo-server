@@ -746,21 +746,29 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                               return (
                                 <div
                                   key={`${pin.type}-${pin.id}`}
-                                  className="group/pin relative flex items-center"
+                                  className="group/row relative flex items-center"
                                 >
+                                  {/* The end padding keeps the label clear of the unpin
+                                    button where it shows at rest (touch). A fine pointer
+                                    only reveals it on hover or focus, so the label keeps
+                                    the full width there. */}
                                   <ViewTransitionLink
                                     to={pinHref}
                                     onClick={onNavigate}
-                                    className={`flex flex-1 items-center gap-2 rounded-xl px-2.5 py-2.5 text-[0.78125rem] font-medium transition-colors duration-150 ${
+                                    className={`flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2.5 py-2.5 text-[0.78125rem] font-medium transition-colors duration-150 ${
+                                      canToggle
+                                        ? "pe-7 [:where(:root[data-fine-pointer=true])_&]:pe-2.5"
+                                        : ""
+                                    } ${
                                       pinActive
                                         ? "text-sidebar-accent-foreground bg-sidebar-accent/90"
                                         : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/70"
                                     }`}
                                   >
                                     {pin.type === "collection" ? (
-                                      <FolderOpen className="h-3.5 w-3.5 opacity-60" />
+                                      <FolderOpen className="h-3.5 w-3.5 shrink-0 opacity-60" />
                                     ) : (
-                                      <LayoutGrid className="h-3.5 w-3.5 opacity-60" />
+                                      <LayoutGrid className="h-3.5 w-3.5 shrink-0 opacity-60" />
                                     )}
                                     <span id={pinLabelId} className="truncate">
                                       {label}
@@ -776,7 +784,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                           label: pin.label,
                                         })
                                       }
-                                      className="text-muted-foreground hover:text-destructive absolute end-1 rounded p-1 opacity-0 transition-opacity group-hover/pin:opacity-100"
+                                      className="pointer-reveal text-muted-foreground hover:text-destructive absolute end-1 rounded p-1"
                                       title={t("web.shell.sidebar.unpin")}
                                       aria-label={t("web.shell.sidebar.unpin")}
                                       aria-describedby={pinLabelId}
