@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Tabs as TabsPrimitive } from "radix-ui";
 import { Shuffle } from "lucide-react";
 import { useT, type MessageKey } from "@/i18n";
+import { hasArabicScript } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 import { isAudiobookLibraryType } from "@/pages/libraryPageSearchParams";
 
@@ -78,7 +79,12 @@ export default function LibraryHeader({
           <span>{t("web.library.header.eyebrow")}</span>
           {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a divider glyph, not text */}
           <span className="hero-eyebrow-divider">/</span>
-          <span className="hero-eyebrow-strong">{libraryName}</span>
+          <span
+            className="hero-eyebrow-strong"
+            data-cursive={hasArabicScript(libraryName) || undefined}
+          >
+            {libraryName}
+          </span>
         </p>
       </div>
       <div className="flex min-w-0 items-center gap-2">
