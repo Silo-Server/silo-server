@@ -31,6 +31,12 @@ interface DetailHeroProps {
    */
   genreHref?: (genre: string) => string;
   overview?: string;
+  /**
+   * Identifies the item the overview belongs to. A new item remounts the
+   * overview, so its translation status starts fresh instead of announcing
+   * the previous item's.
+   */
+  overviewKey?: string;
   /** Shows the translating status while an on-view AI translation is in flight. */
   overviewTranslating?: boolean;
   /** When set, renders a small "Translate" chip under the overview. */
@@ -72,6 +78,7 @@ export default function DetailHero({
   genres,
   genreHref,
   overview,
+  overviewKey,
   overviewTranslating = false,
   onTranslateOverview,
   overviewMachineTranslated = false,
@@ -303,6 +310,7 @@ export default function DetailHero({
 
                 {overview && (
                   <DetailOverview
+                    key={overviewKey}
                     overview={overview}
                     compact={isCompact}
                     clamp={isViewportBounded}

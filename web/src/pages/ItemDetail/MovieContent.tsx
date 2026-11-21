@@ -263,6 +263,7 @@ export default function MovieContent({
           }
           scoreRow={<ScoreRow ratings={item.ratings} />}
           overview={item.overview}
+          overviewKey={item.content_id}
           overviewTranslating={overviewTranslating}
           onTranslateOverview={onTranslateOverview}
           overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}

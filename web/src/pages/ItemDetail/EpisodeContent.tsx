@@ -329,6 +329,7 @@ export default function EpisodeContent({
           }
           scoreRow={<ScoreRow ratings={item.ratings} />}
           overview={overviewSource?.overview}
+          overviewKey={item.content_id}
           overviewTranslating={overviewTranslating}
           onTranslateOverview={onTranslateOverview}
           overviewMachineTranslated={hasMachineTranslation(

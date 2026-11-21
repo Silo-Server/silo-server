@@ -167,6 +167,7 @@ export default function SeasonContent({
             />
           }
           overview={item.overview}
+          overviewKey={item.content_id}
           overviewTranslating={translationInHero && overviewTranslating}
           onTranslateOverview={translationInHero ? onTranslateOverview : undefined}
           overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
