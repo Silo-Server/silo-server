@@ -60,6 +60,7 @@ Examples:
 - Hero titles are the largest and heaviest text on the page.
 - Section headers are clearly smaller than page and hero titles.
 - Metadata stays small and muted.
+- Secondary text on the solid accent (a pressed pill, a default button) keeps the label's own color and steps down in size and weight. Opacity there can drop it below 4.5:1 with some admin accents.
 - Primary actions should be the most visually prominent controls.
 
 ### 5. Ambient Immersion
