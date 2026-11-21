@@ -1020,6 +1020,7 @@ export default function NotificationsAdminSettings() {
                   label={t("web.admin.settings.notifications.relay.url")}
                   description={t("web.admin.settings.notifications.relay.urlDescription")}
                   type="text"
+                  dir="ltr"
                   value={pushRelayURL}
                   onChange={(v) => setPushRelayURLDraft(v)}
                   restartRequired={needsRestart("notifications.push_relay_url")}

@@ -668,7 +668,7 @@ function DeviceScopeControl({
         )}
       >
         <span>{t("web.admin.devices.scope.allDevices")}</span>
-        <span className="font-mono text-[11.5px] tabular-nums opacity-70">
+        <span className="text-muted-foreground font-mono text-[11.5px] tabular-nums">
           {numberText(totalDevices)}
         </span>
       </button>
@@ -684,7 +684,7 @@ function DeviceScopeControl({
         )}
       >
         <span>{t("web.admin.devices.scope.withOverrides")}</span>
-        <span className="font-mono text-[11.5px] tabular-nums opacity-70">
+        <span className="text-muted-foreground font-mono text-[11.5px] tabular-nums">
           {devicesWithOverrides}
         </span>
       </button>
@@ -739,7 +739,7 @@ function SettingsScopeControl({
         )}
       >
         <span>{t("web.admin.devices.settingsScope.allSettings")}</span>
-        <span className="font-mono text-[10.5px] tabular-nums opacity-70">
+        <span className="text-muted-foreground font-mono text-[10.5px] tabular-nums">
           {numberText(totalSettings)}
         </span>
       </button>
@@ -758,7 +758,7 @@ function SettingsScopeControl({
         )}
       >
         <span>{t("web.admin.devices.settingsScope.overrides")}</span>
-        <span className="font-mono text-[10.5px] tabular-nums opacity-70">
+        <span className="text-muted-foreground font-mono text-[10.5px] tabular-nums">
           {numberText(overrideCount)}
         </span>
       </button>

@@ -49,8 +49,8 @@ function contrastRatio(a: string, b: string): number {
   return (light! + 0.05) / (dark! + 0.05);
 }
 
-/** `hex` moved `amount` (0-1) of the way toward `target`, as srgb color-mix does. */
-function mix(hex: string, target: string, amount: number): string {
+/** Moves `hex` toward `target` by `amount` (0 keeps `hex`, 1 gives `target`). */
+function mixToward(hex: string, target: string, amount: number): string {
   const from = parseInt(hex.slice(1), 16);
   const to = parseInt(target.slice(1), 16);
   const channel = (shift: number) => {
@@ -61,6 +61,15 @@ function mix(hex: string, target: string, amount: number): string {
       .padStart(2, "0");
   };
   return `#${channel(16)}${channel(8)}${channel(0)}`;
+}
+
+/** The accent mixed toward white in twentieths until `reads` accepts it, or white. */
+function lightenUntil(hex: string, reads: (candidate: string) => boolean): string {
+  for (let step = 0; step <= 20; step++) {
+    const candidate = mixToward(hex, WHITE_LABEL, step / 20);
+    if (reads(candidate)) return candidate;
+  }
+  return WHITE_LABEL;
 }
 
 /** The label drawn on an accent: white or Cinema Dark's dark label, whichever reads better. */
@@ -86,16 +95,37 @@ function primaryLabelOn(hex: string): string {
  * badge) still reads.
  */
 function accentOnDark(hex: string): string {
-  for (let step = 0; step <= 20; step++) {
-    const candidate = mix(hex, WHITE_LABEL, step / 20);
-    if (
+  return lightenUntil(
+    hex,
+    (candidate) =>
       contrastRatio(candidate, PLAYER_PANEL) >= MIN_PLAYER_CONTRAST &&
-      contrastRatio(candidate, labelOn(candidate)) >= MIN_PLAYER_CONTRAST
-    ) {
-      return candidate;
-    }
-  }
-  return WHITE_LABEL;
+      contrastRatio(candidate, labelOn(candidate)) >= MIN_PLAYER_CONTRAST,
+  );
+}
+
+/** Cinema Dark's lightest surface under text, --surface-raised. */
+const LIGHTEST_SURFACE = "#28282e";
+/** High contrast mixes 20% of its white boost into --surface-raised (app.css). */
+const LIGHTEST_SURFACE_HIGH_CONTRAST = mixToward(LIGHTEST_SURFACE, WHITE_LABEL, 0.2);
+/** The strongest accent tint text sits on: `bg-primary/20`. */
+const STRONGEST_TINT = 0.2;
+/** WCAG AA for normal text. */
+const MIN_TEXT_CONTRAST = 4.5;
+
+/**
+ * The accent as text (`text-primary`) on Cinema Dark: unchanged when it
+ * already reads at 4.5:1 on `surface`, the lightest surface text sits on, and
+ * on the accent's own strongest tint over it; otherwise lightened just enough.
+ * Darker surfaces then read at least as well.
+ */
+function accentText(hex: string, surface: string): string {
+  const tint = mixToward(surface, hex, STRONGEST_TINT);
+  return lightenUntil(
+    hex,
+    (candidate) =>
+      contrastRatio(candidate, surface) >= MIN_TEXT_CONTRAST &&
+      contrastRatio(candidate, tint) >= MIN_TEXT_CONTRAST,
+  );
 }
 
 /** Cinema Dark's page (--background), which the theme's --primary-hover fades the primary toward. */
@@ -109,8 +139,10 @@ const PAGE = "#141417";
  * theme's color-mix keeps fractional channels and can land just under it.
  */
 function hoverFill(hex: string, label: string): string {
-  const faded = mix(hex, PAGE, 0.1);
-  return contrastRatio(faded, label) >= MIN_LABEL_CONTRAST ? faded : mix(hex, WHITE_LABEL, 0.1);
+  const faded = mixToward(hex, PAGE, 0.1);
+  return contrastRatio(faded, label) >= MIN_LABEL_CONTRAST
+    ? faded
+    : mixToward(hex, WHITE_LABEL, 0.1);
 }
 
 /**
@@ -131,6 +163,10 @@ export function accentDeclarations(accent: string): Record<string, string> | nul
     "sidebar-primary": hex,
     "accent-on-dark": onDark,
     "accent-on-dark-foreground": labelOn(onDark),
+    // app.css maps text-primary to --primary-text; BrandingProvider swaps in
+    // the high contrast value under that setting.
+    "primary-text": accentText(hex, LIGHTEST_SURFACE),
+    "primary-text-high-contrast": accentText(hex, LIGHTEST_SURFACE_HIGH_CONTRAST),
   };
   const label = primaryLabelOn(hex);
   if (label !== DARK_LABEL) {

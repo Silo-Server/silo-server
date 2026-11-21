@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
+	provisioningv1 "github.com/Silo-Server/silo-server/contracts/plugins/provisioning/v1"
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 func TestReadProvisionDocumentEmptyEnvironment(t *testing.T) {
@@ -18,22 +22,87 @@ func TestReadProvisionDocumentEmptyEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name, inline, path      string
-		wantDocument, wantError bool
+		name         string
+		env          map[string]string
+		wantVariable string
+		wantError    bool
 	}{
-		{"empty variables use committed state", "", "", false, false},
-		{"inline release", release, "", true, false},
-		{"file release", "", path, true, false},
-		{"two declarations", release, path, false, true},
+		{"empty variables use committed state", nil, "", false},
+		{"inline release", map[string]string{"SILO_PLUGINS": release}, "SILO_PLUGINS", false},
+		{"file release", map[string]string{"SILO_PLUGINS_FILE": path}, "SILO_PLUGINS_FILE", false},
+		{"deployment document", map[string]string{"SILO_CONFIG": release}, "SILO_CONFIG", false},
+		{"deployment document file", map[string]string{"SILO_CONFIG_FILE": path}, "SILO_CONFIG_FILE", false},
+		{"two declarations", map[string]string{"SILO_PLUGINS": release, "SILO_PLUGINS_FILE": path}, "", true},
+		{"old and new names", map[string]string{"SILO_CONFIG_FILE": path, "SILO_PLUGINS": release}, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SILO_PLUGINS", tc.inline)
-			t.Setenv("SILO_PLUGINS_FILE", tc.path)
+			for _, name := range []string{"SILO_CONFIG", "SILO_CONFIG_FILE", "SILO_PLUGINS", "SILO_PLUGINS_FILE"} {
+				t.Setenv(name, tc.env[name])
+			}
 			doc, err := ReadProvisionDocument()
-			if (err != nil) != tc.wantError || (doc != nil) != tc.wantDocument {
+			if (err != nil) != tc.wantError || (doc != nil) != (tc.wantVariable != "") {
 				t.Fatalf("document present = %t, error = %v", doc != nil, err)
 			}
+			if doc != nil && doc.Variable() != tc.wantVariable {
+				t.Fatalf("variable = %q, want %q", doc.Variable(), tc.wantVariable)
+			}
 		})
+	}
+}
+
+// The deployment document declares AI providers with keys taken by reference.
+// A section it leaves out is left as stored; an empty one releases it.
+func TestProvisionDocumentAIProviders(t *testing.T) {
+	t.Setenv("TEST_SILO_OPENAI_KEY", "sk-from-env")
+	doc, err := parseProvisionDocument([]byte(`{"apiVersion":1,"ai_providers":{
+		"openai-main":{"type":"openai","api_key":{"fromEnv":"TEST_SILO_OPENAI_KEY"}},
+		"local-embed":{"type":"custom","name":"Local embeddings","base_url":"http://embed:8080/v1","capabilities":["embeddings"]}}}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.DeclaresPlugins() {
+		t.Error("a document without a plugins section declares plugins")
+	}
+	providers, declared, err := doc.DeclaredAIProviders()
+	if err != nil || !declared || len(providers) != 2 {
+		t.Fatalf("providers = %+v, declared = %t, error = %v", providers, declared, err)
+	}
+	if p := providers[1]; p.ID != "openai-main" || p.APIKey != "sk-from-env" {
+		t.Errorf("openai-main = %+v, want the key from the environment", p)
+	}
+	if p := providers[0]; p.ID != "local-embed" || p.APIKey != "" {
+		t.Errorf("local-embed = %+v, want no key", p)
+	}
+
+	empty, err := parseProvisionDocument([]byte(`{"apiVersion":1,"ai_providers":{}}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providers, declared, err := empty.DeclaredAIProviders(); err != nil || !declared || len(providers) != 0 {
+		t.Errorf("empty section: providers = %v, declared = %t, error = %v; want a release", providers, declared, err)
+	}
+	plugins, err := parseProvisionDocument([]byte(`{"apiVersion":1,"plugins":{}}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, declared, _ := plugins.DeclaredAIProviders(); declared || !plugins.DeclaresPlugins() {
+		t.Error("a plugins-only document declares AI providers, or no plugins")
+	}
+
+	t.Setenv("TEST_SILO_BLANK_KEY", "  ")
+	for name, input := range map[string]string{
+		"literal key":        `{"apiVersion":1,"ai_providers":{"openai-main":{"type":"openai","api_key":"sk-private-literal"}}}`,
+		"key it requires":    `{"apiVersion":1,"ai_providers":{"openai-main":{"type":"openai"}}}`,
+		"blank key":          `{"apiVersion":1,"ai_providers":{"local":{"type":"ollama","api_key":{"fromEnv":"TEST_SILO_BLANK_KEY"}}}}`,
+		"empty capabilities": `{"apiVersion":1,"ai_providers":{"local":{"type":"ollama","capabilities":[]}}}`,
+	} {
+		doc, err := parseProvisionDocument([]byte(input), false)
+		if err == nil {
+			_, _, err = doc.DeclaredAIProviders()
+		}
+		if err == nil || strings.Contains(err.Error(), "sk-private-literal") {
+			t.Errorf("%s: error = %v, want a refusal that doesn't quote the key", name, err)
+		}
 	}
 }
 
@@ -99,7 +168,6 @@ func TestProvisionDocumentRejectsAmbiguousInputs(t *testing.T) {
 		"duplicate JSON release":     {`{"apiVersion":1,"plugins":{"silo.auth.oidc":{"version":"1.0.0","version":"0.1.2"}}}`, false},
 		"duplicate YAML release":     {"apiVersion: 1\nplugins:\n  silo.auth.oidc:\n    version: 1.0.0\n    version: 0.1.2\n", true},
 		"multi document":             {"apiVersion: 1\nplugins: {}\n---\nplugins: {}\n", true},
-		"missing plugins":            {`{"apiVersion":1}`, false},
 		"null releases no ownership": {`{"apiVersion":1,"plugins":null}`, false},
 		"misspelled host option":     {`{"apiVersion":1,"plugins":{"silo.auth.oidc":{"authBinding":{}}}}`, false},
 		"conflicting secret sources": {`{"apiVersion":1,"plugins":{"silo.auth.oidc":{"config":{"connection":{"password":{"fromFile":"private-literal","fromEnv":"ALSO"}}}}}}`, false},
@@ -180,5 +248,38 @@ func TestProvisionDocumentHostIntegersAndPluginNumbers(t *testing.T) {
 
 	if _, err := parseProvisionDocument([]byte("apiVersion: 1\nplugins:\n  silo.auth.oidc:\n    config:\n      connection:\n        seconds: 9007199254740993.0"), true); err == nil {
 		t.Fatal("YAML rounded the number before validation")
+	}
+}
+
+// The schema lists the provider types and capabilities the server knows, so a
+// type added in config is declarable.
+func TestProvisionSchemaMatchesAIProviderTypes(t *testing.T) {
+	var schema struct {
+		Defs struct {
+			AIProvider struct {
+				Properties struct {
+					Type         struct{ Enum []string } `json:"type"`
+					Capabilities struct {
+						Items struct{ Enum []string } `json:"items"`
+					} `json:"capabilities"`
+				} `json:"properties"`
+			} `json:"aiProvider"`
+		} `json:"$defs"`
+	}
+	if err := json.Unmarshal(provisioningv1.Schema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	var types, capabilities []string
+	for _, spec := range config.AIProviderTypes {
+		types = append(types, string(spec.Type))
+	}
+	for _, capability := range config.AICapabilities {
+		capabilities = append(capabilities, string(capability))
+	}
+	if got := schema.Defs.AIProvider.Properties.Type.Enum; !slices.Equal(got, types) {
+		t.Errorf("schema types = %v, want %v", got, types)
+	}
+	if got := schema.Defs.AIProvider.Properties.Capabilities.Items.Enum; !slices.Equal(got, capabilities) {
+		t.Errorf("schema capabilities = %v, want %v", got, capabilities)
 	}
 }

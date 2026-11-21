@@ -30,10 +30,14 @@ type PreviewHomeSection struct {
 	Scope       string `json:"scope"`
 	LibraryID   *int   `json:"library_id,omitempty"`
 	SectionType string `json:"section_type"`
-	// LocalID is the matching section here; Changes the fields a restore
-	// replaces in it.
+	// LocalID is the matching section here; Changes the section change
+	// codes of what a restore replaces in it.
 	LocalID string   `json:"local_id,omitempty"`
 	Changes []string `json:"changes,omitempty"`
+	// MissingCollectionItems counts the carried collection's items, in this
+	// catalog, that the section's collection here lacks; set with the
+	// collection_items change.
+	MissingCollectionItems int `json:"missing_collection_items,omitempty"`
 }
 
 // sectionPlan is one backup section against this server.
@@ -214,17 +218,17 @@ func (p *planner) planHomeSection(ctx context.Context, e HomeSectionEntry, libMa
 		return plan, nil
 	}
 	plan.item.HomeSection.LocalID = local.ID
-	changes, err := p.sectionChanges(ctx, plan, libMap, sameServer)
+	changes, missing, err := p.sectionChanges(ctx, plan, libMap, sameServer)
 	if err != nil {
 		return plan, err
 	}
-	plan.item.HomeSection.Changes = changes
+	plan.item.HomeSection.Changes, plan.item.HomeSection.MissingCollectionItems = changes, missing
 	if len(changes) == 0 {
 		plan.item.Status, plan.item.Reason = ItemOnThisServer, ReasonSame
 		return plan, nil
 	}
 	plan.item.Status, plan.item.Selectable = ItemDiffers, true
-	plan.item.Message = "Replaces the section here: " + strings.Join(changes, ", ") + "."
+	plan.item.Message = "Replaces the section here: " + changeWords(changes, missing) + "."
 	return plan, nil
 }
 
@@ -253,42 +257,43 @@ func readSection(ctx context.Context, q queryer, where string, args ...any) ([]*
 	return out, rows.Err()
 }
 
-// sectionChanges lists what replacing the local section would change.
-func (p *planner) sectionChanges(ctx context.Context, plan sectionPlan, libMap map[int]int, sameServer bool) ([]string, error) {
+// sectionChanges lists what replacing the local section would change, as
+// change codes, and how many items the section's collection here lacks.
+func (p *planner) sectionChanges(ctx context.Context, plan sectionPlan, libMap map[int]int, sameServer bool) ([]string, int, error) {
 	e, local := plan.entry, plan.local
 	var changes []string
 	if e.SectionType != string(local.SectionType) {
-		changes = append(changes, "type")
+		changes = append(changes, ChangeType)
 	}
 	switch {
 	case e.Title != local.Title:
-		changes = append(changes, "title")
+		changes = append(changes, ChangeTitle)
 	// The same title can still have lost its key here, by a rename and a
 	// rename back. A set's title without a key never takes one away: the
 	// write leaves the local key alone.
 	case e.TitleKey != "" && (e.TitleKey != local.TitleKey || !maps.Equal(e.TitleArgs, local.TitleArgs)):
-		changes = append(changes, "title translation")
+		changes = append(changes, ChangeTitleTranslation)
 	}
 	if e.Position != local.Position {
-		changes = append(changes, "position")
+		changes = append(changes, ChangePosition)
 	}
 	if e.Featured != local.Featured {
-		changes = append(changes, "featured")
+		changes = append(changes, ChangeFeatured)
 	}
 	if e.ItemLimit != local.ItemLimit {
-		changes = append(changes, "item limit")
+		changes = append(changes, ChangeItemLimit)
 	}
 	if e.Enabled != local.Enabled {
-		changes = append(changes, "enabled")
+		changes = append(changes, ChangeEnabled)
 	}
 	if e.restoredWebOnly() != local.WebOnly {
-		changes = append(changes, "web only")
+		changes = append(changes, ChangeWebOnly)
 	}
 	collection := sectionCollectionID(local.Config)
 	if e.Collection == nil && sectionCollectionID(e.Config) != "" {
 		resolved, _, err := p.resolveCollection(ctx, sectionCollectionID(e.Config), libMap, sameServer)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		collection = resolved
 	}
@@ -298,30 +303,30 @@ func (p *planner) sectionChanges(ctx context.Context, plan sectionPlan, libMap m
 		// section was pointed at since is replaced by the carried one.
 		managed, err := managedCollectionOf(ctx, p.q, local)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if managed == "" {
-			return append(changes, "collection replaced"), nil
+			return append(changes, ChangeCollectionReplaced), 0, nil
 		}
 	}
 	listedConfig, _, err := p.remapListedCollections(ctx, e.Config, libMap, sameServer)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	config, ok := remapSectionConfig(listedConfig, libMap, collection)
 	if !ok || !jsonEqual(config, local.Config) {
-		changes = append(changes, "configuration")
+		changes = append(changes, ChangeConfiguration)
 	}
 	if e.Collection != nil {
 		missing, err := p.managedItemsMissing(ctx, e.Collection, collection)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if missing > 0 {
-			changes = append(changes, fmt.Sprintf("%d collection items", missing))
+			return append(changes, ChangeCollectionItems), missing, nil
 		}
 	}
-	return changes, nil
+	return changes, 0, nil
 }
 
 // managedItemsMissing counts the carried collection's items, in this

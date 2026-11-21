@@ -107,15 +107,18 @@ interface ArgumentUse {
   printed: Set<string>;
   /**
    * Printed arguments that need isolates in a right-to-left interface: all of
-   * them except one printed only as the whole content of a `code` tag
-   * (`<code>{command}</code>`). That tag renders as a `<code>` element, which
-   * app.css already isolates, and isolate characters inside it would end up
-   * in a copy of the value.
+   * them except one printed only as the whole content of a code-like tag
+   * (`<code>{command}</code>`, `<url>{login_url}</url>`). Those tags render as
+   * a `<code>` element, which app.css already isolates, and isolate characters
+   * inside it would end up in a copy of the value.
    */
   isolated: Set<string>;
   /** Arguments a `select` or `plural` chooses on; never isolated, or no branch would match. */
   selectors: Set<string>;
 }
+
+/** Rich-text tags that every caller renders as a `<code>` element. */
+const CODE_TAGS = new Set(["code", "url", "address", "mono", "id"]);
 
 const uses = new WeakMap<MessageFormatElement[], ArgumentUse>();
 
@@ -133,7 +136,11 @@ function argumentUse(ast: MessageFormatElement[]): ArgumentUse {
         for (const option of Object.values(element.options)) walk(option.value);
       } else if (element.type === TAG) {
         const [only] = element.children;
-        if (element.value === "code" && element.children.length === 1 && only?.type === ARGUMENT) {
+        if (
+          CODE_TAGS.has(element.value) &&
+          element.children.length === 1 &&
+          only?.type === ARGUMENT
+        ) {
           use!.printed.add(only.value);
         } else {
           walk(element.children);
@@ -232,8 +239,9 @@ const DIGITS = /^\p{Nd}+$/u;
  *   numbers ("01" in "S{season}E{episode}") are not: an isolate would cut a
  *   number off the letters it belongs to and reorder it. A range or a signed
  *   number ("2-3", "8+") keeps its isolate, or Arabic text would reorder it.
- *   A value that is the whole content of a `code` tag isn't wrapped either: its
- *   `<code>` element isolates it, and the value copies as shown.
+ *   A value that is the whole content of a code-like tag (`CODE_TAGS`) isn't
+ *   wrapped either: its `<code>` element isolates it, and the value copies as
+ *   shown.
  *
  * Left-to-right output in Latin digits is unchanged, so English keeps its bytes.
  */

@@ -208,6 +208,9 @@ func restoreOldSchemaBackup(t *testing.T, db oldSchemaDatabase, secretKey []byte
 	t.Setenv("SECRET_KEY", string(secretKey))
 	t.Setenv("DATABASE_URL", db.url)
 	t.Setenv("REDIS_URL", "")
+	for _, name := range []string{"SECRET_KEY_FILE", "DATABASE_URL_FILE", "REDIS_URL_FILE"} {
+		t.Setenv(name, "")
+	}
 	noEnv := filepath.Join(t.TempDir(), "no.env")
 	run := func(args ...string) string {
 		t.Helper()
@@ -270,7 +273,7 @@ func (s storedBackupSettings) Get(_ context.Context, key string) (string, error)
 // other SILO_BACKUP_* variables wait for startup.
 func TestEnvBackupSettingsOverlayStored(t *testing.T) {
 	values := map[string]string{"SILO_BACKUP_ENABLED": "false", "SILO_BACKUP_KEEP": "1"}
-	env, err := config.ReadEnvSettings(func(name string) string { return values[name] })
+	env, err := config.ReadEnvSettings(func(name string) string { return values[name] }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

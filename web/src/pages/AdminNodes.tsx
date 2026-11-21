@@ -454,10 +454,7 @@ function GroupChip({
       )}
       <span className={cn(active && "font-medium")}>{label}</span>
       <span
-        className={cn(
-          "font-mono text-[10px] tabular-nums",
-          active ? "opacity-70" : "text-muted-foreground",
-        )}
+        className={cn("font-mono text-[10px] tabular-nums", !active && "text-muted-foreground")}
       >
         {count}
       </span>
@@ -962,7 +959,9 @@ function NodeDevicePicker({
               <p className={cn("truncate text-sm", !row.reported && "text-muted-foreground")}>
                 {row.description}
               </p>
-              <p className="text-muted-foreground truncate font-mono text-xs">{row.path}</p>
+              <p className="text-muted-foreground truncate font-mono text-xs">
+                <span dir="ltr">{row.path}</span>
+              </p>
             </div>
             <Switch
               checked={row.selected}
@@ -1174,6 +1173,7 @@ function NodeForm({
         <div className="space-y-2">
           <Label>{t("web.admin.nodes.form.url")}</Label>
           <Input
+            dir="ltr"
             value={url}
             disabled={isLocked("url")}
             onChange={(e) => setUrl(e.target.value)}
@@ -1196,6 +1196,8 @@ function NodeForm({
           <div className="space-y-2">
             <Label>{t("web.admin.nodes.form.publicUrl")}</Label>
             <Input
+              // The URL reads left to right; the translated placeholder keeps the page's direction.
+              dir={publicUrl ? "ltr" : undefined}
               value={publicUrl}
               disabled={isLocked("public_url")}
               onChange={(e) => setPublicUrl(e.target.value)}
@@ -1334,6 +1336,8 @@ function NodeForm({
                 <>
                   <Input
                     id="node-hw-device-override"
+                    // Device paths read left to right; the translated placeholder keeps the page's direction.
+                    dir={hwDeviceOverride ? "ltr" : undefined}
                     value={hwDeviceOverride}
                     disabled={isLocked("hw_device_override")}
                     onChange={(e) => setHwDeviceOverride(e.target.value)}
@@ -1383,7 +1387,7 @@ function NodeForm({
 
 /** Rich-text tag for the device examples in the form help. */
 function mono(chunks: ReactNode[]) {
-  return <span className="font-mono">{chunks}</span>;
+  return <code className="font-mono">{chunks}</code>;
 }
 
 /** The node the key dialog acts on, and whether it has a key to replace. */

@@ -103,7 +103,7 @@ export default function InterfaceSettings() {
           it leads. */}
       <div className="grid gap-x-10 @5xl:grid-cols-[minmax(0,1fr)_auto]">
         <aside className="pb-2 @5xl:order-last @5xl:pb-0">
-          <div className="@5xl:sticky @5xl:top-6 @5xl:max-h-[calc(100dvh-1.5rem)] @5xl:overflow-y-auto @5xl:pt-6">
+          <div className="@5xl:sticky @5xl:top-[calc(1.5rem+var(--impersonation-banner-height))] @5xl:max-h-[calc(100dvh-1.5rem-var(--impersonation-banner-height))] @5xl:overflow-y-auto @5xl:pt-6">
             <PosterCardPreview revealShortcuts={revealShortcuts} />
           </div>
         </aside>

@@ -201,7 +201,7 @@ function AdminLogsPage() {
             placeholder={t("web.admin.logs.filters.playbackSessionId")}
             value={playbackSessionID}
             onChange={(e) => updateSearchParam("playback_session_id", e.target.value)}
-            className="max-w-md font-mono text-xs"
+            className="placeholder:font-ui max-w-md font-mono text-xs"
           />
           {playbackSessionID && (
             <div className="bg-background border-border rounded-md border px-3 py-1.5 text-xs">
@@ -238,7 +238,7 @@ function AdminLogsPage() {
               placeholder={t("web.admin.logs.filters.requestId")}
               value={requestID}
               onChange={(e) => updateSearchParam("request_id", e.target.value)}
-              className="max-w-xs font-mono"
+              className="placeholder:font-ui max-w-xs font-mono"
             />
             <Input
               placeholder={t("web.admin.logs.filters.messageContains")}
@@ -334,7 +334,7 @@ function AdminLogsPage() {
               placeholder={t("web.admin.logs.filters.requestId")}
               value={requestID}
               onChange={(e) => updateSearchParam("request_id", e.target.value)}
-              className="max-w-xs font-mono"
+              className="placeholder:font-ui max-w-xs font-mono"
             />
             <Input
               placeholder={t("web.admin.logs.filters.method")}
@@ -346,7 +346,7 @@ function AdminLogsPage() {
               placeholder={t("web.admin.logs.filters.clientIp")}
               value={clientIP}
               onChange={(e) => updateSearchParam("client_ip", e.target.value)}
-              className="max-w-xs font-mono"
+              className="placeholder:font-ui max-w-xs font-mono"
             />
             <Input
               aria-label={t("web.admin.logs.filters.auditAction")}

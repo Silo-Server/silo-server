@@ -140,7 +140,8 @@ function contrastRatio(a: string, b: string): number {
 
 // Black or white, whichever reads better on a hex fill. Used for the rating
 // source chips the plate preset draws in the accent colour, and for text on
-// a solid style fill.
+// a solid style fill. A colour that isn't hex gets white: both ratios are
+// infinite, so neither wins.
 export function readableTextOn(hex: string): "#000000" | "#ffffff" {
-  return (luminanceOf(hex) ?? 0) > 0.4 ? "#000000" : "#ffffff";
+  return contrastRatio(hex, "#000000") > contrastRatio(hex, "#ffffff") ? "#000000" : "#ffffff";
 }
