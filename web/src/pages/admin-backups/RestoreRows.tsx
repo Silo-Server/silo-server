@@ -288,12 +288,14 @@ export const ItemRow = memo(function ItemRow({
         />
         <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
           {/* block: Label is a flex box, which would clip the name without an ellipsis.
-              Chromium breaks at <wbr> even under nowrap, so a one-line row hides them. */}
+              Chromium breaks at <wbr> even under nowrap, so a one-line row hides them.
+              The name caps its width only when a detail sits beside it. */}
           <Label
             htmlFor={controlId}
             title={label}
             className={cn(
-              "block shrink-0 text-sm font-medium @max-2xl:wrap-anywhere @2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden",
+              "block shrink-0 text-sm font-medium @max-2xl:wrap-anywhere @2xl:truncate @2xl:[&_wbr]:hidden",
+              secondary ? "@2xl:max-w-[60%]" : "@2xl:max-w-full",
               !item.selectable && "text-muted-foreground",
             )}
           >
@@ -341,7 +343,11 @@ export const ItemRow = memo(function ItemRow({
   );
 });
 
-/** A row of the "match this server" list: no choice to make, so just the name. */
+/**
+ * A row of the "match this server" list: no choice to make, so just the name.
+ * The name is never cut short, so names that differ only at the end stay apart;
+ * the detail moves under it when the two don't fit on one line.
+ */
 export const SameRow = memo(function SameRow({
   item,
   secondary,
@@ -352,10 +358,8 @@ export const SameRow = memo(function SameRow({
   useT();
   const label = displayLabel(item);
   return (
-    <li className="flex min-w-0 items-baseline gap-2 py-1 text-[13px]">
-      <span title={label} className="max-w-[60%] shrink-0 truncate">
-        {label}
-      </span>
+    <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 py-1 text-[13px]">
+      <span className="wrap-anywhere">{label}</span>
       {secondary ? (
         <span title={secondary} className="text-muted-foreground min-w-0 truncate text-xs">
           {secondary}
