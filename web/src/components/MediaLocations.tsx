@@ -8,6 +8,7 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { resolutionScore } from "@/pages/ItemDetail/components/versionRankingUtils";
 import { buildQualitySummary } from "@/pages/ItemDetail/components/VersionFlyout";
+import { PathText } from "@/components/PathText";
 
 interface MediaLocationsProps {
   title: string;
@@ -151,7 +152,9 @@ export default function MediaLocations({
                           path: location.folderPath,
                         })}
                       >
-                        {t("web.item.locations.folderName", { folder: location.folderName })}
+                        {t("web.item.locations.folderName", {
+                          folder: <PathText value={location.folderName} />,
+                        })}
                       </span>
                     ) : null}
                     <span className="text-foreground ms-1 break-all">{location.fileName}</span>

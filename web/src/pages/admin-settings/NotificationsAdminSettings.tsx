@@ -58,6 +58,7 @@ import { useReportUnsavedChanges } from "@/hooks/useUnsavedChanges";
 import { emailReady } from "@/lib/emailReadiness";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
+import { PathText } from "@/components/PathText";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "@/components/SaveBar";
 import { SettingField, SettingFieldStatus } from "./SettingField";
@@ -495,7 +496,7 @@ function DiscordSetupGuide() {
       <div className="text-muted-foreground space-y-1.5 py-3 text-xs leading-relaxed">
         <p>
           {t("web.admin.settings.notifications.discord.guideIntro", {
-            site: DISCORD_DEVELOPER_PORTAL.replace("https://", ""),
+            site: <PathText value={DISCORD_DEVELOPER_PORTAL.replace("https://", "")} />,
             link: (chunks) => (
               <a
                 href={DISCORD_DEVELOPER_PORTAL}

@@ -40,6 +40,7 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useT, type MessageKey } from "@/i18n";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDate } from "@/lib/datetime";
+import { PathText } from "@/components/PathText";
 
 type Scope = PersonalAPIKeyScopes["scopes"][number];
 
@@ -428,7 +429,7 @@ function KeyUsage({
           <p className="text-muted-foreground">
             {t("web.settings.apiKeys.usage.accountKey", {
               profile: example.name,
-              endpoint: PROFILES_REQUEST,
+              endpoint: <PathText value={PROFILES_REQUEST} />,
             })}
           </p>
           <code className="break-all">{profileHeader}</code>

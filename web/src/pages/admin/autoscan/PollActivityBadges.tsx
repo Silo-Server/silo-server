@@ -7,8 +7,10 @@ import type {
   Library,
   ScanRun,
 } from "@/api/types";
+import { PathText } from "@/components/PathText";
 import { Badge } from "@/components/ui/badge";
-import { useT } from "@/i18n";
+import { useT, type Translate } from "@/i18n";
+import { formatActiveScanMode } from "@/lib/scanRuns";
 import { cn } from "@/lib/utils";
 
 import {
@@ -16,7 +18,6 @@ import {
   SCAN_STATUS_LABELS,
   changeReasonText,
   changeScanKeys,
-  changeScopeLabel,
   eventStatusTone,
   isKnownChangeOutcome,
   libraryName,
@@ -25,6 +26,24 @@ import {
   splitDisplayPath,
   summarizeScanResult,
 } from "./pollEventDisplay";
+
+/**
+ * The scan mode and the path it covers ("Full scan · /media/movies"), with the
+ * path as an element so it copies without isolate characters.
+ */
+function changeScope(t: Translate, change: AutoscanEventChange) {
+  const mode = change.target_mode
+    ? formatActiveScanMode({ mode: change.target_mode as ScanRun["mode"] })
+    : t("web.admin.autoscan.activity.change.scanFallback");
+  return t("web.admin.autoscan.activity.change.scope", {
+    mode,
+    path: change.target_path ? (
+      <PathText value={change.target_path} />
+    ) : (
+      t("web.admin.autoscan.activity.entireLibrary")
+    ),
+  });
+}
 
 export function PollStatusBadge({ status }: { status: AutoscanEventStatus }) {
   const t = useT();
@@ -229,7 +248,8 @@ export function ChangeExplanation({
     case "queued":
     case "joined": {
       const [plain, inLibrary] = changeScanKeys(change);
-      const scope = changeScopeLabel(t, change);
+      // An element isolates the scope as the formatter would, without characters a copy carries.
+      const scope = <bdi>{changeScope(t, change)}</bdi>;
       return (
         <div className="text-muted-foreground text-xs [overflow-wrap:anywhere]">
           {library ? t(inLibrary, { scope, library }) : t(plain, { scope })}
@@ -240,7 +260,9 @@ export function ChangeExplanation({
       return (
         <div className="text-muted-foreground text-xs [overflow-wrap:anywhere]">
           {change.target_path
-            ? t("web.admin.autoscan.activity.change.suppressedPath", { path: change.target_path })
+            ? t("web.admin.autoscan.activity.change.suppressedPath", {
+                path: <PathText value={change.target_path} />,
+              })
             : t("web.admin.autoscan.activity.change.suppressed")}
         </div>
       );

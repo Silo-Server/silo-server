@@ -65,6 +65,7 @@ import { formatDateTime } from "@/lib/datetime";
 import { formatRelativeTime } from "@/lib/date";
 import { toggleHWDevice } from "@/lib/hwDevices";
 import { cn } from "@/lib/utils";
+import { PathText } from "@/components/PathText";
 import type {
   NodeCapabilityStaleReason,
   NodeGPULiveDevice,
@@ -654,7 +655,7 @@ function NodeUnit({
               className="text-muted-foreground truncate font-mono text-xs"
               title={t("web.admin.nodes.unit.publicUrlTitle")}
             >
-              {t("web.admin.nodes.unit.publicUrl", { url: node.public_url })}
+              {t("web.admin.nodes.unit.publicUrl", { url: <PathText value={node.public_url} /> })}
             </p>
           )}
           {node.type === "transcode" && <NodeKeyLine node={node} onKey={onKey} />}

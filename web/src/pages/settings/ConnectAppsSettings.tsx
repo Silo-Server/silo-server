@@ -29,6 +29,7 @@ import { useCompatConnectInfo } from "@/hooks/queries/compat";
 import { useProfiles } from "@/hooks/queries/profiles";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
+import { PathText } from "@/components/PathText";
 import {
   buildJellyfinPasswordHint,
   buildJellyfinUsername,
@@ -232,7 +233,9 @@ function TroubleshootingPanel({
       ? [
           {
             q: t("web.settings.connectApps.troubleshooting.siloAddressQuestion"),
-            a: t("web.settings.connectApps.troubleshooting.siloAddressAnswer", { url: compatURL }),
+            a: t("web.settings.connectApps.troubleshooting.siloAddressAnswer", {
+              url: <PathText value={compatURL} />,
+            }),
           },
         ]
       : []),

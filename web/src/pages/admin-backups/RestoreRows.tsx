@@ -6,6 +6,7 @@ import type {
   RestoreSectionId,
   RestoreSetting,
 } from "@/api/v2/adminBackupRestore";
+import { PathText } from "@/components/PathText";
 import { RestartBadge } from "@/components/settings/RestartBadge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -228,6 +229,9 @@ function hasItemDetails(item: RestoreItem): boolean {
   );
 }
 
+/** Between paths in a list: data, not interface text. */
+const PATH_SEPARATOR = ", ";
+
 /** What a row's chevron opens; null when there is nothing more to say. */
 function itemDetails(t: Translate, item: RestoreItem): ReactNode {
   const why = item.message || (item.reason ? t(REASON_SENTENCES[item.reason]) : undefined);
@@ -253,7 +257,20 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
     ) : null,
     missingPaths.length > 0 ? (
       <p key="missing-paths" className="text-xs text-amber-600 dark:text-amber-400">
-        {t("web.admin.backups.restore.rows.cantOpen", { paths: missingPaths.join(", ") })}
+        {t("web.admin.backups.restore.rows.cantOpen", {
+          // Each path in its own element, the list left to right, so a path
+          // ending in Arabic keeps its comma after it. The separator matches
+          // the old join(", "): paths can hold spaces, and some languages'
+          // list separators are a space or nothing.
+          paths: (
+            <bdi dir="ltr">
+              {missingPaths.flatMap((path, index) => [
+                index > 0 ? PATH_SEPARATOR : null,
+                <PathText key={index} value={path} />,
+              ])}
+            </bdi>
+          ),
+        })}
       </p>
     ) : null,
     item.missing_blobs.length > 0 ? (

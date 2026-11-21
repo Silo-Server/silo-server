@@ -17,6 +17,7 @@ import {
   DEFAULT_FFMPEG_PATH,
   DEFAULT_TRANSCODE_DIR,
 } from "@/pages/admin-settings/settingsPathDefaults";
+import { PathText } from "@/components/PathText";
 
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
 import { useStepSubmit, useStepSummary } from "../useStep";
@@ -160,7 +161,7 @@ export function PlaybackStep() {
             label={t("web.setup.playback.ffmpegPathLabel")}
             defaultValue={DEFAULT_FFMPEG_PATH}
             description={t("web.setup.playback.ffmpegPathDescription", {
-              path: DEFAULT_FFMPEG_PATH,
+              path: <PathText value={DEFAULT_FFMPEG_PATH} />,
             })}
             value={form.getValue("playback.ffmpeg_path")}
             onChange={(v) => form.setValue("playback.ffmpeg_path", v)}
@@ -170,7 +171,7 @@ export function PlaybackStep() {
             label={t("web.setup.playback.transcodeDirLabel")}
             defaultValue={DEFAULT_TRANSCODE_DIR}
             description={t("web.setup.playback.transcodeDirDescription", {
-              path: DEFAULT_TRANSCODE_DIR,
+              path: <PathText value={DEFAULT_TRANSCODE_DIR} />,
             })}
             value={form.getValue("playback.transcode_dir")}
             onChange={(v) => form.setValue("playback.transcode_dir", v)}

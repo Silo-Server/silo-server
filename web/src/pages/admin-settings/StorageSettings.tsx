@@ -37,6 +37,7 @@ import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { toast } from "sonner";
 import { SaveBar } from "@/components/SaveBar";
 import { useT, type Translate } from "@/i18n";
+import { PathText } from "@/components/PathText";
 
 import { FieldGroup } from "./FieldGroup";
 import { SettingField } from "./SettingField";
@@ -670,7 +671,7 @@ export default function StorageSettings() {
     ? privateEndpointValue
       ? t("web.admin.settings.storage.target.privateBucket", {
           bucket: privateBucketValue,
-          endpoint: privateEndpointValue,
+          endpoint: <PathText value={privateEndpointValue} />,
         })
       : t("web.admin.settings.storage.target.privateBucketNoEndpoint", {
           bucket: privateBucketValue,
@@ -684,11 +685,13 @@ export default function StorageSettings() {
     ? publicEndpointValue
       ? t("web.admin.settings.storage.target.publicBucket", {
           bucket: publicBucketValue,
-          endpoint: publicEndpointValue,
+          endpoint: <PathText value={publicEndpointValue} />,
         })
       : t("web.admin.settings.storage.target.publicBucketNoEndpoint", { bucket: publicBucketValue })
     : publicEndpointValue
-      ? t("web.admin.settings.storage.target.publicNoBucket", { endpoint: publicEndpointValue })
+      ? t("web.admin.settings.storage.target.publicNoBucket", {
+          endpoint: <PathText value={publicEndpointValue} />,
+        })
       : t("web.admin.settings.storage.target.publicNoBucketNoEndpoint");
   const saveInProgressRef = useRef(false);
 

@@ -76,7 +76,10 @@ function Dialog({ row }: { row: HomeRow }) {
   printed only as the whole content of a `code`, `url`, `address`, `mono` or `id`
   tag (`<code>{command}</code>`), so it copies without invisible characters.
   Render those tags as `<code>` elements, which app.css isolates (add
-  `[font-family:inherit]` for text that isn't monospace). English bytes never change.
+  `[font-family:inherit]` for text that isn't monospace). A URL or path printed
+  through a plain placeholder passes as an element, `{ url: <PathText value={url} /> }`:
+  the formatter wraps only strings, and `PathText` isolates the value itself.
+  English bytes never change.
 - **Web-only keys** may use `select` and rich-text tags:
   `"Read the <link>guide</link>"` with
   `t(id, { link: (chunks) => <a href={url}>{chunks}</a> })`, which returns React nodes.

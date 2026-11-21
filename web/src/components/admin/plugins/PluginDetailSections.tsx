@@ -29,6 +29,7 @@ import {
   sourceLabel,
 } from "@/lib/pluginPresentation";
 import { describeTrigger, pluginTaskPath, pluginTaskTrigger } from "@/lib/taskTrigger";
+import { PathText } from "@/components/PathText";
 
 import { humanizeConfigKey } from "./configSchemaAdminForm";
 import { PluginConfigForm } from "./PluginConfigForm";
@@ -333,7 +334,7 @@ function SignatureFact({ signature }: { signature: PluginSignature }) {
         <>
           <span className="block">
             {t("web.admin.plugins.signature.verified", {
-              repository: signatureRepositoryLabel(sourceRepo),
+              repository: <PathText value={signatureRepositoryLabel(sourceRepo)} />,
               link: (chunks: ReactNode[]) =>
                 href ? (
                   <a

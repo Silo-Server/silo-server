@@ -16,7 +16,6 @@ import { formatLocale } from "@/lib/appLocale";
 import { formatTime as formatTimePreferred, preferredDateLocale } from "@/lib/datetime";
 import { type SourceLabelLookups } from "@/lib/autoscanLabels";
 import { formatDecimal } from "@/lib/numberFormat";
-import { formatActiveScanMode } from "@/lib/scanRuns";
 
 import { eventSourceName } from "./sourceDisplay";
 
@@ -317,16 +316,6 @@ export const CHANGE_REASON_TEXT: Record<string, MessageKey> = {
 export function changeReasonText(t: Translate, reason: string | undefined): string | undefined {
   if (!reason || !Object.prototype.hasOwnProperty.call(CHANGE_REASON_TEXT, reason)) return;
   return t(CHANGE_REASON_TEXT[reason]!);
-}
-
-export function changeScopeLabel(t: Translate, change: AutoscanEventChange): string {
-  const mode = change.target_mode
-    ? formatActiveScanMode({ mode: change.target_mode as ScanRun["mode"] })
-    : t("web.admin.autoscan.activity.change.scanFallback");
-  return t("web.admin.autoscan.activity.change.scope", {
-    mode,
-    path: change.target_path || t("web.admin.autoscan.activity.entireLibrary"),
-  });
 }
 
 /** The explanation of a queued or joined change, without and with its library. */

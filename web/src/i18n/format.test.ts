@@ -1,3 +1,5 @@
+import { Fragment, createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MessageFormatElement } from "react-intl";
 
@@ -128,6 +130,19 @@ describe("formatWith", () => {
       expect(formatWith(arabic, "web.detail.episodeCode", { season, episode })).toBe(expected);
     },
   );
+
+  it("leaves an element value unwrapped in a right-to-left language", () => {
+    // Call sites pass URLs and paths as PathText elements, which isolate the
+    // value without characters that a copy would carry.
+    const arabic = createAppIntl("ar-XB", {});
+    const url = createElement("bdi", { dir: "ltr" }, "https://compat.example.test");
+    const out = formatWith(arabic, "web.settings.connectApps.troubleshooting.siloAddressAnswer", {
+      url,
+    });
+    expect(renderToStaticMarkup(createElement(Fragment, null, out))).toBe(
+      'The compatibility API is a separate address: <bdi dir="ltr">https://compat.example.test</bdi>',
+    );
+  });
 
   it("leaves a code tag's value bare in a right-to-left language, so it copies as shown", () => {
     // The <code> element isolates its own text (app.css); isolate characters

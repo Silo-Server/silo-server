@@ -24,6 +24,7 @@ import { formatLocale } from "@/lib/appLocale";
 import type { SourceLabelLookups } from "@/lib/autoscanLabels";
 import { formatActiveScanMode } from "@/lib/scanRuns";
 import { cn } from "@/lib/utils";
+import { PathText } from "@/components/PathText";
 
 import {
   ChangeExplanation,
@@ -439,7 +440,7 @@ function PollEventInspectorBody({
                       {change.rewritten_path && change.rewritten_path !== change.source_path ? (
                         <div className="text-muted-foreground font-mono text-xs [overflow-wrap:anywhere]">
                           {t("web.admin.autoscan.activity.change.rewrittenTo", {
-                            path: change.rewritten_path,
+                            path: <PathText value={change.rewritten_path} />,
                             label: (chunks) => <span className="font-sans">{chunks}</span>,
                           })}
                         </div>

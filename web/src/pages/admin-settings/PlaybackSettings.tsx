@@ -24,6 +24,7 @@ import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { PathSettingField } from "@/components/settings/PathSettingField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
+import { PathText } from "@/components/PathText";
 import { SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingField";
 import { SaveBar } from "@/components/SaveBar";
 import { useT } from "@/i18n";
@@ -202,7 +203,7 @@ export default function PlaybackSettings() {
           isNvenc && selectedDevices.length > 1 ? (
             <SettingFieldStatus key="nvenc" tone="warn">
               {t("web.admin.settings.playback.hwAccel.nvencFirstDevice", {
-                device: selectedDevices[0],
+                device: <PathText value={selectedDevices[0] ?? ""} />,
               })}
             </SettingFieldStatus>
           ) : null,
@@ -365,7 +366,7 @@ export default function PlaybackSettings() {
             label={t("web.admin.settings.playback.transcoding.dir")}
             defaultValue={DEFAULT_TRANSCODE_DIR}
             description={t("web.admin.settings.playback.transcoding.dirDescription", {
-              path: DEFAULT_TRANSCODE_DIR,
+              path: <PathText value={DEFAULT_TRANSCODE_DIR} />,
             })}
             value={form.getValue("playback.transcode_dir")}
             onChange={(v) => form.setValue("playback.transcode_dir", v)}
@@ -382,7 +383,7 @@ export default function PlaybackSettings() {
               label={t("web.admin.settings.playback.transcoding.ffmpegPath")}
               defaultValue={DEFAULT_FFMPEG_PATH}
               description={t("web.admin.settings.playback.transcoding.ffmpegPathDescription", {
-                path: DEFAULT_FFMPEG_PATH,
+                path: <PathText value={DEFAULT_FFMPEG_PATH} />,
               })}
               value={form.getValue("playback.ffmpeg_path")}
               onChange={(v) => form.setValue("playback.ffmpeg_path", v)}

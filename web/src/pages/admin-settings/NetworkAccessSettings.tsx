@@ -16,6 +16,7 @@ import {
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import { formatDateTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
+import { PathText } from "@/components/PathText";
 
 import { FieldGroup } from "./FieldGroup";
 
@@ -108,8 +109,8 @@ function HostRow({ provider, host }: { provider: string; host: NetworkAccessHost
                 ? "web.admin.settings.network.host.reachAtWithHostname"
                 : "web.admin.settings.network.host.reachAt",
               {
-                origin: host.origin,
-                hostname: host.hostname ?? "",
+                origin: <PathText value={host.origin} />,
+                hostname: host.hostname ? <PathText value={host.hostname} /> : "",
                 link: (chunks) => (
                   <a
                     href={host.origin}
