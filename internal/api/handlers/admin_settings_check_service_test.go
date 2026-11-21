@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -170,6 +172,10 @@ func TestTextAICheckNamesProviderFailure(t *testing.T) {
 	registry := `{"providers":[{"id":"custom-1","type":"custom","name":"Local","base_url":"http://llm.example.test/v1","api_key":"SYNTHETIC_KEY","capabilities":["chat"]}]}`
 	store := &fakeServerSettingsStore{values: map[string]string{"ai.providers": registry, "ai.text_provider_id": "custom-1", "ai.chat_model": "local-chat"}}
 	h := &AdminHandler{SettingsRepo: store}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
 	for _, tc := range []struct {
 		name     string
 		err      error
@@ -184,7 +190,7 @@ func TestTextAICheckNamesProviderFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			newAdminAISettingsCheckClient = func(llm.Config) aiSettingsCheckClient {
 				return &fakeAISettingsCheckClient{chat: func(context.Context, []llm.Message, bool) (string, error) {
-					return "", fmt.Errorf("SYNTHETIC_PROVIDER_DETAIL: %w", tc.err)
+					return "", fmt.Errorf("SYNTHETIC_PROVIDER_DETAIL echoing SYNTHETIC_KEY: %w", tc.err)
 				}}
 			}
 			result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_chat", nil, nil)
@@ -198,5 +204,8 @@ func TestTextAICheckNamesProviderFailure(t *testing.T) {
 				t.Fatalf("check exposed provider detail: %q", result.Message)
 			}
 		})
+	}
+	if !strings.Contains(logs.String(), "SYNTHETIC_PROVIDER_DETAIL") || strings.Contains(logs.String(), "SYNTHETIC_KEY") {
+		t.Fatalf("server log must keep the provider's error without the API key:\n%s", logs.String())
 	}
 }

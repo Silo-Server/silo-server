@@ -232,7 +232,14 @@ func textCheckFailed(ctx context.Context, err error, apiKey string) connectionCh
 	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
 		detail = strings.ReplaceAll(detail, apiKey, "[redacted]")
 	}
-	slog.WarnContext(ctx, "text AI connection check failed", "component", "api", "error", logredact.SanitizeText(detail))
+	// A streamed ChatGPT or Responses API failure carries its cause only in
+	// the provider's error code, not in the error text.
+	var status, code, param any
+	if httpErr, ok := errors.AsType[*llm.HTTPError](err); ok {
+		status, code, param = httpErr.StatusCode, logredact.SanitizeText(httpErr.Code), logredact.SanitizeText(httpErr.Param)
+	}
+	slog.WarnContext(ctx, "text AI connection check failed", logComponentKey, "api", "error", logredact.SanitizeText(detail),
+		"status", status, "provider_code", code, "provider_param", param)
 	return checkFailed(textCheckFailureMessage(err))
 }
 
@@ -247,7 +254,7 @@ func textCheckFailureMessage(err error) checkMessage {
 	}
 	switch llm.Classify(err) {
 	case llm.FailureQuotaExhausted, llm.FailurePaymentRequired:
-		return newCheckMessage("textAIBilling", "Text AI provider has no available credit or has reached its spending limit. Check your provider balance and limits.")
+		return newCheckMessage("textAIBilling", "Text AI provider has no available credit, or a usage or spending limit was reached. Check the provider balance and limits, or ChatGPT usage settings.")
 	case llm.FailureUnauthorized:
 		return newCheckMessage("textAIUnauthorized", "Text AI provider rejected the credentials. Replace the provider's API key, or sign in with ChatGPT again.")
 	case llm.FailureForbidden:
@@ -266,7 +273,7 @@ func textCheckFailureMessage(err error) checkMessage {
 		return newCheckMessage("textAIUnusableResponse", "Text model returned a response Silo cannot use. Choose another model.")
 	case llm.FailureRejected:
 		if status, ok := errors.AsType[*llm.HTTPError](err); ok {
-			m := newCheckMessage("textAIRejected", fmt.Sprintf("Text AI provider rejected the check request with HTTP status %d. Check the model, reasoning level, and service tier.", status.StatusCode))
+			m := newCheckMessage("textAIRejected", fmt.Sprintf("Text AI provider rejected the check request (status %d). Check the model, reasoning level, and service tier. The server log has the provider's error.", status.StatusCode))
 			m.args = map[string]string{"status": strconv.Itoa(status.StatusCode)}
 			return m
 		}
