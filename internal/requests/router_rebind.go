@@ -34,6 +34,19 @@ func (r *Repository) RebindOrphanedIntegrations(ctx context.Context) ([]string, 
 	if err := lockRoutingMode(ctx, tx); err != nil {
 		return nil, err
 	}
+	rebound, err := rebindOrphanedIntegrations(ctx, tx, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit rebind request integrations: %w", err)
+	}
+	return rebound, nil
+}
+
+// rebindOrphanedIntegrations runs the rebind for every server, or for the one
+// server id names. The caller holds the routing mode lock.
+func rebindOrphanedIntegrations(ctx context.Context, tx pgx.Tx, id *string) ([]string, error) {
 	rows, err := tx.Query(ctx, `
 		WITH candidates AS (
 			SELECT i.id, min(p.id) AS installation_id, count(DISTINCT p.id) AS matches
@@ -44,6 +57,7 @@ func (r *Repository) RebindOrphanedIntegrations(ctx context.Context) ([]string, 
 				AND pc.capability_type = 'request_router.v1'
 				AND pc.capability_id = i.capability_id
 			WHERE i.plugin_id <> '' AND i.installation_id IS NOT NULL
+				AND ($1::text IS NULL OR i.id = $1)
 				AND NOT EXISTS (SELECT 1 FROM plugin_installations p WHERE p.id = i.installation_id)
 			GROUP BY i.id
 		)
@@ -51,7 +65,7 @@ func (r *Repository) RebindOrphanedIntegrations(ctx context.Context) ([]string, 
 		SET installation_id = c.installation_id, updated_at = now()
 		FROM candidates c
 		WHERE i.id = c.id AND c.matches = 1
-		RETURNING i.id`)
+		RETURNING i.id`, id)
 	if err != nil {
 		return nil, fmt.Errorf("rebind request integrations: %w", err)
 	}
@@ -59,18 +73,21 @@ func (r *Repository) RebindOrphanedIntegrations(ctx context.Context) ([]string, 
 	if err != nil {
 		return nil, fmt.Errorf("rebind request integrations: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit rebind request integrations: %w", err)
-	}
 	return rebound, nil
 }
 
 // failUnboundTargets fails the queued and downloading targets of a server no
 // plugin installation backs, so deleting it does not leave requests that no
-// plugin will ever report on. A bound server's live targets are left alone:
-// its plugin still tracks them, and the delete refuses. The caller holds the
-// server's row lock.
+// plugin will ever report on. A server whose plugin was installed again is
+// rebound first, as the lifecycle hook would, so a delete that runs before the
+// hook still refuses while the reinstalled plugin tracks its requests. A bound
+// server's live targets are left alone: its plugin still tracks them, and the
+// delete refuses. The caller holds the routing mode lock and the server's row
+// lock.
 func (r *Repository) failUnboundTargets(ctx context.Context, tx pgx.Tx, id string) error {
+	if _, err := rebindOrphanedIntegrations(ctx, tx, &id); err != nil {
+		return err
+	}
 	var unbound bool
 	if err := tx.QueryRow(ctx, `
 		SELECT NOT EXISTS (
@@ -82,6 +99,17 @@ func (r *Repository) failUnboundTargets(ctx context.Context, tx pgx.Tx, id strin
 	}
 	if !unbound {
 		return nil
+	}
+	// Lock the parent requests before their targets, in id order, as account
+	// deletion and submission do, so this delete cannot deadlock with them.
+	if _, err := tx.Exec(ctx, `
+		SELECT id FROM media_requests
+		WHERE id IN (
+			SELECT request_id FROM media_request_targets
+			WHERE integration_id = $1 AND status IN ('queued', 'downloading'))
+		ORDER BY id
+		FOR UPDATE`, id); err != nil {
+		return fmt.Errorf("lock unbound integration requests: %w", err)
 	}
 	rows, err := tx.Query(ctx, `
 		UPDATE media_request_targets

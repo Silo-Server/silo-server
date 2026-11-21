@@ -608,6 +608,8 @@
 ./internal/requests TestRoutingFactsMergeDatabase
 ./internal/requests TestRebindOrphanedRouterServersDatabase
 ./internal/requests TestDeleteUnboundRouterServerFailsItsTargetsDatabase
+./internal/requests TestDeleteReinstalledRouterServerRebindsFirstDatabase
+./internal/requests TestRouterServerMovedToMissingInstallationForgetsItsPluginDatabase
 ./internal/requests/discoverrows TestDiscoverListSnapshotLeaseDatabase
 
 # Request cleanup, prepared downloads and user-store transactions.

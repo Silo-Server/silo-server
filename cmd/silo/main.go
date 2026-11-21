@@ -2116,16 +2116,19 @@ func main() {
 		// backoff instead of waiting for the next lazy RPC.
 		pluginHost.SetExitHandler(pluginService.HandleResidentExit)
 		// A request router plugin installed again has a new installation id;
-		// its request servers follow it. The preload below runs this once at
-		// startup, which also rebinds servers orphaned before this hook existed.
+		// its request servers follow it. Registering runs this once at startup,
+		// which also rebinds servers orphaned before this hook existed, and a
+		// failed rebind is retried on later lifecycle polls.
 		requestServers := mediarequests.NewRepository(deps.DB, deps.SecretCipher)
-		pluginService.AddLifecycleHook(func(ctx context.Context) {
+		pluginService.AddRetryableLifecycleHook(appCtx, "request server rebind", func(ctx context.Context) error {
 			rebound, err := requestServers.RebindOrphanedIntegrations(ctx)
 			if err != nil {
-				slog.WarnContext(ctx, "failed to rebind request servers to their plugin", "component", "app", "error", err)
-			} else if len(rebound) > 0 {
+				return err
+			}
+			if len(rebound) > 0 {
 				slog.InfoContext(ctx, "rebound request servers to their reinstalled plugin", "component", "app", "integration_ids", rebound)
 			}
+			return nil
 		})
 		if watchProviderRegistry != nil {
 			reloadWatchProviders := func(ctx context.Context) {

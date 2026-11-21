@@ -11,7 +11,10 @@ FROM public.plugin_installations p
 WHERE p.id = i.installation_id;
 
 -- Servers whose installation was already removed: infer the plugin when
--- exactly one installed plugin offers their request router capability.
+-- exactly one installed plugin offers their request router capability and it
+-- is the official router for that capability. Capability ids are chosen by
+-- each plugin, so any other match could hand a server, and its API key, to a
+-- plugin it never belonged to; those servers stay unbound for the admin.
 WITH inferred AS (
     SELECT i.id, min(p.plugin_id) AS plugin_id, count(DISTINCT p.plugin_id) AS matches
     FROM public.request_integrations i
@@ -28,7 +31,10 @@ UPDATE public.request_integrations i
 SET plugin_id = inferred.plugin_id
 FROM inferred
 WHERE i.id = inferred.id
-  AND inferred.matches = 1;
+  AND inferred.matches = 1
+  AND (i.capability_id, inferred.plugin_id) IN (
+      ('arr', 'silo.requests.arr'),
+      ('seerr', 'silo.requests.seerr'));
 -- +goose StatementEnd
 
 -- +goose Down

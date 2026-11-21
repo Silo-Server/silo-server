@@ -139,3 +139,56 @@ func TestDeleteUnboundRouterServerFailsItsTargetsDatabase(t *testing.T) {
 		t.Fatalf("stuck request outcome = %s, want failed", req.Outcome)
 	}
 }
+
+// A delete that runs after the plugin is installed again but before the
+// lifecycle hook rebinds the server must not fail requests the reinstalled
+// plugin still tracks: the delete rebinds the server and refuses as for any
+// bound server with live requests.
+func TestDeleteReinstalledRouterServerRebindsFirstDatabase(t *testing.T) {
+	repo, pool := routerRebindRepository(t)
+	ctx := t.Context()
+	installRouterPlugin(t, pool, 10, "silo.requests.seerr", "seerr")
+	insertRouterServer(t, repo, "seerr", "seerr", 10)
+	insertLifecycleRequest(t, repo, "tracked", 1, 101, StatusQueued)
+	if _, err := pool.Exec(ctx, `INSERT INTO media_request_targets (request_id, integration_id, quality, status, download_phase)
+		VALUES ('tracked', 'seerr', '1080p', 'downloading', 'downloading')`); err != nil {
+		t.Fatal(err)
+	}
+	uninstallRouterPlugin(t, pool, 10)
+	installRouterPlugin(t, pool, 20, "silo.requests.seerr", "seerr")
+
+	if err := repo.DeleteIntegration(ctx, "seerr"); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("delete reinstalled server: err = %v, want ErrInvalidState", err)
+	}
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT status FROM media_request_targets WHERE request_id = 'tracked'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "downloading" {
+		t.Fatalf("tracked target = %s, want downloading", status)
+	}
+}
+
+// A server saved onto an installation that no longer exists has no known
+// plugin: it must not keep its previous plugin and later follow that plugin's
+// reinstall.
+func TestRouterServerMovedToMissingInstallationForgetsItsPluginDatabase(t *testing.T) {
+	repo, pool := routerRebindRepository(t)
+	ctx := t.Context()
+	installRouterPlugin(t, pool, 10, "silo.requests.seerr", "seerr")
+	insertRouterServer(t, repo, "moved", "seerr", 10)
+	server, err := repo.GetIntegration(ctx, "moved")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.InstallationID = new(99)
+	if _, err := repo.UpdateIntegration(ctx, *server); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	uninstallRouterPlugin(t, pool, 10)
+	installRouterPlugin(t, pool, 20, "silo.requests.seerr", "seerr")
+
+	if rebound, err := repo.RebindOrphanedIntegrations(ctx); err != nil || len(rebound) != 0 {
+		t.Fatalf("rebind = %v, %v, want nothing", rebound, err)
+	}
+}
