@@ -563,6 +563,7 @@ function ProviderPanel({
         disabled={locked}
         // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
         hint={type.default_base_url || "https://llm.example.net/v1"}
+        dir="ltr"
         description={
           custom
             ? t("web.admin.settings.ai.providers.baseUrlCustom")

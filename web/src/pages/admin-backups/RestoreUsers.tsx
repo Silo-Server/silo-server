@@ -87,11 +87,19 @@ function ProfileRow({
       />
       <div className="min-w-0 flex-1">
         {/* When the name and detail don't fit on one line, the detail moves under the
-            name, and a name wider than the row wraps. */}
+            name, and a name wider than the row wraps. Part of a name that can't wrap,
+            such as one long run of joined emoji, is clipped sideways at the row's edge:
+            block makes the words around it wrap at the row's width, and the 0.25em of
+            padding, offset by a negative margin, keeps letters whole that reach past their
+            edge, such as a leading "j" or the end of some Telugu names. */}
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <Label
             htmlFor={controlId}
-            className={cn("text-sm wrap-anywhere", !selectable && "text-muted-foreground")}
+            title={profile.name}
+            className={cn(
+              "-mx-[0.25em] block min-w-0 overflow-x-clip px-[0.25em] text-sm wrap-anywhere",
+              !selectable && "text-muted-foreground",
+            )}
           >
             {profile.name}
           </Label>
@@ -99,24 +107,34 @@ function ProfileRow({
             {detail}
           </span>
         </div>
+        {/* Each status is a block of its own: SettingFieldStatus is inline, so
+            two side by side would share a line. */}
         {why ? (
-          <SettingFieldStatus tone={profile.selectable ? "muted" : "warn"}>
-            {why}
-          </SettingFieldStatus>
+          <div>
+            <SettingFieldStatus tone={profile.selectable ? "muted" : "warn"}>
+              {why}
+            </SettingFieldStatus>
+          </div>
         ) : null}
         {locked ? (
-          <SettingFieldStatus tone="muted">
-            {t("web.admin.backups.restore.users.lockedPrimary")}
-          </SettingFieldStatus>
+          <div>
+            <SettingFieldStatus tone="muted">
+              {t("web.admin.backups.restore.users.lockedPrimary")}
+            </SettingFieldStatus>
+          </div>
         ) : null}
         {profile.no_library_access ? (
-          <SettingFieldStatus tone="warn">
-            {t("web.admin.backups.restore.users.noLibraryAccess")}
-          </SettingFieldStatus>
+          <div>
+            <SettingFieldStatus tone="warn">
+              {t("web.admin.backups.restore.users.noLibraryAccess")}
+            </SettingFieldStatus>
+          </div>
         ) : profile.libraries_left_out > 0 ? (
-          <SettingFieldStatus tone="warn">
-            {droppedLibraries(t, profile.libraries_left_out)}
-          </SettingFieldStatus>
+          <div>
+            <SettingFieldStatus tone="warn">
+              {droppedLibraries(t, profile.libraries_left_out)}
+            </SettingFieldStatus>
+          </div>
         ) : null}
       </div>
     </li>
@@ -183,8 +201,10 @@ export const AccountRow = memo(function AccountRow({
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
+        {/* Named from the plain label: Chromium reads a <wbr> in it as a space. */}
         <Checkbox
           id={controlId}
+          aria-label={item.label}
           checked={checked}
           disabled={!item.selectable}
           onCheckedChange={(value) => onToggle(toggleKeys("users", item), value === true)}
@@ -247,16 +267,21 @@ export const AccountRow = memo(function AccountRow({
       </div>
       {open ? (
         <div id={detailsId} className="space-y-1 ps-7 pb-3">
-          {status ? <p className="text-[13px] @2xl:hidden">{status}</p> : null}
+          {status ? <p className="text-[13px] wrap-anywhere @2xl:hidden">{status}</p> : null}
           {account.admin ? (
             <p className="text-muted-foreground text-xs @2xl:hidden">
               {t("web.admin.backups.restore.users.administrator")}
             </p>
           ) : null}
+          {/* One block per status, as in ProfileRow. */}
           {why ? (
-            <SettingFieldStatus tone={item.selectable || item.reason === "same" ? "muted" : "warn"}>
-              {why}
-            </SettingFieldStatus>
+            <div>
+              <SettingFieldStatus
+                tone={item.selectable || item.reason === "same" ? "muted" : "warn"}
+              >
+                {why}
+              </SettingFieldStatus>
+            </div>
           ) : null}
           {!item.selectable
             ? account.policy_differences.map((difference) => (
@@ -268,19 +293,23 @@ export const AccountRow = memo(function AccountRow({
               ))
             : null}
           {account.libraries_left_out > 0 ? (
-            <SettingFieldStatus tone="warn">
-              {droppedLibraries(t, account.libraries_left_out)}
-            </SettingFieldStatus>
+            <div>
+              <SettingFieldStatus tone="warn">
+                {droppedLibraries(t, account.libraries_left_out)}
+              </SettingFieldStatus>
+            </div>
           ) : null}
           {item.selectable && newProfiles > account.profile_room ? (
-            <SettingFieldStatus tone="warn">
-              {account.profile_room === 0
-                ? t("web.admin.backups.restore.users.noRoom")
-                : t("web.admin.backups.restore.users.room", {
-                    count: account.profile_room,
-                    count_text: account.profile_room,
-                  })}
-            </SettingFieldStatus>
+            <div>
+              <SettingFieldStatus tone="warn">
+                {account.profile_room === 0
+                  ? t("web.admin.backups.restore.users.noRoom")
+                  : t("web.admin.backups.restore.users.room", {
+                      count: account.profile_room,
+                      count_text: account.profile_room,
+                    })}
+              </SettingFieldStatus>
+            </div>
           ) : null}
           {account.profiles.length > 0 ? (
             <ul aria-label={t("web.admin.backups.restore.users.profilesOf", { name: item.label })}>
@@ -326,19 +355,30 @@ export function DataTypesPanel({
           {DATA_TYPE_IDS.map((id) => {
             const controlId = `${baseId}-${id}`;
             const count = counts.get(id) ?? 0;
+            // The checkbox's box is one line tall. The label's text size replaces Label's
+            // leading-none, so it inherits the row's unitless line height. The text is in rem
+            // like the checkbox, so a larger browser font grows both and the line stays
+            // taller than the checkbox, and a minimum font size still spaces wrapped lines.
+            // The label is a block so its count wraps with its text, and text-pretty keeps
+            // the count off a last line of its own where the browser supports it.
             return (
-              <div key={id} className="flex items-center gap-2">
-                <Checkbox
-                  id={controlId}
-                  checked={dataTypes.has(id)}
-                  onCheckedChange={(value) => {
-                    const next = new Set(dataTypes);
-                    if (value === true) next.add(id);
-                    else next.delete(id);
-                    onChange(next);
-                  }}
-                />
-                <Label htmlFor={controlId} className="text-[13px] font-normal">
+              <div key={id} className="flex items-start gap-2 text-[0.8125rem] leading-normal">
+                <span className="flex min-h-lh shrink-0 items-center">
+                  <Checkbox
+                    id={controlId}
+                    checked={dataTypes.has(id)}
+                    onCheckedChange={(value) => {
+                      const next = new Set(dataTypes);
+                      if (value === true) next.add(id);
+                      else next.delete(id);
+                      onChange(next);
+                    }}
+                  />
+                </span>
+                <Label
+                  htmlFor={controlId}
+                  className="block text-[0.8125rem] font-normal text-pretty"
+                >
                   {count > 0
                     ? t("web.admin.backups.restore.users.dataTypeCount", {
                         label: DATA_TYPE_LABELS[id],

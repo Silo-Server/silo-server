@@ -1,15 +1,22 @@
 import { useCallback } from "react";
 
-/** Reserve the visible fixed player's footprint, including its bottom inset. */
-export function usePlaybackBarHeight(kind: "watch" | "audiobook") {
+/**
+ * Publish a pinned element's height on the document root as the CSS length
+ * `property` while it is mounted, so chrome elsewhere in the tree can clear it.
+ * `includeBottomInset` adds the element's bottom offset, for a bar that floats
+ * above the bottom edge. Pass constants: a new value re-attaches the ref.
+ */
+export function useRootHeightProperty(
+  property: `--${string}`,
+  { includeBottomInset = false }: { includeBottomInset?: boolean } = {},
+) {
   return useCallback(
-    (element: HTMLDivElement | null) => {
+    (element: HTMLElement | null) => {
       if (!element) return;
-      const property = `--${kind}-bar-height`;
       const root = document.documentElement;
       const measure = () => {
         const { height } = element.getBoundingClientRect();
-        const bottom = parseFloat(getComputedStyle(element).bottom) || 0;
+        const bottom = includeBottomInset ? parseFloat(getComputedStyle(element).bottom) || 0 : 0;
         root.style.setProperty(property, `${height + bottom}px`);
       };
       // Window resizes still re-measure where ResizeObserver is unavailable.
@@ -23,6 +30,6 @@ export function usePlaybackBarHeight(kind: "watch" | "audiobook") {
         root.style.removeProperty(property);
       };
     },
-    [kind],
+    [property, includeBottomInset],
   );
 }

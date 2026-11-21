@@ -55,6 +55,7 @@ export function WebhookInstructions({
         <div className="flex gap-2">
           <Input
             id="webhook-url"
+            dir="ltr"
             readOnly
             value={url}
             className="font-mono text-xs"

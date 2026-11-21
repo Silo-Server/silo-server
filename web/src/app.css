@@ -57,6 +57,10 @@
   /* ── Interactive ─────────────────────────────────────────── */
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  /* Text in the primary color. An admin accent sets --primary-text to a
+     variant that reads on Cinema Dark's surfaces (lib/accentColor.ts); fills,
+     borders, and rings keep the accent itself. */
+  --text-color-primary: var(--primary-text, var(--primary));
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -74,6 +78,10 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+  --color-success-label: var(--success-label);
+  --color-warning-label: var(--warning-label);
+  --color-info-label: var(--info-label);
+  --color-destructive-label: var(--destructive-label);
 
   /* ── Borders & Focus ─────────────────────────────────────── */
   --color-border: var(--border);
@@ -175,6 +183,10 @@
 
   /* ── Font Family ───────────────────────────────────────────── */
   --font-family-display: var(--font-display, var(--font-body));
+  /* The interface font, as `font-ui`. Tailwind's own `font-sans` is the system
+     stack. A `font-mono` field whose placeholder is translated prose adds
+     `placeholder:font-ui`: monospace fonts draw Arabic letters unjoined. */
+  --font-ui: var(--font-body);
 
   /* ── Hero Backdrop Defaults ─────────────────────────────────── */
   --hero-backdrop-brightness: 0.9;
@@ -234,15 +246,6 @@
   to {
     opacity: 1;
     transform: scale(1);
-  }
-}
-@keyframes pulse-opacity {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
   }
 }
 @keyframes fade-out {
@@ -560,6 +563,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      --accent           Active/highlighted element backgrounds
      --destructive      Danger/error text, icons, borders
      --destructive-fill Solid danger fill under --destructive-foreground
+     --<status>-label   Status text on a 10% tint of its own colour
      --border           Default border color
      --sidebar          Sidebar background (often darkest surface)
    ================================================================ */
@@ -576,6 +580,16 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --warning-foreground: oklch(0.98 0.01 85);
     --info: oklch(0.7 0.15 250);
     --info-foreground: oklch(0.98 0.01 250);
+
+    /* Small status-coloured labels on a 10% tint of their own colour, such
+       as the play-method tags. Red falls below 4.5:1 there (3.8:1 on a
+       hovered row), so its label mixes toward --contrast-boost. High
+       contrast lightens the surfaces under every label, so it mixes each
+       one further (see the block below). */
+    --success-label: var(--success);
+    --warning-label: var(--warning);
+    --info-label: var(--info);
+    --destructive-label: color-mix(in srgb, var(--contrast-boost) 25%, var(--destructive));
   }
 
   /* ── Contrast-adjustable tokens ─────────────────────────────
@@ -718,12 +732,14 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   /* Code, paths, JSON and log text read left to right inside any page. Inline
      code takes its direction from its own text and keeps the page's direction
      for its margins (a logical margin resolves against the element's own
-     direction). */
+     direction). Code with a dir keeps the browser's isolate, because
+     plaintext would ignore the dir: a path marked left to right lays out
+     left to right even when its first folder is Arabic. */
   pre {
     direction: ltr;
     unicode-bidi: isolate;
   }
-  :is(code, kbd, samp) {
+  :is(code, kbd, samp):not([dir]) {
     unicode-bidi: plaintext;
   }
   /* Titles, names, taglines and overviews from metadata take their direction
@@ -794,6 +810,14 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --surface-hover: color-mix(in srgb, var(--contrast-boost) 16%, var(--surface-hover-base));
     --surface-raised: color-mix(in srgb, var(--contrast-boost) 20%, var(--surface-raised-base));
     --accent: color-mix(in srgb, var(--contrast-boost) 14%, var(--accent-base));
+    /* Status labels: each mixed just far enough to keep 5:1 on a hovered
+       row (--surface-hover), the lightest surface under one, so each keeps
+       as much of its colour as it can. On --surface-raised red would drop
+       below 4.5:1; no label sits there. */
+    --success-label: color-mix(in srgb, var(--contrast-boost) 40%, var(--success));
+    --warning-label: color-mix(in srgb, var(--contrast-boost) 35%, var(--warning));
+    --info-label: color-mix(in srgb, var(--contrast-boost) 50%, var(--info));
+    --destructive-label: color-mix(in srgb, var(--contrast-boost) 60%, var(--destructive));
     --ambient-glow-opacity: 0.04;
   }
   html[data-high-contrast="true"] .surface-panel-subtle,
@@ -1891,7 +1915,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     /* Mobile: non-sticky so the tabs scroll with the hero instead of hovering
        over it — stacking a sticky tab bar under the sticky top nav eats too
        much vertical space on narrow viewports. At lg+ the mobile top nav is
-       hidden, so we promote this header to sticky at top:0 there. */
+       hidden, so we promote this header to sticky at the top there, below the
+       impersonation banner when one shows. */
     position: relative;
     z-index: 20;
     display: flex;
@@ -1914,7 +1939,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   @media (min-width: 1024px) {
     .library-marquee-header {
       position: sticky;
-      top: 0;
+      top: var(--impersonation-banner-height);
       z-index: 30;
     }
   }
@@ -2421,7 +2446,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
   }
 
-  @media (max-width: 639px) {
+  /* The admin page header's phone layout uses Tailwind's `sm` breakpoint, so
+     the `sm:` and `max-sm:` classes pages put in their header actions switch
+     at the same width. Rem in a media query follows the browser's default
+     font size, not the in-app text scale, so a px width here would disagree
+     with those classes whenever the browser's font size isn't 16px. */
+  @variant max-sm {
     .admin-shell .page-header {
       align-items: stretch;
     }
@@ -2458,21 +2488,19 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   }
 
   /* ── Live Badge ──────────────────────────────────────────── */
+  /* Static on purpose: pulsing the opacity of text this small drops it below
+     AA contrast. The label color is light enough to keep 4.5:1 where high
+     contrast lightens the surface under the badge (the Profiles panel and
+     the selected sidebar row). */
   .live-badge {
     margin-inline-start: auto;
     padding: 2px 8px;
     border-radius: 6px;
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 700;
     background: rgba(255, 60, 60, 0.12);
-    color: #f87171;
+    color: #fca5a5;
     border: 1px solid rgba(255, 60, 60, 0.2);
-    animation: pulse-opacity 2s ease-in-out infinite;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .live-badge {
-      animation: none;
-    }
   }
 
   /* ── Progress Bar ────────────────────────────────────────── */
@@ -2543,9 +2571,19 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   :root {
     --app-sidebar-offset: 0px;
     /* How far fixed page chrome (the collection editor's save bar) rises to
-       clear whichever background playback bar shows. usePlaybackBarHeight
+       clear whichever background playback bar shows. useRootHeightProperty
        measures each bar, bottom inset included, on the root while it shows. */
     --playback-bar-clearance: max(var(--watch-bar-height, 0px), var(--audiobook-bar-height, 0px));
+    /* The impersonation banner pins to the top of the viewport above every
+       route, and ImpersonationBanner measures its height here while it shows.
+       Anything else pinned near the top of the viewport (the phone headers,
+       the library tabs, sticky side columns, fixed corner controls) adds this
+       to its offset so the banner never covers it. The 0px default keeps
+       `top: var(--impersonation-banner-height)` valid without a banner. */
+    --impersonation-banner-height: 0px;
+    /* In-page jumps (skip links, scrollIntoView) land below the banner; each
+       target's own scroll margin still clears the header under it. */
+    scroll-padding-top: var(--impersonation-banner-height);
   }
   @media (min-width: 64rem) {
     :root[data-app-shell] {

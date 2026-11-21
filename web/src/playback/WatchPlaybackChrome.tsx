@@ -1,4 +1,4 @@
-import { usePlaybackBarHeight } from "@/hooks/usePlaybackBarHeight";
+import { useRootHeightProperty } from "@/hooks/useRootHeightProperty";
 import {
   consumeAutomaticStart,
   expectAutomaticStart,
@@ -1355,7 +1355,7 @@ function WatchPlaybackHostContent() {
 
 export function WatchPlaybackBar() {
   const t = useT();
-  const barRef = usePlaybackBarHeight("watch");
+  const barRef = useRootHeightProperty("--watch-bar-height", { includeBottomInset: true });
   const controller = useContext(WatchPlaybackControllerContext);
   if (!controller) {
     throw new Error("Watch playback bar is unavailable outside WatchPlaybackProvider");

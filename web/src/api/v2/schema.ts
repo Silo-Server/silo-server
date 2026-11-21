@@ -15251,8 +15251,20 @@ export interface components {
     AdminBackupRestoreCollection: {
       /** @description The template bundle that created a template collection */
       bundle_id?: string;
-      /** @description A template collection's fields the admin changed from the template's defaults that a restore writes here: title, description, visibility, featured, sort order, item sort, source, sync schedule, poster, backdrop */
-      changes?: string[];
+      /** @description What a restore writes to a template collection here: the fields the admin changed from the template's defaults, and libraries when it adds the collection to more of them */
+      changes?: (
+        | "title"
+        | "description"
+        | "visibility"
+        | "featured"
+        | "sort_order"
+        | "item_sort"
+        | "source"
+        | "sync_schedule"
+        | "poster"
+        | "backdrop"
+        | "libraries"
+      )[];
       /** Format: int64 */
       items: number;
       /** @description Libraries here the collection maps to */
@@ -15304,8 +15316,20 @@ export interface components {
       pending?: number;
     };
     AdminBackupRestoreHomeSection: {
-      /** @description What a restore replaces in the section here: title, position, featured, item limit, enabled, web only, configuration, and N collection items */
-      changes?: string[];
+      /** @description What a restore replaces in the section here */
+      changes?: (
+        | "type"
+        | "title"
+        | "title_translation"
+        | "position"
+        | "featured"
+        | "item_limit"
+        | "enabled"
+        | "web_only"
+        | "collection_replaced"
+        | "configuration"
+        | "collection_items"
+      )[];
       /**
        * @description The library here whose page holds the section
        * @example 1
@@ -15313,6 +15337,11 @@ export interface components {
       library_id?: string;
       /** @description The matching section here: the same id on the server that took the backup, else the one section of the page with the same type and title */
       local_id?: string;
+      /**
+       * Format: int64
+       * @description With the collection_items change: the items of the backup's collection, in this server's catalog, that the section's collection here lacks and a restore adds
+       */
+      missing_collection_items?: number;
       /** @enum {string} */
       scope: "home" | "library";
       section_type: string;
