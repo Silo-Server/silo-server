@@ -176,8 +176,8 @@ it("lets a refused settings save through after a reload, keeping the edits only 
   expect(result.current.getValue("download.artifact_dir")).toBe("/srv/artifacts");
 });
 
-it("keeps every edit when a reload after a refused save can't read which secrets are set", async () => {
-  const stored = { "branding.server_name": "Silo", "server.log_level": "info" };
+it("keeps every edit when a reload after a refused save can't read which secrets are set, and checks the page from before it on a retry", async () => {
+  let stored = { "branding.server_name": "Silo", "server.log_level": "info" };
   let tag = '"tagA"';
   let statusFails = false;
   vi.stubGlobal(
@@ -218,6 +218,9 @@ it("keeps every edit when a reload after a refused save can't read which secrets
   act(() => result.current.setValue("branding.server_name", "Casa"));
   // Unset, so no snapshot carries it: only the status tells it from a secret.
   act(() => result.current.setValue("download.artifact_dir", "/srv/artifacts"));
+  // Another administrator changes a setting on this page that this admin
+  // didn't edit.
+  stored = { ...stored, "server.log_level": "warn" };
   tag = '"tagB"';
   statusFails = true;
   await act(async () => {
@@ -236,4 +239,12 @@ it("keeps every edit when a reload after a refused save can't read which secrets
   ]);
   expect(result.current.getValue("download.artifact_dir")).toBe("/srv/artifacts");
   expect(toast.dismiss).not.toHaveBeenCalled();
+
+  // The failed reload already shows the other change. A retry still finds the
+  // edits were made against the page before it, and undoes them.
+  statusFails = false;
+  act(() => action?.onClick({ preventDefault() {} }));
+  await waitFor(() => expect(toast.dismiss).toHaveBeenCalled());
+  expect(result.current.dirtyCount).toBe(0);
+  expect(result.current.getValue("server.log_level")).toBe("warn");
 });

@@ -50,6 +50,9 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     refetch: refetchSensitiveStatus,
   } = useAdminSensitiveStatus();
   const editBaseline = useRef<Record<string, string> | undefined>(undefined);
+  // Which secrets were set when that baseline was taken, since its snapshot
+  // can't show them. Undefined when the status hadn't loaded yet.
+  const baselineConfigured = useRef<string[] | undefined>(undefined);
   const [, setBaselineRevision] = useState(0);
   const saveEpoch = useRef(0);
   const savePending = useRef(false);
@@ -95,14 +98,6 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   useEffect(() => {
     dirtyRef.current = dirty;
   }, [dirty]);
-  // What the page shows for the settings nobody has edited, and which of its
-  // secrets are set; a reload after a refused save compares with these.
-  const shownSettings = useRef(settings);
-  const shownConfigured = useRef(sensitiveData?.configured);
-  useEffect(() => {
-    shownSettings.current = settings;
-    shownConfigured.current = sensitiveData?.configured;
-  }, [settings, sensitiveData]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -183,7 +178,10 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
    */
   const setValue = useCallback(
     (key: string, value: string, { stage = false }: { stage?: boolean } = {}) => {
-      if (!editBaseline.current) editBaseline.current = settings;
+      if (!editBaseline.current) {
+        editBaseline.current = settings;
+        baselineConfigured.current = sensitiveData?.configured;
+      }
       // An edit begins when the key has no record; every path that ends one
       // (save, revert, reset, reload, Discard, a profile switch) drops it.
       if (!editedOver.current.has(key)) {
@@ -315,8 +313,8 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   // After a refused save, the admin asked for the settings as they are now.
   // The edits are kept only if nothing on this page changed meanwhile (an
   // edited setting still shows what it showed when its edit began, the others
-  // what the page showed) and none is a saved password or key, which no
-  // snapshot shows. Otherwise all of them are undone. Edits on a
+  // what the edits' baseline showed) and none is a saved password or key,
+  // which no snapshot shows. Otherwise all of them are undone. Edits on a
   // page go together (a server address and its password, a search provider
   // and its connection), so keeping some could save a mix nobody entered.
   // Reads refs and fresh results only, so a toast holding an old copy still
@@ -325,8 +323,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     if (reloading.current || savePending.current) return;
     const generation = draftGeneration.current;
     const baseline = editBaseline.current;
-    const shown = shownSettings.current;
-    const shownSecrets = shownConfigured.current;
+    const secretsThen = baselineConfigured.current;
     reloading.current = true;
     try {
       // The status is read after the settings, so a secret set by the time of
@@ -367,14 +364,18 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       const unverifiable = (key: string) =>
         changed(key) || (REDIS_KEYS.includes(key) && configured.includes("redis.url"));
       const drafts = [...dirtyRef.current];
-      // A setting on this page that nobody here edited, changed since the page
-      // last showed it: the edits were made against a page that is gone.
-      const pageChanged = stableKeys.some(
-        (key) =>
-          !dirtyRef.current.has(key) &&
-          (valueIn(shown, key) !== valueIn(fresh, key) ||
-            (shownSecrets ?? []).includes(key) !== configured.includes(key)),
-      );
+      // A setting on this page that nobody here edited, changed since the
+      // edits' baseline: they were made against a page that is gone, even when
+      // a background read or a failed reload already shows the change. Without
+      // the secret status from then, the page can't be vouched for.
+      const pageChanged =
+        !secretsThen ||
+        stableKeys.some(
+          (key) =>
+            !dirtyRef.current.has(key) &&
+            (valueIn(baseline, key) !== valueIn(fresh, key) ||
+              secretsThen.includes(key) !== configured.includes(key)),
+        );
       const replaced = pageChanged || drafts.some(unverifiable) ? drafts : [];
       // Retire a ChatGPT sign-in callback that started before this reload.
       saveEpoch.current++;
@@ -392,6 +393,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       });
       setDirty((previous) => new Set([...previous].filter((key) => !replaced.includes(key))));
       editBaseline.current = fresh;
+      baselineConfigured.current = configured;
       setBaselineRevision((revision) => revision + 1);
       dismissConflict();
     } finally {
@@ -472,6 +474,18 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       // With nothing left staged, the next edit starts its own baseline.
       if (result.settingsSnapshot && stillStaged.length > 0) {
         editBaseline.current = result.settingsSnapshot;
+        // The save was accepted over the old baseline, so the secrets set now
+        // are the ones set then, as this save changed them. The server's
+        // values leave out the secrets this save set.
+        const secretsThen = baselineConfigured.current;
+        if (secretsThen) {
+          const secretsNow = new Set(secretsThen);
+          for (const key of submittedKeys) {
+            if (values[key] === "") secretsNow.delete(key);
+            else if (!Object.hasOwn(result.values, key)) secretsNow.add(key);
+          }
+          baselineConfigured.current = [...secretsNow];
+        }
       }
       savedOver.current = settings;
       for (const key of submittedKeys) {
