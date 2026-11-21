@@ -1713,14 +1713,20 @@ func (qb *QueryBuilder) ebookProgressSortPlan() (string, []string, []any) {
 	return "sort_progress.progress_ratio", []string{joinSQL}, []any{qb.userID, qb.profileID}
 }
 
+// dateViewedSortPlan dates each title by its most recent finished play.
+// Watch history is recorded against episodes, so an episode's plays also date
+// its series, as user_last_watched does for the last_watched rule (#4638). The
+// hidden-item check runs on the episode, the item a history removal names.
 func (qb *QueryBuilder) dateViewedSortPlan() (string, []string, []any) {
 	if qb.mediaScope == "ebook" {
 		return qb.ebookDateViewedSortPlan()
 	}
 	historyJoin := fmt.Sprintf(
 		`LEFT JOIN (
-			SELECT uwh.media_item_id AS content_id, MAX(uwh.watched_at) AS viewed_at
+			SELECT viewed.content_id, MAX(uwh.watched_at) AS viewed_at
 			FROM user_watch_history uwh
+			LEFT JOIN episodes ep ON ep.content_id = uwh.media_item_id
+			CROSS JOIN LATERAL (VALUES (uwh.media_item_id), (ep.series_id)) AS viewed(content_id)
 			LEFT JOIN user_history_hidden_items hhi
 				ON hhi.user_id = $%d
 			   AND hhi.profile_id = $%d
@@ -1729,7 +1735,8 @@ func (qb *QueryBuilder) dateViewedSortPlan() (string, []string, []any) {
 			  AND uwh.profile_id = $%d
 			  AND uwh.completed = TRUE
 			  AND (hhi.media_item_id IS NULL OR uwh.watched_at > hhi.hidden_before)
-			GROUP BY uwh.media_item_id
+			  AND viewed.content_id IS NOT NULL
+			GROUP BY viewed.content_id
 		) sort_history_viewed ON sort_history_viewed.content_id = %s.content_id`,
 		qb.argIdx,
 		qb.argIdx+1,
@@ -1739,20 +1746,20 @@ func (qb *QueryBuilder) dateViewedSortPlan() (string, []string, []any) {
 	)
 	progressJoin := fmt.Sprintf(
 		`LEFT JOIN (
-			SELECT uwp.media_item_id AS content_id,
-				CASE
-					WHEN uwp.completed = TRUE
-					  AND (hhi.media_item_id IS NULL OR uwp.updated_at > hhi.hidden_before)
-					THEN uwp.updated_at
-					ELSE NULL
-				END AS viewed_at
+			SELECT viewed.content_id, MAX(uwp.updated_at) AS viewed_at
 			FROM user_watch_progress uwp
+			LEFT JOIN episodes ep ON ep.content_id = uwp.media_item_id
+			CROSS JOIN LATERAL (VALUES (uwp.media_item_id), (ep.series_id)) AS viewed(content_id)
 			LEFT JOIN user_history_hidden_items hhi
 				ON hhi.user_id = $%d
 			   AND hhi.profile_id = $%d
 			   AND hhi.media_item_id = uwp.media_item_id
 			WHERE uwp.user_id = $%d
 			  AND uwp.profile_id = $%d
+			  AND uwp.completed = TRUE
+			  AND (hhi.media_item_id IS NULL OR uwp.updated_at > hhi.hidden_before)
+			  AND viewed.content_id IS NOT NULL
+			GROUP BY viewed.content_id
 		) sort_progress_viewed ON sort_progress_viewed.content_id = %s.content_id`,
 		qb.argIdx,
 		qb.argIdx+1,

@@ -84,6 +84,12 @@ type trailerEpisodeLookup interface {
 	GetByID(ctx context.Context, contentID string) (*models.Episode, error)
 }
 
+// seriesEpisodeIDLister lists every episode ID of each series, so a series can
+// be dated by its episodes' plays.
+type seriesEpisodeIDLister interface {
+	ListAllIDsBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]string, error)
+}
+
 type LocalWatchEventDispatcher interface {
 	HandleLocalWatchEvent(ctx context.Context, event watchsync.LocalWatchEvent) error
 }
@@ -111,6 +117,7 @@ type ItemsHandler struct {
 	trailerItemAccess        trailerItemAccess
 	trailerSeasonLookup      trailerSeasonLookup
 	trailerEpisodeLookup     trailerEpisodeLookup
+	allSeriesEpisodeIDs      seriesEpisodeIDLister
 	trailerRefreshLimiter    ratelimit.RateLimiter
 	localWatchDispatcher     LocalWatchEventDispatcher
 	ebookProgressStore       EbookReaderProgressLister
@@ -137,7 +144,7 @@ func NewItemsHandler(
 	detailSvc *catalog.DetailService,
 	providerIDRepo *catalog.ProviderIDRepository,
 ) *ItemsHandler {
-	return &ItemsHandler{
+	h := &ItemsHandler{
 		browseRepo:  browseRepo,
 		itemRepo:    itemRepo,
 		episodeRepo: episodeRepo,
@@ -154,6 +161,10 @@ func NewItemsHandler(
 		),
 		detailSvc: detailSvc,
 	}
+	if episodeRepo != nil {
+		h.allSeriesEpisodeIDs = episodeRepo
+	}
+	return h
 }
 
 // SetCompletionObserver wires an optional observer notified when a watch
@@ -1391,57 +1402,117 @@ func (h *ItemsHandler) listUserSortMetrics(
 			ratio := ebookProgress.Progress
 			metrics[item.ContentID] = &sortMetricsResponse{ProgressRatio: &ratio}
 		}
-	case "date_viewed", "plays":
+	case "date_viewed":
+		h.listViewedAtSortMetrics(ctx, items, contentIDs, store, profileID, progressMap, ebookProgressMap, metrics)
+	case "plays":
 		history, err := listCompletedHistoryForItems(ctx, store, profileID, contentIDs)
 		if err != nil {
 			return
 		}
 		historyCounts := make(map[string]int, len(contentIDs))
-		historyViewedAt := make(map[string]string, len(contentIDs))
 		for _, entry := range history {
 			if entry.MediaItemID == "" {
 				continue
 			}
 			historyCounts[entry.MediaItemID]++
-			if entry.WatchedAt > historyViewedAt[entry.MediaItemID] {
-				historyViewedAt[entry.MediaItemID] = entry.WatchedAt
-			}
 		}
 		for _, item := range items {
 			if item == nil || item.ContentID == "" {
 				continue
 			}
-			resp := &sortMetricsResponse{}
-			if sortField == "date_viewed" {
-				viewedAt := historyViewedAt[item.ContentID]
-				if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && progress.UpdatedAt > viewedAt {
-					viewedAt = progress.UpdatedAt
-				}
-				if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= models.EbookFinishedProgressThreshold {
-					ebookViewedAt := progress.UpdatedAt.UTC().Format(time.RFC3339)
-					if ebookViewedAt > viewedAt {
-						viewedAt = ebookViewedAt
-					}
-				}
-				if viewedAt == "" {
-					continue
-				}
-				resp.ViewedAt = viewedAt
-			} else {
-				playCount := historyCounts[item.ContentID]
-				if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && playCount < 1 {
-					playCount = 1
-				}
-				if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= models.EbookFinishedProgressThreshold && playCount < 1 {
-					playCount = 1
-				}
-				if playCount <= 0 {
-					continue
-				}
-				resp.PlayCount = &playCount
+			playCount := historyCounts[item.ContentID]
+			if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && playCount < 1 {
+				playCount = 1
 			}
-			metrics[item.ContentID] = resp
+			if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= models.EbookFinishedProgressThreshold && playCount < 1 {
+				playCount = 1
+			}
+			if playCount <= 0 {
+				continue
+			}
+			metrics[item.ContentID] = &sortMetricsResponse{PlayCount: &playCount}
 		}
+	}
+}
+
+// listViewedAtSortMetrics sets each item's latest finished play for a date
+// viewed sort. Plays are recorded against episodes, so a series takes the
+// latest of its episodes' plays, as the sort does (#4638).
+func (h *ItemsHandler) listViewedAtSortMetrics(
+	ctx context.Context,
+	items []*models.MediaItem,
+	contentIDs []string,
+	store userstore.UserStore,
+	profileID string,
+	progressMap map[string]userstore.WatchProgress,
+	ebookProgressMap map[string]EbookReaderProgress,
+	metrics map[string]*sortMetricsResponse,
+) {
+	var seriesEpisodes map[string][]string
+	if seriesIDs := seriesItemIDs(items); h.allSeriesEpisodeIDs != nil && len(seriesIDs) > 0 {
+		// Without the episodes, series go undated but other titles still are.
+		if listed, err := h.allSeriesEpisodeIDs.ListAllIDsBySeriesIDs(ctx, seriesIDs); err == nil {
+			seriesEpisodes = listed
+		}
+	}
+	var episodeIDs []string
+	for _, ids := range seriesEpisodes {
+		episodeIDs = append(episodeIDs, ids...)
+	}
+	lookupIDs := contentIDs
+	if len(episodeIDs) > 0 {
+		lookupIDs = append(append([]string(nil), contentIDs...), episodeIDs...)
+		episodeProgress, err := store.ListProgressByMediaItems(ctx, profileID, episodeIDs)
+		if err != nil {
+			return
+		}
+		merged := make(map[string]userstore.WatchProgress, len(progressMap)+len(episodeProgress))
+		for id, progress := range progressMap {
+			merged[id] = progress
+		}
+		for id, progress := range episodeProgress {
+			merged[id] = progress
+		}
+		progressMap = merged
+	}
+	// One grouped read gives each item's latest visible play.
+	history, err := store.ListCompletedHistoryItems(ctx, userstore.CompletedHistoryItemQuery{
+		ProfileID:    profileID,
+		MediaItemIDs: lookupIDs,
+	})
+	if err != nil {
+		return
+	}
+	historyViewedAt := make(map[string]string, len(history))
+	for _, entry := range history {
+		historyViewedAt[entry.MediaItemID] = entry.WatchedAt
+	}
+	viewedAt := func(id string) string {
+		latest := historyViewedAt[id]
+		if progress, ok := progressMap[id]; ok && progress.Completed && progress.UpdatedAt > latest {
+			latest = progress.UpdatedAt
+		}
+		return latest
+	}
+	for _, item := range items {
+		if item == nil || item.ContentID == "" {
+			continue
+		}
+		latest := viewedAt(item.ContentID)
+		for _, episodeID := range seriesEpisodes[item.ContentID] {
+			if episodeViewedAt := viewedAt(episodeID); episodeViewedAt > latest {
+				latest = episodeViewedAt
+			}
+		}
+		if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= models.EbookFinishedProgressThreshold {
+			if ebookViewedAt := progress.UpdatedAt.UTC().Format(time.RFC3339); ebookViewedAt > latest {
+				latest = ebookViewedAt
+			}
+		}
+		if latest == "" {
+			continue
+		}
+		metrics[item.ContentID] = &sortMetricsResponse{ViewedAt: latest}
 	}
 }
 
