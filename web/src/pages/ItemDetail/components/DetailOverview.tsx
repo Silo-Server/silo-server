@@ -46,6 +46,14 @@ export default function DetailOverview({
   // another item, shows the label without announcing it.
   const [sawTranslation, setSawTranslation] = useState(false);
   if (translating && !sawTranslation) setSawTranslation(true);
+  // The status and the label take the Translate button's height once that
+  // button has shown in this view, so the row keeps its height when one
+  // replaces another. In auto mode no button precedes them, and a row taller
+  // than "More" would move the page when a translation starts or times out.
+  const [offeredTranslate, setOfferedTranslate] = useState(false);
+  if (onTranslate && !offeredTranslate) setOfferedTranslate(true);
+  const rowMargin = offeredTranslate ? "mt-1.5" : "mt-1";
+  const buttonBox = offeredTranslate ? "border-y border-transparent py-0.5" : "";
 
   // Only offer "More" when the clamp actually hides text; re-check on resize
   // because the line count depends on the column width.
@@ -101,19 +109,16 @@ export default function DetailOverview({
             {expanded ? t("web.detail.overview.less") : t("web.detail.overview.more")}
           </button>
         )}
-        {/* The status and the label take the Translate button's height, so
-            the row keeps its height when one replaces another. */}
         <TranslatingStatus
           translating={translating}
           label={t("web.detail.translation.translating")}
-          className="mt-1.5"
+          matchButton={offeredTranslate}
+          className={rowMargin}
         >
-          {sawTranslation && machineTranslated && (
-            <MachineTranslatedLabel className="border-y border-transparent py-0.5" />
-          )}
+          {sawTranslation && machineTranslated && <MachineTranslatedLabel className={buttonBox} />}
         </TranslatingStatus>
         {!sawTranslation && machineTranslated && (
-          <MachineTranslatedLabel className="mt-1.5 border-y border-transparent py-0.5" />
+          <MachineTranslatedLabel className={`${rowMargin} ${buttonBox}`} />
         )}
         {!translating && onTranslate && (
           <button
