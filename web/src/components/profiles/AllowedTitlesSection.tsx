@@ -338,14 +338,14 @@ function AddAllowedTitle({
                   disabled={already}
                   onClick={() => onPick(item)}
                 >
-                  {already ? (
-                    t("web.profiles.allowedTitles.allowed")
-                  ) : (
-                    <>
-                      <Plus className="size-3.5" />
-                      {t("web.profiles.allowedTitles.allow")}
-                    </>
-                  )}
+                  {already ? null : <Plus className="size-3.5" />}
+                  {/* min-w-0 lets a word with no hyphenation point (Bulgarian
+                      has no dictionary) break rather than overflow the button. */}
+                  <span className="min-w-0 break-words">
+                    {already
+                      ? t("web.profiles.allowedTitles.allowed")
+                      : t("web.profiles.allowedTitles.allow")}
+                  </span>
                 </Button>
               </li>
             );
