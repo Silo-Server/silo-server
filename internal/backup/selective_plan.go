@@ -235,7 +235,7 @@ func (p *planner) planLibraries(ctx context.Context) ([]libraryPlan, error) {
 
 // Change codes name what a restore replaces in a home or library page
 // section (PreviewHomeSection.Changes) or a template collection
-// (PreviewCollection.Changes). The API declares them; clients show each in
+// (PreviewCollected.Changes). The API declares them; clients show each in
 // the interface language.
 const (
 	ChangeType               = "type"
