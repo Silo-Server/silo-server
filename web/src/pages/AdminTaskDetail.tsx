@@ -275,6 +275,13 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
   );
 }
 
+/**
+ * A save-conflict action is never wider than the schedule panel: a label too
+ * long for one line wraps inside the button instead of running off screen.
+ */
+const CONFLICT_ACTION =
+  "h-auto min-h-9 max-w-full py-1.5 text-start text-balance wrap-anywhere whitespace-normal";
+
 function TaskSchedulePanel({
   taskKey,
   manualOnly,
@@ -341,10 +348,16 @@ function TaskSchedulePanel({
   };
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-medium">{t("web.admin.tasks.detail.schedule")}</h2>
         {!manualOnly && !snapshot && (
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => void startEditing()}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-auto min-h-8 max-w-full py-1 text-start text-balance wrap-anywhere whitespace-normal"
+            disabled={busy}
+            onClick={() => void startEditing()}
+          >
             {t("web.admin.tasks.detail.editSchedule")}
           </Button>
         )}
@@ -385,7 +398,7 @@ function TaskSchedulePanel({
             <Button
               variant="outline"
               size="sm"
-              className="h-auto min-h-8 max-w-full py-1 text-start whitespace-normal"
+              className="h-auto min-h-8 max-w-full py-1 text-start wrap-anywhere whitespace-normal"
               onClick={() => {
                 setDraft([...draft, { type: "interval", interval_ms: 3_600_000 }]);
                 setDraftKeys([...draftKeys, nextDraftKey.current++]);
@@ -399,6 +412,7 @@ function TaskSchedulePanel({
             <div className="space-y-2 text-sm">
               <Button
                 variant="outline"
+                className={CONFLICT_ACTION}
                 disabled={busy || update.isPending}
                 onClick={() => void review()}
               >
@@ -415,6 +429,7 @@ function TaskSchedulePanel({
                     ))
                   )}
                   <Button
+                    className={CONFLICT_ACTION}
                     disabled={busy || update.isPending}
                     onClick={() => {
                       setSnapshot(candidate);

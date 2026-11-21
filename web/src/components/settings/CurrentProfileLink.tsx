@@ -34,7 +34,10 @@ export function CurrentProfileLink({ className }: { className?: string }) {
         <span className="text-muted-foreground block text-xs leading-tight">
           {t("web.settings.currentProfileLink.caption")}
         </span>
-        <span className="block truncate text-sm font-semibold">{profileName}</span>
+        {/* w-fit keeps a short name on the start side under the caption. */}
+        <span dir="auto" className="block w-fit max-w-full truncate text-sm font-semibold">
+          {profileName}
+        </span>
       </span>
       <ChevronRight className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden="true" />
     </Link>

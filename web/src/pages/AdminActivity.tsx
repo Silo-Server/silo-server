@@ -894,6 +894,7 @@ function StreamRow({
                 <Link
                   to={`/admin/users/${session.user_id}`}
                   title={username}
+                  dir="auto"
                   className={`${ROW_LINK_CLASS} min-w-0 truncate`}
                 >
                   {username}
@@ -998,16 +999,20 @@ function MediaCell({ session }: { session: AdminSession }) {
   );
 }
 
-/** Position through the title, with a bar, and whether the viewer paused. */
+/**
+ * Position through the title, with a bar, and whether the viewer paused. The
+ * bar narrows before anything wraps; past that the line wraps, so its end
+ * (usually the pause label) never paints over the next column.
+ */
 function ProgressLine({ session }: { session: AdminSession }) {
   const t = useT();
   const progress = getPlaybackProgress(session);
   return (
-    <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-[11px]">
+    <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
       {progress !== null ? (
         <span
           aria-hidden="true"
-          className="bg-border h-1 w-14 shrink-0 overflow-hidden rounded-full"
+          className="bg-border h-1 max-w-14 min-w-9 flex-1 overflow-hidden rounded-full"
         >
           <span
             className={`block h-full rounded-full ${session.is_paused ? "bg-warning" : "bg-primary"}`}
@@ -1037,6 +1042,7 @@ function ProfilePill({ session }: { session: AdminSession }) {
   return profile ? (
     <span
       title={profile}
+      dir="auto"
       className="border-primary/30 bg-primary/10 text-primary max-w-[7rem] shrink-0 truncate rounded border px-1.5 py-0.5 text-[10px] leading-none"
     >
       {profile}
@@ -1075,6 +1081,7 @@ function ViewerCell({
         <Link
           to={`/admin/users/${session.user_id}`}
           title={username}
+          dir="auto"
           className={`${ROW_LINK_CLASS} truncate text-[13px] font-medium`}
         >
           {username}

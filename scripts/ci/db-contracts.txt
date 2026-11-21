@@ -906,9 +906,9 @@
 ./internal/autoscan TestUpdateConnectionMarkerReset
 
 # ChatGPT credential rotations serialize independently of general settings.
-./internal/catalog TestEncryptedSettingsValueAtomicSerializesWithoutBlockingGeneralSettingsDB
-./internal/catalog TestSettingsValueWaitersPreservePoolCapacityDB
-./internal/catalog TestSelectionUsesOneConnectionAndWaitsBeforeGeneralLockDB
+./internal/serversettings TestEncryptedSettingsValueAtomicSerializesWithoutBlockingGeneralSettingsDB
+./internal/serversettings TestSettingsValueWaitersPreservePoolCapacityDB
+./internal/serversettings TestSelectionUsesOneConnectionAndWaitsBeforeGeneralLockDB
 
 # Marker thumbnails preserve current ranges and provider image inventories.
 ./internal/chapterthumbs TestMarkerOnlyThumbnailsAndStaleEditsDB

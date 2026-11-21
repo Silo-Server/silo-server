@@ -2036,7 +2036,7 @@ fails on one in no list or in two, and on a listed name that is not a table,
 so a new table needs a decision before it ships; a layer that adds one
 classifies it.
 
-Sensitive settings (`catalog.SensitiveSettingKeys`) are classified the same
+Sensitive settings (`serversettings.SensitiveSettingKeys`) are classified the same
 way in `internal/backup/settings_secrets.go`. The signing keys Silo
 generates for the tokens it issues (`auth.jwt_secret`, which signs sessions,
 download and artwork links, backup object links, OAuth state, and cursors,

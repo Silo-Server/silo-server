@@ -6,7 +6,10 @@
  */
 export function HeroOverviewText({ overview }: { overview: string }) {
   return (
-    <p className="bidi-text text-foreground/72 line-clamp-2 text-sm leading-7 sm:line-clamp-3 sm:text-base">
+    <p
+      dir="auto"
+      className="bidi-text text-foreground/72 line-clamp-2 text-sm leading-7 sm:line-clamp-3 sm:text-base"
+    >
       {overview}
     </p>
   );

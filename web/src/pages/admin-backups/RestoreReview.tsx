@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { useT } from "@/i18n";
+import { cn } from "@/lib/utils";
 import { FieldGroup } from "@/pages/admin-settings/FieldGroup";
 
 import { restoreCaveats, restorePlan, type SelectionKeys } from "./restoreModel";
@@ -37,6 +38,36 @@ export interface RestoreReviewProps {
  */
 const REFUSAL_ACTION = "h-auto min-h-8 max-w-full py-1 text-balance whitespace-normal";
 
+/**
+ * The plan's sentences as a bulleted list, here and in the Choose step's summary. The part
+ * of a name that can't wrap, such as one long run of joined emoji, is clipped sideways at
+ * the list's edge; the words around it still wrap. The clip has 0.25em of padding, offset by
+ * a negative margin, so letters whose ink reaches past their edge stay whole. It sits on the
+ * end side only: the start padding already gives that room and holds the bullets, which
+ * clipping each item would cut off.
+ */
+export function PlanSentences({
+  sentences,
+  className,
+}: {
+  sentences: readonly string[];
+  className?: string;
+}) {
+  const t = useT();
+  return (
+    <ul
+      className={cn(
+        "-me-[0.25em] list-disc space-y-1.5 overflow-x-clip ps-5 pe-[0.25em] text-sm wrap-anywhere",
+        className,
+      )}
+    >
+      {sentences.map((sentence, position) => (
+        <li key={position}>{t("web.admin.backups.restore.plan.sentence", { sentence })}</li>
+      ))}
+    </ul>
+  );
+}
+
 /** Step 2: the whole plan in sentences, what it leaves out, and the button. */
 export function RestoreReview({
   set,
@@ -58,11 +89,7 @@ export function RestoreReview({
     <div className="max-w-[70rem] space-y-5">
       {plan.map((group) => (
         <FieldGroup key={group.section} label={group.title}>
-          <ul className="list-disc space-y-1.5 py-3.5 ps-5 text-sm wrap-anywhere">
-            {group.sentences.map((sentence, position) => (
-              <li key={position}>{t("web.admin.backups.restore.plan.sentence", { sentence })}</li>
-            ))}
-          </ul>
+          <PlanSentences sentences={group.sentences} className="py-3.5" />
         </FieldGroup>
       ))}
       {caveats.length > 0 ? (
@@ -70,13 +97,19 @@ export function RestoreReview({
           label={t("web.admin.backups.restore.review.leftOut")}
           description={t("web.admin.backups.restore.review.leftOutDescription")}
         >
-          <ul className="space-y-2 py-3.5 text-sm wrap-anywhere">
+          {/* Clips a name that can't wrap like PlanSentences, but on both sides: this list
+              has no start padding or bullets. The name's title shows it in full. */}
+          <ul className="-mx-[0.25em] space-y-2 overflow-x-clip px-[0.25em] py-3.5 text-sm wrap-anywhere">
             {caveats.map((caveat) => (
               <li key={caveat.key}>
                 {t("web.admin.backups.restore.review.caveat", {
                   label: caveat.label,
                   text: caveat.text,
-                  b: (chunks) => <span className="font-medium">{chunks}</span>,
+                  b: (chunks) => (
+                    <span title={caveat.label} className="font-medium">
+                      {chunks}
+                    </span>
+                  ),
                   muted: (chunks) => <span className="text-muted-foreground">{chunks}</span>,
                 })}
               </li>
