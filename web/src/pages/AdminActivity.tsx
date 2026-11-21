@@ -894,6 +894,7 @@ function StreamRow({
                 <Link
                   to={`/admin/users/${session.user_id}`}
                   title={username}
+                  dir="auto"
                   className={`${ROW_LINK_CLASS} min-w-0 truncate`}
                 >
                   {username}
@@ -1041,6 +1042,7 @@ function ProfilePill({ session }: { session: AdminSession }) {
   return profile ? (
     <span
       title={profile}
+      dir="auto"
       className="border-primary/30 bg-primary/10 text-primary max-w-[7rem] shrink-0 truncate rounded border px-1.5 py-0.5 text-[10px] leading-none"
     >
       {profile}
@@ -1079,6 +1081,7 @@ function ViewerCell({
         <Link
           to={`/admin/users/${session.user_id}`}
           title={username}
+          dir="auto"
           className={`${ROW_LINK_CLASS} truncate text-[13px] font-medium`}
         >
           {username}

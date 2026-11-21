@@ -101,14 +101,20 @@ export default function DetailOverview({
             {expanded ? t("web.detail.overview.less") : t("web.detail.overview.more")}
           </button>
         )}
+        {/* The status and the label take the Translate button's height, so
+            the row keeps its height when one replaces another. */}
         <TranslatingStatus
           translating={translating}
           label={t("web.detail.translation.translating")}
-          className="mt-1"
+          className="mt-1.5"
         >
-          {sawTranslation && machineTranslated && <MachineTranslatedLabel />}
+          {sawTranslation && machineTranslated && (
+            <MachineTranslatedLabel className="border-y border-transparent py-0.5" />
+          )}
         </TranslatingStatus>
-        {!sawTranslation && machineTranslated && <MachineTranslatedLabel className="mt-1" />}
+        {!sawTranslation && machineTranslated && (
+          <MachineTranslatedLabel className="mt-1.5 border-y border-transparent py-0.5" />
+        )}
         {!translating && onTranslate && (
           <button
             type="button"

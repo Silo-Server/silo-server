@@ -309,8 +309,9 @@ export function rowSecondary(
       if (itemState(item) === "same") {
         return t("web.admin.backups.restore.row.sameFolders", { name: local ?? item.label });
       }
-      // Each path is its own left-to-right run (U+2066 … U+2069), so two folders
-      // with Arabic names side by side keep their order on the row.
+      // The row's tooltip; ItemRow draws the paths themselves. Each path is its
+      // own left-to-right run (U+2066 … U+2069), so two folders with Arabic names
+      // keep their order in the tooltip, which can't be copied.
       return item.library?.paths.map((path) => "\u2066" + path + "\u2069").join(", ") ?? null;
     }
     case "plugin":

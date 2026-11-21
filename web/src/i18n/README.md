@@ -126,6 +126,11 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   it only while it shows the URL or path (`dir={value ? "ltr" : undefined}`).
   `dir="auto"` leaves an empty field's example in the page's direction, and
   `type="url"` rejects addresses without a scheme.
+- A path or URL shown as text (a `code` block, a list of folders) also sets `dir="ltr"`,
+  and the block that holds it takes `align-with-page` (in `app.css`) so its lines, wrapped
+  or not, line up with the text around them: on the page's start side. Without it they
+  start at the block's left edge. Firefox and Safari hide that inside a list item, where
+  they right-align them anyway, so check in Chromium.
 - A name that can be in either script and is cut with `truncate` (a username, say) takes
   `dir="auto"`: it reads in the direction of its first strong character (a letter, or
   right-to-left punctuation such as `؟`), and left to right when it has none, as a name
@@ -148,6 +153,12 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   loses its "…" in Firefox and its start in WebKit, and a clamped paragraph gets its "…"
   at the start of its last line. `.bidi-text` keeps a short one on the page's start
   side, so it needs no `w-fit`. The mixed-direction limit above applies here too.
+- A path shown as text, cut or not, takes `dir="ltr"` and renders through
+  `PathText` (`src/components/PathText.tsx`), which keeps each folder name in its
+  own direction; without it, folders named in Arabic swap places. An email cut with
+  `truncate` takes `dir={emailDir(email)}` (`src/lib/direction.ts`), which keeps one
+  with an Arabic name part in the page's direction; `dir="auto"` would turn it right
+  to left on a left-to-right page. Size either element as for a name, above.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also

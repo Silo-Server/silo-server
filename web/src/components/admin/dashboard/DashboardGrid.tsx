@@ -158,8 +158,8 @@ export function DashboardGrid({
     scrollOffsetY: number;
   } | null>(null);
 
-  // The node the current drag started from: the dragged widget or a link or
-  // image inside it, or the Add widget sheet item.
+  // The node the current drag started from: the dragged widget, a link, image,
+  // or selected Text node inside it, or the Add widget sheet item.
   const dragSourceRef = useRef<Node | null>(null);
 
   const endDrag = useCallback(() => {
@@ -541,6 +541,9 @@ export function DashboardGrid({
       const rowStep = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : undefined;
       if (columnStep === undefined && rowStep === undefined) return;
       event.preventDefault();
+      // One gesture at a time: a pointer holding a handle owns the size, and
+      // its release would overwrite the step anyway.
+      if (resizeSessionRef.current) return;
       const widget = getDashboardWidget(id);
       const nextSpan = clamp(currentSpan + (columnStep ?? 0), widget.minSpan, widget.maxSpan);
       const nextRows = clamp(currentRows + (rowStep ?? 0), widget.minRows, widget.maxRows);

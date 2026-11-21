@@ -24,6 +24,7 @@ import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 import { RowDisclosure } from "./Disclosure";
 import { itemState, type ItemState } from "./restoreGroups";
 import { REASON_SENTENCES, displayLabel, toggleKeys } from "./restoreModel";
+import { useOverflowsInline } from "./useOverflowsInline";
 
 /** Toggles item keys; stable for the page's life so memoized rows don't re-render. */
 export type ToggleKeys = (keys: string[], checked: boolean) => void;
@@ -111,6 +112,31 @@ export function BreakableKey({ value }: { value: string }) {
         <Fragment key={position}>
           {part}
           {position < parts.length - 1 ? <wbr /> : null}
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+const PATH_SEPARATOR = ", ";
+/** Keeps a path's own spaces, so a copied path names the folder. */
+const KEEP_SPACES = "[white-space-collapse:preserve]";
+
+/**
+ * Folder paths, each in its own `dir="ltr"` span, so two folders with Arabic
+ * names keep their order beside each other. The spans isolate each path in the
+ * layout, not with Unicode marks, and keep its spaces, so a copied path is the
+ * folder's own path.
+ */
+function FolderPaths({ paths }: { paths: readonly string[] }) {
+  return (
+    <>
+      {paths.map((path, position) => (
+        <Fragment key={position}>
+          {position > 0 ? PATH_SEPARATOR : null}
+          <span dir="ltr" className={KEEP_SPACES}>
+            {path}
+          </span>
         </Fragment>
       ))}
     </>
@@ -248,15 +274,26 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
     paths.length > 0 ? (
       // Paths read left to right in any language; w-fit keeps the list on the
       // page's start side.
-      <ul key="paths" dir="ltr" className="text-muted-foreground w-fit font-mono text-xs break-all">
+      <ul
+        key="paths"
+        dir="ltr"
+        className={cn("text-muted-foreground w-fit font-mono text-xs break-all", KEEP_SPACES)}
+      >
         {paths.map((path) => (
           <li key={path}>{path}</li>
         ))}
       </ul>
     ) : null,
     missingPaths.length > 0 ? (
+      // The list reads left to right inside the sentence, as on the row above.
       <p key="missing-paths" className="text-xs wrap-anywhere text-amber-600 dark:text-amber-400">
-        {t("web.admin.backups.restore.rows.cantOpen", { paths: missingPaths.join(", ") })}
+        {t("web.admin.backups.restore.rows.cantOpen", {
+          paths: (
+            <span dir="ltr">
+              <FolderPaths paths={missingPaths} />
+            </span>
+          ),
+        })}
       </p>
     ) : null,
     item.missing_blobs.length > 0 ? (
@@ -317,6 +354,8 @@ export const ItemRow = memo(function ItemRow({
   const details = open ? itemDetails(t, item) : null;
   const hasDetails = hasItemDetails(item);
   const label = displayLabel(item);
+  const [nameRef, nameOverflows] = useOverflowsInline<HTMLLabelElement>(label);
+  const paths = item.kind === "library" ? item.library?.paths : undefined;
   // The row is its own container, since its width depends on the admin sidebar and
   // restore summary as much as on the viewport. A narrow row wraps the whole name
   // above the muted detail, so names that differ only at the end stay apart.
@@ -335,13 +374,17 @@ export const ItemRow = memo(function ItemRow({
           {/* block: Label is a flex box, which would clip the name without an ellipsis.
               Beside a detail, a one-line row stops the name at 60% and ends it in "…";
               Chromium breaks at <wbr> even under nowrap, so that row hides them. A name
-              with nothing beside it wraps instead, so it is never cut short. */}
+              with nothing beside it wraps instead, so it is never cut short. A name
+              clips sideways only while part of it can't wrap to fit, such as one long
+              run of joined emoji; a one-line row with a detail truncates instead. */}
           <Label
+            ref={nameRef}
             htmlFor={controlId}
             title={label}
             className={cn(
               "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
               secondary && "@2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden",
+              nameOverflows && (secondary ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
               !item.selectable && "text-muted-foreground",
             )}
           >
@@ -354,10 +397,10 @@ export const ItemRow = memo(function ItemRow({
             // one at the column's width so it is still cut short.
             <span
               title={secondary}
-              dir={item.kind === "library" ? "ltr" : undefined}
+              dir={paths ? "ltr" : undefined}
               className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs"
             >
-              {secondary}
+              {paths ? <FolderPaths paths={paths} /> : secondary}
             </span>
           ) : null}
         </div>

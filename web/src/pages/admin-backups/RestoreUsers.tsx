@@ -19,6 +19,7 @@ import {
   requiredPrimary,
   toggleKeys,
 } from "./restoreModel";
+import { useOverflowsInline } from "./useOverflowsInline";
 
 function droppedLibraries(t: Translate, count: number): string {
   return t("web.admin.backups.restore.users.droppedLibraries", {
@@ -179,6 +180,9 @@ export const AccountRow = memo(function AccountRow({
   const controlId = useId();
   const detailsId = useId();
   const [open, setOpen] = useState(false);
+  const [nameRef, nameOverflows] = useOverflowsInline<HTMLLabelElement>(item.label);
+  // The merge line exists only while the details are open, so opening them measures it.
+  const [mergeRef, mergeOverflows] = useOverflowsInline<HTMLParagraphElement>(open && item);
   const account = item.account;
   if (!account) return null;
   const chosen = new Set(chosenProfiles ? chosenProfiles.split("\u0000") : []);
@@ -198,10 +202,12 @@ export const AccountRow = memo(function AccountRow({
             .flatMap((profile) => profile.data_types),
         )
       : null;
+  // The label can already be the email: an invited account's username is its address,
+  // and an account with no username is labeled by its email.
   const contact = [
     pending,
     account.username !== item.label ? account.username : null,
-    account.email || null,
+    account.email !== item.label ? account.email : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -218,7 +224,9 @@ export const AccountRow = memo(function AccountRow({
   // row's name and contact about 220 px, so below 52rem the row shows only the badge's
   // icon, and the merge status only when it names another account; the details show
   // the admin role and the status. The badge can cut a long merge destination short,
-  // so the details show a merge in full at every width.
+  // so the details show a merge in full at every width. As in ItemRow, a name clips
+  // sideways only while part of it can't wrap to fit: in the label, and in the merge
+  // status, which names the account it merges into.
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
@@ -232,15 +240,21 @@ export const AccountRow = memo(function AccountRow({
         />
         <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
           <Label
+            ref={nameRef}
             htmlFor={controlId}
             title={item.label}
             className={cn(
               "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
               contact && "@2xl:max-w-[45%] @2xl:truncate @2xl:[&_wbr]:hidden",
+              nameOverflows && (contact ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
               !item.selectable && "text-muted-foreground",
             )}
           >
-            <BreakableKey value={item.label} />
+            {/* <bdi> reads the name in its own direction, so an address that starts
+                with digits stays in order on a right-to-left page. */}
+            <bdi>
+              <BreakableKey value={item.label} />
+            </bdi>
           </Label>
           {contact ? (
             // Without the pending summary the line is the email (the label is the
@@ -301,7 +315,15 @@ export const AccountRow = memo(function AccountRow({
       {open ? (
         <div id={detailsId} className="space-y-1 ps-7 pb-3">
           {status ? (
-            <p className={cn("text-[13px] wrap-anywhere", !merges && "@[52rem]:hidden")}>
+            <p
+              ref={mergeRef}
+              title={status}
+              className={cn(
+                "text-[13px] wrap-anywhere",
+                !merges && "@[52rem]:hidden",
+                mergeOverflows && "overflow-x-clip",
+              )}
+            >
               {status}
             </p>
           ) : null}

@@ -351,7 +351,9 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
           >
             {username.charAt(0).toUpperCase()}
           </div>
-          <span className="min-w-0 truncate text-xs font-medium">{username}</span>
+          <span dir="auto" className="min-w-0 truncate text-xs font-medium">
+            {username}
+          </span>
           <span className="text-muted-foreground ms-auto shrink-0 text-[10px] whitespace-nowrap">
             <span className="tabular-nums">{position}</span>
             {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- punctuation separating two already-formatted times */}
