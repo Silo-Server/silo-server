@@ -264,8 +264,8 @@ function NodeLocationFields({
           <Label htmlFor={dirId}>{t("web.admin.downloads.location.directory")}</Label>
           <Input
             id={dirId}
-            // A path reads left to right; the translated placeholder keeps the page's direction.
-            dir={dir || clusterDir ? "ltr" : undefined}
+            // The field only ever holds a path, which reads left to right.
+            dir="ltr"
             value={dir}
             onChange={(event) => setDir(event.target.value)}
             // No sentence as a placeholder: an input can't wrap it, so longer

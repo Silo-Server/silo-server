@@ -88,11 +88,11 @@ export function WebhookEndpointSection({ source }: { source: AutoscanSource }) {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
               id={`webhook-url-${source.id}`}
-              // The URL reads left to right; a translated status message keeps the page's direction.
-              dir={active && !uncertain && url ? "ltr" : undefined}
+              // The URL reads left to right in monospace; a translated notice keeps the
+              // page's direction and font (a monospace font draws Arabic letters unjoined).
+              dir={notice ? undefined : "ltr"}
               readOnly
               value={notice ?? url}
-              // Monospace only for the URL: a monospace font draws Arabic letters unjoined.
               className={cn("min-w-0 flex-1 text-xs", !notice && "font-mono")}
               aria-label={t("web.admin.autoscan.webhook.endpoint.fieldLabel")}
               onFocus={(e) => e.currentTarget.select()}
