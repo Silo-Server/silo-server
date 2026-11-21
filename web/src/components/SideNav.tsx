@@ -79,8 +79,12 @@ export function SideNavItem({
       <span className="flex w-[18px] flex-shrink-0 items-center justify-center">
         <Icon className="h-[18px] w-[18px]" />
       </span>
-      <span className="line-clamp-2 min-w-0 break-words">{label}</span>
-      {badge && <span className="ms-auto">{badge}</span>}
+      {/* Wraps so a badge that grows with the text size moves under the label
+          instead of splitting the label or itself across lines. */}
+      <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1">
+        <span className="line-clamp-2 min-w-0 break-words">{label}</span>
+        {badge && <span className="ms-auto whitespace-nowrap">{badge}</span>}
+      </span>
     </>
   );
   const ariaCurrent = active ? "page" : undefined;
