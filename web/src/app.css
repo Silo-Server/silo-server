@@ -709,18 +709,15 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   /* Code, paths, JSON and log text read left to right inside any page. Inline
      code takes its direction from its own text and keeps the page's direction
      for its margins (a logical margin resolves against the element's own
-     direction). An explicit dir wins, because plaintext would ignore it: a
-     path marked left to right keeps its order even when it starts with an
-     Arabic folder. */
+     direction). Code with a dir keeps the browser's isolate, because
+     plaintext would ignore the dir: a path marked left to right keeps its
+     order even when it starts with an Arabic folder. */
   pre {
     direction: ltr;
     unicode-bidi: isolate;
   }
-  :is(code, kbd, samp) {
+  :is(code, kbd, samp):not([dir]) {
     unicode-bidi: plaintext;
-  }
-  :is(code, kbd, samp)[dir] {
-    unicode-bidi: isolate;
   }
   /* Titles, names, taglines and overviews from metadata take their direction
      from their own text, so "56 Days" doesn't read "Days 56" in Arabic and an
