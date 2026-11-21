@@ -760,14 +760,17 @@ function describeExportJob(t: Translate, job: AdminJob) {
   return `${exportScopeLabel(t, job)} • ${formatDateTime(job.requested_at)}`;
 }
 
-function describeImportJob(t: Translate, job: AdminJob) {
+function describeImportJob(t: Translate, job: AdminJob): ReactNode {
   const importRequest = job.request_payload as {
     source_label?: string;
     source_key?: string;
   };
-  return (
-    importRequest.source_label ||
-    importRequest.source_key ||
+  const label = importRequest.source_label || importRequest.source_key;
+  // The server's label is the remote URL, a file name, or "Export job <id>": untranslated text
+  // that reads left to right in every language. bdi, not isolate characters, keeps copies clean.
+  return label ? (
+    <bdi dir="ltr">{label}</bdi>
+  ) : (
     t("web.admin.catalogMaintenance.imports.seedFallback")
   );
 }

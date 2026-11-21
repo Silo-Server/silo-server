@@ -79,12 +79,15 @@ function jobDescription(job: AdminJob, t: Translate) {
         return t("web.admin.common.jobHistory.target.libraryCount", countValues(ids.length));
       return t("web.admin.common.jobHistory.target.allLibraries");
     }
-    case "catalog_import":
-      return (
-        (payload.source_label as string) ||
-        (payload.source_key as string) ||
+    case "catalog_import": {
+      // A URL, file name, or "Export job <id>" from the server: left to right in every language.
+      const label = (payload.source_label as string) || (payload.source_key as string);
+      return label ? (
+        <bdi dir="ltr">{label}</bdi>
+      ) : (
         t("web.admin.common.jobHistory.target.catalogSeed")
       );
+    }
     default:
       return "";
   }
