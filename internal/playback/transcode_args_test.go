@@ -448,8 +448,38 @@ var videoToolboxToneMapSubtitleBase = TranscodeOpts{
 // pgsComposite is the PGS composite on [vmain] that fits subtitle track index
 // to the frame.
 func pgsComposite(index int) string {
-	return fmt.Sprintf("[vmain]split[bsmain][bsref];[0:s:%d][bsref]scale=w='min(rw,iw*rh/ih)':h='min(rh,ih*rw/iw)':eval=frame[bsub];"+
-		"[bsmain][bsub]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:eof_action=pass", index)
+	return fmt.Sprintf("[vmain]split[bsmain][bsref];[0:s:%d]premultiply=inplace=1[bspre];"+
+		"[bspre][bsref]scale=w='min(rw,iw*rw/(ih*rdar))':h='min(rh,ih*rdar*rh/iw)':eval=frame[bsub];"+
+		"[bsmain][bsub]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:eof_action=pass:alpha=premultiplied", index)
+}
+
+// TestPGSBurnInWithoutScaleReferenceKeepsPlainOverlay verifies that an FFmpeg
+// older than 7.1 gets the VobSub graph for PGS, which it can parse.
+func TestPGSBurnInWithoutScaleReferenceKeepsPlainOverlay(t *testing.T) {
+	previous := scaleReferenceSupported
+	t.Cleanup(func() { scaleReferenceSupported = previous })
+	var probed []string
+	scaleReferenceSupported = func(bin string) bool {
+		probed = append(probed, bin)
+		return false
+	}
+
+	opts := TranscodeOpts{
+		InputPath: "/media/movie.mkv", OutputDir: "/tmp/out", SessionID: "session-pgs-old-ffmpeg", SourceVideoCodec: "h264",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "none", TargetResolution: "1080p",
+		SubtitleTrackIndex: 2, SubtitleBurnIn: true, SubtitleCodec: "hdmv_pgs_subtitle", FFmpegPath: "/opt/old/ffmpeg",
+	}
+	joined := strings.Join(buildFFmpegArgs(opts), " ")
+	want := "-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]null[vmain];[vmain][0:s:2]overlay=eof_action=pass,scale=-2:1080[vout]"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("args missing plain overlay graph %q:\n%s", want, joined)
+	}
+	if strings.Contains(joined, "split[bsmain]") {
+		t.Fatalf("args fit PGS without scale reference support:\n%s", joined)
+	}
+	if len(probed) == 0 || slices.ContainsFunc(probed, func(bin string) bool { return bin != "/opt/old/ffmpeg" }) {
+		t.Fatalf("probed %q, want only the configured /opt/old/ffmpeg", probed)
+	}
 }
 
 func withSubtitle(opts TranscodeOpts, codec string) TranscodeOpts {

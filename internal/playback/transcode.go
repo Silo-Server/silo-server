@@ -26,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback/dovirpu"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -2035,33 +2036,83 @@ func hwSurfaceToCPUFilter(opts TranscodeOpts) string {
 	return "hwdownload,format=" + tonemap.SurfaceDownloadPixelFormat(opts.SourceVideoBitDepth) + ",format=yuv420p"
 }
 
+var (
+	scaleReferenceMu    sync.Mutex
+	scaleReferenceCache map[string]bool
+
+	// scaleReferenceSupported is the probe bitmap burn-in consults; tests
+	// replace it because they build arguments for fake FFmpeg paths.
+	scaleReferenceSupported = supportsScaleReference
+)
+
+// supportsScaleReference reports whether the given FFmpeg binary's scale
+// filter takes a second, reference input whose size the rw and rh expressions
+// read (FFmpeg 7.1+). Older builds fail to parse the whole graph. Probed once
+// per binary path by running a tiny lavfi graph.
+func supportsScaleReference(bin string) bool {
+	scaleReferenceMu.Lock()
+	defer scaleReferenceMu.Unlock()
+	if available, ok := scaleReferenceCache[bin]; ok {
+		return available
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := procgroup.CommandContext(ctx, bin, "-hide_banner", "-nostdin", "-v", "error",
+		"-f", "lavfi", "-i", "color=s=16x16:d=0.04",
+		"-f", "lavfi", "-i", "color=s=32x32:d=0.04",
+		"-filter_complex", "[0:v][1:v]scale=w='min(rw,iw*rw/(ih*rdar))':h=rh",
+		"-f", "null", "-").Run()
+	available := err == nil
+	if !available {
+		slog.Warn("ffmpeg's scale filter has no reference input; PGS burn-in keeps the plain overlay and needs FFmpeg 7.1+ to fit cropped and scaled frames", "ffmpeg", bin)
+	}
+	if scaleReferenceCache == nil {
+		scaleReferenceCache = make(map[string]bool)
+	}
+	scaleReferenceCache[bin] = available
+	return available
+}
+
+// fitsBitmapSubtitle reports whether the burn-in fits the subtitle canvas to
+// the frame: only PGS, and only when the FFmpeg that runs the graph supports
+// scale's reference input.
+func fitsBitmapSubtitle(opts TranscodeOpts) bool {
+	return IsPGS(opts.SubtitleCodec) && scaleReferenceSupported(ResolveFFmpegPath(opts.FFmpegPath))
+}
+
 // bitmapSubtitleComposite overlays the decoded bitmap subtitle sub onto the CPU
 // frames at the pad main. A PGS canvas keeps the disc's frame size, usually
 // 1920x1080, while the frame can be smaller: an encode that cropped the black
 // bars, or video already scaled to the target. So each subtitle frame is fitted
-// inside the video frame, keeping its aspect ratio, and centered. A canvas the
-// size of the frame stays at 0,0. Other bitmap codecs keep the plain overlay at
-// 0,0. The GPU composites (overlay_vaapi, overlay_opencl) are not built here and
-// still place the canvas at 0,0.
+// inside the video frame, keeping its aspect ratio, and centered. The fit works
+// in display proportions (rdar), so an anamorphic frame doesn't stretch the
+// square-pixel canvas, and the subtitle is premultiplied before the scale so a
+// downscaled edge doesn't darken. A canvas the size of the frame stays at 0,0.
+// The fit sizes the subtitle from the video
+// frame with scale's reference input, which needs FFmpeg 7.1 or later; with an
+// older FFmpeg, PGS falls back to the plain overlay at 0,0, which other bitmap
+// codecs always use. The GPU composites (overlay_vaapi, overlay_opencl) are not
+// built here and still place the canvas at 0,0.
 func bitmapSubtitleComposite(opts TranscodeOpts, main, sub string) string {
-	if !IsPGS(opts.SubtitleCodec) {
+	if !fitsBitmapSubtitle(opts) {
 		return main + sub + "overlay=eof_action=pass"
 	}
 	return main + "split[bsmain][bsref];" +
-		sub + "[bsref]scale=w='min(rw,iw*rh/ih)':h='min(rh,ih*rw/iw)':eval=frame[bsub];" +
-		"[bsmain][bsub]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:eof_action=pass"
+		sub + "premultiply=inplace=1[bspre];" +
+		"[bspre][bsref]scale=w='min(rw,iw*rw/(ih*rdar))':h='min(rh,ih*rdar*rh/iw)':eval=frame[bsub];" +
+		"[bsmain][bsub]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:eof_action=pass:alpha=premultiplied"
 }
 
 // bitmapSubtitleScale returns the target scale filter to run before and after
-// bitmapSubtitleComposite; at most one is non-empty. PGS scales first, so its
-// canvas is fitted at the encoder's input size. Other codecs composite at the
-// source size and scale after.
+// bitmapSubtitleComposite; at most one is non-empty. A fitted PGS track scales
+// first, so its canvas is fitted at the encoder's input size. The plain overlay
+// composites at the source size and scales after.
 func bitmapSubtitleScale(opts TranscodeOpts) (before, after string) {
 	scale := resolutionToScale(opts.TargetResolution)
 	if scale == "" {
 		return "", ""
 	}
-	if IsPGS(opts.SubtitleCodec) {
+	if fitsBitmapSubtitle(opts) {
 		return scale, ""
 	}
 	return "", scale
@@ -2101,8 +2152,9 @@ func bitmapSubtitleGraph(opts TranscodeOpts, sub, filters, tail string) string {
 // appendStreamSelectionArgs), so -vf must never be emitted alongside this.
 //
 // On the CPU paths a PGS track is scaled to the target first and its canvas
-// fitted to the frame (see bitmapSubtitleComposite); other bitmap codecs, and
-// the GPU composites, overlay at the source resolution and scale after.
+// fitted to the frame when FFmpeg supports it (see bitmapSubtitleComposite);
+// other bitmap codecs, and the GPU composites, overlay at the source resolution
+// and scale after.
 // eof_action=pass keeps the video flowing untouched once the subtitle stream
 // ends instead of freezing the last overlay frame on screen.
 //
