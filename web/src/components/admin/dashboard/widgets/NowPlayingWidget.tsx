@@ -28,11 +28,12 @@ import { useT } from "@/i18n";
 const MAX_RENDERED_STREAMS = 40;
 
 /**
- * Cards shown below lg, where dashboard rows size to their content and there is
- * no widget height to fit against (matches the lg rule in app.css).
+ * Cards shown below the dashboard's 12-column layout, where rows size to their
+ * content and there is no widget height to fit against. FIXED_ROWS_QUERY is
+ * that layout's media query on .admin-widget-grid in app.css.
  */
 const STACKED_STREAM_LIMIT = 4;
-const FIXED_ROWS_QUERY = "(min-width: 1024px)";
+const FIXED_ROWS_QUERY = "(min-width: 64rem) and (min-width: 1024px)";
 
 export function NowPlayingWidget() {
   const t = useT();

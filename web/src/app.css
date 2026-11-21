@@ -2357,19 +2357,29 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
   /* Admin dashboard widget grid: single column on small screens, two columns
      on tablets (where .admin-widget-wide keeps the full row), and a 12-column
-     grid from lg up where each widget spans var(--widget-span) columns and
-     var(--widget-rows) fixed-height rows.
+     layout on wide screens where each widget spans var(--widget-span) columns
+     and var(--widget-rows) fixed-height rows.
 
-     Rows are only fixed from lg up. Below that the grid is one or two
-     content-sized columns, so a widget is already as narrow as it gets and a
-     row span picked for the wide layout would clip it — the same reason column
-     spans stop applying there. */
+     Rows are only fixed in the 12-column layout. Below it the grid is one or
+     two content-sized columns, so a widget is already as narrow as it gets and
+     a row span picked for the wide layout would clip it — the same reason
+     column spans stop applying there.
+
+     The 12-column layout needs both Tailwind's lg (64rem) and 1024px. Rem in a
+     media query follows the browser's default font size. With a larger
+     default, lg is past 1024px, and widgets' own lg: layouts (the Health
+     Strip's six columns) only fit their row from there. With a smaller one,
+     lg comes before 1024px, where the fixed 240px sidebar and the widgets'
+     px-sized text leave too little room for 12 columns. DashboardGrid's
+     resize handle and Now Playing's FIXED_ROWS_QUERY use the same pair, so the
+     handle shows exactly where spans and rows apply. */
   .admin-widget-grid {
     display: grid;
     grid-template-columns: 1fr;
     gap: 0.875rem;
     /* Height of one widget row. Declared here rather than in the media query so
-       DashboardGrid can read it back for a drag; it only takes effect at lg. */
+       DashboardGrid can read it back for a drag; it only takes effect in the
+       12-column layout. */
     --admin-row-h: 6.25rem;
   }
 
@@ -2379,10 +2389,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     min-width: 0;
   }
 
-  /* Plot area of a dashboard chart drawn with `fill`. From lg up it takes the
-     height the widget's fixed rows leave it. Below lg the rows are
-     content-sized, so there is no height to take and the plot would measure
-     0px; it keeps the 10rem a fixed-height chart gets instead. */
+  /* Plot area of a dashboard chart drawn with `fill`. In the 12-column layout
+     it takes the height the widget's fixed rows leave it. Below it the rows
+     are content-sized, so there is no height to take and the plot would
+     measure 0px; it keeps the 10rem a fixed-height chart gets instead. */
   .admin-chart-fill {
     flex: 1 1 0%;
     min-height: 10rem;
@@ -2417,7 +2427,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     background: transparent;
   }
 
-  @media (min-width: 640px) and (max-width: 1023px) {
+  /* No upper bound: the 12-column rule below sets every property this one
+     does, with the same specificity, so it has to stay after this block. */
+  @media (min-width: 640px) {
     .admin-widget-grid {
       grid-template-columns: repeat(2, 1fr);
     }
@@ -2431,7 +2443,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
   }
 
-  @media (min-width: 1024px) {
+  @media (min-width: 64rem) and (min-width: 1024px) {
     .admin-widget-grid {
       grid-template-columns: repeat(12, 1fr);
       grid-auto-rows: var(--admin-row-h);
