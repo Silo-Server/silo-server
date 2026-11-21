@@ -23,3 +23,12 @@ it("announces a translation's start and finish through one persistent status reg
   expect(screen.getByRole("status")).toBe(status);
   expect(status.textContent).toContain("Translated by AI");
 });
+
+// Moving to another item that is already AI-translated must not sound like a
+// translation finishing on this page.
+it("shows an existing AI translation without announcing it", () => {
+  const { rerender } = render(<DetailOverview overview="Original" />);
+  rerender(<DetailOverview overview="Übersetzt" machineTranslated />);
+  expect(screen.getByRole("status").textContent).toBe("");
+  expect(screen.getByText("Translated by AI")).toBeTruthy();
+});

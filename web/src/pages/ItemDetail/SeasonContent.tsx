@@ -214,12 +214,12 @@ export default function SeasonContent({
                 {t("web.detail.episodes.heading")}
               </h2>
               <div className="flex items-center gap-3">
-                {translationWithEpisodes && (
-                  <EpisodesTranslationAction
-                    translating={overviewTranslating}
-                    onTranslate={onTranslateOverview}
-                  />
-                )}
+                {/* Mounted while the episodes load too, so a translation that
+                  starts before the list arrives is still announced here. */}
+                <EpisodesTranslationAction
+                  translating={translationWithEpisodes && overviewTranslating}
+                  onTranslate={translationWithEpisodes ? onTranslateOverview : undefined}
+                />
                 <span className="text-muted-foreground text-sm">
                   {t("web.detail.seasons.totalCount", {
                     count: item.episode_count ?? episodes.length,
