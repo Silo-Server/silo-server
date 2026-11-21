@@ -650,8 +650,10 @@ export function RestoreChoose({
       >
         {/* The 4px inset keeps the section buttons' focus rings clear of this
             box's clipping edge. The fade covers only the box's bottom padding,
-            so it shows just while more of the summary scrolls on below. */}
-        <div className="overlay-scroll space-y-4 lg:-mx-1 lg:-mt-1 lg:mb-0 lg:min-h-0 lg:overflow-y-auto lg:[mask-image:linear-gradient(to_bottom,black_calc(100%_-_1rem),transparent)] lg:px-1 lg:pt-1 lg:pb-4">
+            so it shows just while more of the summary scrolls on below. Its
+            outsized shrink factor makes it give up its height before the
+            notice does. */}
+        <div className="overlay-scroll space-y-4 lg:-mx-1 lg:-mt-1 lg:mb-0 lg:min-h-0 lg:shrink-[999] lg:overflow-y-auto lg:[mask-image:linear-gradient(to_bottom,black_calc(100%_-_1rem),transparent)] lg:px-1 lg:pt-1 lg:pb-4">
           <SectionIndex sections={set.sections} selection={selection} variant="list" />
           <h2 id="restore-summary-heading" className="text-[15px] font-semibold tracking-tight">
             {t("web.admin.backups.restore.choose.summaryHeading")}
@@ -676,14 +678,19 @@ export function RestoreChoose({
           </p>
         </div>
         {/* Outside the scrolling box, so the notice shows beside Review however
-            far the summary is scrolled. The rule marks where the summary ends. */}
-        <div className="lg:border-border/60 shrink-0 space-y-4 lg:border-t lg:pt-4">
+            far the summary is scrolled. The rule marks where the summary ends.
+            In a window too short for both, a long notice scrolls on its own and
+            Review keeps its row. */}
+        <div className="lg:border-border/60 space-y-4 lg:flex lg:min-h-0 lg:flex-col lg:border-t lg:pt-4">
           {notice ? (
-            <p role="status" className="text-[13px] text-amber-600 dark:text-amber-400">
+            <p
+              role="status"
+              className="overlay-scroll text-[13px] text-amber-600 lg:min-h-0 lg:overflow-y-auto dark:text-amber-400"
+            >
               {notice}
             </p>
           ) : null}
-          <Button className="w-full" disabled={selection.size === 0} onClick={onReview}>
+          <Button className="w-full lg:shrink-0" disabled={selection.size === 0} onClick={onReview}>
             {t("web.admin.backups.restore.choose.review")}
           </Button>
         </div>
