@@ -135,8 +135,14 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   Where the box would stretch (a block, a `flex-col` child), size it to its text with
   `w-fit max-w-full` so a short name stays on the page's start side. A `flex-1` item
   can't be sized that way: keep `flex-1` on a wrapper and put the name in a
-  `block w-fit max-w-full` span inside it. Don't use `.bidi-text` for this: its
-  `unicode-bidi: plaintext` drops the "…" in Firefox and cuts the start in WebKit.
+  `block w-fit max-w-full` span inside it. `.bidi-text` alone doesn't keep the start:
+  its `unicode-bidi: plaintext` leaves the box in the page's direction, so Firefox drops
+  the "…" and WebKit cuts the start.
+- Titles, names, taglines and overviews from metadata use `.bidi-text` (`app.css`).
+  Where such text is cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
+  stylesheet), it also takes `dir="auto"`, or Firefox and WebKit cut it and draw the
+  "…" at the page's end of the line instead of the text's. `.bidi-text` keeps a short
+  one on the page's start side, so it needs no `w-fit`.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also
@@ -145,10 +151,6 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   counterpart (`rtl:bg-gradient-to-l`, `rtl:-translate-x-…`), multiply by
   `var(--dir-sign)` in CSS, or read keys through `readingArrowKey`. `rtl:` is
   redefined in `app.css` so that, like the icon rule, it stops at a `dir="ltr"` box.
-- Titles, names, taglines and overviews from metadata use `.bidi-text` (`app.css`).
-  Where such text is cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
-  stylesheet), it also takes `dir="auto"`, or Firefox and WebKit cut it and draw the
-  "…" at the page's end of the line instead of the text's.
 - Check a change under `ar-XB` (above).
 
 ## Tests
