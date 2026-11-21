@@ -146,7 +146,8 @@ export default function PreparedFilesTab({
             </SelectItem>
             {(storage.data?.locations ?? []).map((l) => (
               <SelectItem key={l.key} value={l.key} className="*:last:min-w-0">
-                <span dir="auto" className="truncate">
+                {/* Cut with "…" in the trigger; the open menu wraps it. */}
+                <span dir="auto" className="in-data-[slot=select-trigger]:truncate">
                   {l.name}
                 </span>
               </SelectItem>
