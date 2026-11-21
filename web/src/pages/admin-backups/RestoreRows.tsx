@@ -299,7 +299,7 @@ export const ItemRow = memo(function ItemRow({
           ) : null}
         </div>
         {item.kind === "template_collection" ? (
-          <span className="text-muted-foreground hidden shrink-0 text-[11px] @2xl:inline">
+          <span className="text-muted-foreground hidden shrink-0 text-[11px] sm:inline">
             {t("web.admin.backups.restore.rows.starterPack")}
           </span>
         ) : null}
