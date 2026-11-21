@@ -46,7 +46,7 @@ export function CollectionPreviewPane({
       aria-busy={busy}
       className="surface-panel grid gap-3.5 rounded-[22px] p-5 sm:p-6"
     >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px]">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.875rem]">
         <h2
           id={`${id}-heading`}
           className="text-muted-foreground inline-flex items-center gap-2 font-normal"
@@ -91,8 +91,8 @@ function PreviewBody({ preview, needsRules }: { preview: ScopePreview; needsRule
   if (needsRules) {
     return (
       <PreviewGhosts announce>
-        <p className="text-[14.5px] font-semibold">{previewNeedsRule()}</p>
-        <p className="text-muted-foreground mt-1 text-[13px]">{previewNeedsRuleHelp()}</p>
+        <p className="text-[0.90625rem] font-semibold">{previewNeedsRule()}</p>
+        <p className="text-muted-foreground mt-1 text-[0.8125rem]">{previewNeedsRuleHelp()}</p>
       </PreviewGhosts>
     );
   }
@@ -119,12 +119,12 @@ function PreviewBody({ preview, needsRules }: { preview: ScopePreview; needsRule
       </ul>
     );
   }
-  let message = <p className="text-muted-foreground text-[13px]">{previewFailed()}</p>;
+  let message = <p className="text-muted-foreground text-[0.8125rem]">{previewFailed()}</p>;
   if (preview.status === "ready") {
     message = (
       <>
-        <p className="text-[14.5px] font-semibold">{previewEmpty()}</p>
-        <p className="text-muted-foreground mt-1 text-[13px]">{previewEmptyHelp()}</p>
+        <p className="text-[0.90625rem] font-semibold">{previewEmpty()}</p>
+        <p className="text-muted-foreground mt-1 text-[0.8125rem]">{previewEmptyHelp()}</p>
       </>
     );
   }

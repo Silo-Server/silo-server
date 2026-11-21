@@ -71,7 +71,7 @@ function RadioCardItem({
       <RadioDot />
       <span className="truncate text-sm font-semibold">{label}</span>
       {hint ? (
-        <span className="text-muted-foreground col-start-2 text-[12.5px]">{hint}</span>
+        <span className="text-muted-foreground col-start-2 text-[0.78125rem]">{hint}</span>
       ) : null}
     </RadioGroupPrimitive.Item>
   );

@@ -36,7 +36,7 @@ function NetworkBadge({ name, title }: { name: string; title: string }) {
     <span
       title={title}
       aria-label={t("web.player.routeBadge.networkAria", { name })}
-      className="border-primary/20 bg-primary/10 text-primary inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold"
+      className="border-primary/20 bg-primary/10 text-primary inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[0.5625rem] font-semibold"
     >
       <span className={LABEL_CLASS}>{t("web.player.routeBadge.network")}</span>
       <span aria-hidden="true">{SEPARATOR}</span>
@@ -67,7 +67,7 @@ export function PlaybackRouteBadges({
           aria-label={t("web.player.routeBadge.locationAria", {
             location: session.stream_location,
           })}
-          className="border-primary/20 bg-primary/10 text-primary inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] font-semibold"
+          className="border-primary/20 bg-primary/10 text-primary inline-flex items-center rounded border px-1.5 py-0.5 text-[0.5625rem] font-semibold"
         >
           {session.stream_location === "local"
             ? t("web.player.routeBadge.local")
@@ -106,7 +106,7 @@ export function PlaybackRouteBadges({
             key={node.key}
             title={title}
             aria-label={title}
-            className={`inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${BADGE_COLORS[node.kind]}`}
+            className={`inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[0.5625rem] font-semibold ${BADGE_COLORS[node.kind]}`}
           >
             {node.kind === "transcode" || node.kind === "proxy" ? (
               <>

@@ -96,7 +96,7 @@ function TileHeading({
         >
           {name}
         </ViewTransitionLink>
-        <span className="text-muted-foreground truncate text-[12.5px]">{subline}</span>
+        <span className="text-muted-foreground truncate text-[0.78125rem]">{subline}</span>
       </div>
     </div>
   );
@@ -104,7 +104,7 @@ function TileHeading({
 
 function TileSummary({ children }: { children: ReactNode }) {
   return (
-    <p className="text-muted-foreground line-clamp-2 min-h-9 text-[13px] leading-snug">
+    <p className="text-muted-foreground line-clamp-2 min-h-9 text-[0.8125rem] leading-snug">
       {children}
     </p>
   );
@@ -112,7 +112,7 @@ function TileSummary({ children }: { children: ReactNode }) {
 
 function TileFooter({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-auto flex min-h-10 items-center justify-between gap-2 border-t text-[13px]">
+    <div className="mt-auto flex min-h-10 items-center justify-between gap-2 border-t text-[0.8125rem]">
       {children}
     </div>
   );
@@ -157,7 +157,7 @@ export function InstalledPluginTile({
         <span className="inline-flex min-w-0 items-center gap-1.5">
           <PluginStatusLabel {...status} />
           {installation.env_managed ? (
-            <span className="text-muted-foreground text-[12.5px]">
+            <span className="text-muted-foreground text-[0.78125rem]">
               {t("web.admin.plugins.provisioning.managed")}
             </span>
           ) : null}
@@ -173,13 +173,13 @@ export function InstalledPluginTile({
           ) : null}
         </span>
         {signature.state === "invalid" ? (
-          <span className="text-warning inline-flex min-w-0 items-center gap-1 text-[12.5px]">
+          <span className="text-warning inline-flex min-w-0 items-center gap-1 text-[0.78125rem]">
             <ShieldAlert aria-hidden="true" className="size-3.5 shrink-0" />
             <span className="truncate">{t("web.admin.plugins.signature.tileInvalid")}</span>
           </span>
         ) : installation.update_failure ? (
           <span
-            className="text-warning inline-flex min-w-0 items-center gap-1 text-[12.5px]"
+            className="text-warning inline-flex min-w-0 items-center gap-1 text-[0.78125rem]"
             title={installation.update_failure.reason}
           >
             <AlertTriangle aria-hidden="true" className="size-3.5 shrink-0" />
@@ -190,12 +190,12 @@ export function InstalledPluginTile({
             </span>
           </span>
         ) : updateVersion ? (
-          <span className="bg-surface-raised text-foreground/85 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[12.5px]">
+          <span className="bg-surface-raised text-foreground/85 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[0.78125rem]">
             <Download aria-hidden="true" className="size-3.5" />
             {t("web.admin.plugins.tile.updateAvailable", { version: updateVersion })}
           </span>
         ) : installation.updates_paused ? (
-          <span className="text-muted-foreground text-[12.5px]">
+          <span className="text-muted-foreground text-[0.78125rem]">
             {t("web.admin.plugins.tile.updatesPaused")}
           </span>
         ) : (
@@ -259,7 +259,7 @@ export function CatalogPluginTile({
       <TileFooter>
         <PluginCapabilityIcons capabilities={capabilities} />
         {isInstalled ? (
-          <span className="text-muted-foreground relative z-10 inline-flex items-center gap-1 text-[12.5px]">
+          <span className="text-muted-foreground relative z-10 inline-flex items-center gap-1 text-[0.78125rem]">
             <Check aria-hidden="true" className="size-3.5" />
             {t("web.admin.plugins.tile.installed")}
           </span>

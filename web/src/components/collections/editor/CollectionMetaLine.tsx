@@ -52,7 +52,7 @@ export function CollectionMetaLine({
   );
   const names = libraryNames && libraryNames.length > 0 ? joinList(libraryNames) : null;
   return (
-    <p className={cn("text-muted-foreground text-[14px]", className)}>
+    <p className={cn("text-muted-foreground text-[0.875rem]", className)}>
       {names ? <b className="text-foreground font-semibold">{names}</b> : null}
       {parts.map((part, index) => (
         <Fragment key={part}>

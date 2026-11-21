@@ -185,12 +185,12 @@ export default function ImageSelectorTab({ item, enabled, onImageApplied }: Imag
   return (
     <div className="flex h-full flex-col gap-3">
       {/* Info banner */}
-      <div className="bg-muted/50 text-muted-foreground shrink-0 rounded-lg px-3 py-2 text-[11px]">
+      <div className="bg-muted/50 text-muted-foreground shrink-0 rounded-lg px-3 py-2 text-[0.6875rem]">
         {t("web.item.images.immediateNotice")}
       </div>
 
       {item.type === "season" && (
-        <div className="flex shrink-0 items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+        <div className="flex shrink-0 items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-1.5 text-[0.6875rem] text-amber-600 dark:text-amber-400">
           <AlertCircle className="size-3.5 shrink-0" />
           <span>{t("web.item.images.seasonNotice")}</span>
         </div>
@@ -209,7 +209,7 @@ export default function ImageSelectorTab({ item, enabled, onImageApplied }: Imag
               setProviderFilter(null);
             }}
             className={cn(
-              "rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors",
+              "rounded-md px-3 py-1.5 text-[0.75rem] font-medium transition-colors",
               activeTab === tab.key
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -230,7 +230,7 @@ export default function ImageSelectorTab({ item, enabled, onImageApplied }: Imag
                 setSelectedImage(null);
               }}
               className={cn(
-                "rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-colors",
+                "rounded-md px-2.5 py-1.5 text-[0.6875rem] font-medium transition-colors",
                 textlessOnly
                   ? "bg-primary/10 text-primary"
                   : "text-muted-foreground hover:text-foreground",
@@ -246,7 +246,7 @@ export default function ImageSelectorTab({ item, enabled, onImageApplied }: Imag
             onClick={() => fileInputRef.current?.click()}
             disabled={pending}
             aria-label={t(tabConfig.upload)}
-            className="text-muted-foreground hover:bg-muted hover:text-foreground flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-50"
+            className="text-muted-foreground hover:bg-muted hover:text-foreground flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[0.6875rem] font-medium transition-colors disabled:pointer-events-none disabled:opacity-50"
           >
             {uploadMutation.isPending ? (
               <Loader2 className="size-3.5 animate-spin" />
@@ -284,7 +284,7 @@ export default function ImageSelectorTab({ item, enabled, onImageApplied }: Imag
               aria-pressed={activeProvider === p.id}
               onClick={() => selectProvider(p.id)}
               className={cn(
-                "flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
+                "flex items-center gap-1 rounded-md px-2.5 py-1 text-[0.6875rem] font-medium transition-colors",
                 activeProvider === p.id
                   ? "bg-primary/10 text-primary"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -301,7 +301,7 @@ export default function ImageSelectorTab({ item, enabled, onImageApplied }: Imag
 
       {/* Provider errors */}
       {providerErrors && Object.keys(providerErrors).length > 0 && (
-        <div className="flex shrink-0 items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+        <div className="flex shrink-0 items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-1.5 text-[0.6875rem] text-amber-600 dark:text-amber-400">
           <AlertCircle className="size-3.5 shrink-0" />
           <span>
             {t("web.item.images.providerErrors", {
@@ -369,7 +369,7 @@ export default function ImageSelectorTab({ item, enabled, onImageApplied }: Imag
 
                   {/* Current indicator */}
                   {isCurrent && (
-                    <div className="bg-primary text-primary-foreground absolute start-1 top-1 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-semibold">
+                    <div className="bg-primary text-primary-foreground absolute start-1 top-1 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[0.5625rem] font-semibold">
                       <Check className="size-2.5" />
                       {t("web.item.images.current")}
                     </div>
@@ -386,7 +386,7 @@ export default function ImageSelectorTab({ item, enabled, onImageApplied }: Imag
                   <div className="absolute end-1 bottom-1">
                     <Badge
                       variant="secondary"
-                      className="bg-black/60 px-1 py-0 text-[9px] text-white backdrop-blur-sm"
+                      className="bg-black/60 px-1 py-0 text-[0.5625rem] text-white backdrop-blur-sm"
                     >
                       {img.provider_id.toUpperCase()}
                     </Badge>

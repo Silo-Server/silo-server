@@ -64,7 +64,7 @@ export function CapabilityChips({ capabilities }: { capabilities: AICapability[]
       {capabilities.map((capability) => (
         <span
           key={capability}
-          className="rounded-full border border-[var(--settings-accent-line)] bg-[var(--settings-accent-soft)] px-1.5 py-px text-[10.5px] font-medium text-[var(--settings-accent)]"
+          className="rounded-full border border-[var(--settings-accent-line)] bg-[var(--settings-accent-soft)] px-1.5 py-px text-[0.65625rem] font-medium text-[var(--settings-accent)]"
         >
           {AI_CAPABILITY_LABELS[capability]}
         </span>

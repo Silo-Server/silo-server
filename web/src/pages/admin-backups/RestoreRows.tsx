@@ -50,7 +50,7 @@ export function StateTag({ state }: { state: ItemState }) {
   return (
     <span
       className={cn(
-        "inline-flex h-5 shrink-0 items-center rounded-md border px-1.5 text-[11px] font-medium whitespace-nowrap",
+        "inline-flex h-5 shrink-0 items-center rounded-md border px-1.5 text-[0.6875rem] font-medium whitespace-nowrap",
         tag.className,
       )}
     >
@@ -361,7 +361,7 @@ export const ItemRow = memo(function ItemRow({
           ) : null}
         </div>
         {item.kind === "template_collection" ? (
-          <span className="text-muted-foreground hidden shrink-0 text-[11px] sm:inline">
+          <span className="text-muted-foreground hidden shrink-0 text-[0.6875rem] sm:inline">
             {t("web.admin.backups.restore.rows.starterPack")}
           </span>
         ) : null}
@@ -407,7 +407,7 @@ export const SameRow = memo(function SameRow({
   useT();
   const label = displayLabel(item);
   return (
-    <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-[13px]">
+    <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-[0.8125rem]">
       <span
         title={label}
         className="-mx-[0.25em] block min-w-0 overflow-x-clip px-[0.25em] text-pretty wrap-anywhere"

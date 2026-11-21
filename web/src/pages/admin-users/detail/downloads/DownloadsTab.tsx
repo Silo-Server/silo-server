@@ -201,7 +201,7 @@ export function DownloadsTab({ user }: { user: AdminUser }) {
       {partial && (
         <p
           role="note"
-          className="border-border/60 bg-muted/30 rounded-lg border px-3 py-2 text-[13px] leading-relaxed"
+          className="border-border/60 bg-muted/30 rounded-lg border px-3 py-2 text-[0.8125rem] leading-relaxed"
         >
           {t(partial)}
         </p>
