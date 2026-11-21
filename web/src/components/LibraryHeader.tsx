@@ -61,6 +61,7 @@ export default function LibraryHeader({
     ref: tabStrip,
     edges,
     measure,
+    reveal,
   } = useScrollStrip<HTMLDivElement>(`[role="tab"][data-state="active"]`, activeTab, 24);
 
   useEffect(() => {
@@ -126,6 +127,12 @@ export default function LibraryHeader({
             ref={tabStrip}
             tabIndex={-1}
             onScroll={measure}
+            onFocus={(event) => {
+              // Tabbing back in lands on the selected tab, which a hand scroll
+              // may have left under the fade. Arrow keys and taps select the
+              // tab they focus, so the selection change reveals those.
+              if (event.target.getAttribute("data-state") === "active") reveal();
+            }}
             className={cn(
               "min-w-0 overflow-x-auto overflow-y-hidden rounded-full p-1 [--strip-fade:24px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
               edgeMask(edges),
