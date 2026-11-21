@@ -62,6 +62,9 @@ export default function CrewList({ crew, jobs = DISPLAY_JOBS }: CrewListProps) {
         {entries.map(({ job, people }) => (
           <div key={job} className="contents">
             <dt className="text-muted-foreground text-[0.8125rem] font-medium">{job}</dt>
+            {/* The list runs in the page's direction and is cut at its end;
+                each name reads in its own direction, so a left-to-right name
+                in Arabic keeps its start and the names keep their order. */}
             <dd className="text-foreground/85 truncate">
               {people.map((p, i) => (
                 <span key={p.name}>
@@ -69,12 +72,13 @@ export default function CrewList({ crew, jobs = DISPLAY_JOBS }: CrewListProps) {
                   {p.personId ? (
                     <ViewTransitionLink
                       to={buildPersonCatalogHref(p.personId)}
+                      dir="auto"
                       className="hover:text-primary transition-colors"
                     >
                       {p.name}
                     </ViewTransitionLink>
                   ) : (
-                    p.name
+                    <span dir="auto">{p.name}</span>
                   )}
                 </span>
               ))}

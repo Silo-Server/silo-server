@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Download, Ear, Loader2, Search } from "lucide-react";
 
 import type { FileVersion, SubtitleResult } from "@/api/types";
+import { LineTitle, TitleLineParts } from "@/components/TitleLine";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -239,13 +240,17 @@ export default function SubtitleSearchDialog({
       <DialogContent className="flex max-w-3xl flex-col overflow-hidden sm:max-w-3xl">
         <DialogHeader className="min-w-0">
           <DialogTitle>{t("web.detail.subtitleSearch.title")}</DialogTitle>
-          <DialogDescription className="truncate">
-            {versionLabel
-              ? t("web.detail.subtitleSearch.descriptionWithVersion", {
-                  title,
+          <DialogDescription className="flex flex-wrap justify-center overflow-hidden sm:justify-start">
+            <TitleLineParts>
+              {versionLabel ? (
+                t("web.detail.subtitleSearch.descriptionWithVersion", {
+                  title: <LineTitle>{title}</LineTitle>,
                   version: versionLabel,
                 })
-              : title}
+              ) : (
+                <LineTitle>{title}</LineTitle>
+              )}
+            </TitleLineParts>
           </DialogDescription>
         </DialogHeader>
 

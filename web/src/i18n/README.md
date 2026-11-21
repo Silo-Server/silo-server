@@ -185,6 +185,13 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   loses its "…" in Firefox and its start in WebKit, and a clamped paragraph gets its "…"
   at the start of its last line. `.bidi-text` keeps a short one on the page's start
   side, so it needs no `w-fit`. The mixed-direction limit above applies here too.
+- A cut title inside a line of translated words ("S01E02 · Title", "Play Title")
+  goes to `t()` as a `LineTitle` and the line renders through `TitleLineParts`
+  (`src/components/TitleLine.tsx`), in a `flex flex-wrap overflow-hidden` box (no
+  `flex-wrap` in a pill or a button). The title is cut in its own box and direction;
+  `dir="auto"` on the whole line would let the title set the words' direction too.
+  A list of names (the crew list) stays in the page's direction and gives each name
+  `dir="auto"`, so the names keep their order and the list is cut at its end.
 - A path shown as text, cut or not, takes `dir="ltr"` and renders through
   `PathText` (`src/components/PathText.tsx`), which keeps each folder name in its
   own direction; without it, folders named in Arabic swap places. An email cut with
