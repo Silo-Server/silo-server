@@ -14,6 +14,18 @@ function luminance(hex: string): number {
   return 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0);
 }
 
+/** The theme's --primary-hover: the primary faded a tenth toward the page (#141417). */
+function fadedTowardPage(hex: string): string {
+  const from = parseInt(hex.slice(1), 16);
+  const channel = (shift: number) => {
+    const c = (from >> shift) & 0xff;
+    return Math.round(c + (((0x141417 >> shift) & 0xff) - c) * 0.1)
+      .toString(16)
+      .padStart(2, "0");
+  };
+  return `#${channel(16)}${channel(8)}${channel(0)}`;
+}
+
 function contrast(a: string, b: string): number {
   const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return (light! + 0.05) / (dark! + 0.05);
@@ -34,4 +46,24 @@ describe("accentDeclarations", () => {
       expect(contrast(accent, sidebarLabel)).toBeGreaterThanOrEqual(4.5);
     },
   );
+
+  // Every shipped preset, and a gray that takes the black label where white
+  // reads better than the dark one. The fill changes on hover either way.
+  it.each([
+    "#4f46e5",
+    "#0ea5e9",
+    "#10b981",
+    "#f59e0b",
+    "#ef4444",
+    "#ec4899",
+    "#8b5cf6",
+    "#64748b",
+    "#777777",
+  ])("keeps the label on %s at 4.5:1 or more on hover", (accent) => {
+    const declarations = accentDeclarations(accent)!;
+    const label = declarations["primary-foreground"] ?? THEME_LABEL;
+    const hover = declarations["primary-hover"] ?? fadedTowardPage(accent);
+    expect(hover).not.toBe(accent);
+    expect(contrast(hover, label)).toBeGreaterThanOrEqual(4.5);
+  });
 });

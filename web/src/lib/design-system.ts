@@ -196,6 +196,7 @@ export const DESIGN_PRINCIPLES = [
 // ├─────────────────────────────────────────────────────────────┤
 // │  --primary           │ Primary action color (buttons, CTAs)│
 // │  --primary-foreground│ Text on primary elements            │
+// │  --primary-hover     │ Hovered primary fill                │
 // │  --secondary         │ Secondary element backgrounds       │
 // │  --accent            │ Active/highlighted backgrounds      │
 // │  --destructive       │ Danger text, icons, borders, dots   │

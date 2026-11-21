@@ -138,6 +138,7 @@ Colors are organized as semantic layers. `app.css` provides the actual values; c
 
 - `--primary`: primary action color
 - `--primary-foreground`: text on primary elements
+- `--primary-hover`: solid primary fill on hover. Use it instead of `hover:bg-primary/90`: an accent that takes the dark label fades toward that label when drawn translucent, and its label can drop below 4.5:1
 - `--secondary`: secondary element backgrounds
 - `--accent`: highlighted and active backgrounds
 - `--destructive`: danger and error text, icons, borders, and status dots

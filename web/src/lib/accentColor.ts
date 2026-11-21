@@ -49,11 +49,14 @@ function contrastRatio(a: string, b: string): number {
   return (light! + 0.05) / (dark! + 0.05);
 }
 
-function mixWithWhite(hex: string, amount: number): string {
-  const value = parseInt(hex.slice(1), 16);
+/** `hex` moved `amount` (0-1) of the way toward `target`, as srgb color-mix does. */
+function mix(hex: string, target: string, amount: number): string {
+  const from = parseInt(hex.slice(1), 16);
+  const to = parseInt(target.slice(1), 16);
   const channel = (shift: number) => {
-    const c = (value >> shift) & 0xff;
-    return Math.round(c + (255 - c) * amount)
+    const a = (from >> shift) & 0xff;
+    const b = (to >> shift) & 0xff;
+    return Math.round(a + (b - a) * amount)
       .toString(16)
       .padStart(2, "0");
   };
@@ -84,7 +87,7 @@ function primaryLabelOn(hex: string): string {
  */
 function accentOnDark(hex: string): string {
   for (let step = 0; step <= 20; step++) {
-    const candidate = mixWithWhite(hex, step / 20);
+    const candidate = mix(hex, WHITE_LABEL, step / 20);
     if (
       contrastRatio(candidate, PLAYER_PANEL) >= MIN_PLAYER_CONTRAST &&
       contrastRatio(candidate, labelOn(candidate)) >= MIN_PLAYER_CONTRAST
@@ -93,6 +96,20 @@ function accentOnDark(hex: string): string {
     }
   }
   return WHITE_LABEL;
+}
+
+/** Cinema Dark's page (--background), which the theme's --primary-hover fades the primary toward. */
+const PAGE = "#141417";
+
+/**
+ * A replacement for the theme's --primary-hover when its fade toward the page
+ * would take `label` below 4.5:1, else null. Only a dark label can lose
+ * contrast to that fade, so the replacement lightens the accent a tenth
+ * instead, which can only raise a dark label's contrast.
+ */
+function hoverFillOverride(hex: string, label: string): string | null {
+  if (contrastRatio(mix(hex, PAGE, 0.1), label) >= MIN_LABEL_CONTRAST) return null;
+  return mix(hex, WHITE_LABEL, 0.1);
 }
 
 /**
@@ -119,5 +136,7 @@ export function accentDeclarations(accent: string): Record<string, string> | nul
     declarations["primary-foreground"] = label;
     declarations["sidebar-primary-foreground"] = label;
   }
+  const hover = hoverFillOverride(hex, label);
+  if (hover) declarations["primary-hover"] = hover;
   return declarations;
 }
