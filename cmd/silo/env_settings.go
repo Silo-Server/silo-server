@@ -8,8 +8,8 @@ import (
 	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 // bootstrapPoolSize is the size of the first database pool: what
@@ -46,7 +46,7 @@ type deploymentAIProviders struct {
 // The check and the write share one settings transaction, as an admin save's
 // do, so the check sees the rows the write replaces: a storage transition
 // another server commits while this one starts cannot slip between them.
-func applyEnvSettings(ctx context.Context, repo *catalog.EncryptedSettingsRepo, settings map[string]string, env config.EnvSettings, ai deploymentAIProviders, redisBootstrapURL string) (config.EnvSettings, []string, error) {
+func applyEnvSettings(ctx context.Context, repo *serversettings.EncryptedSettingsRepo, settings map[string]string, env config.EnvSettings, ai deploymentAIProviders, redisBootstrapURL string) (config.EnvSettings, []string, error) {
 	if len(env) == 0 && !ai.declared {
 		return env, nil, nil
 	}

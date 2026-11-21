@@ -126,6 +126,17 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   it only while it shows the URL or path (`dir={value ? "ltr" : undefined}`).
   `dir="auto"` leaves an empty field's example in the page's direction, and
   `type="url"` rejects addresses without a scheme.
+- A path or URL shown as text (a `code` block, a list of folders) also sets `dir="ltr"`,
+  and the block that holds it takes `align-with-page` (in `app.css`). The class gives the
+  block its parent's `text-align`, with `start` and `end` resolved in the parent's
+  direction, so under a start-aligned parent that runs in the page's direction every line,
+  wrapped or not, sits on the page's start side. Without it, an inherited `start` resolves
+  against the block's own direction and puts every line at its left edge. Chromium shows
+  that wherever it happens; Firefox and Safari give `li` `text-align: match-parent`, so
+  inside a right-to-left list item they right-align the lines anyway. Where the block
+  would stretch, also give it `w-fit`, without `max-w-full`: a folder name that can't
+  wrap, such as one long emoji sequence, then widens the block toward the page's end side,
+  as it would in English, instead of running past its start edge.
 - A name that can be in either script and is cut with `truncate` (a username, say) takes
   `dir="auto"`: it reads in the direction of its first strong character (a letter, or
   right-to-left punctuation such as `؟`), and left to right when it has none, as a name
@@ -135,8 +146,26 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   Where the box would stretch (a block, a `flex-col` child), size it to its text with
   `w-fit max-w-full` so a short name stays on the page's start side. A `flex-1` item
   can't be sized that way: keep `flex-1` on a wrapper and put the name in a
-  `block w-fit max-w-full` span inside it. Don't use `.bidi-text` for this: its
-  `unicode-bidi: plaintext` drops the "…" in Firefox and cuts the start in WebKit.
+  `block w-fit max-w-full` span inside it. A `flex-1` item capped at its text with
+  `max-w-max` can't stretch, so it can take `dir="auto"` itself unless it also carries
+  a logical margin, padding or border (`ms-auto`, `pe-2`, `border-s`): those follow
+  the element's own direction, so keep them on the outer element and put the name in
+  a `block` span inside it. `.bidi-text` alone doesn't keep the start: its
+  `unicode-bidi: plaintext` leaves the box in the page's direction, so Firefox drops
+  the "…" and WebKit cuts the start.
+- Titles, names, taglines and overviews from metadata use `.bidi-text` (`app.css`).
+  Where such text is cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
+  stylesheet), it also takes `dir="auto"`. Without it, text that runs the other way
+  loses its "…" in Firefox and its start in WebKit, and a clamped paragraph gets its "…"
+  at the start of its last line. `.bidi-text` keeps a short one on the page's start
+  side, so it needs no `w-fit`. The mixed-direction limit above applies here too.
+- A path shown as text, cut or not, takes `dir="ltr"` and renders through
+  `PathText` (`src/components/PathText.tsx`), which keeps each folder name in its
+  own direction; without it, folders named in Arabic swap places. An email cut with
+  `truncate` takes `dir={emailDir(email)}` (`src/lib/direction.ts`), which keeps one
+  with an Arabic name part in the page's direction; `dir="auto"` would turn it right
+  to left on a left-to-right page. Size a cut one as for a name, above; a path that
+  wraps instead follows the path or URL rule above.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also

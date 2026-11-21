@@ -49,6 +49,30 @@ describe("accentDeclarations", () => {
     },
   );
 
+  // Every shipped preset, a gray that takes the black label where white reads
+  // better than the dark one, and an accent whose fade toward the page passes
+  // only once rounded to whole channels (the browser's color-mix keeps the
+  // fractions, so the accent must set the hex it checked).
+  it.each([
+    "#4f46e5",
+    "#0ea5e9",
+    "#10b981",
+    "#f59e0b",
+    "#ef4444",
+    "#ec4899",
+    "#8b5cf6",
+    "#64748b",
+    "#777777",
+    "#7d87b2",
+  ])("keeps the label on %s at 4.5:1 or more on hover", (accent) => {
+    const declarations = accentDeclarations(accent)!;
+    const label = declarations["primary-foreground"] ?? THEME_LABEL;
+    const hover = declarations["primary-hover"];
+    expect(hover).toBeDefined();
+    expect(hover).not.toBe(accent);
+    expect(contrast(hover!, label)).toBeGreaterThanOrEqual(4.5);
+  });
+
   // Dark presets that fail as text, one that already reads, and the extremes.
   it.each(["#4f46e5", "#8b5cf6", "#f59e0b", "#000000", "#ffffff"])(
     "draws %s as text at 4.5:1 or more on Cinema Dark",

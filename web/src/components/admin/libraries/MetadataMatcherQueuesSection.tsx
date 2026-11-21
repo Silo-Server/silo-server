@@ -355,7 +355,10 @@ function MatcherQueueDetail({
               )}
             >
               <code
-                className={cn("min-w-0 font-mono", touch ? "max-w-full break-all" : "truncate")}
+                className={cn(
+                  "min-w-0 font-mono",
+                  touch ? "align-with-page max-w-full break-all" : "truncate",
+                )}
                 dir="ltr"
               >
                 {path}

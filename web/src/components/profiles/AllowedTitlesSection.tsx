@@ -92,9 +92,11 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
           <p className="text-muted-foreground text-sm">{t("web.profiles.allowedTitles.none")}</p>
         )
       ) : (
+        // grid-cols-1 (like sm:grid-cols-2) holds the column to the list's width.
+        // An implicit auto column grows to fit the longest name instead of cutting it.
         <ul
           aria-label={t("web.profiles.allowedTitles.heading")}
-          className="grid gap-2 sm:grid-cols-2"
+          className="grid grid-cols-1 gap-2 sm:grid-cols-2"
         >
           {(allowedTitles ?? []).map((item) => (
             <li
@@ -106,10 +108,14 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
                 thumbhash={item.poster_thumbhash}
                 className="ring-border/60 aspect-[2/3] w-9 shrink-0 rounded-md ring-1 ring-inset"
               />
-              <span className="min-w-0 flex-1 truncate text-sm">
-                {item.title}
+              {/* Only the title is cut, and it keeps its start in either script;
+                  the year stays after it in the page's reading order. */}
+              <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                <span dir="auto" className="min-w-0 truncate text-sm">
+                  {item.title}
+                </span>
                 {item.year ? (
-                  <span className="text-muted-foreground ms-1.5 text-xs">
+                  <span className="text-muted-foreground shrink-0 text-xs">
                     {numberText(item.year)}
                   </span>
                 ) : null}
@@ -157,9 +163,10 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
           <h4 className="text-sm font-medium">
             {t("web.profiles.allowedTitles.collectionsHeading")}
           </h4>
+          {/* grid-cols-1: see the title list above. */}
           <ul
             aria-label={t("web.profiles.allowedTitles.collectionsHeading")}
-            className="grid gap-2"
+            className="grid grid-cols-1 gap-2"
           >
             {(collections.data ?? []).map((collection) => (
               <li
@@ -167,8 +174,10 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
                 className="border-border flex items-center gap-3 rounded-md border px-3 py-2"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm">{collection.name}</span>
-                  <span className="text-muted-foreground text-xs">
+                  <span dir="auto" className="block w-fit max-w-full truncate text-sm">
+                    {collection.name}
+                  </span>
+                  <span className="text-muted-foreground block text-xs text-pretty break-words">
                     {collection.live
                       ? t("web.profiles.allowedTitles.titleCount", {
                           count: collection.item_count,
@@ -294,9 +303,13 @@ function AddAllowedTitle({
             const already = allowedIds.has(item.content_id);
             return (
               <li key={item.content_id} className="flex items-center gap-2 px-3 py-2 text-sm">
-                <span className="min-w-0 flex-1 truncate">
-                  {item.title}
-                  <span className="text-muted-foreground ms-1.5 text-xs">
+                {/* Only the title is cut, and it keeps its start in either script;
+                    the year and type stay after it in the page's direction. */}
+                <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                  <span dir="auto" className="min-w-0 truncate">
+                    {item.title}
+                  </span>
+                  <span className="text-muted-foreground shrink-0 text-xs">
                     {[
                       item.year ? numberText(item.year) : null,
                       t("web.profiles.allowedTitles.resultType", { type: item.type }),

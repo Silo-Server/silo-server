@@ -8,7 +8,13 @@ import {
   setProfileToken,
 } from "@/api/client";
 import type { ReactNode } from "react";
-import { useRealtimeEvents } from "./realtimeEventsContext";
+import {
+  useEventChannel,
+  useRealtimeConnectionState,
+  useRealtimeEvents,
+  useRealtimeEventsActions,
+  type RealtimeEventsActionsContextValue,
+} from "./realtimeEventsContext";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { act, cleanup, render, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1474,6 +1480,177 @@ describe("RealtimeEventsProvider", () => {
         vi.advanceTimersByTime(1);
       });
       expect(FakeWebSocket.instances).toHaveLength(2);
+    });
+  });
+
+  describe("context split", () => {
+    it("does not re-render channel or action consumers when connectionState transitions", async () => {
+      const queryClient = new QueryClient();
+      const onChannelRender = vi.fn();
+      const onActionsRender = vi.fn<(actions: RealtimeEventsActionsContextValue) => void>();
+      const onStateRender = vi.fn();
+      const onCombinedRender = vi.fn();
+
+      function ChannelConsumer({ onRender }: { onRender: () => void }) {
+        useEventChannel("catalog");
+        onRender();
+        return null;
+      }
+
+      function ActionsConsumer({
+        onRender,
+      }: {
+        onRender: (actions: RealtimeEventsActionsContextValue) => void;
+      }) {
+        onRender(useRealtimeEventsActions());
+        return null;
+      }
+
+      function StateConsumer({ onRender }: { onRender: () => void }) {
+        const connectionState = useRealtimeConnectionState();
+        onRender();
+        return <span data-testid="connection-state">{connectionState}</span>;
+      }
+
+      function CombinedConsumer({ onRender }: { onRender: () => void }) {
+        const { connectionState } = useRealtimeEvents();
+        onRender();
+        return <span data-testid="combined-state">{connectionState}</span>;
+      }
+
+      const { view } = await renderProvider(
+        queryClient,
+        <>
+          <ChannelConsumer onRender={onChannelRender} />
+          <ActionsConsumer onRender={onActionsRender} />
+          <StateConsumer onRender={onStateRender} />
+          <CombinedConsumer onRender={onCombinedRender} />
+        </>,
+      );
+
+      expect(view.getByTestId("connection-state").textContent).toBe("connecting");
+      expect(view.getByTestId("combined-state").textContent).toBe("connecting");
+      expect(onChannelRender).toHaveBeenCalledTimes(1);
+      expect(onActionsRender).toHaveBeenCalledTimes(1);
+      expect(onStateRender).toHaveBeenCalledTimes(1);
+      expect(onCombinedRender).toHaveBeenCalledTimes(1);
+
+      const socket = FakeWebSocket.instances[0]!;
+      await act(async () => {
+        socket.readyState = FakeWebSocket.OPEN;
+        socket.onopen?.();
+      });
+
+      expect(view.getByTestId("connection-state").textContent).toBe("live");
+      expect(view.getByTestId("combined-state").textContent).toBe("live");
+      expect(onChannelRender).toHaveBeenCalledTimes(1);
+      expect(onActionsRender).toHaveBeenCalledTimes(1);
+      expect(onStateRender).toHaveBeenCalledTimes(2);
+      expect(onCombinedRender).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        socket.emitClose();
+      });
+
+      expect(view.getByTestId("connection-state").textContent).toBe("disconnected");
+      expect(view.getByTestId("combined-state").textContent).toBe("disconnected");
+      expect(onChannelRender).toHaveBeenCalledTimes(1);
+      expect(onActionsRender).toHaveBeenCalledTimes(1);
+      expect(onStateRender).toHaveBeenCalledTimes(3);
+      expect(onCombinedRender).toHaveBeenCalledTimes(3);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+
+      expect(view.getByTestId("connection-state").textContent).toBe("connecting");
+      expect(view.getByTestId("combined-state").textContent).toBe("connecting");
+      expect(onChannelRender).toHaveBeenCalledTimes(1);
+      expect(onActionsRender).toHaveBeenCalledTimes(1);
+      expect(onStateRender).toHaveBeenCalledTimes(4);
+      expect(onCombinedRender).toHaveBeenCalledTimes(4);
+    });
+
+    it("observes current connectionState in awaitAdminJob without changing its identity", async () => {
+      setProfileId("profile-1");
+      mockState.profile = { id: "profile-1", has_pin: false, is_primary: true } as never;
+
+      const ticket = vi.mocked(fetch).getMockImplementation()!;
+      const polledJobIds: string[] = [];
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        const match = String(input).match(/\/api\/v2\/admin\/jobs\/([^/?]+)$/);
+        if (!match) return ticket(input, init);
+        polledJobIds.push(match[1]!);
+        return new Response(
+          JSON.stringify({
+            id: match[1]!,
+            kind: "item_refresh",
+            state: "succeeded",
+            created_at: "2026-11-15T00:00:00Z",
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      });
+
+      const queryClient = new QueryClient();
+      const onActionsRender = vi.fn<(actions: RealtimeEventsActionsContextValue) => void>();
+
+      function ActionsConsumer({
+        onRender,
+      }: {
+        onRender: (actions: RealtimeEventsActionsContextValue) => void;
+      }) {
+        onRender(useRealtimeEventsActions());
+        return null;
+      }
+
+      await renderProvider(queryClient, <ActionsConsumer onRender={onActionsRender} />);
+      expect(onActionsRender).toHaveBeenCalledTimes(1);
+      const stableAwaitAdminJob = onActionsRender.mock.calls[0]![0].awaitAdminJob;
+
+      // Transition to live: awaitAdminJob waits for the WebSocket event instead of polling.
+      const socket = FakeWebSocket.instances[0]!;
+      await act(async () => {
+        socket.readyState = FakeWebSocket.OPEN;
+        socket.onopen?.();
+      });
+      expect(onActionsRender).toHaveBeenCalledTimes(1);
+
+      const liveJobPromise = stableAwaitAdminJob("job-live");
+      await act(async () => {
+        socket.emitMessage({
+          type: "event",
+          channel: "jobs",
+          event: "job.completed",
+          data: {
+            id: "job-live",
+            job_type: "item_refresh",
+            status: "completed",
+            requested_at: "2026-11-15T00:00:00Z",
+          },
+        });
+      });
+      await expect(liveJobPromise).resolves.toMatchObject({
+        id: "job-live",
+        status: "completed",
+      });
+      expect(polledJobIds).toEqual([]);
+
+      // Transition to disconnected: the same awaitAdminJob reference falls back to polling.
+      await act(async () => {
+        socket.emitClose();
+      });
+      expect(onActionsRender).toHaveBeenCalledTimes(1);
+
+      const offlineJobPromise = stableAwaitAdminJob("job-offline");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      await expect(offlineJobPromise).resolves.toMatchObject({
+        id: "job-offline",
+        status: "completed",
+      });
+      expect(polledJobIds).toEqual(["job-offline"]);
     });
   });
 });

@@ -198,18 +198,22 @@ function HealthCell({
   to?: string;
 }) {
   // Text sizes are rem, like the dashboard row and the cell padding: a smaller
-  // browser font shrinks those, and px text would then outgrow the row.
+  // browser font shrinks those, and px text would then outgrow the row. A long
+  // label truncates like the value rather than wrapping, which would make the
+  // cell taller than the one-row card, and the icon keeps its size.
   const body = (
     <>
       <div className="text-muted-foreground flex items-center gap-1.5 text-[0.6875rem] font-medium">
-        <Icon className="h-3.5 w-3.5" />
-        {label}
+        <Icon className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate" title={label}>
+          {label}
+        </span>
       </div>
       <div
         className={cn(
           "mt-1 truncate text-[0.9375rem] leading-tight font-bold tabular-nums",
-          tone === "error" && "text-destructive",
-          tone === "warn" && "text-amber-500",
+          tone === "error" && "text-destructive-label",
+          tone === "warn" && "text-warning-label",
         )}
         title={value}
       >
