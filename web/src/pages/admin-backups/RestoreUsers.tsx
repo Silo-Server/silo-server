@@ -313,12 +313,16 @@ export function DataTypesPanel({
           {DATA_TYPE_IDS.map((id) => {
             const controlId = `${baseId}-${id}`;
             const count = counts.get(id) ?? 0;
-            // The checkbox's box is at least one line tall; the row and label share a text
-            // size, which also replaces Label's leading-none, so their lines match. The label
-            // is a block so its count wraps with its text, and text-pretty keeps the count
-            // off a last line of its own where the browser supports it.
+            // The checkbox's box is one line tall. The label's px text size replaces Label's
+            // leading-none, so it inherits the row's line height, which is never shorter
+            // than the rem-sized checkbox; a large browser font then still centers the two.
+            // The label is a block so its count wraps with its text, and text-pretty keeps
+            // the count off a last line of its own where the browser supports it.
             return (
-              <div key={id} className="flex items-start gap-2 text-[13px]">
+              <div
+                key={id}
+                className="flex items-start gap-2 text-[13px] leading-[max(1.5em,1rem)]"
+              >
                 <span className="flex min-h-lh shrink-0 items-center">
                   <Checkbox
                     id={controlId}
