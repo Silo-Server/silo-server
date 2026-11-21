@@ -39,7 +39,7 @@ func TestSubtitleCacheServesThroughTheStore(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path, file := fixtureFile(t, ffmpeg, cues)
 			s, repo, _ := newTestStore(t, ffmpeg)
-			transcode := t.TempDir()
+			transcode := filepath.Join(t.TempDir(), "transcode")
 			cache := playback.NewSubtitleCache(func() string { return transcode })
 			cache.SetEmbeddedSource(s)
 			opts := playback.StreamExtractOpts{InputPath: path, SourceCodec: "subrip", FFmpegPath: ffmpeg, Embedded: playback.EmbeddedSubtitleRefFor(file, 0)}

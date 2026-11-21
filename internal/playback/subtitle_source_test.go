@@ -346,6 +346,26 @@ func TestServeExtractWithoutATrackSkipsTheSource(t *testing.T) {
 	}
 }
 
+// ffmpeg writes a kept copy by path, so a cache dir others can write never
+// gets one: the track is demuxed without a copy.
+func TestServeExtractKeepsNoCopyInARefusedCacheDir(t *testing.T) {
+	c, source := newTestCache(t)
+	dir := filepath.Join(filepath.Dir(source), "subtitle-cache")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	c.SetEmbeddedSource(&fakeEmbeddedSource{whole: errors.New("no cues"), format: "matroska"})
+	var mu sync.Mutex
+	var calls []StreamExtractOpts
+	rec := serveText(t, c, StreamExtractOpts{InputPath: source, SourceCodec: "subrip", Embedded: testEmbeddedRef}, fakeConvert(&calls, &mu, false))
+	if rec.Body.String() != "demuxed" || len(calls) != 1 || calls[0].KeepPath != "" {
+		t.Fatalf("body %q, %d extracts, keep %q", rec.Body.String(), len(calls), calls[0].KeepPath)
+	}
+}
+
 // The keepalive's ticks and the extract's writes and flushes reach the
 // response writer one at a time: it isn't safe for concurrent use.
 func TestPrefixKeepaliveSerializesTheWriter(t *testing.T) {
