@@ -5,6 +5,7 @@ import {
   ConnectionCheckAction,
   useConnectionCheck,
 } from "@/components/admin/ConnectionCheckAction";
+import { SecretField } from "@/components/settings/SecretField";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { fetchAdminServerStatus, useAdminServerStatus } from "@/hooks/queries/admin/settings";
@@ -13,7 +14,7 @@ import { settingsRestartPending } from "@/hooks/admin/useSettingsHealth";
 import { useMounted } from "@/hooks/useMounted";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useT, type MessageKey, type Translate } from "@/i18n";
-import { stageRedisUrl } from "@/pages/admin-settings/redisDraft";
+import { REDIS_KEYS, keepSavedRedisUrl, stageRedisUrl } from "@/pages/admin-settings/redisDraft";
 import {
   SettingField,
   SettingFieldRow,
@@ -22,8 +23,6 @@ import {
 
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
 import { useStepSubmit, useStepSummary } from "../useStep";
-
-const REDIS_KEYS = ["redis.url", "redis.db"];
 
 const PUBLIC_S3_KEYS = [
   "s3.public_endpoint",
@@ -123,7 +122,9 @@ function redisStatusFor(
 /**
  * One storage backend: a summary row that says whether it is configured, and a
  * disclosure with the fields. A backend an admin does not touch stays folded
- * and reads as one line, which is what most single-node installs want.
+ * and reads as one line, which is what most single-node installs want. One
+ * holding an unsaved edit is marked changed and stays open, because Continue
+ * saves it.
  */
 function Backend({
   title,
@@ -131,6 +132,7 @@ function Backend({
   configured,
   status,
   open,
+  edited,
   onToggle,
   readOnly = false,
   children,
@@ -141,16 +143,20 @@ function Backend({
   /** Overrides the default Configured / Not set up line. */
   status?: ReactNode;
   open: boolean;
+  /** Whether a field inside holds an unsaved edit. */
+  edited: boolean;
   onToggle: () => void;
   /** Show the environment-owned values for inspection without offering edits. */
   readOnly?: boolean;
   children: ReactNode;
 }) {
   const t = useT();
+  const shown = open || edited;
   return (
     <>
       <SettingFieldRow
         label={title}
+        dirty={edited}
         description={description}
         status={
           status ??
@@ -161,8 +167,15 @@ function Backend({
           ))
         }
       >
-        <Button type="button" variant="secondary" size="sm" onClick={onToggle} aria-expanded={open}>
-          {open
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={onToggle}
+          aria-expanded={shown}
+          disabled={edited}
+        >
+          {shown
             ? t("web.setup.storage.hide")
             : readOnly
               ? t("web.setup.storage.view")
@@ -171,7 +184,7 @@ function Backend({
                 : t("web.setup.storage.setUp")}
         </Button>
       </SettingFieldRow>
-      {open ? <div className="setup-backend-fields">{children}</div> : null}
+      {shown ? <div className="setup-backend-fields">{children}</div> : null}
     </>
   );
 }
@@ -233,21 +246,22 @@ function S3Fields({
         managedByEnv={form.envVar(key("bucket"))}
         disabled={locationLocked}
       />
-      <SettingField
+      {/* Emptying a secret field keeps the saved value; the wizard clears none. */}
+      <SecretField
         label={t("web.setup.storage.accessKeyLabel")}
-        type="password"
         value={form.getValue(key("access_key"))}
+        configured={form.sensitiveConfigured.includes(key("access_key"))}
         onChange={(v) => form.setValue(key("access_key"), v)}
+        onKeep={() => form.resetValue(key("access_key"))}
         managedByEnv={form.envVar(key("access_key"))}
-        sensitiveConfigured={form.sensitiveConfigured.includes(key("access_key"))}
       />
-      <SettingField
+      <SecretField
         label={t("web.setup.storage.secretKeyLabel")}
-        type="password"
         value={form.getValue(key("secret_key"))}
+        configured={form.sensitiveConfigured.includes(key("secret_key"))}
         onChange={(v) => form.setValue(key("secret_key"), v)}
+        onKeep={() => form.resetValue(key("secret_key"))}
         managedByEnv={form.envVar(key("secret_key"))}
-        sensitiveConfigured={form.sensitiveConfigured.includes(key("secret_key"))}
       />
       <SettingField
         label={t("web.setup.storage.prefixLabel")}
@@ -299,14 +313,14 @@ function S3Fields({
             />
           ) : null}
           {showsLinkSetting("s3.public_token_secret") ? (
-            <SettingField
+            <SecretField
               label={t("web.setup.storage.tokenSecretLabel")}
               dirty={keptForEdit("s3.public_token_secret")}
-              type="password"
               hint={t("web.setup.storage.tokenSecretHint")}
               value={form.getValue("s3.public_token_secret")}
+              configured={form.sensitiveConfigured.includes("s3.public_token_secret")}
               onChange={(v) => form.setValue("s3.public_token_secret", v)}
-              sensitiveConfigured={form.sensitiveConfigured.includes("s3.public_token_secret")}
+              onKeep={() => form.resetValue("s3.public_token_secret")}
               managedByEnv={form.envVar("s3.public_token_secret")}
             />
           ) : null}
@@ -315,7 +329,7 @@ function S3Fields({
               label={t("web.setup.storage.tokenParamLabel")}
               dirty={keptForEdit("s3.public_token_param")}
               description={t("web.setup.storage.tokenParamDescription")}
-              value={form.getValue("s3.public_token_param") || "verify"}
+              value={form.getValue("s3.public_token_param")}
               onChange={(v) => form.setValue("s3.public_token_param", v)}
               managedByEnv={form.envVar("s3.public_token_param")}
             />
@@ -326,7 +340,7 @@ function S3Fields({
               dirty={keptForEdit("s3.public_token_ttl")}
               type="number"
               unit={t("web.setup.storage.seconds")}
-              value={form.getValue("s3.public_token_ttl") || "10800"}
+              value={form.getValue("s3.public_token_ttl")}
               onChange={(v) => form.setValue("s3.public_token_ttl", v)}
               managedByEnv={form.envVar("s3.public_token_ttl")}
             />
@@ -563,17 +577,18 @@ export function StorageStep() {
               ) : undefined
             }
             open={open.redis}
+            edited={REDIS_KEYS.some(form.isDirty)}
             onToggle={() => setOpen((o) => ({ ...o, redis: !o.redis }))}
             readOnly={redisManaged}
           >
-            <SettingField
+            <SecretField
               label={t("web.setup.storage.redisUrlLabel")}
-              type="password"
               // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
               hint="redis://localhost:6379"
               value={form.getValue("redis.url")}
+              configured={redisSaved}
               onChange={(v) => stageRedisUrl(form, v)}
-              sensitiveConfigured={redisSaved && form.getValue("redis.url") === ""}
+              onKeep={() => keepSavedRedisUrl(form)}
               managedByEnv={form.envVar("redis.url")}
             />
             <SettingField
@@ -597,6 +612,7 @@ export function StorageStep() {
             description={t("web.setup.storage.publicDescription")}
             configured={publicConfigured}
             open={open.public}
+            edited={PUBLIC_S3_KEYS.some(form.isDirty)}
             onToggle={() => setOpen((o) => ({ ...o, public: !o.public }))}
           >
             <S3Fields
@@ -620,6 +636,7 @@ export function StorageStep() {
             description={t("web.setup.storage.privateDescription")}
             configured={privateConfigured}
             open={open.private}
+            edited={PRIVATE_S3_KEYS.some(form.isDirty)}
             onToggle={() => setOpen((o) => ({ ...o, private: !o.private }))}
           >
             <S3Fields

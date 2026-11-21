@@ -53,6 +53,8 @@ export default function GeneralSettings() {
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
   const [saveInProgress, setSaveInProgress] = useState(false);
   const saveInProgressRef = useRef(false);
+  // Each save and discard ends the Use Redis switch's own choice.
+  const [savesAndDiscards, setSavesAndDiscards] = useState(0);
 
   // The Redis URL is a credential: its editors are frozen while a save is in
   // flight so a late keystroke cannot ride along with it.
@@ -80,6 +82,7 @@ export default function GeneralSettings() {
           ? form.dirtyKeys.filter((key) => !REDIS_KEYS.includes(key))
           : undefined,
       );
+      setSavesAndDiscards((count) => count + 1);
     } finally {
       saveInProgressRef.current = false;
       setSaveInProgress(false);
@@ -89,6 +92,7 @@ export default function GeneralSettings() {
   function handleDiscard() {
     if (saveInProgressRef.current) return;
     form.discard();
+    setSavesAndDiscards((count) => count + 1);
   }
 
   // Redis reads whether a URL is saved from the protected-credential status,
@@ -228,7 +232,12 @@ export default function GeneralSettings() {
             </div>
           </div>
         ) : (
-          <RedisGroup form={form} restartKeys={restartKeys} secrets={redisUrlEditors} />
+          <RedisGroup
+            form={form}
+            restartKeys={restartKeys}
+            secrets={redisUrlEditors}
+            savesAndDiscards={savesAndDiscards}
+          />
         )}
       </div>
 

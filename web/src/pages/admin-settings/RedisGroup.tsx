@@ -30,10 +30,13 @@ export function RedisGroup({
   form,
   restartKeys,
   secrets,
+  savesAndDiscards,
 }: {
   form: ReturnType<typeof useSettingsForm>;
   restartKeys: RestartKeyMatcher;
   secrets: RedisUrlEditors;
+  /** Counts the page's completed saves and its discards. */
+  savesAndDiscards: number;
 }) {
   const t = useT();
   const checkConnection = useCheckAdminSettingsConnection();
@@ -43,12 +46,14 @@ export function RedisGroup({
   const configured = form.sensitiveConfigured.includes("redis.url");
   const [enabledOverride, setEnabledOverride] = useState<boolean | null>(null);
   // Saving or discarding clears the toggle override so it follows the stored
-  // URL again. Adjusting during render (rather than in an effect) keeps the
-  // override alive while the admin is still editing.
-  const [lastDirtyCount, setLastDirtyCount] = useState(form.dirtyCount);
-  if (lastDirtyCount !== form.dirtyCount) {
-    setLastDirtyCount(form.dirtyCount);
-    if (form.dirtyCount === 0) setEnabledOverride(null);
+  // URL again. Running out of unsaved changes is not the same: erasing what
+  // was typed into a field with nothing saved takes back its edit while the
+  // admin is still working. Adjusting during render (rather than in an effect)
+  // keeps the override alive while the admin is still editing.
+  const [lastSavesAndDiscards, setLastSavesAndDiscards] = useState(savesAndDiscards);
+  if (lastSavesAndDiscards !== savesAndDiscards) {
+    setLastSavesAndDiscards(savesAndDiscards);
+    setEnabledOverride(null);
   }
   // Once REDIS_URL sets the connection the switch is locked, so a choice
   // made before it took over no longer applies.

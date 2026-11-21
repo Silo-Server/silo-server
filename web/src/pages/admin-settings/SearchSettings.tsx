@@ -246,7 +246,7 @@ export default function SearchSettings() {
               <>
                 <SettingField
                   label={t("web.admin.settings.search.meili.index.label")}
-                  value={form.getValue("catalog.search.meilisearch.index") || "silo_media_items"}
+                  value={form.getValue("catalog.search.meilisearch.index")}
                   onChange={(value) => form.setValue("catalog.search.meilisearch.index", value)}
                   description={t("web.admin.settings.search.meili.index.description")}
                   disabled={!meiliEnabled || connectionUnknown}
@@ -257,7 +257,7 @@ export default function SearchSettings() {
                   label={t("web.admin.settings.search.meili.timeout.label")}
                   type="number"
                   unit={t("web.admin.common.units.milliseconds")}
-                  value={form.getValue("catalog.search.meilisearch.timeout_ms") || "800"}
+                  value={form.getValue("catalog.search.meilisearch.timeout_ms")}
                   onChange={(value) =>
                     form.setValue("catalog.search.meilisearch.timeout_ms", value)
                   }
@@ -268,7 +268,7 @@ export default function SearchSettings() {
                 <SettingField
                   label={t("web.admin.settings.search.meili.batch.label")}
                   type="number"
-                  value={form.getValue("catalog.search.meilisearch.sync_batch_size") || "500"}
+                  value={form.getValue("catalog.search.meilisearch.sync_batch_size")}
                   onChange={(value) =>
                     form.setValue("catalog.search.meilisearch.sync_batch_size", value)
                   }
@@ -279,7 +279,7 @@ export default function SearchSettings() {
                 <SettingField
                   label={t("web.admin.settings.search.meili.ratio.label")}
                   type="number"
-                  value={form.getValue("catalog.search.meilisearch.semantic_ratio") || "0.50"}
+                  value={form.getValue("catalog.search.meilisearch.semantic_ratio")}
                   onChange={(value) =>
                     form.setValue("catalog.search.meilisearch.semantic_ratio", value)
                   }

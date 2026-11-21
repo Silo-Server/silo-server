@@ -130,17 +130,13 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       if (!editBaseline.current) editBaseline.current = settings;
       editVersions.current.set(key, (editVersions.current.get(key) ?? 0) + 1);
       setLocalValues((prev) => ({ ...prev, [key]: value }));
-      // The snapshot leaves secrets out, so a key it lacks (a staged secret
-      // clear among them) stays dirty. An edit made during a save, or before
-      // the snapshot that save wrote has arrived, stays dirty too, because the
-      // snapshot cannot yet say what is saved.
+      // An edit made during a save, or before the snapshot that save wrote has
+      // arrived, stays dirty, because the snapshot cannot yet say what is saved.
       const reverted =
         !stage &&
         !savePending.current &&
-        settings != null &&
         settings !== savedOver.current &&
-        Object.hasOwn(settings, key) &&
-        settings[key] === value;
+        savedValue(settings, sensitiveData?.configured, key) === value;
       setDirty((prev) => {
         const next = new Set(prev);
         if (reverted) next.delete(key);
@@ -148,7 +144,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         return next;
       });
     },
-    [settings],
+    [sensitiveData, settings],
   );
 
   // Revert one staged field without disturbing other edits. This is also how
@@ -357,4 +353,22 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     buildConnectionCheckRequest,
     beginSettingsTransition,
   };
+}
+
+/**
+ * What is saved for `key`, or undefined when the snapshot and the secret
+ * status can't say. A key the snapshot lacks has nothing saved, unless it is a
+ * set secret, which the snapshot leaves out; for that, or before the status
+ * (`configured`) has arrived, the saved value is unknown, and an empty draft is
+ * a clear to save.
+ */
+function savedValue(
+  settings: Record<string, string> | undefined,
+  configured: string[] | undefined,
+  key: string,
+): string | undefined {
+  if (settings == null) return undefined;
+  if (Object.hasOwn(settings, key)) return settings[key];
+  if (configured == null || configured.includes(key)) return undefined;
+  return "";
 }

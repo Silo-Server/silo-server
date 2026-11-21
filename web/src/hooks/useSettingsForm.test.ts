@@ -29,7 +29,7 @@ vi.mock("@/api/client", () => ({
 // would loop forever.
 const KEYS = ["branding.server_name", "database.max_connections"];
 const settingsData = { "branding.server_name": "Silo", "database.max_connections": "20" };
-const sensitiveData = { configured: [], managed_by_env: [] };
+const sensitiveData = { configured: [] as string[], managed_by_env: [] };
 
 vi.mock("@/hooks/queries/admin/settings", () => ({
   useAdminServerSettings: () => ({
@@ -47,6 +47,7 @@ afterEach(() => {
   snapshot.loaded = true;
   snapshot.values = undefined;
   authority.profileId = "profile-a";
+  sensitiveData.configured = [];
 });
 
 describe("useSettingsForm save()", () => {
@@ -340,9 +341,17 @@ describe("useSettingsForm unsaved-changes guard", () => {
   });
 
   it("releases an edit changed back to its saved value, but not a staged secret clear", () => {
+    sensitiveData.configured = ["email.smtp_password"];
     const registry = renderHook(() => useHasUnsavedChanges());
     const form = renderHook(() =>
-      useSettingsForm({ keys: ["branding.server_name", "email.smtp_password"] }),
+      useSettingsForm({
+        keys: [
+          "branding.server_name",
+          "email.smtp_password",
+          "s3.public_read_endpoint",
+          "s3.public_token_secret",
+        ],
+      }),
     );
 
     act(() => {
@@ -354,7 +363,20 @@ describe("useSettingsForm unsaved-changes guard", () => {
     expect(form.result.current.dirtyCount).toBe(0);
     expect(registry.result.current).toBe(false);
 
-    // The snapshot leaves secrets out, so an empty secret is a clear to save.
+    // The snapshot leaves out a setting with nothing saved, secret or not, so
+    // emptying what was typed into one gets it back to its saved state.
+    for (const key of ["s3.public_read_endpoint", "s3.public_token_secret"]) {
+      act(() => {
+        form.result.current.setValue(key, "typed");
+      });
+      act(() => {
+        form.result.current.setValue(key, "");
+      });
+    }
+    expect(form.result.current.dirtyCount).toBe(0);
+    expect(registry.result.current).toBe(false);
+
+    // It leaves out a set secret too, and emptying that is a clear to save.
     act(() => {
       form.result.current.setValue("email.smtp_password", "");
     });
