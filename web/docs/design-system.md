@@ -139,6 +139,7 @@ Colors are organized as semantic layers. `app.css` provides the actual values; c
 
 - `--primary`: primary action color
 - `--primary-foreground`: text on primary elements
+- `--primary-text`: the primary color as text, which `text-primary` uses. An admin accent sets it to the accent, lightened only as far as needed to read at 4.5:1 on Cinema Dark's surfaces; without one it is `--primary`. Draw accent-colored text with `text-primary`, never `var(--primary)`
 - `--secondary`: secondary element backgrounds
 - `--accent`: highlighted and active backgrounds
 - `--destructive`: danger and error text, icons, borders, and status dots

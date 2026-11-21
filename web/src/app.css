@@ -57,6 +57,10 @@
   /* ── Interactive ─────────────────────────────────────────── */
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  /* Text in the primary color. An admin accent sets --primary-text to a
+     variant that reads on Cinema Dark's surfaces (lib/accentColor.ts); fills,
+     borders, and rings keep the accent itself. */
+  --text-color-primary: var(--primary-text, var(--primary));
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
