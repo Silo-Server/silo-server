@@ -1433,9 +1433,17 @@ func (h *PlaybackHandler) recordStopHistory(ctx context.Context, session *playba
 	return result
 }
 
-// recordAdminStopHistory logs a failed write itself and also returns it, so
-// the lifecycle sweep can hold back its next attempt.
+// recordAdminStopHistory records a session's end in the admin log; see
+// recordAdminEnd.
 func (h *PlaybackHandler) recordAdminStopHistory(ctx context.Context, session *playback.Session, reason PlaybackEndReason) error {
+	return h.recordAdminEnd(ctx, session, reason, time.Time{})
+}
+
+// recordAdminEnd logs a failed write itself and also returns it, so the
+// lifecycle sweep can hold back its next attempt. subtitleAt is when the
+// session's subtitle was last known, when that is before its end
+// (AdminPlaybackHistoryEntry.SubtitleAt).
+func (h *PlaybackHandler) recordAdminEnd(ctx context.Context, session *playback.Session, reason PlaybackEndReason, subtitleAt time.Time) error {
 	entry, err := h.buildAdminHistoryEntry(ctx, session)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to build admin history", "component", "api", "session", session.ID, "error", err)
@@ -1445,6 +1453,7 @@ func (h *PlaybackHandler) recordAdminStopHistory(ctx context.Context, session *p
 		return nil
 	}
 	entry.EndReason = reason
+	entry.SubtitleAt = subtitleAt
 	// An end goes through the session's lifecycle, which announces it;
 	// a teardown the client can recover from records its stretch only.
 	if reason != "" {

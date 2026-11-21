@@ -709,8 +709,8 @@
 ./internal/api/handlers TestAdminPlaybackWatchTimeDB
 
 # A play's device, client and stream decisions are filled once by any
-# finalization, its end reason follows the latest one, and the history
-# window is inclusive below and exclusive above.
+# finalization, its end reason and subtitle follow the latest one, and the
+# history window is inclusive below and exclusive above.
 ./internal/api/handlers TestAdminPlaybackHistoryFactsDB
 ./internal/api/handlers TestLiveSessionReadsTheSyncedRowDB
 ./internal/audiobooks TestABSPlaybackSessionKeepsItsFileDB
@@ -720,6 +720,8 @@
 ./internal/api/handlers TestLifecycleSweepSelectsWhatItCanEndDB
 ./internal/api/handlers TestLifecycleSweepPassesLiveJellyfinPlaysDB
 ./internal/api/handlers TestLifecycleSweepBacksOffFailedEndsDB
+./internal/api/handlers TestLifecycleSweepKeepsARecordedSubtitleDB
+./internal/api/handlers TestLifecycleSweepTakesALaterSyncedSubtitleDB
 # A live row names an episode as the history entry its play leaves does.
 ./internal/api/handlers TestEpisodeLiveRowNamesItAsHistoryDB
 
