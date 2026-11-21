@@ -80,25 +80,26 @@ type RefreshDebtSample = MetadataRefreshMetrics["due_samples"][number];
 
 /**
  * A due or failed target's title in the interface language. Seasons and
- * episodes are named from their parts, as the item pages name them; a target
- * that no longer exists shows its content ID.
+ * episodes are named from their parts with the item pages' helpers: a season
+ * keeps its own name and a stored English default becomes the translated one.
+ * A target that no longer exists shows its content ID.
  */
 function refreshSampleTitle(t: Translate, entry: RefreshDebtSample): string {
   const season = entry.season_number;
   if (season == null) return entry.title || entry.content_id;
+  const series = entry.series_title;
   const episode = entry.episode_number;
-  let name: string;
-  if (episode == null) {
-    name = seasonDisplayName(season, entry.title);
-  } else {
+  if (episode != null && entry.title) {
+    // One message rather than one nested in another: a right-to-left interface
+    // isolates each placeholder, and a nested message's isolate reads left to right.
     const code = formatEpisodeCode(season, episode);
-    name = entry.title
-      ? t("web.admin.tasks.detail.sampleEpisode", { code, title: entry.title })
-      : code;
+    return series
+      ? t("web.admin.tasks.detail.sampleSeriesEpisode", { series, code, title: entry.title })
+      : t("web.admin.tasks.detail.sampleEpisode", { code, title: entry.title });
   }
-  return entry.series_title
-    ? t("web.admin.tasks.detail.sampleTitle", { series: entry.series_title, name })
-    : name;
+  const name =
+    episode == null ? seasonDisplayName(season, entry.title) : formatEpisodeCode(season, episode);
+  return series ? t("web.admin.tasks.detail.sampleTitle", { series, name }) : name;
 }
 
 function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
@@ -145,7 +146,8 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="surface-panel rounded-2xl border-0 p-4">
+        {/* min-w-0 lets a long sample title truncate instead of widening the page. */}
+        <div className="surface-panel min-w-0 rounded-2xl border-0 p-4">
           <h3 className="text-sm font-medium">{t("web.admin.tasks.detail.reasonBreakdown")}</h3>
           <div className="mt-3 flex flex-wrap gap-2">
             {reasonCounts.length === 0 && (
@@ -174,7 +176,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
           </div>
         </div>
 
-        <div className="surface-panel rounded-2xl border-0 p-4">
+        <div className="surface-panel min-w-0 rounded-2xl border-0 p-4">
           <h3 className="text-sm font-medium">{t("web.admin.tasks.detail.recentErrors")}</h3>
           <div className="mt-3 space-y-3">
             {metrics.recent_errors.length === 0 && (
@@ -250,9 +252,13 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
                     {refreshItemTypeLabel(t, entry.type)}
                   </div>
                 </td>
-                <td className="px-4 py-2">{formatDateTime(entry.next_refresh_at)}</td>
+                <td className="px-4 py-2 whitespace-nowrap">
+                  {formatDateTime(entry.next_refresh_at)}
+                </td>
                 <td className="px-4 py-2">{entry.attempt_count}</td>
-                <td className="px-4 py-2">{formatOptionalDateTime(entry.last_attempt_at)}</td>
+                <td className="px-4 py-2 whitespace-nowrap">
+                  {formatOptionalDateTime(entry.last_attempt_at)}
+                </td>
               </tr>
             ))}
           </tbody>

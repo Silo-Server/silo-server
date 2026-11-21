@@ -20,7 +20,7 @@ type AdminTaskAttemptBucket struct {
 type AdminTaskDebtSample struct {
 	TargetType    string   `json:"target_type"`
 	ContentID     ID       `json:"content_id"`
-	Title         string   `json:"title" doc:"The target's own title as stored: the item's, the season's or the episode's, without its series. Empty when the target no longer exists"`
+	Title         string   `json:"title" doc:"The target's own title as stored: the item's, the season's or the episode's, without its series. Empty when the target has no title or no longer exists"`
 	Type          string   `json:"type"`
 	SeriesTitle   string   `json:"series_title,omitempty" doc:"Series title for a season or episode that still exists; absent otherwise"`
 	SeasonNumber  *int     `json:"season_number,omitempty" doc:"Season number for a season or episode that still exists; absent otherwise"`

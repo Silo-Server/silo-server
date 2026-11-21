@@ -22506,7 +22506,7 @@ export interface components {
       /** @description Series title for a season or episode that still exists; absent otherwise */
       series_title?: string;
       target_type: string;
-      /** @description The target's own title as stored: the item's, the season's or the episode's, without its series. Empty when the target no longer exists */
+      /** @description The target's own title as stored: the item's, the season's or the episode's, without its series. Empty when the target has no title or no longer exists */
       title: string;
       type: string;
     };
