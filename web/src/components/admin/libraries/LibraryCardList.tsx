@@ -166,12 +166,12 @@ function LibraryCard({
 function LibraryCardPaths({ paths }: { paths: string[] }) {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
-  // Each path reads left to right in any language and is sized to its text, so
-  // each one sits on the page's start side, even beside a path that wraps.
+  // Each path reads left to right in any language, and each of its lines, wrapped
+  // or not, sits on the page's start side.
   const pathList = (
     <ul className="text-muted-foreground space-y-1 font-mono text-xs break-all">
       {paths.map((path) => (
-        <li key={path} dir="ltr" className="w-fit">
+        <li key={path} dir="ltr" className="align-with-page">
           {path}
         </li>
       ))}
