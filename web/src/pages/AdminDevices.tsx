@@ -507,7 +507,7 @@ export default function AdminDevices() {
             )}
           </div>
 
-          <div className="overlay-scroll max-h-[max(calc(100vh-22rem),10rem)] flex-1 scroll-pt-10 overflow-y-auto lg:max-h-[max(calc(100vh-18rem),10rem)]">
+          <div className="overlay-scroll max-h-[max(calc(100vh-22rem),10rem)] flex-1 overflow-y-auto lg:max-h-[max(calc(100vh-18rem),10rem)]">
             {isLoading ? (
               <div className="space-y-1.5 p-2.5">
                 {Array.from({ length: 5 }).map((_, i) => (
@@ -1323,7 +1323,7 @@ function DeviceRow({
     <Link
       to={href}
       className={cn(
-        "group relative flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors",
+        "group relative flex scroll-mt-10 items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors",
         active ? "bg-surface-hover/70" : "hover:bg-surface-hover/40",
       )}
     >
