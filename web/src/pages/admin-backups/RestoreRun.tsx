@@ -167,7 +167,11 @@ function AccountReport({
                     {/* The outcome moves to the next line as a unit, so its "·" stays with the
                         word it introduces, and wraps inside itself only when it can't fit on a
                         line. The gap is the name's margin, left behind at the end of the line. */}
-                    <bdi className="me-1.5 font-medium">{profile.label}</bdi>
+                    <span className="me-1.5 font-medium">
+                      {/* <bdi> isolates the name's direction. It sits inside the span, so the
+                          margin follows the page's direction, not the name's. */}
+                      <bdi>{profile.label}</bdi>
+                    </span>
                     <wbr />
                     <span className="text-muted-foreground inline-block">
                       {t("web.admin.backups.restore.run.profileOutcome", {
