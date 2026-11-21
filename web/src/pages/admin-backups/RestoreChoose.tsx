@@ -44,6 +44,7 @@ import {
   libraryNames,
   matchesFilter,
   nothingToRestoreText,
+  rowLibrary,
   rowSecondary,
   sectionProgress,
   stateCountsLabel,
@@ -222,7 +223,8 @@ function Rows({ sectionId, items, selection, onToggle, names, withLibrary = fals
             item={item}
             checked={selection.has(itemKey(sectionId, item.id))}
             onToggle={onToggle}
-            secondary={rowSecondary(item, names, withLibrary)}
+            secondary={rowSecondary(item, names)}
+            library={withLibrary ? rowLibrary(item, names) : null}
           />
         ),
       )}
@@ -333,7 +335,12 @@ function SameRows({
           className="bg-background/60 mt-1.5 max-h-80 overflow-y-auto rounded-md border px-3 py-1"
         >
           {items.map((item) => (
-            <SameRow key={item.id} item={item} secondary={rowSecondary(item, names, true)} />
+            <SameRow
+              key={item.id}
+              item={item}
+              secondary={rowSecondary(item, names)}
+              library={rowLibrary(item, names)}
+            />
           ))}
         </ul>
       ) : null}
