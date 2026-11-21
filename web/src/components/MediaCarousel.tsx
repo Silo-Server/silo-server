@@ -224,8 +224,11 @@ export default function MediaCarousel({
   onNearEnd,
 }: MediaCarouselProps) {
   const t = useT();
+  // "Explore all" keeps its one-line width beside a wrapping heading, up to half
+  // the header. A longer label (a long translation at a large Text Size) wraps
+  // there instead of crushing the heading, but never below its longest word.
   const viewAllClass =
-    "text-muted-foreground hover:text-primary shrink-0 text-[0.75rem] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
+    "text-muted-foreground hover:text-primary max-w-1/2 min-w-min shrink-0 text-[0.75rem] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
   const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
     useCarouselEmbla();
   useEffect(() => {
