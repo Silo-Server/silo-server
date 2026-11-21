@@ -590,7 +590,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --success-label: var(--success);
     --warning-label: var(--warning);
     --info-label: var(--info);
-    --destructive-label: color-mix(in srgb, var(--destructive), var(--contrast-boost) 25%);
+    --destructive-label: color-mix(in srgb, var(--contrast-boost) 25%, var(--destructive));
   }
 
   /* ── Contrast-adjustable tokens ─────────────────────────────
@@ -811,11 +811,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --accent: color-mix(in srgb, var(--contrast-boost) 14%, var(--accent-base));
     /* Status labels: each mixed just far enough to keep 5:1 on a hovered
        row (--surface-hover), the lightest surface under one, so each keeps
-       as much of its colour as it can. */
-    --success-label: color-mix(in srgb, var(--success), var(--contrast-boost) 40%);
-    --warning-label: color-mix(in srgb, var(--warning), var(--contrast-boost) 35%);
-    --info-label: color-mix(in srgb, var(--info), var(--contrast-boost) 50%);
-    --destructive-label: color-mix(in srgb, var(--destructive), var(--contrast-boost) 60%);
+       as much of its colour as it can. On --surface-raised red would drop
+       below 4.5:1; no label sits there. */
+    --success-label: color-mix(in srgb, var(--contrast-boost) 40%, var(--success));
+    --warning-label: color-mix(in srgb, var(--contrast-boost) 35%, var(--warning));
+    --info-label: color-mix(in srgb, var(--contrast-boost) 50%, var(--info));
+    --destructive-label: color-mix(in srgb, var(--contrast-boost) 60%, var(--destructive));
     --ambient-glow-opacity: 0.04;
   }
   html[data-high-contrast="true"] .surface-panel-subtle,
