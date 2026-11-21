@@ -37,6 +37,7 @@ import { formatCodecLabel, formatFileSize } from "@/lib/mediaFormat";
 import { cn } from "@/lib/utils";
 import { activityMethodMeta } from "@/pages/adminActivityPresentation";
 import { CHECKBOX } from "./controls";
+import { downloadEntryStatus } from "./downloadStoragePresentation";
 import {
   cancelPreparationsPrompt,
   canPausePreparation,
@@ -1066,8 +1067,8 @@ function PreparationDetails({
                     {requesterDevice(r)}
                   </span>
                 </span>
-                <span className="text-[10px] text-[var(--terminal-muted)] capitalize">
-                  {r.status === "preparing" ? t(`${K}.details.requesterWaiting`) : r.status}
+                <span className="text-[10px] text-[var(--terminal-muted)]">
+                  {downloadEntryStatus(r.status).label}
                 </span>
               </div>
             ))
