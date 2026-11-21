@@ -51,6 +51,9 @@ function Dialog({ row }: { row: HomeRow }) {
 - **Plurals:** one `plural` spanning the message,
   `{count, plural, one {# page} other {# pages}}`; pass `count` as a number. A
   language without the message falls back to English with English plural rules.
+  Wording that refers to the items as one or several ("it" / "them") selects on
+  `{amount, select, exactlyOne {…} exactlyTwo {…} other {…}}` instead; pass
+  `amount: exactAmount(count)` (see docs/architecture/i18n.md).
 - **Placeholders:** pass dates, durations and sizes already formatted, as strings
   (`formatLocale()` / `appLanguage()` from `@/lib/appLocale`).
 - **Digits:** in Arabic, numbers print in the format locale's digits, as dates do

@@ -1,4 +1,4 @@
-import { t, type MessageKey, type TextValues } from "@/i18n";
+import { exactAmount, t, type MessageKey, type TextValues } from "@/i18n";
 import { appLanguage } from "@/lib/appLocale";
 import { DATA_TYPE_IDS, DATA_TYPE_PHRASES, pendingCount } from "@/lib/profileDataTypes";
 import type {
@@ -272,7 +272,7 @@ export function chooseItems(
   if (added.length > 0) {
     notices.push(
       t("web.admin.backups.restore.notice.alsoChose", {
-        count: added.length,
+        amount: exactAmount(added.length),
         names: joinNames(added.map(itemName)),
       }),
     );
@@ -344,7 +344,10 @@ export function unchooseItems(
       : counted("web.admin.backups.restore.notice.itemCount", dependents.length);
   return {
     selection: next,
-    notice: t("web.admin.backups.restore.notice.alsoUnchose", { count: dependents.length, names }),
+    notice: t("web.admin.backups.restore.notice.alsoUnchose", {
+      amount: exactAmount(dependents.length),
+      names,
+    }),
   };
 }
 
