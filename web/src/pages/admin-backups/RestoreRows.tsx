@@ -24,6 +24,7 @@ import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 import { RowDisclosure } from "./Disclosure";
 import { itemState, type ItemState } from "./restoreGroups";
 import { REASON_SENTENCES, displayLabel, toggleKeys } from "./restoreModel";
+import { useOverflowsInline } from "./useOverflowsInline";
 
 /** Toggles item keys; stable for the page's life so memoized rows don't re-render. */
 export type ToggleKeys = (keys: string[], checked: boolean) => void;
@@ -352,6 +353,7 @@ export const ItemRow = memo(function ItemRow({
   const details = open ? itemDetails(t, item) : null;
   const hasDetails = hasItemDetails(item);
   const label = displayLabel(item);
+  const [nameRef, nameOverflows] = useOverflowsInline<HTMLLabelElement>(label);
   const paths = item.kind === "library" ? item.library?.paths : undefined;
   // The row is its own container, since its width depends on the admin sidebar and
   // restore summary as much as on the viewport. A narrow row wraps the whole name
@@ -371,13 +373,17 @@ export const ItemRow = memo(function ItemRow({
           {/* block: Label is a flex box, which would clip the name without an ellipsis.
               Beside a detail, a one-line row stops the name at 60% and ends it in "…";
               Chromium breaks at <wbr> even under nowrap, so that row hides them. A name
-              with nothing beside it wraps instead, so it is never cut short. */}
+              with nothing beside it wraps instead, so it is never cut short. A name
+              clips sideways only while part of it can't wrap to fit, such as one long
+              run of joined emoji; a one-line row with a detail truncates instead. */}
           <Label
+            ref={nameRef}
             htmlFor={controlId}
             title={label}
             className={cn(
               "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
               secondary && "@2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden",
+              nameOverflows && (secondary ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
               !item.selectable && "text-muted-foreground",
             )}
           >
