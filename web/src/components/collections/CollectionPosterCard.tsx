@@ -44,10 +44,6 @@ export function CollectionPosterCard({
 
   const isUserCollection = kind === "user_collections";
   const showPin = pinnable && !isUserCollection && libraryId !== undefined;
-  // A title drawn on the poster starts below the pin (top-2 plus a 36 px chip)
-  // and, when the count shows, ends above it.
-  let fallbackTitlePadding = "";
-  if (showPin) fallbackTitlePadding = meta === undefined ? "pt-11 pb-7" : "pt-11";
   const href = buildCollectionCatalogHref(collection, isUserCollection, libraryId);
   // A card with its own meta line draws it below the link instead.
   let subline: ReactNode = null;
@@ -84,12 +80,15 @@ export function CollectionPosterCard({
           ) : (
             <div
               aria-hidden
-              className={`text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm ${fallbackTitlePadding}`}
+              className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm"
             >
               {isUserCollection && <User className="h-5 w-5 opacity-60" />}
-              {/* Never shrunk below its lines: a card too short for them lets
-                  the title overflow its padding rather than cut a line in half. */}
+              {/* The spacers keep the title below the pin (top-2 plus a 36 px chip)
+                  and above the count. The title never shrinks, so on a card too
+                  short for all of it the spacers give way and it centres as before. */}
+              {showPin ? <div className="h-7 shrink" /> : null}
               <span className="line-clamp-3 shrink-0 font-medium">{collection.title}</span>
+              {showPin && meta === undefined ? <div className="h-3 shrink" /> : null}
             </div>
           )}
           {meta === undefined ? (
