@@ -637,16 +637,17 @@ export function GroupsBoard({
 
       {narrow ? null : (
         // From xl it sits beside the board, pinned below the admin shell's
-        // activity control. A long preview is taller than the window, so it
-        // scrolls inside itself, and takes keyboard focus there to be scrolled.
-        // The cap leaves room for the 2rem of page padding below the board, or
-        // the end of the page would push the preview back up under the control.
+        // activity control and any impersonation banner. A long preview is
+        // taller than the window, so it scrolls inside itself, and takes
+        // keyboard focus there to be scrolled. The cap leaves room for the
+        // 2rem of page padding below the board, or the end of the page would
+        // push the preview back up under the control.
         <ViewerPreview
           libraryName={libraryName}
           shelves={shelves}
           isVisible={isVisible}
           focusable={previewPinned}
-          className="overlay-scroll xl:sticky xl:top-16 xl:max-h-[calc(100dvh-6rem-var(--playback-bar-clearance,0px))] xl:overflow-y-auto"
+          className="overlay-scroll xl:sticky xl:top-[calc(4rem+var(--impersonation-banner-height))] xl:max-h-[calc(100dvh-6rem-var(--impersonation-banner-height)-var(--playback-bar-clearance,0px))] xl:overflow-y-auto"
         />
       )}
 

@@ -203,7 +203,8 @@ function AdminLayoutContent() {
           (top-5 below any banner, h-9 → it ends 3.5rem down). With less, a page
           header's right-aligned buttons sit underneath them until the capped
           content column pulls away from the viewport's right edge. A side
-          panel that sticks on desktop uses `top-16` for the same reason.
+          panel that sticks on desktop starts 4rem below any banner for the
+          same reason.
           `--page-gutter` is published so fixed page chrome (the collection
           editor's save bar) can line up with the content column.
           `scroll-mt-24` keeps Skip to content's jump clear of the phone

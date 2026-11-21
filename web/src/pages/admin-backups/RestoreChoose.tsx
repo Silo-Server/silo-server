@@ -639,14 +639,15 @@ export function RestoreChoose({
         ))}
       </div>
 
-      {/* Pinned below the admin shell's activity control. The height cap
-          leaves room for any background playback bar and for the 6rem of page
-          padding below this grid: without it, the end of the page pushes the
-          panel back up under the control. A longer summary scrolls on its own,
-          above Review. */}
+      {/* Pinned below the admin shell's activity control and any
+          impersonation banner. The height cap leaves room for both, for any
+          background playback bar, and for the 6rem of page padding below this
+          grid: without that, the end of the page pushes the panel back up
+          under the control. A longer summary scrolls on its own, above
+          Review. */}
       <aside
         aria-labelledby="restore-summary-heading"
-        className="surface-panel-subtle h-fit space-y-4 rounded-xl p-5 lg:sticky lg:top-16 lg:flex lg:max-h-[calc(100dvh-10rem-var(--playback-bar-clearance,0px))] lg:flex-col"
+        className="surface-panel-subtle h-fit space-y-4 rounded-xl p-5 lg:sticky lg:top-[calc(4rem+var(--impersonation-banner-height))] lg:flex lg:max-h-[calc(100dvh-10rem-var(--impersonation-banner-height)-var(--playback-bar-clearance,0px))] lg:flex-col"
       >
         {/* The 4px inset keeps the section buttons' focus rings clear of this
             box's clipping edge. The fade covers only the box's bottom padding,

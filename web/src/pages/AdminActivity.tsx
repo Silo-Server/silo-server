@@ -627,9 +627,10 @@ export default function AdminActivity() {
             )}
           </div>
 
-          {/* Table header, which stays in view while the page scrolls */}
+          {/* Table header, which stays in view while the page scrolls, below any
+              impersonation banner */}
           <div
-            className={`border-border bg-card/95 sticky top-0 z-10 ${layout.table} ${layout.columns} items-center gap-3 border-b px-3 py-2 backdrop-blur`}
+            className={`border-border bg-card/95 sticky top-(--impersonation-banner-height) z-10 ${layout.table} ${layout.columns} items-center gap-3 border-b px-3 py-2 backdrop-blur`}
           >
             <span />
             <SortHeader field="media" current={sortField} dir={sortDir} onClick={toggleSort}>
