@@ -1,3 +1,312 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "04893a4903cb32e93db8f53ca78507369c0090fb9434bdc27a8de73cfea46408",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "0640ac17953947c7cf8a021233021ba0b63257a6cd60777345d58c9a1cd73d31",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "0eb201b6c8fcb978e3f8d4043b3b025cd7a8194b32bb60a8675793658f16ba16",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "22b23b95e8386bc904c1d1496fe19b734f4db8a203ebc12322610e9efd8f04a3",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "2cc1b21bf7e5c5dfe5cdacddb6b05f728933d388e79ffeff8db9b1350c98e159",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "3cd452ed2c4b4f39c90014dec94498fbc26c5f3a92e4c9fb5e733ec21b1e975b",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "3cf289e9b77f4f30c39e0299dd56c922b95c1bf1b2913b8c1610da3d8499e518",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "45ad808ef852a80758bcf2a52a9eb803fa051661420fc4e1ca7fac348e8fb330",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "4d113f878b6a5a984970ffebaf3b5d44b9f3300f693f69f7d9dcb81846e06029",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "515c17343fb176bbc3f4bd8f83d7ff70f5082a4a67cfcdb3415a8a1f9859e561",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "5354d4218f29088dd60995f67b9305688ddeb2512237d315a86d40d4684efadc",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "535b1583e64cfa3862282a6d23f9a0155c13a1e19ec8dd8f14104873a0cb4506",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "64a111ac5c1b10aac3a66adc7f277669dff290006c160eaa99052e6955b4fa03",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "77f687943992cff51cd0a6665638f2f0761c93dabd8e2752ab511aa8c93f1d21",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "889177b078585e6930d8951b34e32af184ded7bafb0d87ef32ed104e0a32043c",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "93980f5715d6eed73c4695c363366ec95fe8c8f7090249c2931227a1bb538d2f",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "cb4f56ec73e069dfc5181951062ee8a49fb8da6338e82c946c83a0ff67bb5f4e",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "d11ad09ae2c119cae710d08a6152f2fb27e40c0b80430549b81ef319d0f1757b",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "d888874218dedb368705e1a83058b91ce3474cd9388e52130880ab756d054639",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "e392d86727872f9be9f15a4776330812e20fb402976281f4260c4ca6b5956962",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "f49144772bca3e7fe25089eb1f761fa834b02505ddc21d20a005c5531fff891a",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupUploadRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "f59900fbdec9eeaaa36055ad096a3144ab894db1146fed7b526fd780a02c4d04",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "0a908a853b27b557bac7cbed9e18eaa79607a633595d5c600869f405bd6619a7",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "1f081a9e8ae554fc3796b0f2dd276e7a76a73d731231203ee0d6eab47d79c127",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "3cfda317beaa61e3f6418a91f979b0dbebf5bae9382e037bcc5237cfe4c92989",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "4322f7e2eda949af6b584fb0c358107399b70304fec80cdce3890ce599df68b8",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "525ae100c57b281a3dd784c81ec704a1dc2f5520002c2a6dd5934cb29ee16c36",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "5e88e6c8140ce76c15caf4094e7bb91ff49a3878d1b798d3399bc4df385a8b8e",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "6126053e1117a34083030f41639e7a00753ebc87e703e8262af0f8e3b0c2fb92",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "6629c381edc0a2f6a34e693406c66e1338d454b2f3c8a82c49c1d15ceca0bcb1",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "6d35dc88858e9f71d49d1a2557b4fe244fd6f9332df5fa3e9b91ff1f386002a2",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "783b2ceb5c17f99a37f70ca56557023e51739243c2b3e857696684353cfa954d",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "8c63110ffb50638e230b407aac33a7a10c79ccbca15197b8849fabd3db0d14f3",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "920575d9028120baa304d17d2add72169d4fdf996870191102329a02e9769137",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "9278baf88e918940f1c80813e8cf7d839a42a87b31bbc6ce2f3e1e3a78bfce8f",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "94305e1ea3a2d496e14a9362fb3966be3dfda853faaf3bca0a8fee5a04cc19a3",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "9ca15be7fbe8673ff3f5cdc995d630b5e163b812de8f4c2a484b8ae8af9beb6b",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "b27759a5ad5115ab9b622f04505742c3c45147c664f05bacc83eefe736f8fdfd",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "b29239a0b91f2bd6991cfe24f2f2ed935599b74f9c80ddb3af40beb678e961f6",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "b3e08e56303617dff5992aada1f4b5a6bad2d284c90b8400c7b6d6f905c8ca72",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "b56fe69d4dcba185b3750f685e285ddc7f8ce9d2d4ea6c67e76b384a0572ef1f",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "c886ab23e8efc3cfc55778608b078f5e2063b7235be8c08cd3007667b82e9f82",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "e65ecdcc42e9dc7a7f606f14a333d0760110fc886d1ef4263c004ebc16e1c8a7",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    },
+    {
+      "operation_id": "getAdminBackupRestoreSet",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "fa82f174ee7896d7a5265070a2eac33017f5d55948111619c422f97ed4387f95",
+      "reason": "Selective restore change lists become declared codes that the web shows in the interface language, instead of English display words. Only the web restore flow reads them (silo-apple, silo-android and silo-roku have no backup restore screens); it is updated in the same change.",
+      "approved_in": "#4757"
+    }
+  ]
 }

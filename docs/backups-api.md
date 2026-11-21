@@ -350,8 +350,9 @@ Kind-specific details:
   `library_ids`, `local_id`, `template_id`, `bundle_id`, and `changes`, the
   fields the admin changed from the template's defaults that a restore
   writes here (`title`, `description`, `visibility`, `featured`,
-  `sort order`, `item sort`, `source`, `sync schedule`, `poster`,
-  `backdrop`).
+  `sort_order`, `item_sort`, `source`, `sync_schedule`, `poster`,
+  `backdrop`), plus `libraries` when it adds the collection to more of
+  them. The values are codes; clients show each in their own words.
 - `home_section` (id `section:<backup section id>`, labeled with its title
   and its page): an admin section of the home page or a library page.
   `home_section` with `scope` (`home` or `library`), `library_id` (the
@@ -359,9 +360,11 @@ Kind-specific details:
   one with the backup's id, else the one section of the page with the same
   type and title, which is `ambiguous` when two of the backup's sections
   share that page, type, and title), and `changes`, what a restore replaces
-  in it (`title`, `position`, `featured`, `item limit`, `enabled`,
-  `web only`, `configuration`, and `N collection items` of the collection it
-  manages). A
+  in it as codes (`type`, `title`, `title_translation`, `position`,
+  `featured`, `item_limit`, `enabled`, `web_only`, `collection_replaced`,
+  `configuration`, and `collection_items`). With `collection_items`,
+  `missing_collection_items` counts the items of the collection it manages
+  that the one here lacks. A
   chosen section replaces the configuration of the one here or is created; a
   section that manages a collection brings it. A row of collections
   (`collection_posters`) lists each collection mapped to the one here, in

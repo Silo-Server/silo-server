@@ -327,8 +327,9 @@ export default function AdminBackups() {
           subtitle={t("web.admin.backups.header.subtitle")}
           className="mb-4"
           actions={
-            // On a phone the actions start at the left, so each takes its own
-            // row there and the reason "Back up now" can't run sits right under it.
+            // On a phone the page header lines its actions up at the start, so
+            // each one gets its own full-width row there, and the reason "Back up
+            // now" can't run sits right under that button.
             <div className="flex flex-col items-end gap-1 max-sm:w-full max-sm:items-stretch">
               <div className="flex flex-wrap justify-end gap-2">
                 {uploadAvailable ? (
