@@ -57,14 +57,18 @@ const OUTCOME = {
   },
 } satisfies Record<RestoreReportItem["outcome"], { label: MessageKey; [key: string]: unknown }>;
 
+/** Keeps each "·" with the word after it, so a wrapped line never ends on a separator. */
+function keepSeparatorsWithNext(node: ReactNode): ReactNode {
+  if (typeof node === "string") return node.replace(/· /g, "·\u00a0");
+  return Array.isArray(node) ? node.map(keepSeparatorsWithNext) : node;
+}
+
 /**
- * Lets a muted "· Users · Restored" run wrap only before a "·", so a separator never
- * ends a line and a short label after it ("· Left out") stays whole. A label wider than
- * the line still breaks, through the line's `wrap-anywhere`.
+ * Keeps a short status ("Left out") on one line. One wider than the line still breaks,
+ * through the line's `wrap-anywhere`.
  */
-function breakBeforeSeparators(node: ReactNode): ReactNode {
-  if (typeof node === "string") return node.replace(/ (?!·)/g, "\u00a0");
-  return Array.isArray(node) ? node.map(breakBeforeSeparators) : node;
+function nonBreaking(text: string): string {
+  return text.replace(/ /g, "\u00a0");
 }
 
 function ReportRow({ item }: { item: RestoreReportItem }) {
@@ -95,10 +99,10 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
           {t("web.admin.backups.restore.run.itemLine", {
             label: displayLabel(item),
             section: t(SECTION_TITLES[item.section]),
-            outcome: t(outcome.label),
+            outcome: nonBreaking(t(outcome.label)),
             b: (chunks) => <span className="font-medium">{chunks}</span>,
             muted: (chunks) => (
-              <span className="text-muted-foreground">{breakBeforeSeparators(chunks)}</span>
+              <span className="text-muted-foreground">{keepSeparatorsWithNext(chunks)}</span>
             ),
           })}
         </p>
@@ -162,11 +166,13 @@ function AccountReport({
                     {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
                     <span className="font-medium">{profile.label}</span>{" "}
                     <span className="text-muted-foreground">
-                      {breakBeforeSeparators(
+                      {keepSeparatorsWithNext(
                         t("web.admin.backups.restore.run.profileOutcome", {
-                          outcome: profile.created
-                            ? t("web.admin.backups.restore.outcome.created")
-                            : t(outcome.label),
+                          outcome: nonBreaking(
+                            profile.created
+                              ? t("web.admin.backups.restore.outcome.created")
+                              : t(outcome.label),
+                          ),
                         }),
                       )}
                     </span>
