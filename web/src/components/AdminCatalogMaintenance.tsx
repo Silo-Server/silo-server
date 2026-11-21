@@ -50,7 +50,8 @@ import { toast } from "sonner";
 import type { ReactNode } from "react";
 import { numberText, useT, type Translate } from "@/i18n";
 
-// Example paths and URLs shown as placeholders; not translated.
+// Example paths and URLs shown as placeholders; not translated. A path or URL reads left to
+// right in every language, so the fields that take one set dir="ltr".
 const LOCAL_PATH_EXAMPLE = "/catalog-seeds/my-catalog.json.gz";
 const REMOTE_URL_EXAMPLE = "https://example.com/catalog-seeds/export.json.gz";
 const REWRITE_FROM_EXAMPLE = "/srv/media";
@@ -257,6 +258,7 @@ export default function AdminCatalogMaintenance() {
                   <div className="space-y-2">
                     <Label>{t("web.admin.catalogMaintenance.import.filePathLabel")}</Label>
                     <Input
+                      dir="ltr"
                       value={localPath}
                       onChange={(e) => setLocalPath(e.target.value)}
                       placeholder={LOCAL_PATH_EXAMPLE}
@@ -288,13 +290,7 @@ export default function AdminCatalogMaintenance() {
                               )}
                             />
                           </SelectTrigger>
-                          <SelectContent>
-                            {localImportSources.map((source) => (
-                              <SelectItem key={source.key} value={source.key}>
-                                {describeImportSource(source)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
+                          <SelectContent>{localImportSources.map(importSourceItem)}</SelectContent>
                         </Select>
                       </>
                     )}
@@ -396,11 +392,7 @@ export default function AdminCatalogMaintenance() {
                             {t("web.admin.catalogMaintenance.import.noBucketSeeds")}
                           </SelectItem>
                         ) : (
-                          bucketImportSources.map((source) => (
-                            <SelectItem key={source.key} value={source.key}>
-                              {describeImportSource(source)}
-                            </SelectItem>
-                          ))
+                          bucketImportSources.map(importSourceItem)
                         )}
                       </SelectContent>
                     </Select>
@@ -412,6 +404,7 @@ export default function AdminCatalogMaintenance() {
                   <div className="space-y-2">
                     <Label>{t("web.admin.catalogMaintenance.import.remoteUrlLabel")}</Label>
                     <Input
+                      dir="ltr"
                       value={remoteURL}
                       onChange={(e) => setRemoteURL(e.target.value)}
                       placeholder={REMOTE_URL_EXAMPLE}
@@ -452,11 +445,13 @@ export default function AdminCatalogMaintenance() {
                   {pathRewrites.map((rewrite, index) => (
                     <div key={rewrite.id} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
                       <Input
+                        dir="ltr"
                         value={rewrite.from}
                         onChange={(e) => updateRewrite(index, "from", e.target.value)}
                         placeholder={REWRITE_FROM_EXAMPLE}
                       />
                       <Input
+                        dir="ltr"
                         value={rewrite.to}
                         onChange={(e) => updateRewrite(index, "to", e.target.value)}
                         placeholder={REWRITE_TO_EXAMPLE}
@@ -772,9 +767,17 @@ function describeImportJob(t: Translate, job: AdminJob) {
   );
 }
 
-function describeImportSource(source: CatalogSeedImportSource) {
-  const label = source.last_modified ? formatDateTime(source.last_modified) : source.key;
-  return `${label} • ${source.key}`;
+// The key is a path, so a left-to-right isolate (LRI … PDI) keeps it in order in any language.
+// textValue lets type-to-select match the key rather than the invisible isolate before it.
+function importSourceItem(source: CatalogSeedImportSource) {
+  const key = `\u2066${source.key}\u2069`;
+  const label = source.last_modified ? formatDateTime(source.last_modified) : key;
+  const text = `${label} • ${key}`;
+  return (
+    <SelectItem key={source.key} value={source.key} textValue={source.key}>
+      {text}
+    </SelectItem>
+  );
 }
 
 function getJobProgressPercent(job: AdminJob) {
