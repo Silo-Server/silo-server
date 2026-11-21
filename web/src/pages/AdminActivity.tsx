@@ -980,12 +980,13 @@ function TitleLink({ session }: { session: AdminSession }) {
     <Link
       to={itemHref}
       title={title}
-      className={`${ROW_LINK_CLASS} ${ROW_LINK_TRUNCATE_CLASS} block w-fit max-w-full text-[13px] font-medium`}
+      dir="auto"
+      className={`bidi-text ${ROW_LINK_CLASS} ${ROW_LINK_TRUNCATE_CLASS} block w-fit max-w-full text-[13px] font-medium`}
     >
       {title}
     </Link>
   ) : (
-    <div title={title} className="truncate text-[13px] font-medium">
+    <div title={title} dir="auto" className="bidi-text truncate text-[13px] font-medium">
       {title}
     </div>
   );
