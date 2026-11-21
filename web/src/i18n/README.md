@@ -139,8 +139,15 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   `max-w-max` can't stretch, so it can take `dir="auto"` itself unless it also carries
   a logical margin, padding or border (`ms-auto`, `pe-2`, `border-s`): those follow
   the element's own direction, so keep them on the outer element and put the name in
-  a `block` span inside it. Don't use `.bidi-text` for this: its
-  `unicode-bidi: plaintext` drops the "…" in Firefox and cuts the start in WebKit.
+  a `block` span inside it. `.bidi-text` alone doesn't keep the start: its
+  `unicode-bidi: plaintext` leaves the box in the page's direction, so Firefox drops
+  the "…" and WebKit cuts the start.
+- Titles, names, taglines and overviews from metadata use `.bidi-text` (`app.css`).
+  Where such text is cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
+  stylesheet), it also takes `dir="auto"`. Without it, text that runs the other way
+  loses its "…" in Firefox and its start in WebKit, and a clamped paragraph gets its "…"
+  at the start of its last line. `.bidi-text` keeps a short one on the page's start
+  side, so it needs no `w-fit`. The mixed-direction limit above applies here too.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also

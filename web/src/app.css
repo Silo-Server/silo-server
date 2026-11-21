@@ -752,7 +752,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   /* Titles, names, taglines and overviews from metadata take their direction
      from their own text, so "56 Days" doesn't read "Days 56" in Arabic and an
      English sentence keeps its full stop and its ellipsis at the end. They
-     still line up with the page. Chromium knows only the prefixed keyword. */
+     still line up with the page. Chromium knows only the prefixed keyword.
+     Text cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
+     stylesheet) also takes dir="auto": plaintext leaves the element's own
+     direction at the page's, and Firefox and WebKit cut the text and draw the
+     "…" at that direction's end, so an English title in Arabic would lose its
+     start or its "…". */
   .bidi-text {
     unicode-bidi: plaintext;
     text-align: -webkit-match-parent;
