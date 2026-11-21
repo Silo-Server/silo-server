@@ -157,7 +157,11 @@ function StatusLine({
   const t = useT();
   return (
     <div className="flex min-h-9 items-center justify-between gap-4 py-2 text-sm">
-      <span className="text-muted-foreground max-w-[60%] shrink-0">{label}</span>
+      <span
+        className={mono ? "text-muted-foreground max-w-[60%] shrink-0" : "text-muted-foreground"}
+      >
+        {label}
+      </span>
       <span className={mono ? "max-w-[60%] truncate font-mono text-xs" : "text-end"}>
         {typeof value === "boolean"
           ? value
