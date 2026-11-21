@@ -273,12 +273,14 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
     ) : null,
     paths.length > 0 ? (
       // Paths read left to right in any language; align-with-page keeps each line,
-      // a short path's or a wrapped one's, on the page's start side.
+      // a short path's or a wrapped one's, on the page's start side. w-fit lets a
+      // folder name that can't wrap widen the list toward the page's end side
+      // instead of running past its start edge.
       <ul
         key="paths"
         dir="ltr"
         className={cn(
-          "text-muted-foreground align-with-page font-mono text-xs break-all",
+          "text-muted-foreground align-with-page w-fit font-mono text-xs break-all",
           KEEP_SPACES,
         )}
       >
