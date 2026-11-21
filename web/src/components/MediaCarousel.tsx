@@ -56,7 +56,10 @@ interface MediaCarouselProps {
    * to it again whenever it changes, as when the page moves to another item.
    */
   startSlide?: number;
-  /** Optional actions rendered next to the title (e.g. pin button) */
+  /**
+   * Optional actions rendered after the title (e.g. pin button). They follow
+   * the title's last word, or start the next line when they don't fit there.
+   */
   headerActions?: ReactNode;
   /**
    * When true (default) the carousel applies its own page-edge horizontal
@@ -243,7 +246,7 @@ export default function MediaCarousel({
   const viewportPadX = edgePadding ? " pe-4 sm:pe-6 lg:pe-10 xl:pe-12" : "";
   const containerPadX = edgePadding ? " ps-4 sm:ps-6 lg:ps-10 xl:ps-12" : "";
   const titleSize = compact ? "text-[0.6875rem]" : "text-xl";
-  const titleClass = `inline whitespace-normal font-semibold ${headerActions ? "me-2" : ""} ${
+  const titleClass = `inline font-semibold ${headerActions ? "me-2" : ""} ${
     compact ? "text-muted-foreground tracking-[0.18em] uppercase" : "text-foreground tracking-tight"
   }`;
   const hasExploreAll = Boolean(viewAllHref || onViewAll);
@@ -279,13 +282,11 @@ export default function MediaCarousel({
       }
     >
       <div className={`${headerGap} flex items-end justify-between gap-4${headerPadX}`}>
-        {/* Inline flow keeps the actions beside the heading's text when it
-            wraps; a flex row leaves them at the far edge of the heading's box.
-            Regular rows carry icons, badges, and counts, which nowrap here keeps
-            with the heading's last word. Compact rows carry sentence-long hints,
-            which move to their own line instead when they don't fit. The heading
-            inherits the size here, so min-h-lh is one heading line. */}
-        <div className={`min-w-0 ${titleSize} ${compact ? "" : "whitespace-nowrap"}`}>
+        {/* Inline flow puts the actions right after the heading's last word, or
+            at the start of the next line when they don't fit; in a flex row, a
+            wrapped heading keeps its full width and leaves them at the far edge.
+            The heading inherits the size here, so min-h-lh is one heading line. */}
+        <div className={`min-w-0 ${titleSize}`}>
           {titleHref ? (
             <Link to={titleHref} className="group/title">
               {/* The heading and "View" set their own colors, so without "View"
@@ -310,9 +311,7 @@ export default function MediaCarousel({
             <h2 className={titleClass}>{title}</h2>
           )}
           {headerActions ? (
-            <span className="inline-flex min-h-lh items-center align-top whitespace-normal">
-              {headerActions}
-            </span>
+            <span className="inline-flex min-h-lh items-center align-top">{headerActions}</span>
           ) : null}
         </div>
         {viewAllHref ? (
