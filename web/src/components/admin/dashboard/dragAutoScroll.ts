@@ -105,6 +105,22 @@ interface AutoScrollState {
   clientY: number;
   container: Element | null;
   onScrolled: ((dy: number) => void) | null;
+  follow: ((event: DragEvent) => void) | null;
+}
+
+/**
+ * Ends a running loop: cancels the next frame and stops following the pointer.
+ */
+function release(state: AutoScrollState) {
+  if (state.raf !== null) {
+    cancelAnimationFrame(state.raf);
+    state.raf = null;
+  }
+  if (state.follow) {
+    window.removeEventListener("dragover", state.follow, true);
+    state.follow = null;
+  }
+  state.container = null;
 }
 
 /**
@@ -124,15 +140,12 @@ export function useDragAutoScroll(anchorRef: RefObject<HTMLElement | null>) {
     clientY: 0,
     container: null,
     onScrolled: null,
+    follow: null,
   });
 
   const stop = useCallback(() => {
     const state = stateRef.current;
-    if (state.raf !== null) {
-      cancelAnimationFrame(state.raf);
-      state.raf = null;
-    }
-    state.container = null;
+    release(state);
     state.onScrolled = null;
   }, []);
 
@@ -148,20 +161,27 @@ export function useDragAutoScroll(anchorRef: RefObject<HTMLElement | null>) {
       const { top, bottom } = scrollViewportBounds(container);
       if (edgeScrollSpeed(clientY, top, bottom) === 0) return;
       state.container = container;
+      // Drag events over anything outside the grid (the pinned header, the
+      // gutters) never reach its handler, so while the loop runs it follows
+      // the pointer from the window rather than keep the grid's last position.
+      const follow = (event: DragEvent) => {
+        stateRef.current.clientY = event.clientY;
+      };
+      window.addEventListener("dragover", follow, true);
+      state.follow = follow;
 
       const step = () => {
         const current = stateRef.current;
         const target = current.container;
         if (!target) {
-          current.raf = null;
+          release(current);
           return;
         }
         const bounds = scrollViewportBounds(target);
         const speed = edgeScrollSpeed(current.clientY, bounds.top, bounds.bottom);
         if (speed === 0) {
           // Left the edge zones; the next qualifying dragover restarts the loop.
-          current.raf = null;
-          current.container = null;
+          release(current);
           return;
         }
         const before = target.scrollTop;
