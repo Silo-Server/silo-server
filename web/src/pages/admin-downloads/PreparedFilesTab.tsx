@@ -140,13 +140,15 @@ export default function PreparedFilesTab({
           >
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="max-w-[calc(100vw-2rem)]">
             <SelectItem value={ALL}>
               {t("web.admin.downloads.preparedFiles.allLocations")}
             </SelectItem>
             {(storage.data?.locations ?? []).map((l) => (
-              <SelectItem key={l.key} value={l.key}>
-                {l.name}
+              <SelectItem key={l.key} value={l.key} className="*:last:min-w-0">
+                <span dir="auto" className="truncate">
+                  {l.name}
+                </span>
               </SelectItem>
             ))}
           </SelectContent>

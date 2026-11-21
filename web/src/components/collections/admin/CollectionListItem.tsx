@@ -123,6 +123,7 @@ function ListItem({
       id={collection.id}
       selection={selection}
       title={collection.title}
+      titleDir="auto"
       collapsed={false}
       collapsedText={null}
       art={
@@ -234,7 +235,9 @@ function CompactItem({
         )}
       />
       <div className={cn("min-w-0 cursor-pointer", !visible && "opacity-60")} onClick={onOpen}>
-        <p className="truncate text-[14px] font-semibold tracking-[-0.01em]">{collection.title}</p>
+        <p dir="auto" className="bidi-text truncate text-[14px] font-semibold tracking-[-0.01em]">
+          {collection.title}
+        </p>
         <p className="text-muted-foreground truncate text-[12.5px]">
           {collectionKindLabel(collectionKindOf(collection.collection_type))}
           <MetaDot />

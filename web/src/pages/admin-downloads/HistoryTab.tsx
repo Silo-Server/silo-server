@@ -112,11 +112,13 @@ export default function HistoryTab() {
           <SelectTrigger size="sm" className="w-44" aria-label={t(`${H}.locationLabel`)}>
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="max-w-[calc(100vw-2rem)]">
             <SelectItem value={ALL}>{t(`${H}.allLocations`)}</SelectItem>
             {locations.map((l) => (
-              <SelectItem key={l.key} value={l.key}>
-                {l.name}
+              <SelectItem key={l.key} value={l.key} className="*:last:min-w-0">
+                <span dir="auto" className="truncate">
+                  {l.name}
+                </span>
               </SelectItem>
             ))}
             <SelectItem value="device">{t(`${H}.devices`)}</SelectItem>
