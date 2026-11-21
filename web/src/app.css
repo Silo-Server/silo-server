@@ -477,7 +477,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .sidebar-inner,
   .sidebar-fade,
   .sidebar-main-stage,
-  .impersonation-banner {
+  .impersonation-banner,
+  .follows-sidebar-collapse {
     transition: none;
   }
   .player-breathe {
@@ -2702,30 +2703,39 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      compensation must follow whichever query actually changes the margin it is
      compensating for. `html[data-text-scale]` does not move it; rem in a media
      query resolves against the browser's default font size, not the root
-     element's. */
+     element's.
+
+     `.follows-sidebar-collapse` gives the same hold to other chrome mounted
+     above the routes that is placed from `--app-sidebar-offset`, such as the
+     background watch bar. The hold is the distance the element itself moves
+     when the offset snaps: the sidebar's full 196px for chrome pinned to its
+     edge, as the banner is. Chrome centred between the sidebar and the far
+     edge moves half that, so it sets `--sidebar-follow-shift: 98px`. */
   /* While the banner holds its previous offset it is translated right, so its
      right edge sits briefly past the viewport. Layout already clips its own
      subtree this way; the banner is mounted above it, so the app root needs the
      same treatment or that overhang becomes a document-level horizontal scroll
      for the length of the transition. `clip` rather than `hidden` so this never
      becomes a scroll container and the banner's `position: sticky` keeps
-     resolving against the viewport. */
+     resolving against the viewport. A fixed element's overhang never scrolls,
+     so `.follows-sidebar-collapse` needs no such clip. */
   #root {
     overflow-x: clip;
   }
 
   @media (min-width: 64rem) {
-    .impersonation-banner {
+    .impersonation-banner,
+    .follows-sidebar-collapse {
       transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
     }
     :root[data-sidebar-collapsed="true"]:not([data-sidebar-visual-collapsed="true"])
-      .impersonation-banner {
-      transform: translateX(calc(196px * var(--dir-sign)));
+      :is(.impersonation-banner, .follows-sidebar-collapse) {
+      transform: translateX(calc(var(--sidebar-follow-shift, 196px) * var(--dir-sign)));
       transition: none;
     }
     :root:not([data-sidebar-collapsed="true"])[data-sidebar-visual-collapsed="true"]
-      .impersonation-banner {
-      transform: translateX(calc(-196px * var(--dir-sign)));
+      :is(.impersonation-banner, .follows-sidebar-collapse) {
+      transform: translateX(calc(var(--sidebar-follow-shift, 196px) * -1 * var(--dir-sign)));
       transition: none;
     }
   }
