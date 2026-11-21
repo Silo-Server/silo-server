@@ -275,6 +275,14 @@
       width: 44px;
       padding-inline: 0;
     }
+    /* The resume bar sits under the label (ActionBar). The label is sized in
+       rem but this pill in px, so at a larger text size the pill grows and
+       keeps room for the bar below the label instead of letting it cross. */
+    [data-compact-mobile] .detail-primary-actions > button:has([data-slot="progress-indicator"]) {
+      height: auto;
+      min-height: 44px;
+      padding-block: 0.5rem calc(0.625rem + 3px);
+    }
     [data-compact-mobile] .detail-stream-actions {
       gap: 8px;
     }

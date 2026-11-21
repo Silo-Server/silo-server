@@ -439,7 +439,7 @@ export default function ActionBar({
   // app.css), so they differ by shape whatever the palette.
   const progressBar =
     playProgress != null && playProgress > 0 && playProgress < 100 ? (
-      <span className="bg-primary-foreground/10 pointer-events-none absolute inset-x-4 bottom-1.5 h-[3px] overflow-hidden rounded-full forced-colors:bg-transparent forced-colors:outline forced-colors:outline-[GrayText]">
+      <span className="bg-primary-foreground/10 absolute inset-x-4 bottom-1.5 h-[3px] rounded-full forced-colors:bg-transparent forced-colors:outline forced-colors:outline-[GrayText]">
         <span
           data-slot="progress-indicator"
           className="bg-primary-foreground absolute inset-y-0 start-0 min-w-1 rounded-full"
