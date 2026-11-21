@@ -1,4 +1,4 @@
-import { memo, useId, useState } from "react";
+import { memo, useId, useLayoutEffect, useRef, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 
 import type { RestoreDataTypeId, RestoreItem, RestoreProfile } from "@/api/v2/adminBackupRestore";
@@ -76,6 +76,22 @@ function ProfileRow({
   const detail = same
     ? t("web.admin.backups.restore.users.matches")
     : [profileDetail(t, profile), pendingSummary(profile.data_types)].filter(Boolean).join(" · ");
+  // Only a name still wider than the row after wrapping is clipped: one with a run
+  // no line break can split, such as many joined emoji. Clipping a name that fits
+  // would trim letters whose ink reaches past their edge, such as a leading "j".
+  const nameRef = useRef<HTMLLabelElement>(null);
+  const [nameOverflows, setNameOverflows] = useState(false);
+  useLayoutEffect(() => {
+    const name = nameRef.current;
+    if (!name) return;
+    // A name that fits can measure a fraction of a pixel wider than its box.
+    const measure = () => setNameOverflows(name.scrollWidth > name.clientWidth + 1);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(name);
+    return () => observer.disconnect();
+  }, [profile.name]);
   return (
     <li className="flex items-start gap-3 py-1.5">
       <Checkbox
@@ -87,17 +103,17 @@ function ProfileRow({
       />
       <div className="min-w-0 flex-1">
         {/* When the name and detail don't fit on one line, the detail moves under the
-            name, and a name wider than the row wraps. Part of a name that can't wrap,
-            such as one long run of joined emoji, is clipped sideways at the row's edge:
-            block makes the words around it wrap at the row's width, and the 0.25em of
-            padding, offset by a negative margin, keeps letters whole that reach past their
-            edge, such as a leading "j" or the end of some Telugu names. */}
+            name, and a name wider than the row wraps; as a block, its words wrap at the
+            row's width. A name that still overflows is clipped sideways at the row's
+            edge, and its title shows it in full. */}
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <Label
+            ref={nameRef}
             htmlFor={controlId}
             title={profile.name}
             className={cn(
-              "-mx-[0.25em] block min-w-0 overflow-x-clip px-[0.25em] text-sm wrap-anywhere",
+              "block min-w-0 text-sm wrap-anywhere",
+              nameOverflows && "overflow-x-clip",
               !selectable && "text-muted-foreground",
             )}
           >
