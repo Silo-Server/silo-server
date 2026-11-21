@@ -43,6 +43,7 @@ export function CollectionPosterCard({
   const { loaded, onLoad, onError } = useImageLoaded(collection.poster_url);
 
   const isUserCollection = kind === "user_collections";
+  const showPin = pinnable && !isUserCollection && libraryId !== undefined;
   const href = buildCollectionCatalogHref(collection, isUserCollection, libraryId);
   // A card with its own meta line draws it below the link instead.
   let subline: ReactNode = null;
@@ -79,7 +80,11 @@ export function CollectionPosterCard({
           ) : (
             <div
               aria-hidden
-              className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm"
+              // With the pin, the title sits between it (top-2 plus a 36 px chip)
+              // and the count badge, so neither covers it on a narrow card.
+              className={`text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm ${
+                showPin ? "pt-11 pb-7" : ""
+              }`}
             >
               {isUserCollection && <User className="h-5 w-5 opacity-60" />}
               <span className="line-clamp-3 font-medium">{collection.title}</span>
@@ -100,9 +105,7 @@ export function CollectionPosterCard({
       {tag ? <div className="px-0.5 pt-1.5">{tag}</div> : null}
       {menu ? <div className="absolute end-2 top-2 z-10">{menu}</div> : null}
       {handle ? <div className="absolute start-2 top-2 z-10">{handle}</div> : null}
-      {pinnable && !isUserCollection && libraryId !== undefined ? (
-        <SidebarPinButton collection={collection} libraryId={libraryId} />
-      ) : null}
+      {showPin ? <SidebarPinButton collection={collection} libraryId={libraryId} /> : null}
     </div>
   );
 }
