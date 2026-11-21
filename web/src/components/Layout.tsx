@@ -10,9 +10,9 @@ import {
 } from "react";
 import { Link, useLocation } from "react-router";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Menu, Search } from "lucide-react";
+import { Menu, Search, X } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -44,6 +44,7 @@ import { markCriticalContentLoaded, useCriticalContentLoaded } from "@/lib/start
 import { useSettingsReturnPath } from "@/hooks/useSettingsReturnPath";
 import { useT } from "@/i18n";
 import { useSidebarSwap } from "@/hooks/useSidebarSwap";
+import { getInitial } from "@/lib/text";
 
 // Only admins see the activity indicator, so everyone else skips downloading it.
 const ServerActivity = lazy(() => import("@/components/ServerActivity"));
@@ -474,10 +475,7 @@ export default function Layout({ children }: LayoutProps) {
                   <AvatarImage src={profile.avatar_url} alt={profile.name} />
                 ) : null}
                 <AvatarFallback className="bg-primary text-primary-foreground text-xs font-bold">
-                  {profile?.name?.charAt(0).toUpperCase() ??
-                    user?.username?.charAt(0).toUpperCase() ??
-                    // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- placeholder initial, not a word
-                    "?"}
+                  {getInitial(profile?.name ?? user?.username ?? "?")}
                 </AvatarFallback>
               </Avatar>
             </Link>
@@ -486,10 +484,26 @@ export default function Layout({ children }: LayoutProps) {
 
         {/* Mobile sidebar drawer */}
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <SheetContent side="left" className="w-[280px] p-0 sm:max-w-[280px]">
+          {/* Matches AppSidebar's 260px surface. That surface is fixed at z-40, so
+              it would cover the sheet's built-in close button; this one sits
+              above it, centred in the sidebar's logo row. */}
+          <SheetContent
+            side="left"
+            showCloseButton={false}
+            className="w-[260px] border-e-0 p-0 sm:max-w-[260px]"
+          >
             <SheetHeader className="sr-only">
               <SheetTitle>{t("web.shell.layout.navigationTitle")}</SheetTitle>
             </SheetHeader>
+            <SheetClose asChild>
+              <button
+                type="button"
+                aria-label={t("web.ui.close")}
+                className="text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/60 absolute end-3 top-12 z-50 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-xl transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </SheetClose>
             <AppSidebar onNavigate={() => setMobileOpen(false)} />
           </SheetContent>
         </Sheet>

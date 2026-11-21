@@ -90,7 +90,7 @@ type AdminBackupRestoreAccount struct {
 	Match             string                               `json:"match" enum:"account_id,restored,username_email,new" doc:"account_id: the backup is this server's and the account id exists; restored: an earlier restore of this backup's server created it; username_email: the one account here whose username or email is this account's username or email; new: restoring creates it"`
 	Target            string                               `json:"target" doc:"What a restore selection names for this account: the local account id, or new"`
 	LocalID           *ID                                  `json:"local_id,omitempty" doc:"The matched account here"`
-	LocalUsername     string                               `json:"local_username,omitempty"`
+	LocalUsername     string                               `json:"local_username,omitempty" doc:"The matched account's username, or its email when it has none"`
 	Group             string                               `json:"group,omitempty" doc:"The account's access group in the backup; a new account joins the group of that name here"`
 	PolicyDifferences []AdminBackupRestorePolicyDifference `json:"policy_differences" doc:"For a new account, what this server's policy would grant beyond the backup's; any difference makes it unselectable"`
 	LibrariesLeftOut  int                                  `json:"libraries_left_out" doc:"Library entries of the account's own library list with no library here; they are dropped, never widened"`

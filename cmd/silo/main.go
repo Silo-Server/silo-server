@@ -131,6 +131,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/server"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/storagetransition"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
@@ -522,7 +523,7 @@ func keptSubtitleStore(stores blobstore.Stores, assetsS3 *s3client.Client) blobs
 func configureOperationalLogging(
 	ctx context.Context,
 	pool *pgxpool.Pool,
-	settingsRepo catalog.SettingsStore,
+	settingsRepo serversettings.SettingsStore,
 	logStreamHub *logstream.Hub,
 	filteredHandler slog.Handler,
 	nodeID string,
@@ -645,7 +646,7 @@ func librarySettingsCleaner(pool *pgxpool.Pool, stores userstore.UserStoreProvid
 // provider registry, once. Every API node may run it; the settings lock makes
 // the first one do the work and the rest find nothing left to convert. A
 // failure leaves those jobs unconfigured rather than stopping the server.
-func convertLegacyAIProviders(ctx context.Context, settings *catalog.EncryptedSettingsRepo) {
+func convertLegacyAIProviders(ctx context.Context, settings *serversettings.EncryptedSettingsRepo) {
 	converted := false
 	var unconverted []string
 	err := settings.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
@@ -671,7 +672,7 @@ func convertLegacyAIProviders(ctx context.Context, settings *catalog.EncryptedSe
 // mismatch gets the fix and this key's check value, which the GCM error alone
 // does not point to.
 func settingsLoadError(err error, secretKey []byte) string {
-	if !errors.Is(err, catalog.ErrSecretKeyMismatch) {
+	if !errors.Is(err, serversettings.ErrSecretKeyMismatch) {
 		return fmt.Sprintf("loading settings: %v", err)
 	}
 	check, cerr := secret.KeyCheckValue(secretKey)
@@ -685,7 +686,7 @@ func settingsLoadError(err error, secretKey []byte) string {
 		"To compare keys, run: printf %%s \"$SECRET_KEY\" | silo secret check (or: silo secret check --file \"$SECRET_KEY_FILE\")", err, check)
 }
 
-func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *catalog.EncryptedSettingsRepo) {
+func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *serversettings.EncryptedSettingsRepo) {
 	settingsN, err := settings.BackfillSensitiveSettings(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "secret backfill: sensitive settings", "component", "app", "error", err)
@@ -944,7 +945,7 @@ func main() {
 	var deploymentDocument *plugins.ProvisionDocument
 	var declaredAIProviders deploymentAIProviders
 	if isPrimaryNode && !*migrateOnly && !*migrateStatus && *migrateDownTo < 0 {
-		envSettings, err = config.ReadEnvSettings(os.Getenv, catalog.SensitiveSettingKeys)
+		envSettings, err = config.ReadEnvSettings(os.Getenv, serversettings.SensitiveSettingKeys)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
@@ -1040,7 +1041,7 @@ func main() {
 	// every consumer (config.LoadFromDB, admin, ABS, watchers) transparently sees
 	// plaintext while sensitive keys rest as ciphertext. The settings backfill
 	// (run after migrations, before this GetAll) is wired further below.
-	settingsRepo := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
+	settingsRepo := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), dataCipher)
 	if isPrimaryNode {
 		// Read once before the backfills: under a wrong SECRET_KEY they would
 		// encrypt plaintext credentials with that key, leaving rows the right
@@ -1126,7 +1127,7 @@ func main() {
 	}
 	// Re-wrap with the encrypting decorator so the recreated pool's settings repo
 	// still encrypts/decrypts — no raw settings repo may escape into later wiring.
-	settingsRepo = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
+	settingsRepo = serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), dataCipher)
 	// One reader for access.unrated_content, shared by every scope resolver and
 	// the recommendations engine: forgetting the builder call at a construction
 	// site fails silently (unrated titles hidden, no error).
@@ -1850,7 +1851,7 @@ func main() {
 		// Read the identity rows under the settings mutation lock, so a commit
 		// already in progress finishes before the check. The rows are plain,
 		// so an unreadable encrypted setting cannot block a rejoin.
-		identityRows := catalog.NewServerSettingsRepo(pool)
+		identityRows := serversettings.NewServerSettingsRepo(pool)
 		storageAdmission.SetRejoinCheck(func(ctx context.Context) error {
 			err := identityRows.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
 				return nil, blobstore.CheckRecordedLocation(current, assetsIdentity, privateIdentity)
@@ -2746,6 +2747,20 @@ func main() {
 		defer policySystem.Stop()
 	}
 
+	// Build a viewer scope resolver using the current userStoreProvider (raw
+	// for notifications before wrapping below, wrapped for downstream callers).
+	newViewerResolver := func(users access.UserRepository, tokens access.ProfileTokenValidator) scopeResolver {
+		if policySystem != nil {
+			return policy.NewViewerResolver(users, userStoreProvider, tokens, policySystem.PDP(), accessGroupStore).
+				WithUnratedContentPolicy(unratedContent).
+				WithAdminDefaults(adminDefaults)
+		}
+		// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+		return access.NewResolver(users, userStoreProvider, tokens, accessGroupStore).
+			WithUnratedContentPolicy(unratedContent).
+			WithAdminDefaults(adminDefaults)
+	}
+
 	// White-label branding: one service shared by the API (public read + admin
 	// upload), the frontend handler (index.html title, favicon, manifest), the
 	// artwork reconcile task, and outgoing email. It is built before the
@@ -2769,13 +2784,7 @@ func main() {
 	if deps.DB != nil && userStoreProvider != nil {
 		userRepo := auth.NewUserRepository(deps.DB)
 		profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
-		var notificationScopes notifications.ScopeResolver
-		if policySystem != nil {
-			notificationScopes = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		} else {
-			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		}
+		notificationScopes := newViewerResolver(userRepo, profileTokens)
 		notificationSystem = notifications.NewSystem(
 			deps.DB,
 			settingsRepo,
@@ -2892,15 +2901,7 @@ func main() {
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, catalog.NewProviderIDRepository(deps.DB))
 		// A sync's episodes follow what the profile may open, as any viewer
 		// read does, so it resolves scope the same way.
-		var watchProviderScopes interface {
-			Resolve(context.Context, access.ResolveInput) (access.Scope, error)
-		}
-		if policySystem != nil {
-			watchProviderScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
-		} else {
-			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path.
-			watchProviderScopes = access.NewResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
-		}
+		watchProviderScopes := newViewerResolver(auth.NewUserRepository(deps.DB), nil)
 		watchProviderLibrary := catalog.NewLibraryItemRepository(deps.DB)
 		watchProviderService.
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
@@ -3119,12 +3120,7 @@ func main() {
 			// Cached rows are built under the scope the API resolves for the
 			// profile's own requests, so reads do not filter them down.
 			recUserRepo := auth.NewUserRepository(deps.DB)
-			if policySystem != nil {
-				recEngine.WithScopeResolver(policy.NewViewerResolver(recUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults))
-			} else {
-				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				recEngine.WithScopeResolver(access.NewResolver(recUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults))
-			}
+			recEngine.WithScopeResolver(newViewerResolver(recUserRepo, nil))
 		}
 		deps.Recommender = recEngine
 		deps.CatalogSearchVectorizer = recEngine
@@ -3365,13 +3361,7 @@ func main() {
 			// Imports fill their item limit with titles their owner profile
 			// can access. Scheduled syncs start with the task manager below,
 			// so the owner resolver is wired here, not in the router.
-			var ownerScopes scopeResolver
-			if policySystem != nil {
-				ownerScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			} else {
-				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				ownerScopes = access.NewResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			}
+			ownerScopes := newViewerResolver(auth.NewUserRepository(deps.DB), nil)
 			userSync := usercollections.NewService(deps.UserStoreProvider, collItemRepo, libraryItemRepo, usercollections.NewOwnerAccess(ownerScopes), nil, slog.Default())
 			userSync.TMDBCollections = collectionService.TMDBCollections
 			// Syncs refresh collages and start with the task manager below,
@@ -3787,13 +3777,7 @@ func main() {
 		if userStoreProvider != nil {
 			userRepo := auth.NewUserRepository(deps.DB)
 			profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
-			var reconcileResolver scopeResolver
-			if policySystem != nil {
-				reconcileResolver = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			} else {
-				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				reconcileResolver = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			}
+			reconcileResolver := newViewerResolver(userRepo, profileTokens)
 			requestReconcileSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: reconcileResolver})
 		}
 		if notificationSystem != nil {
@@ -3950,12 +3934,7 @@ func main() {
 		if deps.ImageResolver != nil {
 			absDetailSvc.SetImageResolver(deps.ImageResolver)
 		}
-		var absScopeResolver scopeResolver
-		if policySystem != nil {
-			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		} else {
-			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		}
+		absScopeResolver := newViewerResolver(absUserRepo, nil)
 		absHDeps := audiobooks.ABSHandlerDeps{
 			Pool:     deps.DB,
 			Items:    absItemRepo,
@@ -4394,24 +4373,8 @@ func main() {
 			// user-disabled libraries, and rating/quality ceilings apply to
 			// the compat API exactly as they do to the native API.
 			if userStoreProvider != nil {
-				var compatScopeResolver jellycompat.ScopeResolver
-				if policySystem != nil {
-					compatScopeResolver = policy.NewViewerResolver(
-						userRepo,
-						userStoreProvider,
-						nil, // profile tokens unused: compat login already verifies PINs
-						policySystem.PDP(),
-						accessGroupStore,
-					).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-				} else {
-					// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-					compatScopeResolver = access.NewResolver(
-						userRepo,
-						userStoreProvider,
-						nil, // profile tokens unused: compat login already verifies PINs
-						accessGroupStore,
-					).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-				}
+				// profile tokens unused: compat login already verifies PINs
+				compatScopeResolver := newViewerResolver(userRepo, nil)
 				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(compatScopeResolver)
 				compatDeps.PlaybackScopeResolver = compatScopeResolver
 			}
@@ -4491,7 +4454,7 @@ func main() {
 			lanDiscoveryDone = make(chan struct{})
 			go func() {
 				defer close(lanDiscoveryDone)
-				advertiseOnLAN(lanCtx, apiListener.Addr(), serveridentity.New(catalog.NewServerSettingsRepo(pool)), brandingSvc)
+				advertiseOnLAN(lanCtx, apiListener.Addr(), serveridentity.New(serversettings.NewServerSettingsRepo(pool)), brandingSvc)
 			}()
 		}
 		if pluginProvisionWriter != nil {
@@ -5597,11 +5560,11 @@ func (r scopeEntitlementResolver) resolveScope(ctx context.Context, userID int, 
 	})
 }
 
-// audiobooksSettingsAdapter bridges catalog.ServerSettingsRepo (which
+// audiobooksSettingsAdapter bridges serversettings.ServerSettingsRepo (which
 // exposes Get) to the audiobooks.SettingsReader interface (which
 // requires GetString). The two signatures are identical modulo name.
 type audiobooksSettingsAdapter struct {
-	repo catalog.SettingsStore
+	repo serversettings.SettingsStore
 }
 
 func (a *audiobooksSettingsAdapter) GetString(ctx context.Context, key string) (string, error) {
