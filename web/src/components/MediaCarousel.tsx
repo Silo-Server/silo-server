@@ -273,8 +273,12 @@ export default function MediaCarousel({
   );
 
   return (
+    // `.media-carousel`'s content-visibility clips paint and hit testing at
+    // the section's edge, and the header sits on its top edge. The padding,
+    // cancelled by the negative margin, keeps the top of header focus rings
+    // and hit areas inside the clip.
     <section
-      className="section-row media-carousel group/carousel relative isolate"
+      className="section-row media-carousel group/carousel relative isolate -mt-2 pt-2"
       style={
         {
           "--carousel-intrinsic-h": carouselIntrinsicHeight(cardPresentation.poster_size),

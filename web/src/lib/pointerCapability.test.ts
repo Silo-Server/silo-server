@@ -52,8 +52,7 @@ afterEach(() => {
 describe("initPointerCapability", () => {
   it("treats a pen that hovers as a fine pointer, contact included", () => {
     start(false);
-    // Hovering with the barrel button held is still hovering.
-    document.dispatchEvent(pointer("pen", "pointermove", 2));
+    document.dispatchEvent(pointer("pen"));
     expect(document.documentElement.getAttribute(ATTR)).toBe("true");
     document.dispatchEvent(pointer("touch", "pointerdown"));
     document.dispatchEvent(pointer("pen", "pointermove", 1));
@@ -63,10 +62,10 @@ describe("initPointerCapability", () => {
   it("treats a pen that only makes contact like touch", () => {
     // A pen that can't hover could never uncover hover-only controls.
     start(true);
-    document.dispatchEvent(pointer("mouse"));
     document.dispatchEvent(pointer("pen", "pointerdown", 1));
     expect(document.documentElement.getAttribute(ATTR)).toBe("false");
-    document.dispatchEvent(pointer("pen", "pointermove", 1));
+    // Contact with the barrel button held reports only that button on Windows.
+    document.dispatchEvent(pointer("pen", "pointermove", 2));
     expect(document.documentElement.getAttribute(ATTR)).toBe("false");
   });
 

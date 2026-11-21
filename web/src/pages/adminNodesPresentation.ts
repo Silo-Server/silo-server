@@ -106,8 +106,8 @@ export interface NodeGPULiveDevice {
 }
 
 const BACKEND_BADGE_CLASS: Record<NodeGPUBackendState, string> = {
-  verified: "bg-success/10 text-success border-success/15",
-  failed: "bg-warning/10 text-warning border-warning/15",
+  verified: "bg-success/10 text-success-label border-success/15",
+  failed: "bg-warning/10 text-warning-label border-warning/15",
   unverified: "bg-surface text-muted-foreground border-border",
   none: "bg-surface text-muted-foreground border-border",
 };

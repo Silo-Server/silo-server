@@ -200,7 +200,7 @@ export const DESIGN_PRINCIPLES = [
 // │  --accent            │ Active/highlighted backgrounds      │
 // │  --destructive       │ Danger text, icons, borders, dots   │
 // │  --destructive-fill  │ Danger fill under white text        │
-// │  --<status>-label    │ Status text on its own 10% tint     │
+// │  --<status>-label    │ Status text on its tint or a surface│
 // │  --ring              │ Focus ring color                    │
 // ├─────────────────────────────────────────────────────────────┤
 // │  BORDERS                                                   │

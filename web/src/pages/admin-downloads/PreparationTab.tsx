@@ -1068,7 +1068,7 @@ function PreparationDetails({
                     : requesterName(r)}
                 </span>
                 {/* Moves under the name when both don't fit, rather than squeezing it. */}
-                <span className="ms-auto text-[10px] text-[var(--terminal-muted)]">
+                <span className="ms-auto min-w-0 text-end text-[10px] wrap-anywhere text-[var(--terminal-muted)]">
                   {downloadEntryStatus(r.status).label}
                 </span>
                 <span className="basis-full truncate text-[10px] text-[var(--terminal-muted)]">

@@ -20,18 +20,16 @@
 // tap-emulated `:hover` on a hybrid cannot uncover the controls and strand
 // them visible, which is what the media-query gate was protecting against.
 //
-// A pen counts as fine only once a pen has hovered: a `pointermove` without
-// the tip or eraser on the screen. Pens that can't hover (a first-generation
-// Apple Pencil, a contact-only stylus on a touch laptop) only ever report
-// contact, and treating that like a mouse would hide hover-only controls
-// behind a hover that pen can never produce. Their contact clears the flag,
-// as a touch does.
+// A pen counts as fine only once a pen has hovered: a `pointermove` with no
+// buttons pressed. Nothing else is safe to read as hover: on Windows, a pen on
+// the screen with its barrel button held reports `buttons: 2`. Pens that can't
+// hover (a first-generation Apple Pencil, a contact-only stylus on a touch
+// laptop) only ever report contact, and treating that like a mouse would hide
+// hover-only controls behind a hover that pen can never produce. Their contact
+// clears the flag, as a touch does.
 
 const FINE_POINTER_ATTR = "data-fine-pointer";
 const FINE_POINTER_QUERY = "(any-hover: hover) and (any-pointer: fine)";
-// Pen `buttons` bits meaning it touches the screen: the tip (1) or the eraser
-// (32). A hovering pen can still hold its barrel button (2).
-const PEN_CONTACT_BUTTONS = 1 | 32;
 
 // Components decide what to mount from this too, not just CSS, so the value has
 // to be subscribable rather than only readable off the DOM.
@@ -109,9 +107,7 @@ export function initPointerCapability(deps?: Partial<PointerCapabilityDeps>): ()
       set(true);
     } else if (event.pointerType === "pen") {
       observedPointer = true;
-      if (event.type === "pointermove" && (event.buttons & PEN_CONTACT_BUTTONS) === 0) {
-        penHovers = true;
-      }
+      if (event.type === "pointermove" && event.buttons === 0) penHovers = true;
       set(penHovers);
     } else if (event.pointerType === "touch") {
       observedPointer = true;

@@ -374,11 +374,11 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Disconnect a provider and discard its key. A provider a job uses cannot be deleted. */
+    /** Disconnect a provider and discard its key. A provider a job uses cannot be deleted, and one the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment. */
     delete: operations["deleteAdminAIProvider"];
     options?: never;
     head?: never;
-    /** Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request. */
+    /** Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request. A provider the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment. */
     patch: operations["updateAdminAIProvider"];
     trace?: never;
   };
@@ -14302,6 +14302,8 @@ export interface components {
       capabilities: ("chat" | "embeddings" | "speech")[];
       has_api_key: boolean;
       id: string;
+      /** @description The variable in the server's environment that declares this provider, such as SILO_CONFIG_FILE, when the deployment declares it. Updating or deleting such a provider is 422 validation_failed with code managed_by_environment. */
+      managed_by_env_var?: string;
       name: string;
       /** @enum {string} */
       type: "openai" | "gemini" | "openrouter" | "groq" | "ollama" | "whisper" | "custom";
@@ -22510,6 +22512,11 @@ export interface components {
        */
       content_id: string;
       /**
+       * Format: int64
+       * @description Episode number for an episode that still exists; absent otherwise
+       */
+      episode_number?: number;
+      /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
        */
@@ -22522,7 +22529,15 @@ export interface components {
       next_refresh_at: string;
       /** Format: int64 */
       reason_mask: number;
+      /**
+       * Format: int64
+       * @description Season number for a season or episode that still exists; absent otherwise
+       */
+      season_number?: number;
+      /** @description Series title for a season or episode that still exists; absent otherwise */
+      series_title?: string;
       target_type: string;
+      /** @description The target's own title as stored: the item's, the season's or the episode's, without its series. Empty when the target has no title or no longer exists */
       title: string;
       type: string;
     };
