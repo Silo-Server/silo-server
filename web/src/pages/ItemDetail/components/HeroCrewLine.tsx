@@ -32,12 +32,12 @@ function CrewNames({ people }: { people: CrewPerson[] }) {
           {p.personId ? (
             <ViewTransitionLink
               to={buildPersonCatalogHref(p.personId)}
-              className="text-foreground/70 hover:text-foreground/90 font-medium transition-colors"
+              className="text-foreground font-medium underline-offset-2 hover:underline"
             >
               {p.name}
             </ViewTransitionLink>
           ) : (
-            <span className="text-foreground/70 font-medium">{p.name}</span>
+            <span className="text-foreground font-medium">{p.name}</span>
           )}
         </span>
       ))}
@@ -82,8 +82,7 @@ export default function HeroCrewLine({
     <div className="text-muted-foreground text-[0.8125rem]">
       {hasAuthors && (
         <>
-          <span className="text-muted-foreground/60">{t("web.detail.overview.byAuthors")} </span>
-          <CrewNames people={authors} />
+          {t("web.detail.overview.byAuthors")} <CrewNames people={authors} />
         </>
       )}
       {hasAuthors && (hasDirectors || hasWriters || hasGenres) && (
@@ -91,8 +90,7 @@ export default function HeroCrewLine({
       )}
       {hasDirectors && (
         <>
-          <span className="text-muted-foreground/60">{leadLabel} </span>
-          <CrewNames people={directors} />
+          {leadLabel} <CrewNames people={directors} />
         </>
       )}
       {hasDirectors && hasWriters && (
@@ -100,8 +98,7 @@ export default function HeroCrewLine({
       )}
       {hasWriters && (
         <>
-          <span className="text-muted-foreground/60">{t("web.detail.overview.writtenBy")} </span>
-          <CrewNames people={writers} />
+          {t("web.detail.overview.writtenBy")} <CrewNames people={writers} />
         </>
       )}
       {(hasDirectors || hasWriters) && hasGenres && (

@@ -36,7 +36,7 @@ export default function DetailBreadcrumb({ segments }: DetailBreadcrumbProps) {
                 </ViewTransitionLink>
               ) : (
                 <span
-                  className="text-muted-foreground/60 text-[0.8125rem]"
+                  className={`${isLast ? "text-foreground" : "text-muted-foreground"} text-[0.8125rem]`}
                   {...(isLast ? { "aria-current": "page" as const } : {})}
                 >
                   {segment.label}
