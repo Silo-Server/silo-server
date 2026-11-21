@@ -183,6 +183,7 @@ export const AccountRow = memo(function AccountRow({
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
+        {/* Named from the plain label: Chromium reads a <wbr> in it as a space. */}
         <Checkbox
           id={controlId}
           aria-label={item.label}
