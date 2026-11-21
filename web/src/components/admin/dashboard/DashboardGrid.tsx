@@ -4,7 +4,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { GripVertical, Plus, X } from "lucide-react";
 import {
   Sheet,
@@ -154,10 +154,38 @@ export function DashboardGrid({
     scrollOffsetY: number;
   } | null>(null);
 
-  // Scrolls the page (or an inner scroll container) while a drag sits near the
-  // top or bottom edge, so a widget can be dragged to an off-screen part of
-  // the grid. Fed from dragover/pointermove; stopped on every drag ending.
-  const autoScroll = useDragAutoScroll(gridRef);
+  // A layout change mid-gesture (the server copy arriving while the page
+  // loads), or leaving Customize, can unmount the gesture's source: the widget
+  // being moved or resized leaves the grid, the one being added leaves the
+  // sheet, or the resize handle goes. Its dragend or pointerup then never
+  // reaches React, so the gesture ends here instead. A browser drag itself
+  // goes on, but the grid no longer accepts it.
+  const gestureActive = draggedId !== null || addDragId !== null || resizePreview !== null;
+  if (
+    gestureActive &&
+    (!isCustomizing ||
+      (draggedId !== null && !entries.some((entry) => entry.id === draggedId)) ||
+      (addDragId !== null && !hiddenWidgets.some((widget) => widget.id === addDragId)) ||
+      (resizePreview !== null && !entries.some((entry) => entry.id === resizePreview.id)))
+  ) {
+    setDraggedId(null);
+    setAddDragId(null);
+    setDropIndicator(null);
+    setResizePreview(null);
+  }
+  const isResizing = resizePreview !== null;
+
+  // A resize session lasts as long as its preview, so one ended above can't
+  // pick up a later pointermove over another handle. A layout effect, so it
+  // can't run after a new session has started.
+  useLayoutEffect(() => {
+    if (!isResizing) resizeSessionRef.current = null;
+  }, [isResizing]);
+
+  // Scrolls the page (or an inner scroll container) while a drag or resize
+  // sits near the top or bottom edge, so a widget can be dragged to an
+  // off-screen part of the grid. It runs for as long as one of them is active.
+  const { update: updateAutoScroll } = useDragAutoScroll(gridRef, gestureActive);
 
   const setWidgetCollapsed = useCallback((id: WidgetId, collapsed: boolean) => {
     setCollapsedIds((prev) => {
@@ -187,10 +215,9 @@ export function DashboardGrid({
   );
 
   const handleDragEnd = useCallback(() => {
-    autoScroll.stop();
     setDraggedId(null);
     setDropIndicator(null);
-  }, [autoScroll]);
+  }, []);
 
   /** True when the drag carries the Add-widget sheet's payload type. */
   const isAddDrag = useCallback(
@@ -244,13 +271,11 @@ export function DashboardGrid({
         setDropIndicator((prev) =>
           prev?.id === indicator?.id && prev?.edge === indicator?.edge ? prev : indicator,
         );
-        autoScroll.update(event.clientY);
         return;
       }
       if (!draggedId) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
-      autoScroll.update(event.clientY);
       // Over the trailing area a reorder appends, exactly like a sheet add;
       // the indicator is the "after" edge of the last widget unless the
       // dragged widget already is the last one.
@@ -266,12 +291,11 @@ export function DashboardGrid({
         prev?.id === target.id && prev.edge === target.edge ? prev : target,
       );
     },
-    [autoScroll, draggedId, entries, isAddDrag, resolveDropEdge],
+    [draggedId, entries, isAddDrag, resolveDropEdge],
   );
 
   const handleDrop = useCallback(
     (event: DragEvent<HTMLElement>) => {
-      autoScroll.stop();
       if (isAddDrag(event)) {
         event.preventDefault();
         // The payload is authoritative; the state id is the fallback for a
@@ -314,7 +338,6 @@ export function DashboardGrid({
     [
       addDragId,
       addWidget,
-      autoScroll,
       draggedId,
       entries,
       findWidgetIdFromEvent,
@@ -425,16 +448,15 @@ export function DashboardGrid({
       applyResizePreview();
       // A widget can be taller than the viewport, so growing it needs the same
       // edge auto-scroll a reorder drag gets.
-      autoScroll.update(event.clientY, handleResizeAutoScrolled);
+      updateAutoScroll(event.clientY, handleResizeAutoScrolled);
     },
-    [applyResizePreview, autoScroll, handleResizeAutoScrolled],
+    [applyResizePreview, handleResizeAutoScrolled, updateAutoScroll],
   );
 
   const handleResizePointerEnd = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
       const session = resizeSessionRef.current;
       if (!session) return;
-      autoScroll.stop();
       resizeSessionRef.current = null;
       setResizePreview(null);
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -450,7 +472,7 @@ export function DashboardGrid({
         }),
       );
     },
-    [autoScroll, resizeWidget, t],
+    [resizeWidget, t],
   );
 
   const handleMoveKeyDown = useCallback(
@@ -513,8 +535,6 @@ export function DashboardGrid({
     },
     [resizeWidget, t],
   );
-
-  const isResizing = resizePreview !== null;
 
   return (
     <>
@@ -700,7 +720,6 @@ export function DashboardGrid({
                   onDragEnd={() => {
                     // Fires for cancelled and completed drags alike; the drop
                     // handler has already applied any placement by now.
-                    autoScroll.stop();
                     setAddDragId(null);
                     setDropIndicator(null);
                   }}

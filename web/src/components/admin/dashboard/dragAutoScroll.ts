@@ -102,101 +102,104 @@ function scrollViewportBounds(container: Element): { top: number; bottom: number
 
 interface AutoScrollState {
   raf: number | null;
-  clientY: number;
-  container: Element | null;
+  /** The pointer's latest position, or null while it is outside the window. */
+  clientY: number | null;
   onScrolled: ((dy: number) => void) | null;
-  follow: ((event: DragEvent) => void) | null;
 }
 
-/**
- * Ends a running loop: cancels the next frame and stops following the pointer.
- */
-function release(state: AutoScrollState) {
+/** Cancels the next frame; the next position inside an edge zone restarts the loop. */
+function pause(state: AutoScrollState) {
   if (state.raf !== null) {
     cancelAnimationFrame(state.raf);
     state.raf = null;
   }
-  if (state.follow) {
-    window.removeEventListener("dragover", state.follow, true);
-    state.follow = null;
-  }
-  state.container = null;
 }
 
 /**
- * The stateful half: `update(clientY)` on every dragover (or pointermove), and
- * `stop()` on every way a drag can end. The first update inside an edge zone
- * starts the RAF loop; the loop stops itself the moment the pointer leaves the
- * zones, and `stop` (also run on unmount) kills it from the outside.
+ * The stateful half. While `active` (a widget is being dragged or resized),
+ * the RAF loop runs whenever the pointer sits in an edge zone and pauses when
+ * it leaves them; when `active` turns false, by whatever path the gesture
+ * ended, the loop stops.
+ *
+ * A drag reports the pointer from the window: drag events over anything
+ * outside the grid (the pinned phone header, the gutters, the sidebar, the
+ * Add widget sheet the drag started from) never reach the grid's handlers. A
+ * pointer resize, which fires no drag events, calls `update(clientY)` on every
+ * pointermove instead.
  *
  * Scrolling happens in the loop, not in the event handler — dragover fires
  * continuously and only the latest `clientY` matters. `onScrolled` reports
  * each frame's actual scroll delta so a pointer-anchored session (resize) can
  * compensate for the content moving under a stationary pointer.
  */
-export function useDragAutoScroll(anchorRef: RefObject<HTMLElement | null>) {
+export function useDragAutoScroll(anchorRef: RefObject<HTMLElement | null>, active: boolean) {
   const stateRef = useRef<AutoScrollState>({
     raf: null,
-    clientY: 0,
-    container: null,
+    clientY: null,
     onScrolled: null,
-    follow: null,
   });
 
-  const stop = useCallback(() => {
+  /** Starts the loop when it is idle and the pointer is inside an edge zone. */
+  const start = useCallback(() => {
     const state = stateRef.current;
-    release(state);
-    state.onScrolled = null;
-  }, []);
+    if (state.raf !== null || state.clientY === null) return;
+    const container = findScrollContainer(anchorRef.current);
+    if (!container) return;
+    const { top, bottom } = scrollViewportBounds(container);
+    if (edgeScrollSpeed(state.clientY, top, bottom) === 0) return;
+
+    const step = () => {
+      const bounds = scrollViewportBounds(container);
+      const speed =
+        state.clientY === null ? 0 : edgeScrollSpeed(state.clientY, bounds.top, bounds.bottom);
+      if (speed === 0) {
+        pause(state);
+        return;
+      }
+      const before = container.scrollTop;
+      container.scrollTop = before + speed;
+      const dy = container.scrollTop - before;
+      if (dy !== 0) state.onScrolled?.(dy);
+      state.raf = requestAnimationFrame(step);
+    };
+    state.raf = requestAnimationFrame(step);
+  }, [anchorRef]);
 
   const update = useCallback(
     (clientY: number, onScrolled?: (dy: number) => void) => {
       const state = stateRef.current;
       state.clientY = clientY;
       state.onScrolled = onScrolled ?? null;
-      if (state.raf !== null) return;
-
-      const container = findScrollContainer(anchorRef.current);
-      if (!container) return;
-      const { top, bottom } = scrollViewportBounds(container);
-      if (edgeScrollSpeed(clientY, top, bottom) === 0) return;
-      state.container = container;
-      // Drag events over anything outside the grid (the pinned header, the
-      // gutters) never reach its handler, so while the loop runs it follows
-      // the pointer from the window rather than keep the grid's last position.
-      const follow = (event: DragEvent) => {
-        stateRef.current.clientY = event.clientY;
-      };
-      window.addEventListener("dragover", follow, true);
-      state.follow = follow;
-
-      const step = () => {
-        const current = stateRef.current;
-        const target = current.container;
-        if (!target) {
-          release(current);
-          return;
-        }
-        const bounds = scrollViewportBounds(target);
-        const speed = edgeScrollSpeed(current.clientY, bounds.top, bounds.bottom);
-        if (speed === 0) {
-          // Left the edge zones; the next qualifying dragover restarts the loop.
-          release(current);
-          return;
-        }
-        const before = target.scrollTop;
-        target.scrollTop = before + speed;
-        const dy = target.scrollTop - before;
-        if (dy !== 0) current.onScrolled?.(dy);
-        current.raf = requestAnimationFrame(step);
-      };
-      state.raf = requestAnimationFrame(step);
+      start();
     },
-    [anchorRef],
+    [start],
   );
 
-  // A drag interrupted by unmount must not leave the loop running.
-  useEffect(() => stop, [stop]);
+  useEffect(() => {
+    if (!active) return;
+    const state = stateRef.current;
+    const follow = (event: DragEvent) => update(event.clientY);
+    // A drag that leaves the window fires a last dragleave and then no more
+    // dragover, which would leave the loop scrolling on the last position.
+    // Moving between elements fires dragleave too, so only one that enters no
+    // element at a point outside the window counts. Chromium on Windows and
+    // Linux reports that point as (0, 0).
+    const leave = (event: DragEvent) => {
+      const { clientX: x, clientY: y } = event;
+      const outside =
+        x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight || (x === 0 && y === 0);
+      if (event.relatedTarget === null && outside) state.clientY = null;
+    };
+    window.addEventListener("dragover", follow, true);
+    window.addEventListener("dragleave", leave, true);
+    return () => {
+      window.removeEventListener("dragover", follow, true);
+      window.removeEventListener("dragleave", leave, true);
+      pause(state);
+      state.clientY = null;
+      state.onScrolled = null;
+    };
+  }, [active, update]);
 
-  return { update, stop };
+  return { update };
 }
