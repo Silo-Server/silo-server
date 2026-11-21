@@ -272,12 +272,15 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
       </div>
     ) : null,
     paths.length > 0 ? (
-      // Paths read left to right in any language; w-fit keeps the list on the
-      // page's start side.
+      // Paths read left to right in any language; align-with-page keeps each line,
+      // a short path's or a wrapped one's, on the page's start side.
       <ul
         key="paths"
         dir="ltr"
-        className={cn("text-muted-foreground w-fit font-mono text-xs break-all", KEEP_SPACES)}
+        className={cn(
+          "text-muted-foreground align-with-page font-mono text-xs break-all",
+          KEEP_SPACES,
+        )}
       >
         {paths.map((path) => (
           <li key={path}>{path}</li>
