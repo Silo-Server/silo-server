@@ -458,3 +458,90 @@ func TestInstalledPlistDrain(t *testing.T) {
 		t.Fatalf("drain %v; want 20m from the plist's ExitTimeOut", got)
 	}
 }
+
+// If SIGTERM drained the node and bootout is refused, stop still kickstarts
+// the job even when the follow-up launchctl print fails, so a drained node
+// with KeepAlive.SuccessfulExit=false is not left stopped.
+func TestStopKickstartsDrainedJobWhenLoadedCheckFails(t *testing.T) {
+	dir := t.TempDir()
+	script := `#!/bin/sh
+dir='` + dir + `'
+echo "$*" >> "$dir/calls"
+case "$1" in
+print)
+	if [ -e "$dir/bootout_failed" ]; then
+		echo "transient print error" >&2
+		exit 5
+	fi
+	if [ -e "$dir/killed" ]; then
+		printf 'state = not running\n'
+		exit 0
+	fi
+	printf 'state = running\n\tpid = 100\n'
+	exit 0 ;;
+kill) touch "$dir/killed"; exit 0 ;;
+bootout) touch "$dir/bootout_failed"; echo "bootout refused" >&2; exit 1 ;;
+kickstart) exit 0 ;;
+esac
+exit 0
+`
+	path := filepath.Join(dir, "launchctl")
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	previous := launchctlPath
+	launchctlPath = path
+	t.Cleanup(func() { launchctlPath = previous })
+
+	sent, err := fakeInstaller(t).stop(context.Background(), io.Discard)
+	if sent || err == nil {
+		t.Fatalf("stop = %v, %v; want sent=false and error", sent, err)
+	}
+	if calls := launchctlCalls(t, dir); !strings.Contains(calls, "kickstart ") {
+		t.Fatalf("launchctl calls:\n%s\nwant kickstart after drained job's bootout and print failed", calls)
+	}
+}
+
+// When an interrupted swap left silo.old behind and a retry runs from the
+// installed binary (so stage skipped the binary), rollback must still restore
+// silo.old before clearing the swap marker.
+func TestRollbackRestoresExistingBinaryBackupWhenUnstaged(t *testing.T) {
+	dir := fakeLaunchctl(t, "0")
+	if err := os.WriteFile(filepath.Join(dir, "gone"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	n := fakeInstaller(t)
+	if err := os.MkdirAll(n.paths.dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(n.paths.plist), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for path, data := range map[string]string{
+		n.paths.binary:          "unverified-v2",
+		n.paths.binary + ".old": "working-v1",
+		n.paths.env:             "new-env",
+		n.paths.env + ".old":    "old-env",
+		n.paths.swapPending():   "",
+	} {
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	swaps := []nodeInstallSwap{{path: n.paths.env, hadOld: true, placed: true}}
+	if err := n.rollback(context.Background(), swaps, []byte("old plist"), false); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if got, err := os.ReadFile(n.paths.binary); err != nil || string(got) != "working-v1" {
+		t.Fatalf("binary = %q, %v; want working-v1 restored from silo.old", got, err)
+	}
+	if _, err := os.Stat(n.paths.binary + ".old"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("silo.old still exists: %v", err)
+	}
+	if got, err := os.ReadFile(n.paths.env); err != nil || string(got) != "old-env" {
+		t.Fatalf("env = %q, %v; want old-env", got, err)
+	}
+	if _, err := os.Stat(n.paths.swapPending()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("swap marker still exists: %v", err)
+	}
+}

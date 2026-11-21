@@ -530,9 +530,22 @@ func discardStaged(swaps []nodeInstallSwap) {
 func (n nodeInstaller) rollback(ctx context.Context, swaps []nodeInstallSwap, oldPlist []byte, oldLoaded bool) error {
 	if _, err := n.stop(ctx, io.Discard); err != nil {
 		var backups []string
+		seen := make(map[string]bool, len(swaps))
+		addBackup := func(old string) {
+			if !seen[old] {
+				seen[old] = true
+				backups = append(backups, old)
+			}
+		}
 		for _, s := range swaps {
 			if s.hadOld {
-				backups = append(backups, s.old())
+				addBackup(s.old())
+			}
+		}
+		for _, path := range n.paths.installedFiles() {
+			old := path + ".old"
+			if _, statErr := os.Lstat(old); statErr == nil {
+				addBackup(old)
 			}
 		}
 		kept := "no previous files were replaced"
@@ -542,6 +555,7 @@ func (n nodeInstaller) rollback(ctx context.Context, swaps []nodeInstallSwap, ol
 		return fmt.Errorf("recovery is incomplete: the new node could not be confirmed stopped (%w), so nothing was restored and %s", err, kept)
 	}
 	var errs []error
+	restored := make(map[string]bool, len(swaps))
 	for _, s := range swaps {
 		if !s.placed {
 			_ = os.Remove(s.staged())
@@ -549,8 +563,23 @@ func (n nodeInstaller) rollback(ctx context.Context, swaps []nodeInstallSwap, ol
 		switch {
 		case s.hadOld:
 			errs = append(errs, os.Rename(s.old(), s.path))
+			restored[s.path] = true
 		case s.placed:
 			errs = append(errs, os.Remove(s.path))
+		}
+	}
+	// An interrupted swap can leave a working backup (such as silo.old) for a
+	// path this run did not stage or did not reach before failing. Restore it
+	// before clearing the swap marker so a later run cannot drop it.
+	for _, path := range n.paths.installedFiles() {
+		if restored[path] {
+			continue
+		}
+		old := path + ".old"
+		if _, err := os.Lstat(old); err == nil {
+			errs = append(errs, os.Rename(old, path))
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			errs = append(errs, err)
 		}
 	}
 	if oldPlist == nil {

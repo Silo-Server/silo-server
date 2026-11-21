@@ -121,10 +121,12 @@ func (n nodeInstaller) stop(ctx context.Context, out io.Writer) (sent bool, err 
 		if err == nil && !loaded {
 			return true, nil
 		}
-		if err == nil && killed {
-			// The job stays, but its node may have drained and exited, which
-			// KeepAlive does not restart: start it again.
-			_, err = n.launchctl(context.WithoutCancel(ctx), "kickstart", n.service)
+		if killed {
+			// The job may stay loaded after its node drained and exited, which
+			// KeepAlive does not restart: start it again even when the loaded
+			// check above failed.
+			_, kickErr := n.launchctl(context.WithoutCancel(ctx), "kickstart", n.service)
+			err = errors.Join(err, kickErr)
 		}
 		return false, errors.Join(bootoutErr, err)
 	}
