@@ -2825,11 +2825,14 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 /* Arabic letters join, and letter-spacing pulls them apart. CSS Text 3 says not
    to space cursive scripts: Chromium and Firefox skip it, Safari doesn't. Clear
    it wherever the language is Arabic, which in the Arabic interface is the whole
-   page (<html lang>). !important in @layer base outranks every other
-   letter-spacing: later layers' !important (Tailwind's `tracking-*!`), unlayered
-   rules such as setup-wizard.css, and inline styles. */
+   page (<html lang>). Names and titles keep the interface language, so a tracked
+   element that shows them sets `data-cursive` when they hold Arabic-script text
+   (hasArabicScript in lib/direction). !important in @layer base outranks every
+   other letter-spacing: later layers' !important (Tailwind's `tracking-*!`),
+   unlayered rules such as setup-wizard.css, and inline styles. */
 @layer base {
-  :lang(ar) {
+  :lang(ar),
+  [data-cursive] {
     letter-spacing: normal !important;
   }
 }
