@@ -72,6 +72,10 @@ export default function DetailOverview({
 
   return (
     <div className="detail-hero-description max-w-2xl">
+      {/* dir="auto" takes the first paragraph's direction. A collection's
+          description keeps its line breaks, so when a later paragraph runs the
+          other way and is clamped, Firefox and WebKit cut it on the wrong side;
+          no one direction suits every paragraph of one clamped block. */}
       <p
         ref={textRef}
         dir="auto"
