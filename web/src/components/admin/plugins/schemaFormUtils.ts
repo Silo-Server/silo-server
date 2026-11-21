@@ -304,6 +304,20 @@ export function effectiveValue(
   return value !== undefined ? value : field.default_value;
 }
 
+/** Whether a field holds a secret, which renders masked. */
+export function isSecretField(field: PluginAdminFormField): boolean {
+  return field.secret || field.control === "PASSWORD";
+}
+
+/**
+ * Whether a field renders as a multi-line text box. A secret never does: a
+ * textarea can't mask what is typed, so a secret stays a masked single-line
+ * input even when its plugin also marks it multiline.
+ */
+export function rendersMultiline(field: PluginAdminFormField): boolean {
+  return !isSecretField(field) && (field.control === "TEXTAREA" || field.multiline);
+}
+
 export function fieldIsVisible(
   descriptor: PluginAdminForm,
   field: PluginAdminFormField,

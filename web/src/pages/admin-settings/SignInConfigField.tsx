@@ -1,7 +1,11 @@
 import { useId } from "react";
 
 import type { PluginAdminFormField } from "@/api/types";
-import { effectiveValue } from "@/components/admin/plugins/schemaFormUtils";
+import {
+  effectiveValue,
+  isSecretField,
+  rendersMultiline,
+} from "@/components/admin/plugins/schemaFormUtils";
 import { useT } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,7 +68,7 @@ export function SignInConfigField({
   const id = `${idPrefix}-${field.key}`;
   const descriptionId = useId();
   const value = effectiveValue(field, values);
-  const secret = field.secret || field.control === "PASSWORD";
+  const secret = isSecretField(field);
   const hint = description ?? field.description;
   const noteId = useId();
   const describedBy =
@@ -106,7 +110,7 @@ export function SignInConfigField({
         </SelectContent>
       </Select>
     );
-  } else if (field.control === "TEXTAREA" || field.multiline) {
+  } else if (rendersMultiline(field)) {
     control = (
       <textarea
         id={id}
