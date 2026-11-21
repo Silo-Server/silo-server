@@ -361,7 +361,9 @@ export default function AdminBackupRestore() {
         }
         onChooseAgain={() => {
           // A refused start can open a running restore while Review is still
-          // open, and its refusal stored after that; Choose again starts over.
+          // open, and its refusal arrives after that, possibly only once this
+          // run has ended. Choose again starts over and drops that request.
+          start.reset();
           leaveReview();
           setParams({});
         }}
