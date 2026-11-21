@@ -185,6 +185,7 @@ export const AccountRow = memo(function AccountRow({
       <div className="flex min-h-10 items-center gap-3 py-1.5">
         <Checkbox
           id={controlId}
+          aria-label={item.label}
           checked={checked}
           disabled={!item.selectable}
           onCheckedChange={(value) => onToggle(toggleKeys("users", item), value === true)}
@@ -247,7 +248,7 @@ export const AccountRow = memo(function AccountRow({
       </div>
       {open ? (
         <div id={detailsId} className="space-y-1 ps-7 pb-3">
-          {status ? <p className="text-[13px] @2xl:hidden">{status}</p> : null}
+          {status ? <p className="text-[13px] wrap-anywhere @2xl:hidden">{status}</p> : null}
           {account.admin ? (
             <p className="text-muted-foreground text-xs @2xl:hidden">
               {t("web.admin.backups.restore.users.administrator")}

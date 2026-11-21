@@ -275,8 +275,10 @@ export const ItemRow = memo(function ItemRow({
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
+        {/* Named from the plain label: Chromium reads a <wbr> in it as a space. */}
         <Checkbox
           id={controlId}
+          aria-label={label}
           checked={checked}
           disabled={!item.selectable}
           onCheckedChange={(value) => onToggle(toggleKeys(sectionId, item), value === true)}
