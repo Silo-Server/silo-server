@@ -110,57 +110,40 @@ func TestListSortMetricsIncludesEbookReaderProgress(t *testing.T) {
 }
 
 // TestListSortMetricsDatesSeriesByEpisodeViews checks that a series card in a
-// date viewed sort shows when its latest episode was finished, from history
-// or a completed progress row, since plays are recorded against episodes
-// (#4638).
+// date viewed sort shows its store rollup's latest episode play, since plays
+// are recorded against episodes (#4638).
 func TestListSortMetricsDatesSeriesByEpisodeViews(t *testing.T) {
 	ctx := context.Background()
-	store := newProfileTestStore(t)
-	handler := &ItemsHandler{allSeriesEpisodeIDs: fakeSeriesEpisodeIDs{
-		"series-history":  {"history-e1", "history-e2"},
-		"series-progress": {"progress-e1"},
-		"series-unseen":   {"unseen-e1"},
+	store := seriesViewedAtStore{UserStore: newProfileTestStore(t), viewedAt: map[string]string{
+		"series-watched": "2026-05-28T10:00:00Z",
 	}}
 	items := []*models.MediaItem{
-		{ContentID: "series-history", Type: "series", Title: "History"},
-		{ContentID: "series-progress", Type: "series", Title: "Progress"},
+		{ContentID: "series-watched", Type: "series", Title: "Watched"},
 		{ContentID: "series-unseen", Type: "series", Title: "Unseen"},
 	}
-	for _, play := range []struct{ episode, at string }{{"history-e1", "2026-05-27T10:00:00Z"}, {"history-e2", "2026-05-28T10:00:00Z"}} {
-		if err := store.AddHistory(ctx, userstore.WatchHistoryEntry{
-			ProfileID: "profile-1", MediaItemID: play.episode, WatchedAt: play.at,
-			DurationSeconds: 1500, Completed: true, Source: userstore.WatchHistorySourcePlayback,
-		}); err != nil {
-			t.Fatalf("AddHistory(%s): %v", play.episode, err)
-		}
-	}
-	if err := store.SetProgressAt(ctx, "profile-1", "progress-e1", 1500, 1500, true, time.Date(2026, 5, 29, 18, 30, 0, 0, time.UTC)); err != nil {
-		t.Fatalf("SetProgressAt: %v", err)
-	}
-	if err := store.SetProgress(ctx, "profile-1", "unseen-e1", 300, 1500, userstore.ProgressThresholds{}); err != nil {
-		t.Fatalf("SetProgress: %v", err)
-	}
 
-	metrics := handler.listSortMetrics(ctx, items, "date_viewed", catalog.AccessFilter{}, nil, store, 0, "profile-1")
-	if got := metrics["series-history"]; got == nil || got.ViewedAt != "2026-05-28T10:00:00Z" {
-		t.Fatalf("series-history viewed metrics = %#v", got)
-	}
-	if got := metrics["series-progress"]; got == nil || got.ViewedAt != "2026-05-29T18:30:00Z" {
-		t.Fatalf("series-progress viewed metrics = %#v", got)
+	metrics := (&ItemsHandler{}).listSortMetrics(ctx, items, "date_viewed", catalog.AccessFilter{}, nil, store, 0, "profile-1")
+	if got := metrics["series-watched"]; got == nil || got.ViewedAt != "2026-05-28T10:00:00Z" {
+		t.Fatalf("series-watched viewed metrics = %#v", got)
 	}
 	if got := metrics["series-unseen"]; got != nil {
-		t.Fatalf("unfinished episode dated its series: %#v", got)
+		t.Fatalf("unwatched series was dated: %#v", got)
 	}
 }
 
-// fakeSeriesEpisodeIDs maps a series to its episode IDs.
-type fakeSeriesEpisodeIDs map[string][]string
+// seriesViewedAtStore adds a fixed series rollup to a user store; only
+// SeriesLatestViewedAt answers.
+type seriesViewedAtStore struct {
+	userstore.UserStore
+	userstore.SeriesEpisodeRollupStore
+	viewedAt map[string]string
+}
 
-func (f fakeSeriesEpisodeIDs) ListAllIDsBySeriesIDs(_ context.Context, seriesIDs []string) (map[string][]string, error) {
-	result := make(map[string][]string, len(seriesIDs))
+func (s seriesViewedAtStore) SeriesLatestViewedAt(_ context.Context, _ string, seriesIDs []string) (map[string]string, error) {
+	result := make(map[string]string, len(seriesIDs))
 	for _, id := range seriesIDs {
-		if episodes, ok := f[id]; ok {
-			result[id] = episodes
+		if at, ok := s.viewedAt[id]; ok {
+			result[id] = at
 		}
 	}
 	return result, nil

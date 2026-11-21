@@ -992,33 +992,25 @@ func (r *EpisodeRepository) ListBySeriesIDs(ctx context.Context, seriesIDs []str
 // ListIDsBySeriesIDs returns the available episode IDs used to determine
 // whether a series is completed, without loading episode metadata.
 func (r *EpisodeRepository) ListIDsBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]string, error) {
-	return r.listIDsByParent(ctx, "series_id", seriesIDs, episodeAvailabilityPredicate)
-}
-
-// ListAllIDsBySeriesIDs returns every episode ID of each series, including
-// episodes no library holds a file for, whose watches still count as the
-// series being viewed.
-func (r *EpisodeRepository) ListAllIDsBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]string, error) {
-	return r.listIDsByParent(ctx, "series_id", seriesIDs, "TRUE")
+	return r.listIDsByParent(ctx, "series_id", seriesIDs)
 }
 
 // ListIDsBySeasonIDs is the season counterpart of ListIDsBySeriesIDs.
 func (r *EpisodeRepository) ListIDsBySeasonIDs(ctx context.Context, seasonIDs []string) (map[string][]string, error) {
-	return r.listIDsByParent(ctx, "season_id", seasonIDs, episodeAvailabilityPredicate)
+	return r.listIDsByParent(ctx, "season_id", seasonIDs)
 }
 
-func (r *EpisodeRepository) listIDsByParent(ctx context.Context, parentColumn string, parentIDs []string, predicate string) (map[string][]string, error) {
+func (r *EpisodeRepository) listIDsByParent(ctx context.Context, parentColumn string, parentIDs []string) (map[string][]string, error) {
 	result := make(map[string][]string, len(parentIDs))
 	if len(parentIDs) == 0 {
 		return result, nil
 	}
 
-	// parentColumn and predicate come only from the fixed wrappers above.
-	// Completion is order-independent; its wrappers preserve the same
-	// availability rule as ListBySeriesIDs and ListBySeasonIDs, including
-	// missing-file rows.
+	// parentColumn comes only from the two fixed-column wrappers above.
+	// Completion is order-independent; preserve the same availability rule
+	// as ListBySeriesIDs and ListBySeasonIDs, including missing-file rows.
 	query := fmt.Sprintf(`SELECT content_id, %s FROM episodes
-		WHERE %s = ANY($1) AND %s`, parentColumn, parentColumn, predicate)
+		WHERE %s = ANY($1) AND %s`, parentColumn, parentColumn, episodeAvailabilityPredicate)
 	rows, err := r.pool.Query(ctx, query, parentIDs)
 	if err != nil {
 		return nil, fmt.Errorf("listing episode ids by %s: %w", parentColumn, err)
