@@ -180,10 +180,13 @@ export const AccountRow = memo(function AccountRow({
             .flatMap((profile) => profile.data_types),
         )
       : null;
+  // The label can already be the email: an invited account's username is its address,
+  // and an account with no username is labeled by its email. Sign-in matches emails
+  // without regard to case, so a case-only difference is still the same address.
   const contact = [
     pending,
     account.username !== item.label ? account.username : null,
-    account.email || null,
+    account.email.toLowerCase() !== item.label.toLowerCase() ? account.email : null,
   ]
     .filter(Boolean)
     .join(" · ");
