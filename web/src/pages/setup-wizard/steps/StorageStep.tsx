@@ -159,12 +159,24 @@ function Backend({
         dirty={edited}
         description={description}
         status={
-          status ??
-          (configured ? (
-            <SettingFieldStatus tone="ok">{t("web.setup.storage.configured")}</SettingFieldStatus>
-          ) : (
-            <SettingFieldStatus tone="muted">{t("web.setup.storage.notSetUp")}</SettingFieldStatus>
-          ))
+          <div className="flex flex-col items-start gap-1">
+            {status ??
+              (configured ? (
+                <SettingFieldStatus tone="ok">
+                  {t("web.setup.storage.configured")}
+                </SettingFieldStatus>
+              ) : (
+                <SettingFieldStatus tone="muted">
+                  {t("web.setup.storage.notSetUp")}
+                </SettingFieldStatus>
+              ))}
+            {/* Says why Hide is unavailable. */}
+            {edited ? (
+              <SettingFieldStatus tone="muted">
+                {t("web.admin.settings.fields.groupUnsavedChanges")}
+              </SettingFieldStatus>
+            ) : null}
+          </div>
         }
       >
         <Button

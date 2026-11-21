@@ -345,6 +345,7 @@ describe("StorageStep", () => {
     // Continue saves the edit, so its fields stay in view and can't be hidden.
     expect(screen.getByLabelText("Bucket")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Hide" })).toBeDisabled();
+    expect(screen.getByText("Unsaved changes in this group")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Set up" })).toHaveLength(2);
   });
 
