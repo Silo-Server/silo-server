@@ -7324,6 +7324,11 @@ func (h *PlaybackHandler) resumePositionV3(ctx context.Context, userID int, prof
 // begins at the resolved stream origin and advances through the copied pre-roll
 // before reaching the requested position. Neither progressive nor growing HLS
 // copy transports can seek arbitrarily inside their current response.
+//
+// The pre-roll is deliberate, including the up-to-one-GOP rewind a non-seek
+// replan such as an audio switch shows on a rebuilt progressive transport. Do
+// not clamp the origin to the requested position to hide it. See
+// docs/architecture/playback-protocol-v3.md#copy-video-seek-anchor.
 func configureCopyRemuxTimelineV3(plan *playback.PlanV3, origin float64) {
 	if plan == nil {
 		return
@@ -12883,6 +12888,12 @@ func seekReanchorNoMovementV3(record *playback.AttemptRecordV3, session *playbac
 // rebuilt element that reported the route's start, or a position read before
 // the previous progress report). The session has advanced past it, and starting
 // the replacement there would rewind content that already played.
+//
+// On a progressive copy-video route this is only the requested start. The
+// anchor resolver moves the transport origin back to the preceding keyframe, so
+// the first presented frame can be up to one GOP earlier. That pre-roll is
+// expected; do not compensate for it by choosing a later position here. See
+// docs/architecture/playback-protocol-v3.md#copy-video-seek-anchor.
 func (h *PlaybackHandler) nonSeekReplanPositionV3(sessionID string, requested float64) *float64 {
 	position := requested
 	if sessionID != "" {
