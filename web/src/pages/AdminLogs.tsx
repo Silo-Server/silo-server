@@ -541,8 +541,13 @@ function AdminLogsPage() {
                 )}
                 <div>
                   <div className="mb-1 text-sm font-medium">{t("web.admin.logs.detail.path")}</div>
-                  <div className="bg-muted rounded-md px-3 py-2 font-mono text-xs break-all">
-                    {stringAttr(selectedEntry, "path")}
+                  {/* A path reads left to right in any language, so its leading
+                      "/" stays in front, and its lines line up with the page. */}
+                  <div
+                    dir="ltr"
+                    className="bg-muted align-with-page rounded-md px-3 py-2 font-mono text-xs break-all"
+                  >
+                    <PathText path={stringAttr(selectedEntry, "path")} />
                   </div>
                 </div>
                 <div>
@@ -611,7 +616,9 @@ const OperationalLogRow = memo(function OperationalLogRow({
       <TableCell>{stringAttr(entry, "status")}</TableCell>
       <TableCell>{durationAttr(t, entry)}</TableCell>
       <TableCell>
-        <div className="max-w-[360px] truncate" title={entry.message}>
+        {/* A log message takes its direction from its own text, so a cut one
+            keeps its opening words; w-fit keeps it on the page's start side. */}
+        <div dir="auto" className="w-fit max-w-[360px] truncate" title={entry.message}>
           {entry.message}
         </div>
       </TableCell>

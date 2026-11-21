@@ -17,6 +17,12 @@ const mocks = vi.hoisted(() => ({
   linkRow: false,
   publicURL: "https://media.example.test" as string | undefined,
 }));
+// The claim link box renders its URL folder by folder, so match its whole text.
+function claimLink(url: string) {
+  return screen.getByText(
+    (_, element) => element?.tagName === "CODE" && element.textContent === url,
+  );
+}
 const linkRow = {
   id: "8",
   email: "",
@@ -133,7 +139,7 @@ it("keeps a one-time link after clipboard failure, resets mutation state, and di
   expect(await screen.findByText(/email delivery failed or is uncertain/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
   expect(await screen.findByText(/Could not copy/)).toBeInTheDocument();
-  expect(screen.getByText("https://example.invalid/invite/one-time")).toBeInTheDocument();
+  expect(claimLink("https://example.invalid/invite/one-time")).toBeInTheDocument();
   expect(mocks.reset).toHaveBeenCalled();
   setProfileId("other");
   view.rerender(<InvitationsTab />);
@@ -220,7 +226,7 @@ it("creates a link invitation without an address and shows the link to share", a
   expect(body).toMatchObject({ delivery: "link", note: "For Sam" });
   expect(body.email).toBeUndefined();
   expect(await screen.findByText(/Invitation link created/)).toBeInTheDocument();
-  expect(screen.getByText("https://example.invalid/invite/link-only")).toBeInTheDocument();
+  expect(claimLink("https://example.invalid/invite/link-only")).toBeInTheDocument();
   expect(screen.getByText(/Anyone with the link can use it/)).toBeInTheDocument();
 });
 it("selects a delivery option when its card text is clicked", () => {
@@ -264,7 +270,7 @@ it("replaces an emailed invitation's link without emailing it", async () => {
       `New link created for ${row.email}. Nothing was emailed; share this link with them yourself.`,
     ),
   ).toBeInTheDocument();
-  expect(screen.getByText("https://example.invalid/invite/replaced")).toBeInTheDocument();
+  expect(claimLink("https://example.invalid/invite/replaced")).toBeInTheDocument();
 });
 it("emails a new link only when asked and email is configured", async () => {
   mocks.resend.mockResolvedValue({
