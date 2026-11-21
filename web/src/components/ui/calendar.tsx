@@ -75,6 +75,27 @@ const calendarFormatters: Partial<Formatters> = {
   formatWeekdayName: (weekday) => weekdayNameFormat().format(weekday),
 };
 
+// Week data from Intl.Locale: getWeekInfo(), or the weekInfo property some
+// browsers shipped first. TypeScript's lib doesn't declare either yet.
+type LocaleWithWeekInfo = Intl.Locale & {
+  getWeekInfo?: () => { firstDay: number };
+  weekInfo?: { firstDay: number };
+};
+
+type WeekStart = NonNullable<ComponentProps<typeof DayPicker>["weekStartsOn"]>;
+
+// The format locale's first day of the week (Monday in pl, Saturday in ar).
+// firstDay counts 1 (Monday) to 7 (Sunday); DayPicker counts 0 (Sunday) to 6.
+// Without week data, DayPicker keeps its Sunday default. The format locale's
+// own tag keeps any -u-fw- first-day override; resolving drops it.
+function weekStartsOn(): WeekStart | undefined {
+  const locale: LocaleWithWeekInfo = new Intl.Locale(
+    formatLocale() ?? new Intl.DateTimeFormat().resolvedOptions().locale,
+  );
+  const firstDay = (locale.getWeekInfo?.() ?? locale.weekInfo)?.firstDay;
+  return firstDay === undefined ? undefined : ((firstDay % 7) as WeekStart);
+}
+
 function Calendar({
   className,
   classNames,
@@ -91,6 +112,7 @@ function Calendar({
   return (
     <DayPicker
       dir={dir}
+      weekStartsOn={weekStartsOn()}
       showOutsideDays={showOutsideDays}
       labels={translatedLabels}
       formatters={{ ...calendarFormatters, ...formatters }}

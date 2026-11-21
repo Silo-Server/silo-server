@@ -41,6 +41,11 @@ export default function DetailOverview({
   const textRef = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
+  // Announce "Translated by AI" only after a translation ran in this view. A
+  // description that arrives already translated, such as on navigation to
+  // another item, shows the label without announcing it.
+  const [sawTranslation, setSawTranslation] = useState(false);
+  if (translating && !sawTranslation) setSawTranslation(true);
 
   // Only offer "More" when the clamp actually hides text; re-check on resize
   // because the line count depends on the column width.
@@ -91,12 +96,18 @@ export default function DetailOverview({
             {expanded ? t("web.detail.overview.less") : t("web.detail.overview.more")}
           </button>
         )}
-        {translating && (
-          <TranslatingStatus label={t("web.detail.translation.translating")} className="mt-1.5" />
-        )}
-        {/* The label takes the Translate button's height too, so the row keeps
-            its height when a finished translation swaps the status for it. */}
-        {!translating && machineTranslated && (
+        {/* The status and the label take the Translate button's height, so
+            the row keeps its height when one replaces another. */}
+        <TranslatingStatus
+          translating={translating}
+          label={t("web.detail.translation.translating")}
+          className="mt-1.5"
+        >
+          {sawTranslation && machineTranslated && (
+            <MachineTranslatedLabel className="border-y border-transparent py-0.5" />
+          )}
+        </TranslatingStatus>
+        {!sawTranslation && machineTranslated && (
           <MachineTranslatedLabel className="mt-1.5 border-y border-transparent py-0.5" />
         )}
         {!translating && onTranslate && (
