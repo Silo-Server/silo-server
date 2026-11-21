@@ -20,6 +20,7 @@ import {
 } from "@/hooks/queries/titleAllowances";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useT } from "@/i18n";
+import { getInitial } from "@/lib/text";
 
 interface AllowCollectionDialogProps {
   open: boolean;
@@ -86,7 +87,7 @@ function ProfileLabel({ profile, note }: { profile: Profile; note?: string }) {
     <>
       <Avatar className="size-8">
         {profile.avatar_url ? <AvatarImage src={profile.avatar_url} alt="" /> : null}
-        <AvatarFallback>{profile.name.slice(0, 1).toUpperCase()}</AvatarFallback>
+        <AvatarFallback>{getInitial(profile.name)}</AvatarFallback>
       </Avatar>
       <span className="flex min-w-0 flex-1 flex-col">
         {/* A cut name keeps its start in either script; w-fit keeps a short one

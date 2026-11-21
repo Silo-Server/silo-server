@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 
 import { useRootHeightProperty } from "@/hooks/useRootHeightProperty";
 import { useT } from "@/i18n";
+import { getInitial } from "@/lib/text";
 
 interface ImpersonationBannerProps {
   userName: string;
@@ -30,7 +31,7 @@ export default function ImpersonationBanner({
     }
   }
 
-  const initial = userName.charAt(0).toUpperCase() || "?";
+  const initial = getInitial(userName) || "?";
 
   return (
     <div

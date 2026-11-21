@@ -44,6 +44,7 @@ import { markCriticalContentLoaded, useCriticalContentLoaded } from "@/lib/start
 import { useSettingsReturnPath } from "@/hooks/useSettingsReturnPath";
 import { useT } from "@/i18n";
 import { useSidebarSwap } from "@/hooks/useSidebarSwap";
+import { getInitial } from "@/lib/text";
 
 // Only admins see the activity indicator, so everyone else skips downloading it.
 const ServerActivity = lazy(() => import("@/components/ServerActivity"));
@@ -474,10 +475,7 @@ export default function Layout({ children }: LayoutProps) {
                   <AvatarImage src={profile.avatar_url} alt={profile.name} />
                 ) : null}
                 <AvatarFallback className="bg-primary text-primary-foreground text-xs font-bold">
-                  {profile?.name?.charAt(0).toUpperCase() ??
-                    user?.username?.charAt(0).toUpperCase() ??
-                    // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- placeholder initial, not a word
-                    "?"}
+                  {getInitial(profile?.name ?? user?.username ?? "?")}
                 </AvatarFallback>
               </Avatar>
             </Link>

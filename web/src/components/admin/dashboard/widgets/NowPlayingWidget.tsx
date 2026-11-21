@@ -20,6 +20,7 @@ import { SectionError } from "../feedback";
 import { useReportCollapsed } from "../widgetChrome";
 import { SessionProfilePill } from "./SessionProfilePill";
 import { useT } from "@/i18n";
+import { getInitial } from "@/lib/text";
 
 /**
  * Most cards the widget mounts at once. The widget shows only what fits, and a
@@ -351,7 +352,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             className="text-primary-foreground flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
             style={{ background: `var(--primary)` }}
           >
-            {username.charAt(0).toUpperCase()}
+            {getInitial(username)}
           </div>
           <span dir="auto" className="min-w-0 truncate text-xs font-medium">
             {username}
