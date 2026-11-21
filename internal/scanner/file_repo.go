@@ -118,640 +118,183 @@ const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.extra_id, mf.seas
 	mf.probe_source, mf.probe_updated_at, mf.probe_failed_at, mf.match_attempted_at, mf.missing_since,
 	mf.first_seen_scan_run_id, mf.created_at, mf.updated_at`
 
-// scanMediaFile scans a single row into a *models.MediaFile.
-func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
-	var f models.MediaFile
-	var contentID *string
-	var episodeID *string
-	var extraID *string
-	var seasonNumber, episodeNumber *int
-	var canonicalRootPath *string
-	var observedRootPath, contentGroupKey, baseTitle, baseType, identityConfidence *string
-	var groupKeyVersion, baseYear *int
-	var identityJSON []byte
-	var fileModifiedAt *time.Time
-	var fileHash *string
-	var codecVideo, codecAudio, resolution, container, probeSource *string
-	var markersSource, introMarkersSource, introMarkersProvider, introMarkersAlgorithm *string
-	var creditsMarkersSource, creditsMarkersProvider, creditsMarkersAlgorithm *string
-	var recapMarkersSource, recapMarkersProvider, recapMarkersAlgorithm *string
-	var previewMarkersSource, previewMarkersProvider, previewMarkersAlgorithm *string
-	var chapterThumbnailLastError *string
-	var editionRaw, editionKey, editionSource *string
-	var audioChannels *int
-	var hdr *bool
-	var duration, bitrate *int
-	var chapterThumbnailFailureCount *int
-	var markersConfidence, introMarkersConfidence, creditsMarkersConfidence *float64
-	var recapMarkersConfidence, previewMarkersConfidence *float64
-	var introMarkersDetectedAt, creditsMarkersDetectedAt *time.Time
-	var recapMarkersDetectedAt, previewMarkersDetectedAt *time.Time
-	var editionConfidence *float64
-	var presentationPartIndex, presentationPartTotal *int
-	var multiEpisodeStart, multiEpisodeEnd *int
-	var presentationKind, presentationGroupKey *string
-	var firstSeenScanRunID *string
-	var chapterThumbnailRetryAfter *time.Time
-	var videoTracksJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON, chaptersJSON []byte
+func derefVal[T any](p *T) T {
+	if p == nil {
+		var zero T
+		return zero
+	}
+	return *p
+}
 
-	err := row.Scan(
-		&f.ID,
-		&contentID,
-		&episodeID,
-		&extraID,
-		&seasonNumber,
-		&episodeNumber,
-		&f.MediaFolderID,
-		&canonicalRootPath,
-		&observedRootPath,
-		&contentGroupKey,
-		&groupKeyVersion,
-		&baseTitle,
-		&baseYear,
-		&baseType,
-		&identityConfidence,
-		&identityJSON,
-		&f.FilePath,
-		&f.FileSize,
-		&fileModifiedAt,
-		&fileHash,
-		&codecVideo,
-		&codecAudio,
-		&resolution,
-		&audioChannels,
-		&hdr,
-		&container,
-		&duration,
-		&bitrate,
-		&videoTracksJSON,
-		&audioTracksJSON,
-		&subtitleTracksJSON,
-		&externalSubtitlesJSON,
-		&chaptersJSON,
-		&f.MarkerThumbnails,
-		&chapterThumbnailRetryAfter,
-		&chapterThumbnailFailureCount,
-		&chapterThumbnailLastError,
-		&f.IntroStart,
-		&f.IntroEnd,
-		&f.CreditsStart,
-		&f.CreditsEnd,
-		&f.RecapStart,
-		&f.RecapEnd,
-		&f.PreviewStart,
-		&f.PreviewEnd,
-		&f.MarkerSegments,
-		&markersSource,
-		&markersConfidence,
-		&introMarkersSource,
-		&introMarkersProvider,
-		&introMarkersConfidence,
-		&introMarkersAlgorithm,
-		&introMarkersDetectedAt,
-		&creditsMarkersSource,
-		&creditsMarkersProvider,
-		&creditsMarkersConfidence,
-		&creditsMarkersAlgorithm,
-		&creditsMarkersDetectedAt,
-		&recapMarkersSource,
-		&recapMarkersProvider,
-		&recapMarkersConfidence,
-		&recapMarkersAlgorithm,
-		&recapMarkersDetectedAt,
-		&previewMarkersSource,
-		&previewMarkersProvider,
-		&previewMarkersConfidence,
-		&previewMarkersAlgorithm,
-		&previewMarkersDetectedAt,
-		&editionRaw,
-		&editionKey,
-		&editionConfidence,
-		&editionSource,
-		&presentationKind,
-		&presentationGroupKey,
-		&presentationPartIndex,
-		&presentationPartTotal,
-		&multiEpisodeStart,
-		&multiEpisodeEnd,
-		&f.MultiplePPS,
-		&f.MultiplePPSScanSize,
-		&f.MultiplePPSScanMtime,
-		&probeSource,
-		&f.ProbeUpdatedAt,
-		&f.ProbeFailedAt,
-		&f.MatchAttemptedAt,
-		&f.MissingSince,
-		&firstSeenScanRunID,
-		&f.CreatedAt,
-		&f.UpdatedAt,
-	)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrFileNotFound
-		}
-		return nil, fmt.Errorf("scanning media file: %w", err)
-	}
+// mediaFileRowScan holds nullable scalar and raw JSONB scan buffers for one
+// full media_files row before decoding into models.MediaFile.
+type mediaFileRowScan struct {
+	contentID, episodeID, extraID                        *string
+	seasonNumber, episodeNumber                          *int
+	canonicalRootPath, observedRootPath, contentGroupKey *string
+	groupKeyVersion, baseYear                            *int
+	baseTitle, baseType, identityConfidence              *string
+	identityJSON                                         []byte
+	fileHash                                             *string
+	codecVideo, codecAudio, resolution, container        *string
+	audioChannels, duration, bitrate                     *int
+	hdr                                                  *bool
+	videoTracksJSON, audioTracksJSON, subtitleTracksJSON []byte
+	externalSubtitlesJSON, chaptersJSON                  []byte
+	chapterThumbnailFailureCount                         *int
+	chapterThumbnailLastError                            *string
+	editionRaw, editionKey, editionSource                *string
+	presentationKind, presentationGroupKey               *string
+	presentationPartIndex, presentationPartTotal         *int
+	multiEpisodeStart, multiEpisodeEnd                   *int
+	probeSource, firstSeenScanRunID                      *string
+}
 
-	// Assign nullable fields.
-	if contentID != nil {
-		f.ContentID = *contentID
+// dests returns scan destinations matching the column order of fileColumns.
+func (s *mediaFileRowScan) dests(f *models.MediaFile) []any {
+	return []any{
+		&f.ID, &s.contentID, &s.episodeID, &s.extraID, &s.seasonNumber, &s.episodeNumber,
+		&f.MediaFolderID, &s.canonicalRootPath, &s.observedRootPath, &s.contentGroupKey, &s.groupKeyVersion,
+		&s.baseTitle, &s.baseYear, &s.baseType, &s.identityConfidence, &s.identityJSON,
+		&f.FilePath, &f.FileSize, &f.FileModifiedAt, &s.fileHash,
+		&s.codecVideo, &s.codecAudio, &s.resolution, &s.audioChannels, &s.hdr, &s.container,
+		&s.duration, &s.bitrate, &s.videoTracksJSON, &s.audioTracksJSON, &s.subtitleTracksJSON, &s.externalSubtitlesJSON, &s.chaptersJSON, &f.MarkerThumbnails,
+		&f.ChapterThumbnailRetryAfter, &s.chapterThumbnailFailureCount, &s.chapterThumbnailLastError,
+		&f.IntroStart, &f.IntroEnd, &f.CreditsStart, &f.CreditsEnd, &f.RecapStart, &f.RecapEnd, &f.PreviewStart, &f.PreviewEnd, &f.MarkerSegments, &f.MarkersSource, &f.MarkersConfidence,
+		&f.IntroMarkersSource, &f.IntroMarkersProvider, &f.IntroMarkersConfidence, &f.IntroMarkersAlgorithm, &f.IntroMarkersDetectedAt,
+		&f.CreditsMarkersSource, &f.CreditsMarkersProvider, &f.CreditsMarkersConfidence, &f.CreditsMarkersAlgorithm, &f.CreditsMarkersDetectedAt,
+		&f.RecapMarkersSource, &f.RecapMarkersProvider, &f.RecapMarkersConfidence, &f.RecapMarkersAlgorithm, &f.RecapMarkersDetectedAt,
+		&f.PreviewMarkersSource, &f.PreviewMarkersProvider, &f.PreviewMarkersConfidence, &f.PreviewMarkersAlgorithm, &f.PreviewMarkersDetectedAt,
+		&s.editionRaw, &s.editionKey, &f.EditionConfidence, &s.editionSource,
+		&s.presentationKind, &s.presentationGroupKey, &s.presentationPartIndex, &s.presentationPartTotal,
+		&s.multiEpisodeStart, &s.multiEpisodeEnd,
+		&f.MultiplePPS, &f.MultiplePPSScanSize, &f.MultiplePPSScanMtime,
+		&s.probeSource, &f.ProbeUpdatedAt, &f.ProbeFailedAt, &f.MatchAttemptedAt, &f.MissingSince,
+		&s.firstSeenScanRunID, &f.CreatedAt, &f.UpdatedAt,
 	}
-	if episodeID != nil {
-		f.EpisodeID = *episodeID
-	}
-	if extraID != nil {
-		f.ExtraID = *extraID
-	}
-	if seasonNumber != nil {
-		f.SeasonNumber = *seasonNumber
-	}
-	if episodeNumber != nil {
-		f.EpisodeNumber = *episodeNumber
-	}
-	if canonicalRootPath != nil {
-		f.CanonicalRootPath = *canonicalRootPath
-	}
-	if observedRootPath != nil {
-		f.ObservedRootPath = *observedRootPath
-	}
-	if contentGroupKey != nil {
-		f.ContentGroupKey = *contentGroupKey
-	}
-	if groupKeyVersion != nil {
-		f.GroupKeyVersion = *groupKeyVersion
-	}
-	if baseTitle != nil {
-		f.BaseTitle = *baseTitle
-	}
-	if baseYear != nil {
-		f.BaseYear = *baseYear
-	}
-	if baseType != nil {
-		f.BaseType = *baseType
-	}
-	if identityConfidence != nil {
-		f.IdentityConfidence = *identityConfidence
-	}
-	if len(identityJSON) > 0 {
-		f.IdentityJSON = append([]byte(nil), identityJSON...)
-	}
-	if fileHash != nil {
-		f.FileHash = *fileHash
-	}
-	if fileModifiedAt != nil {
-		f.FileModifiedAt = fileModifiedAt
-	}
-	if codecVideo != nil {
-		f.CodecVideo = *codecVideo
-	}
-	if codecAudio != nil {
-		f.CodecAudio = *codecAudio
-	}
-	if resolution != nil {
-		f.Resolution = *resolution
-	}
-	if audioChannels != nil {
-		f.AudioChannels = *audioChannels
-	}
-	if hdr != nil {
-		f.HDR = *hdr
-	}
-	if container != nil {
-		f.Container = *container
-	}
-	if duration != nil {
-		f.Duration = *duration
-	}
-	if bitrate != nil {
-		f.Bitrate = *bitrate
-	}
-	if chapterThumbnailRetryAfter != nil {
-		f.ChapterThumbnailRetryAfter = chapterThumbnailRetryAfter
-	}
-	if chapterThumbnailFailureCount != nil {
-		f.ChapterThumbnailFailureCount = *chapterThumbnailFailureCount
-	}
-	if chapterThumbnailLastError != nil {
-		f.ChapterThumbnailLastError = *chapterThumbnailLastError
-	}
-	if probeSource != nil {
-		f.ProbeSource = *probeSource
-	}
-	if editionRaw != nil {
-		f.EditionRaw = *editionRaw
-	}
-	if editionKey != nil {
-		f.EditionKey = *editionKey
-	}
-	f.EditionConfidence = editionConfidence
-	if editionSource != nil {
-		f.EditionSource = *editionSource
-	}
-	if presentationKind != nil {
-		f.PresentationKind = *presentationKind
-	}
-	if presentationGroupKey != nil {
-		f.PresentationGroupKey = *presentationGroupKey
-	}
-	if firstSeenScanRunID != nil {
-		f.FirstSeenScanRunID = *firstSeenScanRunID
-	}
-	if presentationPartIndex != nil {
-		f.PresentationPartIndex = *presentationPartIndex
-	}
-	if presentationPartTotal != nil {
-		f.PresentationPartTotal = *presentationPartTotal
-	}
-	if multiEpisodeStart != nil {
-		f.MultiEpisodeStart = *multiEpisodeStart
-	}
-	if multiEpisodeEnd != nil {
-		f.MultiEpisodeEnd = *multiEpisodeEnd
-	}
-	f.MarkersSource = markersSource
-	f.MarkersConfidence = markersConfidence
-	f.IntroMarkersSource = introMarkersSource
-	f.IntroMarkersProvider = introMarkersProvider
-	f.IntroMarkersConfidence = introMarkersConfidence
-	f.IntroMarkersAlgorithm = introMarkersAlgorithm
-	f.IntroMarkersDetectedAt = introMarkersDetectedAt
-	f.CreditsMarkersSource = creditsMarkersSource
-	f.CreditsMarkersProvider = creditsMarkersProvider
-	f.CreditsMarkersConfidence = creditsMarkersConfidence
-	f.CreditsMarkersAlgorithm = creditsMarkersAlgorithm
-	f.CreditsMarkersDetectedAt = creditsMarkersDetectedAt
-	f.RecapMarkersSource = recapMarkersSource
-	f.RecapMarkersProvider = recapMarkersProvider
-	f.RecapMarkersConfidence = recapMarkersConfidence
-	f.RecapMarkersAlgorithm = recapMarkersAlgorithm
-	f.RecapMarkersDetectedAt = recapMarkersDetectedAt
-	f.PreviewMarkersSource = previewMarkersSource
-	f.PreviewMarkersProvider = previewMarkersProvider
-	f.PreviewMarkersConfidence = previewMarkersConfidence
-	f.PreviewMarkersAlgorithm = previewMarkersAlgorithm
-	f.PreviewMarkersDetectedAt = previewMarkersDetectedAt
+}
 
-	if len(videoTracksJSON) > 0 {
-		if err := json.Unmarshal(videoTracksJSON, &f.VideoTracks); err != nil {
-			return nil, fmt.Errorf("unmarshaling video_tracks: %w", err)
+func (s *mediaFileRowScan) apply(f *models.MediaFile) error {
+	f.ContentID = derefVal(s.contentID)
+	f.EpisodeID = derefVal(s.episodeID)
+	f.ExtraID = derefVal(s.extraID)
+	f.SeasonNumber = derefVal(s.seasonNumber)
+	f.EpisodeNumber = derefVal(s.episodeNumber)
+	f.CanonicalRootPath = derefVal(s.canonicalRootPath)
+	f.ObservedRootPath = derefVal(s.observedRootPath)
+	f.ContentGroupKey = derefVal(s.contentGroupKey)
+	f.GroupKeyVersion = derefVal(s.groupKeyVersion)
+	f.BaseTitle = derefVal(s.baseTitle)
+	f.BaseYear = derefVal(s.baseYear)
+	f.BaseType = derefVal(s.baseType)
+	f.IdentityConfidence = derefVal(s.identityConfidence)
+	if len(s.identityJSON) > 0 {
+		f.IdentityJSON = append([]byte(nil), s.identityJSON...)
+	}
+	f.FileHash = derefVal(s.fileHash)
+	f.CodecVideo = derefVal(s.codecVideo)
+	f.CodecAudio = derefVal(s.codecAudio)
+	f.Resolution = derefVal(s.resolution)
+	f.AudioChannels = derefVal(s.audioChannels)
+	f.HDR = derefVal(s.hdr)
+	f.Container = derefVal(s.container)
+	f.Duration = derefVal(s.duration)
+	f.Bitrate = derefVal(s.bitrate)
+	f.ChapterThumbnailFailureCount = derefVal(s.chapterThumbnailFailureCount)
+	f.ChapterThumbnailLastError = derefVal(s.chapterThumbnailLastError)
+	f.ProbeSource = derefVal(s.probeSource)
+	f.EditionRaw = derefVal(s.editionRaw)
+	f.EditionKey = derefVal(s.editionKey)
+	f.EditionSource = derefVal(s.editionSource)
+	f.PresentationKind = derefVal(s.presentationKind)
+	f.PresentationGroupKey = derefVal(s.presentationGroupKey)
+	f.FirstSeenScanRunID = derefVal(s.firstSeenScanRunID)
+	f.PresentationPartIndex = derefVal(s.presentationPartIndex)
+	f.PresentationPartTotal = derefVal(s.presentationPartTotal)
+	f.MultiEpisodeStart = derefVal(s.multiEpisodeStart)
+	f.MultiEpisodeEnd = derefVal(s.multiEpisodeEnd)
+
+	if len(s.videoTracksJSON) > 0 {
+		if err := json.Unmarshal(s.videoTracksJSON, &f.VideoTracks); err != nil {
+			return fmt.Errorf("unmarshaling video_tracks: %w", err)
 		}
 	}
 	if f.VideoTracks == nil {
 		f.VideoTracks = []models.VideoTrack{}
 	}
 
-	if len(audioTracksJSON) > 0 {
-		if err := json.Unmarshal(audioTracksJSON, &f.AudioTracks); err != nil {
-			return nil, fmt.Errorf("unmarshaling audio_tracks: %w", err)
+	if len(s.audioTracksJSON) > 0 {
+		if err := json.Unmarshal(s.audioTracksJSON, &f.AudioTracks); err != nil {
+			return fmt.Errorf("unmarshaling audio_tracks: %w", err)
 		}
 	}
 	if f.AudioTracks == nil {
 		f.AudioTracks = []models.AudioTrack{}
 	}
 
-	// Deserialize JSONB fields.
-	if len(subtitleTracksJSON) > 0 {
-		if err := json.Unmarshal(subtitleTracksJSON, &f.SubtitleTracks); err != nil {
-			return nil, fmt.Errorf("unmarshaling subtitle_tracks: %w", err)
+	if len(s.subtitleTracksJSON) > 0 {
+		if err := json.Unmarshal(s.subtitleTracksJSON, &f.SubtitleTracks); err != nil {
+			return fmt.Errorf("unmarshaling subtitle_tracks: %w", err)
 		}
 	}
 	if f.SubtitleTracks == nil {
 		f.SubtitleTracks = []models.SubtitleTrack{}
 	}
 
-	if len(externalSubtitlesJSON) > 0 {
-		if err := json.Unmarshal(externalSubtitlesJSON, &f.ExternalSubtitles); err != nil {
-			return nil, fmt.Errorf("unmarshaling external_subtitles: %w", err)
+	if len(s.externalSubtitlesJSON) > 0 {
+		if err := json.Unmarshal(s.externalSubtitlesJSON, &f.ExternalSubtitles); err != nil {
+			return fmt.Errorf("unmarshaling external_subtitles: %w", err)
 		}
 	}
 	if f.ExternalSubtitles == nil {
 		f.ExternalSubtitles = []models.ExternalSubtitle{}
 	}
 
-	if len(chaptersJSON) > 0 {
-		if err := json.Unmarshal(chaptersJSON, &f.Chapters); err != nil {
-			return nil, fmt.Errorf("unmarshaling chapters: %w", err)
+	if len(s.chaptersJSON) > 0 {
+		if err := json.Unmarshal(s.chaptersJSON, &f.Chapters); err != nil {
+			return fmt.Errorf("unmarshaling chapters: %w", err)
 		}
 	}
 
+	return nil
+}
+
+// scanMediaFileRow decodes one full media_files row into a *models.MediaFile.
+// Scan errors are returned unwrapped so callers can map pgx.ErrNoRows and add
+// caller-specific context.
+func scanMediaFileRow(row pgx.Row) (*models.MediaFile, error) {
+	var f models.MediaFile
+	var s mediaFileRowScan
+	if err := row.Scan(s.dests(&f)...); err != nil {
+		return nil, err
+	}
+	if err := s.apply(&f); err != nil {
+		return nil, err
+	}
 	return &f, nil
+}
+
+// scanMediaFile scans a single row into a *models.MediaFile.
+func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
+	f, err := scanMediaFileRow(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrFileNotFound
+		}
+		return nil, fmt.Errorf("scanning media file: %w", err)
+	}
+	return f, nil
 }
 
 // scanMediaFiles scans multiple rows into a []*models.MediaFile slice.
 func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 	var files []*models.MediaFile
 	for rows.Next() {
-		var f models.MediaFile
-		var contentID *string
-		var episodeID *string
-		var extraID *string
-		var seasonNumber, episodeNumber *int
-		var canonicalRootPath *string
-		var observedRootPath, contentGroupKey, baseTitle, baseType, identityConfidence *string
-		var groupKeyVersion, baseYear *int
-		var identityJSON []byte
-		var fileModifiedAt *time.Time
-		var fileHash *string
-		var codecVideo, codecAudio, resolution, container, probeSource *string
-		var markersSource, introMarkersSource, introMarkersProvider, introMarkersAlgorithm *string
-		var creditsMarkersSource, creditsMarkersProvider, creditsMarkersAlgorithm *string
-		var recapMarkersSource, recapMarkersProvider, recapMarkersAlgorithm *string
-		var previewMarkersSource, previewMarkersProvider, previewMarkersAlgorithm *string
-		var chapterThumbnailLastError *string
-		var editionRaw, editionKey, editionSource *string
-		var audioChannels *int
-		var hdr *bool
-		var duration, bitrate *int
-		var chapterThumbnailFailureCount *int
-		var markersConfidence, introMarkersConfidence, creditsMarkersConfidence *float64
-		var recapMarkersConfidence, previewMarkersConfidence *float64
-		var introMarkersDetectedAt, creditsMarkersDetectedAt *time.Time
-		var recapMarkersDetectedAt, previewMarkersDetectedAt *time.Time
-		var editionConfidence *float64
-		var presentationPartIndex, presentationPartTotal *int
-		var multiEpisodeStart, multiEpisodeEnd *int
-		var presentationKind, presentationGroupKey *string
-		var firstSeenScanRunID *string
-		var chapterThumbnailRetryAfter *time.Time
-		var videoTracksJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON, chaptersJSON []byte
-
-		err := rows.Scan(
-			&f.ID,
-			&contentID,
-			&episodeID,
-			&extraID,
-			&seasonNumber,
-			&episodeNumber,
-			&f.MediaFolderID,
-			&canonicalRootPath,
-			&observedRootPath,
-			&contentGroupKey,
-			&groupKeyVersion,
-			&baseTitle,
-			&baseYear,
-			&baseType,
-			&identityConfidence,
-			&identityJSON,
-			&f.FilePath,
-			&f.FileSize,
-			&fileModifiedAt,
-			&fileHash,
-			&codecVideo,
-			&codecAudio,
-			&resolution,
-			&audioChannels,
-			&hdr,
-			&container,
-			&duration,
-			&bitrate,
-			&videoTracksJSON,
-			&audioTracksJSON,
-			&subtitleTracksJSON,
-			&externalSubtitlesJSON,
-			&chaptersJSON,
-			&f.MarkerThumbnails,
-			&chapterThumbnailRetryAfter,
-			&chapterThumbnailFailureCount,
-			&chapterThumbnailLastError,
-			&f.IntroStart,
-			&f.IntroEnd,
-			&f.CreditsStart,
-			&f.CreditsEnd,
-			&f.RecapStart,
-			&f.RecapEnd,
-			&f.PreviewStart,
-			&f.PreviewEnd,
-			&f.MarkerSegments,
-			&markersSource,
-			&markersConfidence,
-			&introMarkersSource,
-			&introMarkersProvider,
-			&introMarkersConfidence,
-			&introMarkersAlgorithm,
-			&introMarkersDetectedAt,
-			&creditsMarkersSource,
-			&creditsMarkersProvider,
-			&creditsMarkersConfidence,
-			&creditsMarkersAlgorithm,
-			&creditsMarkersDetectedAt,
-			&recapMarkersSource,
-			&recapMarkersProvider,
-			&recapMarkersConfidence,
-			&recapMarkersAlgorithm,
-			&recapMarkersDetectedAt,
-			&previewMarkersSource,
-			&previewMarkersProvider,
-			&previewMarkersConfidence,
-			&previewMarkersAlgorithm,
-			&previewMarkersDetectedAt,
-			&editionRaw,
-			&editionKey,
-			&editionConfidence,
-			&editionSource,
-			&presentationKind,
-			&presentationGroupKey,
-			&presentationPartIndex,
-			&presentationPartTotal,
-			&multiEpisodeStart,
-			&multiEpisodeEnd,
-			&f.MultiplePPS,
-			&f.MultiplePPSScanSize,
-			&f.MultiplePPSScanMtime,
-			&probeSource,
-			&f.ProbeUpdatedAt,
-			&f.ProbeFailedAt,
-			&f.MatchAttemptedAt,
-			&f.MissingSince,
-			&firstSeenScanRunID,
-			&f.CreatedAt,
-			&f.UpdatedAt,
-		)
+		f, err := scanMediaFileRow(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scanning media file row: %w", err)
 		}
-
-		if contentID != nil {
-			f.ContentID = *contentID
-		}
-		if episodeID != nil {
-			f.EpisodeID = *episodeID
-		}
-		if extraID != nil {
-			f.ExtraID = *extraID
-		}
-		if seasonNumber != nil {
-			f.SeasonNumber = *seasonNumber
-		}
-		if episodeNumber != nil {
-			f.EpisodeNumber = *episodeNumber
-		}
-		if canonicalRootPath != nil {
-			f.CanonicalRootPath = *canonicalRootPath
-		}
-		if observedRootPath != nil {
-			f.ObservedRootPath = *observedRootPath
-		}
-		if contentGroupKey != nil {
-			f.ContentGroupKey = *contentGroupKey
-		}
-		if groupKeyVersion != nil {
-			f.GroupKeyVersion = *groupKeyVersion
-		}
-		if baseTitle != nil {
-			f.BaseTitle = *baseTitle
-		}
-		if baseYear != nil {
-			f.BaseYear = *baseYear
-		}
-		if baseType != nil {
-			f.BaseType = *baseType
-		}
-		if identityConfidence != nil {
-			f.IdentityConfidence = *identityConfidence
-		}
-		if len(identityJSON) > 0 {
-			f.IdentityJSON = append([]byte(nil), identityJSON...)
-		}
-		if fileHash != nil {
-			f.FileHash = *fileHash
-		}
-		if fileModifiedAt != nil {
-			f.FileModifiedAt = fileModifiedAt
-		}
-		if codecVideo != nil {
-			f.CodecVideo = *codecVideo
-		}
-		if codecAudio != nil {
-			f.CodecAudio = *codecAudio
-		}
-		if resolution != nil {
-			f.Resolution = *resolution
-		}
-		if audioChannels != nil {
-			f.AudioChannels = *audioChannels
-		}
-		if hdr != nil {
-			f.HDR = *hdr
-		}
-		if container != nil {
-			f.Container = *container
-		}
-		if duration != nil {
-			f.Duration = *duration
-		}
-		if bitrate != nil {
-			f.Bitrate = *bitrate
-		}
-		if chapterThumbnailRetryAfter != nil {
-			f.ChapterThumbnailRetryAfter = chapterThumbnailRetryAfter
-		}
-		if chapterThumbnailFailureCount != nil {
-			f.ChapterThumbnailFailureCount = *chapterThumbnailFailureCount
-		}
-		if chapterThumbnailLastError != nil {
-			f.ChapterThumbnailLastError = *chapterThumbnailLastError
-		}
-		if probeSource != nil {
-			f.ProbeSource = *probeSource
-		}
-		if editionRaw != nil {
-			f.EditionRaw = *editionRaw
-		}
-		if editionKey != nil {
-			f.EditionKey = *editionKey
-		}
-		f.EditionConfidence = editionConfidence
-		if editionSource != nil {
-			f.EditionSource = *editionSource
-		}
-		if presentationKind != nil {
-			f.PresentationKind = *presentationKind
-		}
-		if presentationGroupKey != nil {
-			f.PresentationGroupKey = *presentationGroupKey
-		}
-		if firstSeenScanRunID != nil {
-			f.FirstSeenScanRunID = *firstSeenScanRunID
-		}
-		if presentationPartIndex != nil {
-			f.PresentationPartIndex = *presentationPartIndex
-		}
-		if presentationPartTotal != nil {
-			f.PresentationPartTotal = *presentationPartTotal
-		}
-		if multiEpisodeStart != nil {
-			f.MultiEpisodeStart = *multiEpisodeStart
-		}
-		if multiEpisodeEnd != nil {
-			f.MultiEpisodeEnd = *multiEpisodeEnd
-		}
-		f.MarkersSource = markersSource
-		f.MarkersConfidence = markersConfidence
-		f.IntroMarkersSource = introMarkersSource
-		f.IntroMarkersProvider = introMarkersProvider
-		f.IntroMarkersConfidence = introMarkersConfidence
-		f.IntroMarkersAlgorithm = introMarkersAlgorithm
-		f.IntroMarkersDetectedAt = introMarkersDetectedAt
-		f.CreditsMarkersSource = creditsMarkersSource
-		f.CreditsMarkersProvider = creditsMarkersProvider
-		f.CreditsMarkersConfidence = creditsMarkersConfidence
-		f.CreditsMarkersAlgorithm = creditsMarkersAlgorithm
-		f.CreditsMarkersDetectedAt = creditsMarkersDetectedAt
-		f.RecapMarkersSource = recapMarkersSource
-		f.RecapMarkersProvider = recapMarkersProvider
-		f.RecapMarkersConfidence = recapMarkersConfidence
-		f.RecapMarkersAlgorithm = recapMarkersAlgorithm
-		f.RecapMarkersDetectedAt = recapMarkersDetectedAt
-		f.PreviewMarkersSource = previewMarkersSource
-		f.PreviewMarkersProvider = previewMarkersProvider
-		f.PreviewMarkersConfidence = previewMarkersConfidence
-		f.PreviewMarkersAlgorithm = previewMarkersAlgorithm
-		f.PreviewMarkersDetectedAt = previewMarkersDetectedAt
-
-		if len(videoTracksJSON) > 0 {
-			if err := json.Unmarshal(videoTracksJSON, &f.VideoTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling video_tracks: %w", err)
-			}
-		}
-		if f.VideoTracks == nil {
-			f.VideoTracks = []models.VideoTrack{}
-		}
-
-		if len(audioTracksJSON) > 0 {
-			if err := json.Unmarshal(audioTracksJSON, &f.AudioTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling audio_tracks: %w", err)
-			}
-		}
-		if f.AudioTracks == nil {
-			f.AudioTracks = []models.AudioTrack{}
-		}
-
-		// Deserialize JSONB fields.
-		if len(subtitleTracksJSON) > 0 {
-			if err := json.Unmarshal(subtitleTracksJSON, &f.SubtitleTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling subtitle_tracks: %w", err)
-			}
-		}
-		if f.SubtitleTracks == nil {
-			f.SubtitleTracks = []models.SubtitleTrack{}
-		}
-
-		if len(externalSubtitlesJSON) > 0 {
-			if err := json.Unmarshal(externalSubtitlesJSON, &f.ExternalSubtitles); err != nil {
-				return nil, fmt.Errorf("unmarshaling external_subtitles: %w", err)
-			}
-		}
-		if f.ExternalSubtitles == nil {
-			f.ExternalSubtitles = []models.ExternalSubtitle{}
-		}
-
-		if len(chaptersJSON) > 0 {
-			if err := json.Unmarshal(chaptersJSON, &f.Chapters); err != nil {
-				return nil, fmt.Errorf("unmarshaling chapters: %w", err)
-			}
-		}
-
-		files = append(files, &f)
+		files = append(files, f)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating media file rows: %w", err)
