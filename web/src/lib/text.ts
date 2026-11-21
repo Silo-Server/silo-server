@@ -6,17 +6,25 @@ const graphemes =
     : undefined;
 
 /**
- * The first `count` characters of `text` as a reader sees them. An emoji, a flag,
- * or a letter with its accents counts as one and is never cut in half, which
- * `charAt` and `slice` do to anything outside the Basic Multilingual Plane.
- * Without Intl.Segmenter it counts code points: still never half a character,
- * though a flag or a joined emoji comes out as its first part.
+ * The characters of `text` as a reader sees them. An emoji, a flag, or a letter
+ * with its accents is one character and is never cut in half, which `charAt` and
+ * `slice` do to anything outside the Basic Multilingual Plane. Without
+ * Intl.Segmenter it yields code points: still never half a character, though a
+ * flag or a joined emoji comes out as separate parts.
  */
+export function* graphemeClusters(text: string): Generator<string> {
+  if (!graphemes) {
+    yield* Array.from(text);
+    return;
+  }
+  for (const { segment } of graphemes.segment(text)) yield segment;
+}
+
+/** The first `count` characters of `text`, as {@link graphemeClusters} counts them. */
 export function leadingGraphemes(text: string, count: number): string {
-  if (!graphemes) return Array.from(text).slice(0, count).join("");
   let out = "";
   let taken = 0;
-  for (const { segment } of graphemes.segment(text)) {
+  for (const segment of graphemeClusters(text)) {
     if (taken === count) break;
     out += segment;
     taken += 1;

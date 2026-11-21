@@ -9,6 +9,8 @@ describe("providerMonogram", () => {
     ["éclair", "ÉC"],
     // हिंदी: two characters, हिं and दी
     ["हिंदी", "हिंदी"],
+    // वाक् संवाद: the word-final virama must not join the next word's letter
+    ["वाक् संवाद", "वाक्"],
     ["AniList", "AN"],
     ["", "??"],
   ])("marks %j as %j", (name, monogram) => {
