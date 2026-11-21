@@ -110,10 +110,9 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
               />
               {/* The year sits under the title, as a collection's count does,
                   so the title has the whole width however narrow the row or
-                  large the text. A cut title keeps its start in either script;
-                  w-fit keeps a short one on the page's start side. */}
+                  large the text. */}
               <span className="min-w-0 flex-1">
-                <span dir="auto" className="block w-fit max-w-full truncate text-sm">
+                <span dir="auto" className="bidi-text block truncate text-sm">
                   {item.title}
                 </span>
                 {item.year ? (
