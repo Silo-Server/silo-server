@@ -76,6 +76,7 @@ import {
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { menuItemKey } from "@/lib/uiCustomization";
 import { Direction } from "radix-ui";
+import { getInitial } from "@/lib/text";
 
 // Same icons the admin library-type picker shows; Library only for a type the
 // picker does not know.
@@ -1094,10 +1095,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                       <AvatarImage src={profile.avatar_url} alt={profile.name} />
                     ) : null}
                     <AvatarFallback className="bg-primary text-primary-foreground text-xs font-bold shadow-[0_14px_32px_-20px_rgba(0,0,0,0.8)]">
-                      {profile?.name?.charAt(0).toUpperCase() ??
-                        user?.username?.charAt(0).toUpperCase() ??
-                        // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- placeholder initial, not a word
-                        "?"}
+                      {getInitial(profile?.name ?? user?.username ?? "?")}
                     </AvatarFallback>
                   </Avatar>
                 </span>
@@ -1122,7 +1120,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     <AvatarImage src={profile.avatar_url} alt={profile.name} />
                   ) : null}
                   <AvatarFallback className="bg-primary text-primary-foreground text-sm font-bold">
-                    {(profile?.name ?? user?.username ?? "?").charAt(0).toUpperCase()}
+                    {getInitial(profile?.name ?? user?.username ?? "?")}
                   </AvatarFallback>
                 </Avatar>
                 {/* w-fit keeps a short name on the start side; the column would
