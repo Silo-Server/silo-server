@@ -92,7 +92,7 @@ export function eventStatusTone(status: AutoscanEventStatus): {
       return {
         label: "web.admin.autoscan.activity.pollStatus.error",
         icon: AlertTriangle,
-        className: "border-destructive/30 bg-destructive/10 text-destructive",
+        className: "border-destructive/30 bg-destructive/10 text-destructive-label",
       };
   }
 }
@@ -104,7 +104,7 @@ export function scanStatusClass(
     case "completed":
       return "border-emerald-500/30 bg-emerald-500/10 text-emerald-500";
     case "failed":
-      return "border-destructive/30 bg-destructive/10 text-destructive";
+      return "border-destructive/30 bg-destructive/10 text-destructive-label";
     case "running":
       return "border-sky-500/30 bg-sky-500/10 text-sky-500";
     case "accepted":
@@ -278,7 +278,7 @@ export const CHANGE_OUTCOME_TONES: Record<
   },
   error: {
     label: "web.admin.autoscan.activity.outcome.error",
-    className: "border-destructive/30 bg-destructive/10 text-destructive",
+    className: "border-destructive/30 bg-destructive/10 text-destructive-label",
   },
 };
 
