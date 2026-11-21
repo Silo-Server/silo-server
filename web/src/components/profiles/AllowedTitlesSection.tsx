@@ -92,9 +92,11 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
           <p className="text-muted-foreground text-sm">{t("web.profiles.allowedTitles.none")}</p>
         )
       ) : (
+        // grid-cols-1 (like sm:grid-cols-2) holds the column to the list's width.
+        // An implicit auto column grows to fit the longest name instead of cutting it.
         <ul
           aria-label={t("web.profiles.allowedTitles.heading")}
-          className="grid gap-2 sm:grid-cols-2"
+          className="grid grid-cols-1 gap-2 sm:grid-cols-2"
         >
           {(allowedTitles ?? []).map((item) => (
             <li
@@ -106,13 +108,17 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
                 thumbhash={item.poster_thumbhash}
                 className="ring-border/60 aspect-[2/3] w-9 shrink-0 rounded-md ring-1 ring-inset"
               />
-              <span className="min-w-0 flex-1 truncate text-sm">
-                {item.title}
-                {item.year ? (
-                  <span className="text-muted-foreground ms-1.5 text-xs">
-                    {numberText(item.year)}
-                  </span>
-                ) : null}
+              {/* A cut title keeps its start in either script; w-fit keeps a
+                  short one on the page's start side. */}
+              <span className="min-w-0 flex-1">
+                <span dir="auto" className="block w-fit max-w-full truncate text-sm">
+                  {item.title}
+                  {item.year ? (
+                    <span className="text-muted-foreground ms-1.5 text-xs">
+                      {numberText(item.year)}
+                    </span>
+                  ) : null}
+                </span>
               </span>
               <Button
                 type="button"
@@ -157,9 +163,10 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
           <h4 className="text-sm font-medium">
             {t("web.profiles.allowedTitles.collectionsHeading")}
           </h4>
+          {/* grid-cols-1: see the title list above. */}
           <ul
             aria-label={t("web.profiles.allowedTitles.collectionsHeading")}
-            className="grid gap-2"
+            className="grid grid-cols-1 gap-2"
           >
             {(collections.data ?? []).map((collection) => (
               <li
@@ -167,7 +174,9 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
                 className="border-border flex items-center gap-3 rounded-md border px-3 py-2"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm">{collection.name}</span>
+                  <span dir="auto" className="block w-fit max-w-full truncate text-sm">
+                    {collection.name}
+                  </span>
                   <span className="text-muted-foreground text-xs">
                     {collection.live
                       ? t("web.profiles.allowedTitles.titleCount", {
