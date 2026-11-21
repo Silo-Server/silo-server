@@ -770,7 +770,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                     ) : (
                                       <LayoutGrid className="h-3.5 w-3.5 shrink-0 opacity-60" />
                                     )}
-                                    <span id={pinLabelId} className="truncate">
+                                    <span id={pinLabelId} className="bidi-text truncate">
                                       {label}
                                     </span>
                                   </ViewTransitionLink>
@@ -784,12 +784,16 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                           label: pin.label,
                                         })
                                       }
-                                      className="pointer-reveal text-muted-foreground hover:text-destructive absolute inset-y-0 end-0 flex items-center rounded-xl px-2"
+                                      className="group/unpin pointer-reveal text-muted-foreground hover:text-destructive absolute inset-y-0 end-0 flex items-center px-1 focus-visible:outline-none"
                                       title={t("web.shell.sidebar.unpin")}
                                       aria-label={t("web.shell.sidebar.unpin")}
                                       aria-describedby={pinLabelId}
                                     >
-                                      <PinOff className="h-3 w-3" />
+                                      {/* The button spans the row's height for an easier tap;
+                                        the focus ring stays around the icon. */}
+                                      <span className="rounded p-1 group-focus-visible/unpin:[outline:auto]">
+                                        <PinOff className="h-3 w-3" />
+                                      </span>
                                     </button>
                                   ) : null}
                                 </div>
