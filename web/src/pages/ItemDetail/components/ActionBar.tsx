@@ -432,17 +432,21 @@ export default function ActionBar({
     displayedPlayLabel
   );
 
-  // A thin bar under the label, so the label stays on the solid accent. The
-  // fill is the label color (it reads wherever the label does); the faint
-  // track keeps 3:1 against it on every accent. In forced colors the track is
-  // a hollow outline and the fill a solid system color (through its slot, see
-  // app.css), so they differ by shape whatever the palette.
+  // A thin bar in the pill's bottom padding, under the label, so the label
+  // stays on the solid accent. The fill is the label color (it reads wherever
+  // the label does); the faint track keeps 3:1 against it on every accent. The
+  // play buttons grow with their text (min-h-11 and padding, not a fixed
+  // height), so a larger font never pushes the label into the bar. In forced
+  // colors the track is a hollow outline and the fill solid, both ButtonText,
+  // which always contrasts with the button face.
   const progressBar =
     playProgress != null && playProgress > 0 && playProgress < 100 ? (
-      <span className="bg-primary-foreground/10 absolute inset-x-4 bottom-1.5 h-[3px] rounded-full forced-colors:bg-transparent forced-colors:outline forced-colors:outline-[GrayText]">
+      <span
+        data-resume-progress
+        className="bg-primary-foreground/10 absolute inset-x-4 bottom-1.5 h-[3px] rounded-full forced-colors:bg-transparent forced-colors:outline forced-colors:outline-[ButtonText]"
+      >
         <span
-          data-slot="progress-indicator"
-          className="bg-primary-foreground absolute inset-y-0 start-0 min-w-1 rounded-full"
+          className="bg-primary-foreground absolute inset-y-0 start-0 min-w-1 rounded-full forced-colors:bg-[ButtonText]"
           style={{ width: `${playProgress}%` }}
         />
       </span>
@@ -1081,7 +1085,7 @@ export default function ActionBar({
           showPlayChoiceDialog ? (
             <Button
               onClick={openPlayChoiceDialog}
-              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
+              className={`${responsivePlayActionClass} relative h-auto min-h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 py-2.5 text-[0.9375rem] font-bold tracking-wide shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
               {playText}
@@ -1090,7 +1094,7 @@ export default function ActionBar({
           ) : selectedVersion ? (
             <Button
               onClick={() => handleSelectedVersionPlay(false)}
-              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
+              className={`${responsivePlayActionClass} relative h-auto min-h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 py-2.5 text-[0.9375rem] font-bold tracking-wide shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
               {playText}
@@ -1099,7 +1103,7 @@ export default function ActionBar({
           ) : (
             <Button
               onClick={() => startPlaybackFromHref(playHref)}
-              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
+              className={`${responsivePlayActionClass} relative h-auto min-h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 py-2.5 text-[0.9375rem] font-bold tracking-wide shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
               {playText}

@@ -275,11 +275,10 @@
       width: 44px;
       padding-inline: 0;
     }
-    /* The resume bar sits under the label (ActionBar). Size this pill in rem
-       like its label, as the full-size pill is (h-11), so at a larger text
-       size it grows and the label doesn't run into the bar. */
-    [data-compact-mobile] .detail-primary-actions > button:has([data-slot="progress-indicator"]) {
-      height: 2.75rem;
+    /* A play pill showing the resume bar grows with its text (ActionBar), so
+       the label never runs into the bar under it. */
+    [data-compact-mobile] .detail-primary-actions > button:has([data-resume-progress]) {
+      height: auto;
       min-height: 44px;
     }
     [data-compact-mobile] .detail-stream-actions {
