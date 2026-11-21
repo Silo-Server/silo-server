@@ -114,6 +114,13 @@ describe.each(THEMES)("high contrast on %s", (theme) => {
     },
   );
 
+  // Red text sits on panels high contrast lightens; --surface-raised is the lightest.
+  it("keeps red text readable on the lightest surface", () => {
+    expect(
+      contrast(highContrastColor(body, "destructive"), highContrastColor(body, "surface-raised")),
+    ).toBeGreaterThanOrEqual(AA_TEXT);
+  });
+
   it("does not make borders less visible than they already were", () => {
     const base = token(body, "border-base");
     expect(contrast(highContrastColor(body, "border"), background)).toBeGreaterThanOrEqual(

@@ -2,12 +2,21 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { EyeOff, Languages } from "lucide-react";
 import { useT } from "@/i18n";
 import MachineTranslatedLabel from "./MachineTranslatedLabel";
+import TranslatingStatus from "./TranslatingStatus";
+
+const CLAMP_CLASSES = {
+  3: "line-clamp-3",
+  4: "line-clamp-4",
+  5: "line-clamp-5",
+} as const;
 
 interface DetailOverviewProps {
   overview: string;
   compact?: boolean;
   /** Clamp to a few lines with a More/Less toggle instead of showing it all. */
   clamp?: boolean;
+  /** Number of visible lines when clamped. Defaults to 3. */
+  clampLines?: keyof typeof CLAMP_CLASSES;
   translating?: boolean;
   onTranslate?: () => void;
   /** The shown text was machine-translated by AI; label it as such. */
@@ -21,6 +30,7 @@ export default function DetailOverview({
   overview,
   compact = false,
   clamp = false,
+  clampLines = 3,
   translating = false,
   onTranslate,
   machineTranslated = false,
@@ -31,19 +41,46 @@ export default function DetailOverview({
   const textRef = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
+  // Announce "Translated by AI" only after a translation ran in this view. A
+  // description that arrives already translated, such as on navigation to
+  // another item, shows the label without announcing it.
+  const [sawTranslation, setSawTranslation] = useState(false);
+  if (translating && !sawTranslation) setSawTranslation(true);
 
   // Only offer "More" when the clamp actually hides text; re-check on resize
   // because the line count depends on the column width.
   useLayoutEffect(() => {
     const text = textRef.current;
     if (!clamp || expanded || !text) return;
-    const measure = () => setOverflowing(text.scrollHeight > text.clientHeight + 1);
+    let active = true;
+    const measure = () => {
+      if (active) setOverflowing(text.scrollHeight > text.clientHeight + 1);
+    };
     measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(text);
-    return () => observer.disconnect();
-  }, [clamp, expanded, overview, hidden]);
+    // A web font that loads after the first measure can change the line count
+    // while the clamped box keeps its height, so the resize observer never
+    // fires. `ready` covers a load already under way (WebKit fires no
+    // "loadingdone"); the event covers later ones.
+    const fonts = "fonts" in document ? document.fonts : undefined;
+    void fonts?.ready.then(measure);
+    fonts?.addEventListener("loadingdone", measure);
+    // So do the text weight preference and the interface language, which
+    // changes how text such as Japanese breaks into lines (DetailTitle watches
+    // both too).
+    const typography = new MutationObserver(measure);
+    typography.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-text-weight", "lang"],
+    });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(text);
+    return () => {
+      active = false;
+      observer?.disconnect();
+      typography.disconnect();
+      fonts?.removeEventListener("loadingdone", measure);
+    };
+  }, [clamp, clampLines, expanded, overview, hidden]);
 
   if (hidden) {
     return (
@@ -62,13 +99,16 @@ export default function DetailOverview({
 
   return (
     <div className="detail-hero-description max-w-2xl">
+      {/* dir="auto" takes the first paragraph's direction. A collection's
+          description keeps its line breaks, so when a later paragraph runs the
+          other way and is clamped, Firefox and WebKit cut it on the wrong side;
+          no one direction suits every paragraph of one clamped block. */}
       <p
         ref={textRef}
+        dir="auto"
         className={`bidi-text text-muted-foreground leading-7 ${
           compact ? "text-sm" : "text-foreground/72 text-sm sm:text-[0.9375rem]"
-        } ${clamp && !expanded ? "line-clamp-3" : ""} ${
-          translating ? "animate-pulse opacity-50" : ""
-        }`}
+        } ${clamp && !expanded ? CLAMP_CLASSES[clampLines] : ""}`}
       >
         {overview}
       </p>
@@ -83,13 +123,20 @@ export default function DetailOverview({
             {expanded ? t("web.detail.overview.less") : t("web.detail.overview.more")}
           </button>
         )}
-        {translating && (
-          <span className="text-muted-foreground/70 mt-1 inline-flex items-center gap-1.5 text-xs">
-            <Languages className="h-3 w-3 animate-pulse" />
-            {t("web.detail.translation.translating")}
-          </span>
+        {/* The status and the label take the Translate button's height, so
+            the row keeps its height when one replaces another. */}
+        <TranslatingStatus
+          translating={translating}
+          label={t("web.detail.translation.translating")}
+          className="mt-1.5"
+        >
+          {sawTranslation && machineTranslated && (
+            <MachineTranslatedLabel className="border-y border-transparent py-0.5" />
+          )}
+        </TranslatingStatus>
+        {!sawTranslation && machineTranslated && (
+          <MachineTranslatedLabel className="mt-1.5 border-y border-transparent py-0.5" />
         )}
-        {!translating && machineTranslated && <MachineTranslatedLabel className="mt-1" />}
         {!translating && onTranslate && (
           <button
             type="button"

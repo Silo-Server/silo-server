@@ -53,7 +53,7 @@ export function SettingJsonDialog({
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
           />
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <Button variant="outline" size="sm" onClick={onCancel}>
               {t("common.cancel")}
             </Button>

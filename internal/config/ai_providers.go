@@ -161,6 +161,10 @@ type AIProvider struct {
 	BaseURL      string         `json:"base_url"`
 	APIKey       string         `json:"api_key,omitempty"`
 	Capabilities []AICapability `json:"capabilities"`
+	// ManagedBy names the deployment variable that declares the provider,
+	// such as SILO_CONFIG_FILE (ApplyDeclaredAIProviders). Admins cannot edit
+	// or delete a declared provider. Empty for one an admin connected.
+	ManagedBy string `json:"managed_by,omitempty"`
 }
 
 // Supports reports whether the provider serves capability.
@@ -412,6 +416,11 @@ func ValidateAIProviderBindings(values map[string]string) error {
 	for _, binding := range aiProviderBindings {
 		id := strings.TrimSpace(values[binding.key])
 		if id == "" {
+			continue
+		}
+		// The text binding is idle while the ChatGPT plan serves text, as in
+		// AIProviderUsers, so it needs no provider until the plan is left.
+		if binding.job == AIJobText && strings.TrimSpace(values[AIAuthModeSettingKey]) == aiAuthModeChatGPT {
 			continue
 		}
 		provider, ok := registry.Find(id)

@@ -77,6 +77,7 @@ func TestAdminDiagnosticDownloadProblems(t *testing.T) {
 // and Accept-Ranges: none means a download cut off by the API server's
 // absolute WriteTimeout cannot resume.
 func TestAdminDiagnosticDownloadOutlastsServerWriteTimeout(t *testing.T) {
+	t.Parallel()
 	body := &slowArtifactReader{chunks: []string{"bu", "nd", "le"}, delay: 150 * time.Millisecond}
 	s := &diagnosticDownloadStub{body: &diagnosticTestBody{Reader: body}}
 	deps := requestDeps(fixtureRequests())

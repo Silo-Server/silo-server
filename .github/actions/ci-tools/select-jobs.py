@@ -21,14 +21,76 @@ GO_ONLY_CONTRACTS = frozenset("contracts/api/v2/" + name for name in (
 ))
 
 
+# Inputs and outputs that can change web/src/lib/settingsContract.ts.
+WEB_SETTINGS_BINDING_EXACT = frozenset({
+    "Makefile",
+    "go.mod",
+    "go.sum",
+    "go.work",
+    "go.work.sum",
+    "web/package.json",
+    "web/pnpm-lock.yaml",
+    "web/.prettierignore",
+    "web/src/lib/settingsContract.ts",
+    "web/src/lib/settingsConformance.json",
+})
+WEB_SETTINGS_BINDING_PREFIXES = (
+    ".github/",
+    "scripts/",
+    "tools/",
+    "contracts/settings/",
+    "cmd/settingsgen/",
+    "internal/lang/",
+    "internal/settingscontract/",
+    "internal/settingskeys/",
+    "web/.prettierrc",
+    "web/prettier.config.",
+    "web/tailwind.config.",
+)
+
+# Inputs and outputs that can change web/src/api/v2/{schema,operations}.ts.
+WEB_APIV2_TYPES_EXACT = frozenset({
+    "Makefile",
+    "contracts/api/v2/openapi.json",
+    "web/package.json",
+    "web/pnpm-lock.yaml",
+    "web/.prettierignore",
+    "web/scripts/generate-apiv2.mjs",
+    "web/src/api/v2/schema.ts",
+    "web/src/api/v2/operations.ts",
+})
+WEB_APIV2_TYPES_PREFIXES = (
+    ".github/",
+    "scripts/",
+    "tools/",
+    "web/.prettierrc",
+    "web/prettier.config.",
+    "web/tailwind.config.",
+)
+
+
 def all_jobs(reason):
-    return {"go": True, "web": True, "reason": reason}
+    return {
+        "go": True,
+        "web": True,
+        "web_settings_binding": True,
+        "web_apiv2_types": True,
+        "reason": reason,
+    }
+
+
+def touches_web_settings_binding(path):
+    return path in WEB_SETTINGS_BINDING_EXACT or path.startswith(WEB_SETTINGS_BINDING_PREFIXES)
+
+
+def touches_web_apiv2_types(path):
+    return path in WEB_APIV2_TYPES_EXACT or path.startswith(WEB_APIV2_TYPES_PREFIXES)
 
 
 def classify(paths):
     if not paths:
         return all_jobs("empty diff")
-    go = web = False
+    go = web = web_settings_binding = web_apiv2_types = False
     for path in paths:
         parts = PurePosixPath(path).parts
         if (not parts or path.startswith("/") or ".." in parts
@@ -38,6 +100,10 @@ def classify(paths):
                 or (path.startswith((".github/ISSUE_TEMPLATE/", ".github/DISCUSSION_TEMPLATE/")) and path.endswith((".yml", ".yaml", ".md")))
                 or (path.endswith(".md") and path.startswith((".github/", "scripts/", "cmd/")))):
             continue
+        if touches_web_settings_binding(path):
+            web_settings_binding = True
+        if touches_web_apiv2_types(path):
+            web_apiv2_types = True
         if (path in GO_ONLY_CONTRACTS
                 or path in {"scripts/ci/db-pins.txt", "scripts/ci/db-contracts.txt"}
                 or (path.startswith("internal/apiv2/") and path.endswith(".go"))
@@ -73,7 +139,13 @@ def classify(paths):
             pass
         else:
             return all_jobs("unknown input")
-    return {"go": go, "web": web, "reason": "complete PR diff"}
+    return {
+        "go": go,
+        "web": web,
+        "web_settings_binding": web and web_settings_binding,
+        "web_apiv2_types": web and web_apiv2_types,
+        "reason": "complete PR diff",
+    }
 
 
 def git(*args):
@@ -161,7 +233,7 @@ def main():
         result = all_jobs("event metadata unavailable")
     print(json.dumps(result, sort_keys=True))
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-        for group in ("go", "web"):
+        for group in ("go", "web", "web_settings_binding", "web_apiv2_types"):
             output.write(group + "=" + str(result[group]).lower() + "\n")
     return 0
 

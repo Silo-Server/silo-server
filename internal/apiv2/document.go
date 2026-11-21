@@ -623,6 +623,7 @@ func registerAll(reg *Registry) {
 	registerAdminPluginRepositoryUpdate(reg)
 	registerAdminPluginRepositoryDelete(reg)
 	registerAdminPluginInventory(reg)
+	registerAdminPluginProvisioning(reg)
 	registerAdminPluginConfiguration(reg)
 	registerAdminPluginLifecycle(reg)
 	registerAdminPluginUploads(reg)
@@ -766,6 +767,7 @@ func registerAll(reg *Registry) {
 	registerPolicyCapability(reg)
 	registerArtwork(reg)
 	registerItemPosters(reg)
+	registerAdminRequestPoster(reg)
 	registerBranding(reg)
 	registerAdminInviteCodes(reg)
 	registerInvitations(reg)
@@ -789,9 +791,7 @@ func registerAll(reg *Registry) {
 // documents. The migration ledger's reconcile test reads the Guarded set
 // from it.
 func DeclaredOperations() []Declared {
-	reg := &Registry{api: huma.NewAPI(humaConfig(), noopAdapter{})}
-	registerAll(reg)
-	return reg.Declared()
+	return slices.Clone(sharedRuntimeSchemas().declared)
 }
 
 // GenerateOpenAPI renders the contract document from the registries alone:

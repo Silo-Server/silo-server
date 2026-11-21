@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PluginCatalogEntry, PluginInstallation } from "@/api/types";
+import type { PluginProvisionStatus } from "@/hooks/queries/admin/plugins";
 
 import AdminPluginDetail from "./AdminPluginDetail";
 
@@ -30,6 +31,7 @@ function query<T>(data: T | undefined, overrides: Partial<QueryState<T>> = {}): 
 
 let installationsQuery: QueryState<PluginInstallation[]> = query<PluginInstallation[]>([]);
 let catalogQuery: QueryState<PluginCatalogEntry[]> = query<PluginCatalogEntry[]>([]);
+let provisioningQuery = query<PluginProvisionStatus[]>([]);
 const restartMock = vi.fn();
 const deleteMock = vi.fn();
 const installMock = vi.fn();
@@ -40,6 +42,7 @@ const capturedSwitches: Array<Record<string, unknown>> = [];
 vi.mock("@/hooks/queries/admin/plugins", () => ({
   useAdminPluginInstallations: () => installationsQuery,
   useAdminPluginCatalog: () => catalogQuery,
+  useAdminPluginProvisioningStatus: () => provisioningQuery,
   useUpdatePluginInstallation: () => ({ mutate: vi.fn(), isPending: false }),
   useApplyPluginUpdate: () => ({ mutate: vi.fn(), isPending: false }),
   useRestartPluginInstallation: () => ({ mutate: restartMock, isPending: false }),
@@ -211,6 +214,7 @@ describe("AdminPluginDetail", () => {
   beforeEach(() => {
     installationsQuery = query([makeInstallation()]);
     catalogQuery = query<PluginCatalogEntry[]>([]);
+    provisioningQuery = query<PluginProvisionStatus[]>([]);
     capturedSwitches.length = 0;
     for (const mock of [
       restartMock,
@@ -220,6 +224,33 @@ describe("AdminPluginDetail", () => {
       saveTaskBindingMock,
     ])
       mock.mockReset();
+  });
+
+  it("shows provisioning status for a declaration without a catalog or installation row", () => {
+    installationsQuery = query([]);
+    catalogQuery = query<PluginCatalogEntry[]>(undefined, { isLoading: true });
+    provisioningQuery = query([
+      {
+        plugin_id: "silo.auth.oidc",
+        version: "0.1.2",
+        state: "held",
+        detail: "A restore withheld plugin authority.",
+      },
+    ]);
+
+    renderPage("silo.auth.oidc");
+    expect(screen.getByRole("heading", { name: "Provisioning status" })).toBeInTheDocument();
+    expect(screen.getByText("Held")).toBeInTheDocument();
+    expect(screen.getByText("A restore withheld plugin authority.")).toBeInTheDocument();
+  });
+
+  it("lets the admin retry a failed provisioning lookup for a missing installation", () => {
+    installationsQuery = query([]);
+    provisioningQuery = query<PluginProvisionStatus[]>(undefined, { isError: true });
+    renderPage("silo.auth.oidc");
+    expect(screen.getByText("Couldn’t load plugin provisioning status.")).toBeInTheDocument();
+    screen.getByRole("button", { name: "Try again" }).click();
+    expect(provisioningQuery.refetch).toHaveBeenCalledOnce();
   });
 
   it("asks for missing required settings, but not for optional ones", () => {
@@ -280,6 +311,10 @@ describe("AdminPluginDetail", () => {
 
   it.each([
     { name: "unverified", overrides: { repository_id: null, source_kind: "external" as const } },
+    {
+      name: "pinned",
+      overrides: { env_managed: { version_pin: "0.1.2", config_fields: {}, binding_fields: {} } },
+    },
     {
       name: "paused",
       overrides: { source_kind: "approved_community" as const, updates_paused: true },

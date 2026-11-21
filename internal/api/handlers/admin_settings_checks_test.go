@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
@@ -267,5 +268,23 @@ func TestAdminSettingsSensitiveValuesStayOutOfResponses(t *testing.T) {
 	}
 	if _, leaked := batch.Values[key]; leaked {
 		t.Fatalf("batch response = %#v, want the secret left out", batch.Values)
+	}
+}
+
+func TestAdminSettingsCannotClearPluginProvisionRestoreHold(t *testing.T) {
+	ctx := t.Context()
+	key := plugins.ProvisionRestoreHoldKey
+	store := &fakeServerSettingsStore{values: map[string]string{key: "current-hold"}}
+	handler := &AdminHandler{SettingsRepo: store}
+	_, singleErr := handler.UpdateAdminSetting(ctx, key, "", nil)
+	_, batchErr := handler.UpdateAdminSettings(ctx, map[string]string{key: ""}, nil)
+	for _, err := range []error{singleErr, batchErr} {
+		apiErr, ok := errors.AsType[*APIError](err)
+		if !ok || apiErr.Status != http.StatusBadRequest || !strings.Contains(apiErr.Message, "managed internally") {
+			t.Fatalf("clearing the restore hold through admin settings: %v", err)
+		}
+	}
+	if store.setCalls != 0 || store.setManyCalls != 0 || store.values[key] != "current-hold" {
+		t.Fatal("admin settings changed the restore hold")
 	}
 }

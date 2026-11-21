@@ -17,6 +17,9 @@ type MetadataRefreshDebtSample struct {
 	ContentID     string     `json:"content_id"`
 	Title         string     `json:"title"`
 	Type          string     `json:"type"`
+	SeriesTitle   string     `json:"series_title,omitempty"`
+	SeasonNumber  *int       `json:"season_number,omitempty"`
+	EpisodeNumber *int       `json:"episode_number,omitempty"`
 	ReasonMask    int64      `json:"reason_mask"`
 	NextRefreshAt time.Time  `json:"next_refresh_at"`
 	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`

@@ -80,7 +80,7 @@ class ErrorBoundaryInner extends Component<ErrorBoundaryProps, ErrorBoundaryStat
 }
 
 const PRIMARY_BUTTON =
-  "bg-primary text-primary-foreground hover:bg-primary/90 rounded-md px-4 py-2";
+  "bg-primary text-primary-foreground hover:bg-primary-hover rounded-md px-4 py-2";
 const SECONDARY_BUTTON = "border-border hover:bg-muted/40 rounded-md border px-4 py-2";
 
 /**

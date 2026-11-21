@@ -263,7 +263,9 @@ export function MDBListBrowser({
         <label htmlFor={`${id}-link`} className="text-[14px] font-semibold">
           {pasteMdblistLink()}
         </label>
-        <div className="relative">
+        {/* Set on the wrapper so the start-side icon and the input's start padding stay
+            on the same side. */}
+        <div dir="ltr" className="relative">
           <Link2
             aria-hidden
             className="text-muted-foreground absolute start-3 top-1/2 size-4 -translate-y-1/2"

@@ -81,13 +81,18 @@ runs:
     - name: Mark restored Go cache entries unused
       if: runner.environment == 'github-hosted'
       shell: bash
+      env:
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       run: |
         cache_dir="$(go env GOCACHE)"
         mkdir -p "$cache_dir"
-        # Go marks use at most hourly; epoch mtimes force used entries to advance and leave unused entries at epoch.
-        find "$cache_dir" -mindepth 2 -maxdepth 2 \( -name '*-a' -o -name '*-d' \) -exec touch -d '@0' {} +
-        # A fresh trim stamp stops Go's daily trim from deleting those entries before the job uses them.
+        # A fresh trim stamp stops Go's daily trim from deleting restored entries before the job uses them.
         date +%s > "$cache_dir/trim.txt"
+        # Only default-branch pushes prune and save GOCACHE; PRs and schedules skip touching every cache file.
+        if [[ "$GITHUB_REF_NAME" == "$DEFAULT_BRANCH" && "$GITHUB_EVENT_NAME" != pull_request && "$GITHUB_EVENT_NAME" != schedule ]]; then
+          # Go marks use at most hourly; epoch mtimes force used entries to advance and leave unused entries at epoch.
+          find "$cache_dir" -mindepth 2 -maxdepth 2 \( -name '*-a' -o -name '*-d' \) -exec touch -d '@0' {} +
+        fi
 
     # cmd/silo embeds the built frontend, so nothing under ./... compiles
     # without web/dist. The Go jobs never serve it, so a placeholder is
