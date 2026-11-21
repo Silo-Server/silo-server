@@ -28239,18 +28239,10 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الحسابات"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -28258,7 +28250,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -28266,22 +28258,6 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الحسابات"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الحسابات"
-            }
-          ]
-        },
         "other": {
           "value": [
             {
@@ -28290,25 +28266,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الملفات"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -28316,27 +28282,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "إخفاء الملفين"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الملفات"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الملفات"
             }
           ]
         },
@@ -28348,25 +28298,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الملفات"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -28374,27 +28314,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "إخفاء الملفين"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الملفات"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الملفات"
             }
           ]
         },
@@ -28406,9 +28330,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -29205,18 +29127,10 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الحسابات"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -29224,27 +29138,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "عرض الحسابين"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الحسابات"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الحسابات"
             }
           ]
         },
@@ -29256,9 +29154,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -29369,18 +29265,10 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الملفات"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -29388,27 +29276,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "عرض الملفين"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الملفات"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الملفات"
             }
           ]
         },
@@ -29420,25 +29292,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الملفات"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -29446,27 +29308,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "عرض الملفين"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الملفات"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الملفات"
             }
           ]
         },
@@ -29478,9 +29324,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -86723,7 +86567,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "أعد التحميل لعرض القيم الحالية. تُلغى تعديلاتك على الإعدادات التي تغيّرت، وعلى كلمات المرور والمفاتيح المحفوظة مع الإعدادات المرتبطة بها؛ ويُحتفظ بتعديلاتك الأخرى."
+      "value": "أعد التحميل لعرض القيم الحالية. إذا تغيّر شيء في هذه الصفحة، أو عدّلت كلمة مرور أو مفتاحًا محفوظًا، فستُلغى جميع تعديلاتك؛ وإلا فسيُحتفظ بها."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -104057,6 +103901,28 @@
     }
   ],
   "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
     {
       "type": 1,
       "value": "code"
