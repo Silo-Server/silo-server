@@ -24,8 +24,6 @@ import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
 import { resolveAdminDocumentTitle, resolveAdminHeaderTitle } from "@/lib/documentTitle";
 import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { Menu, Search, X } from "lucide-react";
-import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
-import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 
 const ADMIN_DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
 /** The play-mark glyph on the phone header's logo tile; not text. */
@@ -66,9 +64,6 @@ function AdminLayoutContent() {
       }),
     [adminInstallations, policyCapability.data?.editor_available],
   );
-  const { isBackgroundBarVisible } = useWatchPlaybackController();
-  const audiobookPlayback = useAudiobookPlaybackController();
-  const hasBackgroundBar = isBackgroundBarVisible || audiobookPlayback?.isBackgroundBarVisible;
   const documentTitle = resolveAdminDocumentTitle(location.pathname);
   const mobileTitle = resolveAdminHeaderTitle(location.pathname);
 
@@ -207,13 +202,13 @@ function AdminLayoutContent() {
           `--page-gutter` is published so fixed page chrome (the collection
           editor's save bar) can line up with the content column.
           `scroll-mt-24` keeps Skip to content's jump clear of the phone
-          header. */}
+          header. The bottom padding adds `--playback-bar-clearance`, the
+          background playback bar's measured footprint (0 without one), at
+          every width, so the end of each page scrolls clear of the bar. */}
       <main
         id="main-content"
         tabIndex={-1}
-        className={`relative z-10 min-h-screen min-w-0 scroll-mt-24 px-(--page-gutter) py-4 [--page-gutter:1rem] sm:[--page-gutter:1.5rem] lg:ms-[240px] lg:scroll-mt-0 lg:pt-16 lg:pb-8 lg:[--page-gutter:2rem] xl:[--page-gutter:2.5rem] ${
-          hasBackgroundBar ? "pb-32 sm:pb-36" : ""
-        }`}
+        className="relative z-10 min-h-screen min-w-0 scroll-mt-24 px-(--page-gutter) pt-4 pb-[calc(1rem+var(--playback-bar-clearance,0px))] [--page-gutter:1rem] sm:[--page-gutter:1.5rem] lg:ms-[240px] lg:scroll-mt-0 lg:pt-16 lg:pb-[calc(2rem+var(--playback-bar-clearance,0px))] lg:[--page-gutter:2rem] xl:[--page-gutter:2.5rem]"
       >
         <PageFrame className="admin-shell">
           {/* Above the routed page and inside the content column, so every
