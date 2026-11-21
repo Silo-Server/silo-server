@@ -87,11 +87,19 @@ function ProfileRow({
       />
       <div className="min-w-0 flex-1">
         {/* When the name and detail don't fit on one line, the detail moves under the
-            name, and a name wider than the row wraps. */}
+            name, and a name wider than the row wraps. Part of a name that can't wrap,
+            such as one long run of joined emoji, is clipped sideways at the row's edge:
+            block makes the words around it wrap at the row's width, and the 0.25em of
+            padding, offset by a negative margin, keeps letters whole that reach past their
+            edge, such as a leading "j" or the end of some Telugu names. */}
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <Label
             htmlFor={controlId}
-            className={cn("text-sm wrap-anywhere", !selectable && "text-muted-foreground")}
+            title={profile.name}
+            className={cn(
+              "-mx-[0.25em] block min-w-0 overflow-x-clip px-[0.25em] text-sm wrap-anywhere",
+              !selectable && "text-muted-foreground",
+            )}
           >
             {profile.name}
           </Label>
@@ -99,24 +107,34 @@ function ProfileRow({
             {detail}
           </span>
         </div>
+        {/* Each status is a block of its own: SettingFieldStatus is inline, so
+            two side by side would share a line. */}
         {why ? (
-          <SettingFieldStatus tone={profile.selectable ? "muted" : "warn"}>
-            {why}
-          </SettingFieldStatus>
+          <div>
+            <SettingFieldStatus tone={profile.selectable ? "muted" : "warn"}>
+              {why}
+            </SettingFieldStatus>
+          </div>
         ) : null}
         {locked ? (
-          <SettingFieldStatus tone="muted">
-            {t("web.admin.backups.restore.users.lockedPrimary")}
-          </SettingFieldStatus>
+          <div>
+            <SettingFieldStatus tone="muted">
+              {t("web.admin.backups.restore.users.lockedPrimary")}
+            </SettingFieldStatus>
+          </div>
         ) : null}
         {profile.no_library_access ? (
-          <SettingFieldStatus tone="warn">
-            {t("web.admin.backups.restore.users.noLibraryAccess")}
-          </SettingFieldStatus>
+          <div>
+            <SettingFieldStatus tone="warn">
+              {t("web.admin.backups.restore.users.noLibraryAccess")}
+            </SettingFieldStatus>
+          </div>
         ) : profile.libraries_left_out > 0 ? (
-          <SettingFieldStatus tone="warn">
-            {droppedLibraries(t, profile.libraries_left_out)}
-          </SettingFieldStatus>
+          <div>
+            <SettingFieldStatus tone="warn">
+              {droppedLibraries(t, profile.libraries_left_out)}
+            </SettingFieldStatus>
+          </div>
         ) : null}
       </div>
     </li>
@@ -255,10 +273,15 @@ export const AccountRow = memo(function AccountRow({
               {t("web.admin.backups.restore.users.administrator")}
             </p>
           ) : null}
+          {/* One block per status, as in ProfileRow. */}
           {why ? (
-            <SettingFieldStatus tone={item.selectable || item.reason === "same" ? "muted" : "warn"}>
-              {why}
-            </SettingFieldStatus>
+            <div>
+              <SettingFieldStatus
+                tone={item.selectable || item.reason === "same" ? "muted" : "warn"}
+              >
+                {why}
+              </SettingFieldStatus>
+            </div>
           ) : null}
           {!item.selectable
             ? account.policy_differences.map((difference) => (
@@ -270,19 +293,23 @@ export const AccountRow = memo(function AccountRow({
               ))
             : null}
           {account.libraries_left_out > 0 ? (
-            <SettingFieldStatus tone="warn">
-              {droppedLibraries(t, account.libraries_left_out)}
-            </SettingFieldStatus>
+            <div>
+              <SettingFieldStatus tone="warn">
+                {droppedLibraries(t, account.libraries_left_out)}
+              </SettingFieldStatus>
+            </div>
           ) : null}
           {item.selectable && newProfiles > account.profile_room ? (
-            <SettingFieldStatus tone="warn">
-              {account.profile_room === 0
-                ? t("web.admin.backups.restore.users.noRoom")
-                : t("web.admin.backups.restore.users.room", {
-                    count: account.profile_room,
-                    count_text: account.profile_room,
-                  })}
-            </SettingFieldStatus>
+            <div>
+              <SettingFieldStatus tone="warn">
+                {account.profile_room === 0
+                  ? t("web.admin.backups.restore.users.noRoom")
+                  : t("web.admin.backups.restore.users.room", {
+                      count: account.profile_room,
+                      count_text: account.profile_room,
+                    })}
+              </SettingFieldStatus>
+            </div>
           ) : null}
           {account.profiles.length > 0 ? (
             <ul aria-label={t("web.admin.backups.restore.users.profilesOf", { name: item.label })}>

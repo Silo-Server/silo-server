@@ -1670,7 +1670,7 @@ function IPLookupDialog({
             aria-label={t("web.admin.activity.ipLookup.placeholder")}
             value={ipSearch}
             onChange={(e) => setIPSearch(e.target.value)}
-            className="max-w-xs font-mono text-sm"
+            className="placeholder:font-ui max-w-xs font-mono text-sm"
           />
           <Button type="submit" variant="outline" size="sm" disabled={!ipSearch.trim()}>
             <Search className="me-1 h-3.5 w-3.5" />

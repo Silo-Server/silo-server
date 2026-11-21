@@ -125,11 +125,13 @@ function AdminLayoutContent() {
       </div>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        {/* Mobile header. Pinned while the page scrolls, so an in-page jump
-            target needs `scroll-mt-24` below lg to land clear of it. */}
+        {/* Mobile header. Pinned while the page scrolls, below the
+            impersonation banner when one shows, so an in-page jump target
+            needs `scroll-mt-24` below lg to land clear of it (the root's
+            scroll padding adds the banner). */}
         <div
           data-sticky-header
-          className="glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-3 py-2.5 lg:hidden"
+          className="glass-dark border-border/70 sticky top-(--impersonation-banner-height) z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-3 py-2.5 lg:hidden"
         >
           <div className="flex min-w-0 items-center gap-2.5">
             <SheetTrigger asChild>
@@ -191,13 +193,14 @@ function AdminLayoutContent() {
         </SheetContent>
       </Sheet>
 
-      {/* Desktop activity indicator; search lives in the sidebar */}
-      <div className="fixed end-5 top-5 z-40 hidden items-center gap-2 lg:flex">
+      {/* Desktop activity indicator; search lives in the sidebar. It sits
+          below the impersonation banner, which would otherwise cover it. */}
+      <div className="fixed end-5 top-[calc(1.25rem+var(--impersonation-banner-height))] z-40 hidden items-center gap-2 lg:flex">
         <ServerActivity />
       </div>
 
       {/* `lg:pt-16` starts the content below the fixed activity control
-          (top-5, h-9 → it ends 3.5rem down). With less, a page
+          (top-5 below any banner, h-9 → it ends 3.5rem down). With less, a page
           header's right-aligned buttons sit underneath them until the capped
           content column pulls away from the viewport's right edge. A side
           panel that sticks on desktop uses `top-16` for the same reason.

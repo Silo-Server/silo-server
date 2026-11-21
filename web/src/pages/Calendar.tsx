@@ -196,10 +196,11 @@ export default function Calendar() {
 
       {/* Sticky week navigator — anchors to the page-level container so the
           containing block spans every DayGroup, keeping it pinned through
-          full-page scroll. top-20 clears the mobile header; when the mobile
+          full-page scroll. 5rem clears the mobile header; when the mobile
           header auto-hides on scroll-down (Layout sets data-mobile-header-hidden
-          on <html>) we pin closer to the viewport top so the gap stays tight. */}
-      <div className="sticky top-20 z-20 px-4 pb-3 transition-[top] duration-200 ease-out sm:px-6 lg:top-2 lg:px-10 xl:px-12 [html[data-mobile-header-hidden=true]_&]:top-2">
+          on <html>) we pin closer to the viewport top so the gap stays tight.
+          Every offset starts below the impersonation banner when one shows. */}
+      <div className="sticky top-[calc(5rem+var(--impersonation-banner-height))] z-20 px-4 pb-3 transition-[top] duration-200 ease-out sm:px-6 lg:top-[calc(0.5rem+var(--impersonation-banner-height))] lg:px-10 xl:px-12 [html[data-mobile-header-hidden=true]_&]:top-[calc(0.5rem+var(--impersonation-banner-height))]">
         <WeekNavigator
           weekStart={weekStart}
           days={days}

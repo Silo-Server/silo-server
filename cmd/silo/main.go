@@ -682,7 +682,7 @@ func settingsLoadError(err error, secretKey []byte) string {
 		"This server's SECRET_KEY has check value %s. "+
 		"Every API server and proxy node that uses this database needs the SECRET_KEY it was encrypted with; "+
 		"a transcode node's node key is a different credential. Restore the original key and restart. "+
-		"To compare keys, run: printf %%s \"$SECRET_KEY\" | silo secret check", err, check)
+		"To compare keys, run: printf %%s \"$SECRET_KEY\" | silo secret check (or: silo secret check --file \"$SECRET_KEY_FILE\")", err, check)
 }
 
 func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *catalog.EncryptedSettingsRepo) {
@@ -783,16 +783,17 @@ func applyBootstrapOverrides(cfg *config.Config, bc *config.BootstrapConfig) {
 // here and the values in effect. REDIS_URL names the database number too, so
 // redis.db is one of them and reports the number in use. With a value the
 // parser cannot read, a server that stays up has only the event bus connected,
-// to a bare address and on database 0.
-func addRedisBootstrapSettings(redisURL string, configured map[string]bool, values, vars map[string]string) {
+// to a bare address and on database 0. redisURLVar is the variable that
+// supplied it: REDIS_URL, or REDIS_URL_FILE.
+func addRedisBootstrapSettings(redisURL, redisURLVar string, configured map[string]bool, values, vars map[string]string) {
 	if redisURL == "" {
 		return
 	}
 	configured["redis.url"] = true
 	values["redis.url"] = redisURL
-	vars["redis.url"] = "REDIS_URL"
+	vars["redis.url"] = redisURLVar
 	configured[config.RedisDBSettingKey] = true
-	vars[config.RedisDBSettingKey] = "REDIS_URL"
+	vars[config.RedisDBSettingKey] = redisURLVar
 	db, _ := (config.RedisConfig{URL: redisURL}).Database()
 	values[config.RedisDBSettingKey] = strconv.Itoa(db)
 }
@@ -937,11 +938,24 @@ func main() {
 	// SILO_DB_MAX_CONNECTIONS sizes it.
 	isPrimaryNode := bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == ""
 	var envSettings config.EnvSettings
+	// The deployment document (SILO_CONFIG or SILO_CONFIG_FILE) is read with
+	// them: its AI providers are stored with the environment's settings, and
+	// its plugins section goes to the provisioning writer once plugins load.
+	var deploymentDocument *plugins.ProvisionDocument
+	var declaredAIProviders deploymentAIProviders
 	if isPrimaryNode && !*migrateOnly && !*migrateStatus && *migrateDownTo < 0 {
-		envSettings, err = config.ReadEnvSettings(os.Getenv)
+		envSettings, err = config.ReadEnvSettings(os.Getenv, catalog.SensitiveSettingKeys)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
+		if deploymentDocument, err = plugins.ReadProvisionDocument(); err != nil {
+			log.Fatalf("read deployment configuration: %v", err)
+		}
+		providers, declared, err := deploymentDocument.DeclaredAIProviders()
+		if err != nil {
+			log.Fatalf("%s: %v", deploymentDocument.Variable(), err)
+		}
+		declaredAIProviders = deploymentAIProviders{declared: declared, providers: providers, variable: deploymentDocument.Variable()}
 	}
 
 	// Step 2: Connect to PostgreSQL (bootstrap pool sized by
@@ -992,7 +1006,7 @@ func main() {
 			return os.Getenv(name)
 		}
 		return ""
-	})
+	}, nil)
 	if backupEnvErr != nil {
 		slog.Warn("the backup before migrations uses the stored backup.enabled", "error", backupEnvErr)
 	}
@@ -1067,7 +1081,7 @@ func main() {
 	// The settings the environment sets win over the stored ones. Cluster-wide
 	// ones are stored so the admin UI and the other servers see the values in
 	// effect; per-process ones only overlay this process's settings.
-	envSettings, envChangedKeys, err := applyEnvSettings(ctx, settingsRepo, settings, envSettings, bc.RedisURL)
+	envSettings, envChangedKeys, err := applyEnvSettings(ctx, settingsRepo, settings, envSettings, declaredAIProviders, bc.RedisURL)
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -1453,7 +1467,7 @@ func main() {
 	bootstrapSensitiveConfigured := map[string]bool{}
 	bootstrapSensitiveValues := map[string]string{}
 	bootstrapEnvVars := map[string]string{}
-	addRedisBootstrapSettings(bc.RedisURL, bootstrapSensitiveConfigured, bootstrapSensitiveValues, bootstrapEnvVars)
+	addRedisBootstrapSettings(bc.RedisURL, bc.RedisURLVar, bootstrapSensitiveConfigured, bootstrapSensitiveValues, bootstrapEnvVars)
 	addEnvSettingLocks(envSettings, bootstrapSensitiveConfigured, bootstrapSensitiveValues, bootstrapEnvVars)
 
 	// Shared Redis client for components needing raw Redis beyond the event
@@ -2077,12 +2091,17 @@ func main() {
 			installer,
 			plugins.NewHostAdapter(pluginHost),
 		)
-		provisionDocument, err := plugins.ReadProvisionDocument()
-		if err != nil {
-			log.Fatalf("read plugin provisioning: %v", err)
+		// A frontend server provisions plugins but stores no settings from
+		// its environment, so it reads the document here.
+		if bc.Mode == "frontend" {
+			if deploymentDocument, err = plugins.ReadProvisionDocument(); err != nil {
+				log.Fatalf("read deployment configuration: %v", err)
+			}
 		}
-		if provisionDocument != nil {
-			pluginProvisionWriter = plugins.NewProvisionWriter(deps.DB, repositoryStore, installationStore, installer, catalogService, runtimeConfigStore, pluginService, provisionDocument,
+		// A deployment document without a plugins section leaves plugin
+		// installations as they are, as no document does.
+		if deploymentDocument.DeclaresPlugins() {
+			pluginProvisionWriter = plugins.NewProvisionWriter(deps.DB, repositoryStore, installationStore, installer, catalogService, runtimeConfigStore, pluginService, deploymentDocument,
 				metadata.ApplyProvisionedMetadataPlacement)
 			runtimeConfigStore.SetProvisionWriter(pluginProvisionWriter)
 			deps.PluginProvisionStatus = runtimeConfigStore.ListProvisionStatus

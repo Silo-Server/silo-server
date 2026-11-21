@@ -236,11 +236,13 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
   const settings = (item.settings ?? []).some((setting) => setting.status !== "on_this_server");
   const paths = item.library && item.library.paths.length > 1 ? item.library.paths : [];
   const missingPaths = item.library?.missing_paths ?? [];
+  // A status gets a block of its own: SettingFieldStatus is inline, so two in a
+  // row would share a line.
   const parts = [
     why ? (
-      <SettingFieldStatus key="why" tone={item.selectable ? "muted" : "warn"}>
-        {why}
-      </SettingFieldStatus>
+      <div key="why">
+        <SettingFieldStatus tone={item.selectable ? "muted" : "warn"}>{why}</SettingFieldStatus>
+      </div>
     ) : null,
     paths.length > 0 ? (
       // Paths read left to right in any language; w-fit keeps the list on the
@@ -252,17 +254,19 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
       </ul>
     ) : null,
     missingPaths.length > 0 ? (
-      <p key="missing-paths" className="text-xs text-amber-600 dark:text-amber-400">
+      <p key="missing-paths" className="text-xs wrap-anywhere text-amber-600 dark:text-amber-400">
         {t("web.admin.backups.restore.rows.cantOpen", { paths: missingPaths.join(", ") })}
       </p>
     ) : null,
     item.missing_blobs.length > 0 ? (
-      <SettingFieldStatus key="files" tone="warn">
-        {t("web.admin.backups.restore.rows.filesMissing", {
-          count: item.missing_blobs.length,
-          count_text: item.missing_blobs.length,
-        })}
-      </SettingFieldStatus>
+      <div key="files">
+        <SettingFieldStatus tone="warn">
+          {t("web.admin.backups.restore.rows.filesMissing", {
+            count: item.missing_blobs.length,
+            count_text: item.missing_blobs.length,
+          })}
+        </SettingFieldStatus>
+      </div>
     ) : null,
     item.restart_required ? (
       <p
