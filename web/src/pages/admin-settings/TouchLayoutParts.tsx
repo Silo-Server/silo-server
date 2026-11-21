@@ -35,7 +35,9 @@ export function FullScreenDialogHeader({
 }) {
   const t = useT();
   return (
-    <DialogHeader className="max-sm:flex-row max-sm:items-start max-sm:text-start">
+    // max-sm:px-0: the built-in close button is hidden below sm, so the header
+    // needs no room for it there.
+    <DialogHeader className="max-sm:flex-row max-sm:items-start max-sm:px-0 max-sm:text-start">
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         <DialogTitle className="max-sm:pt-3">{title}</DialogTitle>
         <DialogDescription>{description}</DialogDescription>

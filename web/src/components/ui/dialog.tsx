@@ -80,7 +80,18 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2 text-center sm:text-start", className)}
+      className={cn(
+        "flex flex-col gap-2 text-center sm:text-start",
+        // DialogContent's close button sits in the header's top end corner, so
+        // the end side keeps text clear of it. Below sm the header is centered,
+        // so the start side matches. The breakpoint sets a variable instead of
+        // the padding, so a className with its own px-* or p-* replaces both
+        // sides at every width. DialogTitle and DialogDescription wrap
+        // anywhere, so a long unbroken name wraps in the narrower header
+        // instead of widening the dialog.
+        "ps-(--dialog-header-ps) pe-6 [--dialog-header-ps:--spacing(6)] sm:[--dialog-header-ps:0px]",
+        className,
+      )}
       {...props}
     />
   );

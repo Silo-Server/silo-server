@@ -85,7 +85,10 @@ function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="sheet-header"
-      className={cn("flex flex-col gap-1.5 p-4", className)}
+      // pe-12 keeps text clear of SheetContent's close button in the top end
+      // corner. SheetTitle and SheetDescription wrap anywhere, so a long
+      // unbroken name wraps short of it.
+      className={cn("flex flex-col gap-1.5 p-4 pe-12", className)}
       {...props}
     />
   );
