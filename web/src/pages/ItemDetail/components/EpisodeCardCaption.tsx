@@ -59,7 +59,7 @@ export default function EpisodeCardCaption({
               {prefix}
             </span>
             {title && (
-              <span dir="auto" className="bidi-text max-w-max min-w-[2.5em] flex-1 truncate">
+              <span dir="auto" className="bidi-text max-w-max grow basis-[2.5em] truncate">
                 {title}
               </span>
             )}
