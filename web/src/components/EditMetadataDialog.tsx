@@ -306,7 +306,7 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                   type="button"
                   onClick={() => setActiveSection(section.key)}
                   className={cn(
-                    "px-4 py-2 text-start text-[13px] font-medium whitespace-nowrap transition-colors",
+                    "px-4 py-2 text-start text-[13px] font-medium whitespace-nowrap transition-colors sm:break-words sm:whitespace-normal",
                     effectiveActiveSection === section.key
                       ? "border-primary bg-primary/8 text-primary max-sm:border-b-2 sm:border-e-2"
                       : "text-muted-foreground hover:text-foreground",
