@@ -101,7 +101,12 @@ export function applyOverlayStyle(
           : background;
       }
       if (solidFill) css.textShadow = undefined;
-      const text = textColor ?? (solidFill ? readableTextOn(solidFill) : undefined);
+      // The preset picked its text colour for the accent fill. A see-through
+      // fill puts the text back on the artwork, where accent fills draw white.
+      const seeThroughAccent = accentFill && background && !solidFill;
+      const text =
+        textColor ??
+        (solidFill ? readableTextOn(solidFill) : seeThroughAccent ? "#ffffff" : undefined);
       if (text && !accentText) css.color = text;
       if (borderColor && !(accent && strategy === "border")) css.borderColor = borderColor;
       if (style.borderWidth !== undefined && style.borderWidth > 0) css.borderStyle = "solid";
