@@ -40,11 +40,15 @@ export default function HeroOverview({
     <div className="mb-7 max-w-2xl">
       <HeroOverviewText overview={item.overview} />
       {translating ? (
-        <TranslatingStatus label={t("web.home.hero.translating")} className="mt-1" />
+        <div className="mt-1.5 flex">
+          <TranslatingStatus label={t("web.home.hero.translating")} />
+        </div>
       ) : (
         (machineTranslated || onTranslate) && (
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            {machineTranslated && <MachineTranslatedLabel />}
+            {machineTranslated && (
+              <MachineTranslatedLabel className="border-y border-transparent py-0.5" />
+            )}
             {onTranslate && (
               <button
                 type="button"
