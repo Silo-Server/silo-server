@@ -66,8 +66,8 @@ export function useOnViewTranslation(
   // Translations in flight, keyed by item and language. A surface that
   // switches items (the Featured hero rotating its slides) shows each item's
   // own progress and keeps polling for an earlier slide's job.
-  // An entry past the wait stops pulsing but stays, settling, while the
-  // language is still pending.
+  // An entry past the wait stops showing the translating status but stays,
+  // settling, while the language is still pending.
   const [running, setRunning] = useState<ReadonlyMap<string, RunningTranslation>>(new Map());
   const entry = key ? running.get(key) : undefined;
   const translating = entry !== undefined && entry.settlingSince === undefined;
