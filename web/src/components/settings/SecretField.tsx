@@ -81,10 +81,14 @@ export function SecretField({
   const clearStaged = cleared && value === "";
   const showAction = onClear != null && configured && !disabled && value === "";
 
-  // While a clear is staged its description replaces `hint`.
+  // While a clear is staged its description replaces `hint`. A secret the
+  // environment sets can't be replaced here, so it gets no editing hint.
   const description = clearStaged
     ? t("web.settings.secretField.clearedDescription")
-    : (hint ?? (configured ? t("web.settings.secretField.configuredDescription") : undefined));
+    : (hint ??
+      (configured && managedByEnv == null
+        ? t("web.settings.secretField.configuredDescription")
+        : undefined));
 
   function keepSaved() {
     if (onKeep) onKeep();

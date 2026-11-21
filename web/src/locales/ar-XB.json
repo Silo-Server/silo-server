@@ -449,6 +449,12 @@
       "value": "\u200F\u202ESign in through your network’s sign-in to continue.\u202C"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis node is set by the server’s deployment configuration. Remove it there and restart the API servers to manage it here.\u202C"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -13900,7 +13906,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — the collection they show isn't here or in the backup\u202C"
+              "value": "\u202E can't be restored — the collection it shows isn't here or in the backup\u202C"
             }
           ]
         },
@@ -13942,7 +13948,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their settings are encrypted with a different SECRET_KEY\u202C"
+              "value": "\u202E can't be restored — its settings are encrypted with a different SECRET_KEY\u202C"
             }
           ]
         },
@@ -13984,7 +13990,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — this server can't take them\u202C"
+              "value": "\u202E can't be restored — this server can't take it\u202C"
             }
           ]
         },
@@ -14068,7 +14074,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their files are missing on this server\u202C"
+              "value": "\u202E can't be restored — its files are missing on this server\u202C"
             }
           ]
         },
@@ -14110,7 +14116,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their folders aren't on this server\u202C"
+              "value": "\u202E can't be restored — its folders aren't on this server\u202C"
             }
           ]
         },
@@ -14152,7 +14158,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their access group isn't on this server\u202C"
+              "value": "\u202E can't be restored — its access group isn't on this server\u202C"
             }
           ]
         },
@@ -14194,7 +14200,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their title isn't in this server's catalog\u202C"
+              "value": "\u202E can't be restored — its title isn't in this server's catalog\u202C"
             }
           ]
         },
@@ -14236,7 +14242,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they would widen access, so this server keeps its stricter values\u202C"
+              "value": "\u202E can't be restored — it would widen access, so this server keeps its own stricter values\u202C"
             }
           ]
         },
@@ -14278,7 +14284,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their library isn't on this server\u202C"
+              "value": "\u202E can't be restored — its library isn't on this server\u202C"
             }
           ]
         },
@@ -14320,7 +14326,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their library can't be restored here\u202C"
+              "value": "\u202E can't be restored — its library can't be restored here\u202C"
             }
           ]
         },
@@ -14387,6 +14393,48 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E can't be restored — this server's environment sets the settings that differ, or part of their connection\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E can't be restored — this server's environment sets the settings that differ, or part of their connection\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14404,7 +14452,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they're encrypted with a different SECRET_KEY\u202C"
+              "value": "\u202E can't be restored — it's encrypted with a different SECRET_KEY\u202C"
             }
           ]
         },
@@ -14446,7 +14494,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they need to be installed from a plugin catalog first\u202C"
+              "value": "\u202E can't be restored — it needs to be installed from a plugin catalog first\u202C"
             }
           ]
         },
@@ -14488,7 +14536,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their primary profile has to be restored with them\u202C"
+              "value": "\u202E can't be restored — its primary profile has to be restored with it\u202C"
             }
           ]
         },
@@ -14530,7 +14578,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — the backup doesn't have them\u202C"
+              "value": "\u202E can't be restored — the backup doesn't have it\u202C"
             }
           ]
         },
@@ -14698,7 +14746,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — this server would give them more access than the backup did\u202C"
+              "value": "\u202E can't be restored — this server would give it more access than the backup did\u202C"
             }
           ]
         },
@@ -14782,7 +14830,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they're already the same here\u202C"
+              "value": "\u202E can't be restored — it's already the same here\u202C"
             }
           ]
         },
@@ -14866,7 +14914,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — the backup's copy of them can't be read\u202C"
+              "value": "\u202E can't be restored — the backup's copy of it can't be read\u202C"
             }
           ]
         },
@@ -14908,7 +14956,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they connect to outside services and this server can't verify the backup\u202C"
+              "value": "\u202E can't be restored — it connects to outside services and this server can't verify the backup\u202C"
             }
           ]
         },
@@ -15021,6 +15069,48 @@
     {
       "type": 0,
       "value": "\u200F\u202EA service's address changes without its credentials in the backup, so restoring clears them here and turns the service off until they're entered again.\u202C"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E setting keeps its current value because this server's environment sets it, or part of its connection.\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E settings keep their current values because this server's environment sets them, or part of their connection.\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15535,8 +15625,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "\u200F\u202EHide them\u202C"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EHide it\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EHide them\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -15709,8 +15819,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "\u200F\u202EShow them\u202C"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EShow it\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EShow them\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -18073,6 +18203,12 @@
       "value": "\u200F\u202EAnother account here signs in with its username or email.\u202C"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis server's environment sets the settings that differ, or part of their connection, so this server keeps its current values.\u202C"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19243,6 +19379,20 @@
     {
       "type": 0,
       "value": "\u202E (kept: stricter)\u202C"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "\u202E (kept: environment)\u202C"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -32222,7 +32372,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "\u200F\u202EFeed of recently started playback sessions\u202C"
+      "value": "\u200F\u202EMost recent plays across all accounts\u202C"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -33935,6 +34085,80 @@
     {
       "type": 0,
       "value": "\u200F\u202EFailed to load activity.\u202C"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E played \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E played \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -52368,6 +52592,12 @@
       "value": "\u200F\u202EEnter the server address to complete the settings.\u202C"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKey set by the server’s deployment configuration\u202C"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -53328,6 +53558,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESet by the server’s deployment configuration. Remove it there and restart the API servers to delete it here.\u202C"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -56045,6 +56281,114 @@
       "value": "\u200F\u202EGeneration has stopped. Stored recommendations stay visible in Discover until the server restarts.\u202C"
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERanking profiles (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E / \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFetching TMDB lists (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E / \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELooking up and embedding titles (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E / \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202ECleared \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E expired title\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202ECleared \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E expired titles\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -56085,6 +56429,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EResolve the embedding lock conflict below before building Discover recommendations.\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERun the Embeddings job first so Silo has library vectors to compare against.\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EConnect an embedding provider in AI Services before building Discover recommendations.\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo profiles have taste profiles yet. Run Taste Profiles once someone has watched or rated titles.\u202C"
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -58063,6 +58431,32 @@
       "value": "\u200F\u202EStays empty until Discover recommendations are turned on in Admin → Recommendations.\u202C"
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERecommended rows stay empty until Discover Recommendations are turned on in \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202EAdmin → Recommendations\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOff in Recommendations\u202C"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -59589,6 +59983,12 @@
       "value": "\u200F\u202ENew rows go to the bottom of Discover\u202C"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen Recommendations settings\u202C"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -59601,6 +60001,12 @@
       "value": "\u200F\u202EMDBList's feed doesn't carry the sort saved on the list's page. Pick the one it shows.\u202C"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour profile has no Discover recommendations yet. Run Discover Recommendations or watch and rate a few titles to preview this row.\u202C"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -59611,6 +60017,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EPick a list or paste its link to see its titles.\u202C"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETurn on Discover Recommendations in Admin → Recommendations to preview this row.\u202C"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -60441,6 +60853,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EMessage sent\u202C"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe player didn’t confirm the message. It may show up late or not at all.\u202C"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -63403,6 +63821,12 @@
       "value": "\u200F\u202EConnection check failed.\u202C"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t check whether the server’s environment sets this. Reload to edit.\u202C"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -63965,6 +64389,30 @@
     {
       "type": 0,
       "value": "\u200F\u202EFailed to update channel\u202C"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReload to see the current values. Your edits to settings that changed, and to saved passwords and keys, are undone; your other edits are kept.\u202C"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReload\u202C"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t reload settings. Try again.\u202C"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESettings changed elsewhere\u202C"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -69551,6 +69999,24 @@
       "value": "\u200F\u202ESwitching to another model requires resetting embeddings, which deletes them all. Another provider serving the same model applies after a restart.\u202C"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdd to Discover\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECould not add recommended rows to the Discover page.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdded recommended rows to the Discover page.\u202C"
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -69573,6 +70039,44 @@
     {
       "type": 0,
       "value": "\u200F\u202EHow many titles that aren't in the library the server keeps to recommend from. Each one is looked up on TMDB and embedded. Embedding is usually cheap, but a higher number can cost more or take longer depending on your embedding provider, and uses more storage.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour Discover page doesn't show any Recommendations rows yet.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETurn on Enable Recommendations above and restart the server before Discover Recommendations can run.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequests are currently off. Turn them on in \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202ERequests settings\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E so viewers can see the Discover page.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen Discover Page\u202C"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -79027,6 +79531,20 @@
       "value": "\u202E).\u202C"
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStorage can’t be moved here while the environment sets storage settings (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "\u202E). Unset those variables and restart every API server first.\u202C"
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -80201,6 +80719,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis schedule comes from the backup settings. Change it in \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202EServer › Backups\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
@@ -91004,25 +91542,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "\u200F\u202ECouldn't sign in the TV. Try again.\u202C"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECheck that your app shows\u202C"
+      "value": "\u200F\u202ECouldn't approve sign-in. Try again.\u202C"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "\u200F\u202ECheck that your TV shows\u202C"
+      "value": "\u200F\u202EMake sure this code matches\u202C"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "\u200F\u202EEnter the code on your TV or app\u202C"
+      "value": "\u200F\u202EEnter the code shown on your device\u202C"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -91034,13 +91566,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in a TV or other device with your account.\u202C"
+      "value": "\u200F\u202ESign in a TV, app, or other device.\u202C"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in a TV\u202C"
+      "value": "\u200F\u202EApprove sign-in\u202C"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -91060,13 +91592,13 @@
     },
     {
       "type": 0,
-      "value": "\u202E to approve a TV. Only the account itself can sign in a TV.\u202C"
+      "value": "\u202E to approve this sign-in. Only the account itself can approve devices.\u202C"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "\u200F\u202EStop viewing as this user to approve a TV. Only the account itself can sign in a TV.\u202C"
+      "value": "\u200F\u202EStop viewing as this user to approve this sign-in. Only the account itself can approve devices.\u202C"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -91084,39 +91616,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "\u200F\u202EWe couldn't find that code. Check the code on your TV.\u202C"
+      "value": "\u200F\u202EWe couldn't find that code. Check the code and try again.\u202C"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "\u200F\u202ENot now\u202C"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EOlder TV apps show \u202C"
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "\u202E instead.\u202C"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EOnly approve a device that's in front of you right now.\u202C"
+      "value": "\u200F\u202EDecline\u202C"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "\u200F\u202EOnly approve a TV that's in front of you right now.\u202C"
+      "value": "\u200F\u202EOnly approve this if you started the sign-in yourself.\u202C"
     }
   ],
   "web.auth.activate.playOn": [
@@ -91142,7 +91654,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "\u200F\u202EAnyone using this TV can pick from your profiles. Profiles with a PIN stay locked.\u202C"
+      "value": "\u200F\u202EThis gives it access to your profiles. Profiles with a PIN stay locked.\u202C"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -91189,6 +91701,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequested \u202C"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -91202,7 +91724,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "\u200F\u202EThis TV stopped waiting. Start again on the TV.\u202C"
+      "value": "\u200F\u202EThis device stopped waiting. Start sign-in again on it.\u202C"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -91211,10 +91733,38 @@
       "value": "\u200F\u202EThis sign-in was declined.\u202C"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDone. \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E is signing in.\u202C"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E is signed in.\u202C"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "\u200F\u202EThis code expired. Your TV is showing a new one. Use that code instead.\u202C"
+      "value": "\u200F\u202EThis code expired. Get a new code on the device and try again.\u202C"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -91248,7 +91798,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "\u200F\u202EDone. this device is signing in as \u202C"
+      "value": "\u200F\u202EDone. This device is signing in as \u202C"
     },
     {
       "type": 1,
@@ -91298,25 +91848,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "\u200F\u202EThat TV is already signed in.\u202C"
+      "value": "\u200F\u202EThis device is already signed in.\u202C"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "\u200F\u202EThis TV was approved and is finishing sign-in.\u202C"
+      "value": "\u200F\u202EThis device was approved and is finishing sign-in.\u202C"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "\u200F\u202EDone. Your TV is signing in.\u202C"
+      "value": "\u200F\u202EDone. Your device is signing in.\u202C"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "\u200F\u202EYour TV is signed in.\u202C"
+      "value": "\u200F\u202EYour device is signed in.\u202C"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -91360,7 +91910,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in \u202C"
+      "value": "\u200F\u202EAllow \u202C"
     },
     {
       "type": 1,
@@ -91368,13 +91918,13 @@
     },
     {
       "type": 0,
-      "value": "\u202E?\u202C"
+      "value": "\u202E to sign in?\u202C"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in this device?\u202C"
+      "value": "\u200F\u202EAllow this device to sign in?\u202C"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -91394,13 +91944,13 @@
     },
     {
       "type": 0,
-      "value": "\u202E to approve this TV.\u202C"
+      "value": "\u202E to approve this sign-in.\u202C"
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in TV\u202C"
+      "value": "\u200F\u202EApprove sign-in\u202C"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -92454,7 +93004,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "\u200F\u202ECouldn't sign in the device. Try again.\u202C"
+      "value": "\u200F\u202ECouldn't approve sign-in. Try again.\u202C"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -114910,6 +115460,12 @@
       "value": "\u200F\u202ETranslating…\u202C"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide server rows added since this export:\u202C"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -114928,6 +115484,12 @@
     {
       "type": 0,
       "value": "\u202E, replacing sections you added here before. Your changes to this server's sections stay.\u202C"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis server's rows changed since this file was exported, so choose any rows to hide below.\u202C"
     }
   ],
   "web.home.layout.checking": [
@@ -114978,6 +115540,26 @@
     {
       "type": 0,
       "value": "\u200F\u202ETurns Hide watched items on.\u202C"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHides selected rows on: \u202C"
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E without changing your other rows there.\u202C"
     }
   ],
   "web.home.layout.import": [
@@ -115086,6 +115668,28 @@
     {
       "type": 0,
       "value": "\u202E.\u202C"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": "\u202E (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -115306,6 +115910,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EUntitled section\u202C"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide server rows not in this file:\u202C"
     }
   ],
   "web.home.page.customize": [

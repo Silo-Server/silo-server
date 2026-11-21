@@ -449,6 +449,12 @@
       "value": "Za nadaljevanje se prijavite prek prijavnega sistema svojega omrežja."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "To vozlišče je nastavljeno v konfiguraciji namestitve strežnika. Odstranite ga tam in znova zaženite strežnike API, da ga boste lahko upravljali tukaj."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -14698,7 +14704,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – prikazane zbirke ni ne tukaj ne v varnostni kopiji"
+              "value": " element se ne more obnoviti – zbirke, ki jo prikazuje, ni ne tukaj ne v varnostni kopiji"
             }
           ]
         },
@@ -14710,7 +14716,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – prikazane zbirke ni ne tukaj ne v varnostni kopiji"
+              "value": " elementa se ne moreta obnoviti – zbirke, ki jo prikazujeta, ni ne tukaj ne v varnostni kopiji"
             }
           ]
         },
@@ -14722,7 +14728,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – prikazane zbirke ni ne tukaj ne v varnostni kopiji"
+              "value": " elementi se ne morejo obnoviti – zbirke, ki jo prikazujejo, ni ne tukaj ne v varnostni kopiji"
             }
           ]
         },
@@ -14734,7 +14740,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – prikazane zbirke ni ne tukaj ne v varnostni kopiji"
+              "value": " elementov se ne more obnoviti – zbirke, ki jo prikazujejo, ni ne tukaj ne v varnostni kopiji"
             }
           ]
         }
@@ -14756,7 +14762,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – nastavitve so šifrirane z drugim SECRET_KEY"
+              "value": " element se ne more obnoviti – njegove nastavitve so šifrirane z drugim SECRET_KEY"
             }
           ]
         },
@@ -14768,7 +14774,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – nastavitve so šifrirane z drugim SECRET_KEY"
+              "value": " elementa se ne moreta obnoviti – njune nastavitve so šifrirane z drugim SECRET_KEY"
             }
           ]
         },
@@ -14780,7 +14786,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – nastavitve so šifrirane z drugim SECRET_KEY"
+              "value": " elementi se ne morejo obnoviti – njihove nastavitve so šifrirane z drugim SECRET_KEY"
             }
           ]
         },
@@ -14792,7 +14798,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – nastavitve so šifrirane z drugim SECRET_KEY"
+              "value": " elementov se ne more obnoviti – njihove nastavitve so šifrirane z drugim SECRET_KEY"
             }
           ]
         }
@@ -14930,7 +14936,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – datoteke na tem strežniku manjkajo"
+              "value": " element se ne more obnoviti – njegove datoteke na tem strežniku manjkajo"
             }
           ]
         },
@@ -14942,7 +14948,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – datoteke na tem strežniku manjkajo"
+              "value": " elementa se ne moreta obnoviti – njune datoteke na tem strežniku manjkajo"
             }
           ]
         },
@@ -14954,7 +14960,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – datoteke na tem strežniku manjkajo"
+              "value": " elementi se ne morejo obnoviti – njihove datoteke na tem strežniku manjkajo"
             }
           ]
         },
@@ -14966,7 +14972,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – datoteke na tem strežniku manjkajo"
+              "value": " elementov se ne more obnoviti – njihove datoteke na tem strežniku manjkajo"
             }
           ]
         }
@@ -14988,7 +14994,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – ustreznih map ni na tem strežniku"
+              "value": " element se ne more obnoviti – njegovih map ni na tem strežniku"
             }
           ]
         },
@@ -15000,7 +15006,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – ustreznih map ni na tem strežniku"
+              "value": " elementa se ne moreta obnoviti – njunih map ni na tem strežniku"
             }
           ]
         },
@@ -15012,7 +15018,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – ustreznih map ni na tem strežniku"
+              "value": " elementi se ne morejo obnoviti – njihovih map ni na tem strežniku"
             }
           ]
         },
@@ -15024,7 +15030,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – ustreznih map ni na tem strežniku"
+              "value": " elementov se ne more obnoviti – njihovih map ni na tem strežniku"
             }
           ]
         }
@@ -15046,7 +15052,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – skupine za dostop ni na tem strežniku"
+              "value": " element se ne more obnoviti – njegove skupine za dostop ni na tem strežniku"
             }
           ]
         },
@@ -15058,7 +15064,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – skupine za dostop ni na tem strežniku"
+              "value": " elementa se ne moreta obnoviti – njune skupine za dostop ni na tem strežniku"
             }
           ]
         },
@@ -15070,7 +15076,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – skupine za dostop ni na tem strežniku"
+              "value": " elementi se ne morejo obnoviti – njihove skupine za dostop ni na tem strežniku"
             }
           ]
         },
@@ -15082,7 +15088,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – skupine za dostop ni na tem strežniku"
+              "value": " elementov se ne more obnoviti – njihove skupine za dostop ni na tem strežniku"
             }
           ]
         }
@@ -15104,7 +15110,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – naslova ni v katalogu tega strežnika"
+              "value": " element se ne more obnoviti – njegovega naslova ni v katalogu tega strežnika"
             }
           ]
         },
@@ -15116,7 +15122,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – naslova ni v katalogu tega strežnika"
+              "value": " elementa se ne moreta obnoviti – njunega naslova ni v katalogu tega strežnika"
             }
           ]
         },
@@ -15128,7 +15134,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – naslova ni v katalogu tega strežnika"
+              "value": " elementi se ne morejo obnoviti – njihovega naslova ni v katalogu tega strežnika"
             }
           ]
         },
@@ -15140,7 +15146,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – naslova ni v katalogu tega strežnika"
+              "value": " elementov se ne more obnoviti – njihovega naslova ni v katalogu tega strežnika"
             }
           ]
         }
@@ -15198,7 +15204,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – razširilo bi dostop, zato ta strežnik ohrani svoje strožje vrednosti"
+              "value": " elementov se ne more obnoviti – razširili bi dostop, zato ta strežnik ohrani svoje strožje vrednosti"
             }
           ]
         }
@@ -15220,7 +15226,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – knjižnice ni na tem strežniku"
+              "value": " element se ne more obnoviti – njegove knjižnice ni na tem strežniku"
             }
           ]
         },
@@ -15232,7 +15238,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – knjižnice ni na tem strežniku"
+              "value": " elementa se ne moreta obnoviti – njune knjižnice ni na tem strežniku"
             }
           ]
         },
@@ -15244,7 +15250,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – knjižnice ni na tem strežniku"
+              "value": " elementi se ne morejo obnoviti – njihove knjižnice ni na tem strežniku"
             }
           ]
         },
@@ -15256,7 +15262,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – knjižnice ni na tem strežniku"
+              "value": " elementov se ne more obnoviti – njihove knjižnice ni na tem strežniku"
             }
           ]
         }
@@ -15278,7 +15284,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – knjižnice tukaj ni mogoče obnoviti"
+              "value": " element se ne more obnoviti – njegove knjižnice tukaj ni mogoče obnoviti"
             }
           ]
         },
@@ -15290,7 +15296,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – knjižnice tukaj ni mogoče obnoviti"
+              "value": " elementa se ne moreta obnoviti – njune knjižnice tukaj ni mogoče obnoviti"
             }
           ]
         },
@@ -15302,7 +15308,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – knjižnice tukaj ni mogoče obnoviti"
+              "value": " elementi se ne morejo obnoviti – njihove knjižnice tukaj ni mogoče obnoviti"
             }
           ]
         },
@@ -15314,7 +15320,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – knjižnice tukaj ni mogoče obnoviti"
+              "value": " elementov se ne more obnoviti – njihove knjižnice tukaj ni mogoče obnoviti"
             }
           ]
         }
@@ -15381,6 +15387,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " element se ne more obnoviti – okolje tega strežnika določa nastavitve, ki se razlikujejo, ali del njihove povezave"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementa se ne moreta obnoviti – okolje tega strežnika določa nastavitve, ki se razlikujejo, ali del njihove povezave"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementi se ne morejo obnoviti – okolje tega strežnika določa nastavitve, ki se razlikujejo, ali del njihove povezave"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementov se ne more obnoviti – okolje tega strežnika določa nastavitve, ki se razlikujejo, ali del njihove povezave"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15430,7 +15494,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – šifriranih je z drugim SECRET_KEY"
+              "value": " elementov se ne more obnoviti – šifrirani so z drugim SECRET_KEY"
             }
           ]
         }
@@ -15510,7 +15574,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – hkrati je treba obnoviti tudi glavni profil"
+              "value": " element se ne more obnoviti – njegov glavni profil je treba obnoviti hkrati z njim"
             }
           ]
         },
@@ -15522,7 +15586,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – hkrati je treba obnoviti tudi glavni profil"
+              "value": " elementa se ne moreta obnoviti – njun glavni profil je treba obnoviti hkrati z njima"
             }
           ]
         },
@@ -15534,7 +15598,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – hkrati je treba obnoviti tudi glavni profil"
+              "value": " elementi se ne morejo obnoviti – njihov glavni profil je treba obnoviti hkrati z njimi"
             }
           ]
         },
@@ -15546,7 +15610,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – hkrati je treba obnoviti tudi glavni profil"
+              "value": " elementov se ne more obnoviti – njihov glavni profil je treba obnoviti hkrati z njimi"
             }
           ]
         }
@@ -15916,7 +15980,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – tukaj je že vse enako"
+              "value": " element se ne more obnoviti – tukaj je že enak"
             }
           ]
         },
@@ -15928,7 +15992,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – tukaj je že vse enako"
+              "value": " elementa se ne moreta obnoviti – tukaj sta že enaka"
             }
           ]
         },
@@ -15940,7 +16004,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – tukaj je že vse enako"
+              "value": " elementi se ne morejo obnoviti – tukaj so že enaki"
             }
           ]
         },
@@ -15952,7 +16016,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – tukaj je že vse enako"
+              "value": " elementov se ne more obnoviti – tukaj so že enaki"
             }
           ]
         }
@@ -16032,7 +16096,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – kopije v varnostni kopiji ni mogoče prebrati"
+              "value": " element se ne more obnoviti – njegove kopije v varnostni kopiji ni mogoče prebrati"
             }
           ]
         },
@@ -16044,7 +16108,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – kopije v varnostni kopiji ni mogoče prebrati"
+              "value": " elementa se ne moreta obnoviti – njune kopije v varnostni kopiji ni mogoče prebrati"
             }
           ]
         },
@@ -16056,7 +16120,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – kopije v varnostni kopiji ni mogoče prebrati"
+              "value": " elementi se ne morejo obnoviti – njihove kopije v varnostni kopiji ni mogoče prebrati"
             }
           ]
         },
@@ -16068,7 +16132,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – kopije v varnostni kopiji ni mogoče prebrati"
+              "value": " elementov se ne more obnoviti – njihove kopije v varnostni kopiji ni mogoče prebrati"
             }
           ]
         }
@@ -16239,6 +16303,64 @@
     {
       "type": 0,
       "value": "Naslov storitve se spremeni brez njenih poverilnic v varnostni kopiji, zato obnovitev tukaj poverilnice počisti in storitev izklopi, dokler jih ne vnesete znova."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavitev ohrani trenutno vrednost, ker okolje tega strežnika določa njo ali del njene povezave."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavitvi ohranita trenutni vrednosti, ker okolje tega strežnika določa njiju ali del njune povezave."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavitve ohranijo trenutne vrednosti, ker okolje tega strežnika določa njih ali del njihove povezave."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavitev ohrani trenutne vrednosti, ker okolje tega strežnika določa njih ali del njihove povezave."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -16917,8 +17039,44 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Skrij jih"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij jih"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij jih"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17139,8 +17297,44 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Prikaži jih"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži jih"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži jih"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -20251,6 +20445,12 @@
       "value": "Drug račun na tem strežniku se prijavlja z istim uporabniškim imenom ali e-poštnim naslovom."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Okolje tega strežnika določa nastavitve, ki se razlikujejo, ali del njihove povezave, zato ta strežnik ohrani svoje trenutne vrednosti."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -21613,6 +21813,16 @@
     {
       "type": 0,
       "value": " (ohranjeno: strožje)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (ohranjeno: okolje)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -36774,7 +36984,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Vir nedavno začetih sej predvajanja"
+      "value": "Najnovejša predvajanja v vseh računih"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -38749,6 +38959,80 @@
     {
       "type": 0,
       "value": "Dejavnosti ni bilo mogoče naložiti."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "Uporabnik "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " je predvajal "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "Uporabnik "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " je predvajal "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -60977,6 +61261,12 @@
       "value": "Vnesite naslov strežnika, da dokončate nastavitve."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ključ je nastavljen v konfiguraciji namestitve strežnika"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -61917,6 +62207,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nastavljeno v konfiguraciji namestitve strežnika. Odstranite ga tam in znova zaženite strežnike API, da ga boste lahko izbrisali tukaj."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -64900,6 +65196,146 @@
       "value": "Ustvarjanje se je ustavilo. Shranjena priporočila ostanejo vidna v Odkrivanju, dokler se strežnik znova ne zažene."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Razvrščanje profilov ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Pridobivanje seznamov TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Iskanje in vlaganje naslovov ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Počiščen "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pretečen naslov"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Počiščena "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pretečena naslova"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Počiščeni "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pretečeni naslovi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Počiščenih "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pretečenih naslovov"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -64956,6 +65392,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Preden ustvarite priporočila za Odkrivanje, razrešite spodnji spor zaklepa vložitev."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Najprej zaženite posel Vložitve, da bo imel Silo vektorje knjižnice za primerjavo."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Preden ustvarite priporočila za Odkrivanje, povežite ponudnika vložitev v razdelku Storitve UI."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Noben profil še nima profila okusa. Zaženite Profili okusa, ko bo kdo gledal ali ocenil naslove."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -67566,6 +68026,32 @@
       "value": "Ostane prazno, dokler priporočila za Odkrivanje niso vklopljena v Skrbništvo → Priporočila."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Vrstice s priporočili ostanejo prazne, dokler priporočila za Odkrivanje niso vklopljena v "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Skrbništvo → Priporočila"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Izklopljeno v Priporočilih"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -69306,6 +69792,12 @@
       "value": "Nove vrstice se dodajo na dno strani Odkrivanje"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Odpri nastavitve Priporočil"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -69318,6 +69810,12 @@
       "value": "Vir storitve MDBList ne vsebuje razvrstitve, shranjene na strani seznama. Izberite tisto, ki jo seznam prikazuje."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Vaš profil še nima priporočil za Odkrivanje. Za predogled te vrstice zaženite Priporočila za Odkrivanje ali si oglejte in ocenite nekaj naslovov."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -69328,6 +69826,12 @@
     {
       "type": 0,
       "value": "Izberite seznam ali prilepite njegovo povezavo, da vidite njegove naslove."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Za predogled te vrstice vklopite priporočila za Odkrivanje v Skrbništvo → Priporočila."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -70278,6 +70782,12 @@
     {
       "type": 0,
       "value": "Sporočilo je poslano"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Predvajalnik ni potrdil prejema sporočila. Morda bo prikazano pozneje ali pa sploh ne."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -73286,6 +73796,12 @@
       "value": "Preverjanje povezave ni uspelo."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Ni bilo mogoče preveriti, ali okolje strežnika nastavlja to možnost. Če jo želite urediti, znova naložite stran."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -73872,6 +74388,30 @@
     {
       "type": 0,
       "value": "Kanala ni bilo mogoče posodobiti"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Znova naložite, da vidite trenutne vrednosti. Vaše spremembe nastavitev, ki so se medtem spremenile, ter shranjenih gesel in ključev bodo razveljavljene; druge spremembe ostanejo."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Znova naloži"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nastavitev ni bilo mogoče znova naložiti. Poskusite znova."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Nastavitve so bile spremenjene drugje"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -79570,6 +80110,24 @@
       "value": "Preklop na drug model zahteva ponastavitev vdelav, kar izbriše vse vdelave. Drug ponudnik, ki ponuja isti model, začne veljati po ponovnem zagonu."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Dodaj v Odkrivanje"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Vrstic s priporočili ni bilo mogoče dodati na stran Odkrivanje."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Vrstice s priporočili so bile dodane na stran Odkrivanje."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -79592,6 +80150,44 @@
     {
       "type": 0,
       "value": "Koliko naslovov, ki jih ni v knjižnici, strežnik hrani za priporočanje. Vsak se poišče v storitvi TMDB in vdela. Vdelava je običajno poceni, vendar je višje število glede na ponudnika vdelav lahko dražje ali počasnejše in porabi več prostora za shranjevanje."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Vaša stran Odkrivanje še ne prikazuje nobene vrstice Priporočila."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Preden se lahko zaženejo priporočila za Odkrivanje, zgoraj vklopite Omogoči priporočila in znova zaženite strežnik."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Zahteve so trenutno izklopljene. Vklopite jih v "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Nastavitve zahtev"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", da bodo gledalci videli stran Odkrivanje."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Odpri stran Odkrivanje"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -88998,6 +89594,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Shrambe ni mogoče premakniti sem, dokler okolje določa nastavitve shrambe ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Najprej odstranite te spremenljivke in znova zaženite vse strežnike API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -90256,6 +90866,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Ta urnik izhaja iz nastavitev varnostnih kopij. Spremenite ga v "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Strežnik › Varnostne kopije"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
@@ -102423,25 +103053,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Televizorja ni bilo mogoče prijaviti. Poskusite znova."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Preverite, ali aplikacija prikazuje"
+      "value": "Prijave ni bilo mogoče odobriti. Poskusite znova."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Preverite, ali televizor prikazuje"
+      "value": "Preverite, ali se ta koda ujema"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Vnesite kodo s televizorja ali iz aplikacije"
+      "value": "Vnesite kodo, prikazano na vaši napravi"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -102453,13 +103077,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Prijavite televizor ali drugo napravo s svojim računom."
+      "value": "Prijavite televizor, aplikacijo ali drugo napravo."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Prijava televizorja"
+      "value": "Odobritev prijave"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -102471,7 +103095,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "Za odobritev televizorja prenehajte z ogledom kot uporabnik "
+      "value": "Za odobritev te prijave prenehajte z ogledom kot uporabnik "
     },
     {
       "type": 1,
@@ -102479,13 +103103,13 @@
     },
     {
       "type": 0,
-      "value": ". Televizor lahko prijavi samo lastnik tega računa."
+      "value": ". Naprave lahko odobri samo lastnik računa."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Za odobritev televizorja prenehajte z ogledom kot ta uporabnik. Televizor lahko prijavi samo lastnik tega računa."
+      "value": "Za odobritev te prijave prenehajte z ogledom kot ta uporabnik. Naprave lahko odobri samo lastnik računa."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -102503,39 +103127,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Te kode ni bilo mogoče najti. Preverite kodo na televizorju."
+      "value": "Te kode ni bilo mogoče najti. Preverite kodo in poskusite znova."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ne zdaj"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Starejše aplikacije za TV namesto tega prikažejo "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Odobrite samo napravo, ki je ta trenutek pred vami."
+      "value": "Zavrni"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Odobrite samo televizor, ki je ta trenutek pred vami."
+      "value": "To odobrite samo, če ste prijavo začeli sami."
     }
   ],
   "web.auth.activate.playOn": [
@@ -102561,7 +103165,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Kdor uporablja ta televizor, lahko izbira med vašimi profili. Profili s PIN-kodo ostanejo zaklenjeni."
+      "value": "S tem ji omogočite dostop do vaših profilov. Profili s PIN-kodo ostanejo zaklenjeni."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -102608,6 +103212,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Zahtevano: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -102621,7 +103235,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Ta televizor je prenehal čakati. Začnite znova na televizorju."
+      "value": "Ta naprava ne čaka več. V njej znova začnite prijavo."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -102630,10 +103244,38 @@
       "value": "Ta prijava je bila zavrnjena."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Končano. Naprava "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se prijavlja."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Naprava "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " je prijavljena."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Ta koda je potekla. Televizor prikazuje novo. Uporabite to kodo."
+      "value": "Ta koda je potekla. V napravi pridobite novo kodo in poskusite znova."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -102717,25 +103359,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Ta televizor je že prijavljen."
+      "value": "Ta naprava je že prijavljena."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Ta televizor je bil odobren in zaključuje prijavo."
+      "value": "Ta naprava je bila odobrena in zaključuje prijavo."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Končano. Televizor se prijavlja."
+      "value": "Končano. Vaša naprava se prijavlja."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Televizor je prijavljen."
+      "value": "Vaša naprava je prijavljena."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -102779,7 +103421,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Želite prijaviti napravo "
+      "value": "Želite dovoliti prijavo naprave "
     },
     {
       "type": 1,
@@ -102793,7 +103435,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Želite prijaviti to napravo?"
+      "value": "Želite dovoliti prijavo te naprave?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -102813,13 +103455,13 @@
     },
     {
       "type": 0,
-      "value": ", da odobrite ta televizor."
+      "value": ", da odobrite to prijavo."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Prijavi televizor"
+      "value": "Odobri prijavo"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -103869,7 +104511,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Naprave ni bilo mogoče prijaviti. Poskusite znova."
+      "value": "Prijave ni bilo mogoče odobriti. Poskusite znova."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -129482,6 +130124,12 @@
       "value": "Prevajanje …"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skrij vrstice strežnika, dodane po tem izvozu:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -129500,6 +130148,12 @@
     {
       "type": 0,
       "value": " in bodo nadomestili razdelke, ki ste jih tu dodali prej. Vaše spremembe razdelkov tega strežnika ostanejo."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Vrstice tega strežnika so se od izvoza te datoteke spremenile, zato spodaj izberite vrstice, ki jih želite skriti."
     }
   ],
   "web.home.layout.checking": [
@@ -129550,6 +130204,26 @@
     {
       "type": 0,
       "value": "Vklopi možnost „Skrij ogledane elemente“."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Skrije izbrane vrstice na straneh: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", ne da bi spremenil vaše druge vrstice tam."
     }
   ],
   "web.home.layout.import": [
@@ -129654,6 +130328,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -129884,6 +130576,12 @@
     {
       "type": 0,
       "value": "Razdelek brez naslova"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skrij vrstice strežnika, ki jih ni v tej datoteki:"
     }
   ],
   "web.home.page.customize": [

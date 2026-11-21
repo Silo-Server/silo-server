@@ -264,14 +264,20 @@ function BlockedGroupRows({ group, ...rows }: Omit<RowsProps, "items"> & { group
   return (
     <div className="border-border/60 border-t py-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="flex items-center gap-1.5 text-[13px]">
-          <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-amber-500" />
+        <span className="flex items-start gap-1.5 text-[13px]">
+          <span
+            aria-hidden="true"
+            className="mt-[calc((1lh-0.375rem)/2)] size-1.5 shrink-0 rounded-full bg-amber-500"
+          />
           {group.title}
         </span>
         <Disclosure open={open} onOpenChange={setOpen} controls={listId}>
-          {open
-            ? t("web.admin.backups.restore.choose.hideThem")
-            : t("web.admin.backups.restore.choose.showThem")}
+          {t(
+            open
+              ? "web.admin.backups.restore.choose.hideThem"
+              : "web.admin.backups.restore.choose.showThem",
+            { count: group.items.length },
+          )}
         </Disclosure>
       </div>
       {open ? (
@@ -324,14 +330,17 @@ function NeverRestored({ keys }: { keys: readonly string[] }) {
   return (
     <div className="border-border/60 border-t py-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-muted-foreground flex items-center gap-1.5 text-[13px]">
-          <Lock aria-hidden="true" className="size-3.5 shrink-0" />
+        <span className="text-muted-foreground flex items-start gap-1.5 text-[13px]">
+          <Lock aria-hidden="true" className="mt-[calc((1lh-0.875rem)/2)] size-3.5 shrink-0" />
           {t("web.admin.backups.restore.choose.neverRestored")}
         </span>
         <Disclosure open={open} onOpenChange={setOpen} controls={listId}>
-          {open
-            ? t("web.admin.backups.restore.choose.hideThem")
-            : t("web.admin.backups.restore.choose.showThem")}
+          {t(
+            open
+              ? "web.admin.backups.restore.choose.hideThem"
+              : "web.admin.backups.restore.choose.showThem",
+            { count: keys.length },
+          )}
         </Disclosure>
       </div>
       {open ? (
@@ -446,9 +455,12 @@ function SectionBlock({
                 {nothingToRestoreText(counts)}
               </span>
               <Disclosure open={showAll} onOpenChange={setShowAll} controls={sameListId}>
-                {showAll
-                  ? t("web.admin.backups.restore.choose.hideThem")
-                  : t("web.admin.backups.restore.choose.showThem")}
+                {t(
+                  showAll
+                    ? "web.admin.backups.restore.choose.hideThem"
+                    : "web.admin.backups.restore.choose.showThem",
+                  { count: section.items.length },
+                )}
               </Disclosure>
             </div>
           ) : null}

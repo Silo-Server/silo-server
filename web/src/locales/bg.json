@@ -449,6 +449,12 @@
       "value": "Влезте чрез входа на вашата мрежа, за да продължите."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Този възел е зададен от конфигурацията за внедряване на сървъра. Премахнете го оттам и рестартирайте API сървърите, за да го управлявате тук."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -13612,7 +13618,7 @@
             },
             {
               "type": 0,
-              "value": " не може да се възстанови – ще разшири достъпа, затова този сървър запазва по-строгите си стойности"
+              "value": " не може да се възстанови – ще разшири достъпа, затова този сървър запазва собствените си по-строги стойности"
             }
           ]
         },
@@ -13727,6 +13733,40 @@
             {
               "type": 0,
               "value": " не могат да се възстановят – друг акаунт тук влиза със същото потребителско име или имейл"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " не може да се възстанови – средата на този сървър задава различаващите се настройки или част от съответната връзка"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " не могат да се възстановят – средата на този сървър задава различаващите се настройки или част от съответната връзка"
             }
           ]
         }
@@ -14259,6 +14299,40 @@
       "value": "Адресът на услуга се променя без данните ѝ за вход в резервното копие, затова възстановяването ги изчиства тук и изключва услугата, докато не бъдат въведени отново."
     }
   ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " настройка запазва текущата си стойност, защото средата на този сървър я задава или задава част от връзката ѝ."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " настройки запазват текущите си стойности, защото средата на този сървър ги задава или задава част от връзката им."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.caveat.filesMissing": [
     {
       "type": 6,
@@ -14711,8 +14785,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Скриване"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14861,8 +14955,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Показване"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17089,6 +17203,12 @@
       "value": "Друг акаунт тук влиза със същото потребителско име или имейл."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Средата на този сървър задава различаващите се настройки или част от връзката им, затова този сървър запазва текущите си стойности."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18163,6 +18283,16 @@
     {
       "type": 0,
       "value": " (запазено: по-строго)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (запазено: среда)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -30510,7 +30640,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Поток от наскоро започнати сесии за възпроизвеждане"
+      "value": "Последните пускания във всички акаунти"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32143,6 +32273,72 @@
     {
       "type": 0,
       "value": "Не можа да се зареди активността."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " пусна "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " пусна "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49576,6 +49772,12 @@
       "value": "Въведете адреса на сървъра, за да завършите настройките."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ключът е зададен от конфигурацията за внедряване на сървъра"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50492,6 +50694,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Възелът е зададен от конфигурацията за внедряване на сървъра. Премахнете го оттам и рестартирайте API сървърите, за да го изтриете тук."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -53109,6 +53317,114 @@
       "value": "Генерирането е спряно. Запазените препоръки остават видими в „Откриване“, докато сървърът не се рестартира."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Класират се профилите ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Извличат се списъците от TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Проверяват се заглавията и се създават ембединги ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Изчистено е "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " изтекло заглавие"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Изчистени са "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " изтекли заглавия"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53141,6 +53457,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Разрешете конфликта със заключването на ембединга по-долу, преди да създавате препоръки в „Откриване“."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Първо стартирайте заданието „Ембединги“, за да има Silo вектори на библиотеката за сравнение."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Свържете доставчик на ембединги в страницата „ИИ услуги“, преди да създавате препоръки в „Откриване“."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Все още няма профили с вкусови профили. Стартирайте „Вкусови профили“, след като в профилите има гледани или оценени заглавия."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -55007,6 +55347,32 @@
       "value": "Остава празен, докато препоръките в „Откриване“ не бъдат включени в Администриране → Препоръки."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Препоръчаните редове остават празни, докато препоръките в „Откриване“ не бъдат включени в "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Администриране → Препоръки"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Изключено в „Препоръки“"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56493,6 +56859,12 @@
       "value": "Новите редове се добавят най-долу в „Откриване“"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Отваряне на настройките в „Препоръки“"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56505,6 +56877,12 @@
       "value": "Емисията на MDBList не съдържа сортирането, запазено на страницата на списъка. Изберете това, което се показва там."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Вашият профил все още няма препоръки в „Откриване“. Стартирайте препоръките в „Откриване“ или гледайте и оценете няколко заглавия, за да видите преглед на този ред."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56515,6 +56893,12 @@
     {
       "type": 0,
       "value": "Изберете списък или поставете връзката към него, за да видите заглавията му."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Включете препоръките в „Откриване“ в Администриране → Препоръки, за да видите преглед на този ред."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -57369,6 +57753,12 @@
     {
       "type": 0,
       "value": "Съобщението е изпратено"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Плейърът не потвърди получаването на съобщението. То може да се покаже по-късно или изобщо да не се покаже."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -60243,6 +60633,12 @@
       "value": "Проверката на връзката е неуспешна."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Не можа да се провери дали средата на сървъра задава тази настройка. Презаредете страницата, за да я редактирате."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60797,6 +61193,30 @@
     {
       "type": 0,
       "value": "Неуспешно обновяване на канала"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Презаредете, за да видите текущите стойности. Промените ви в настройките, които са се променили, както и в запазените пароли и ключове, се отменят; другите ви промени се запазват."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Презареждане"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Не можаха да се презаредят настройките. Опитайте отново."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Настройките са променени другаде"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -66267,6 +66687,24 @@
       "value": "Преминаването към друг модел изисква нулиране на ембедингите, което изтрива всички тях. Друг доставчик, обслужващ същия модел, влиза в сила след рестартиране."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Добавяне в „Откриване“"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Препоръчаните редове не можаха да се добавят към страницата „Откриване“."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Препоръчаните редове са добавени към страницата „Откриване“."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66289,6 +66727,44 @@
     {
       "type": 0,
       "value": "Колко заглавия, които не са в библиотеката, сървърът пази, за да препоръчва от тях. Всяко се проверява в TMDB и за него се създава ембединг. Създаването на ембединги обикновено е евтино, но по-голям брой може да струва повече или да отнеме повече време в зависимост от доставчика на ембединги и използва повече място за съхранение."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Вашата страница „Откриване“ все още не показва редове с препоръки."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Включете опцията „Активиране на препоръките“ по-горе и рестартирайте сървъра, за да могат да се изпълняват препоръките в „Откриване“."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Заявките в момента са изключени. Включете ги в "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Настройки за заявки"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", за да могат зрителите да виждат страницата „Откриване“."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Отваряне на страницата „Откриване“"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -75479,6 +75955,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Хранилището не може да се премести тук, докато средата задава настройки за хранилището ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Първо премахнете тези променливи и рестартирайте всички API сървъри."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76613,6 +77103,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Този график идва от настройките за резервни копия. Променете го в "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Сървър › Резервни копия"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
@@ -86888,25 +87398,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Не можа да се влезе в телевизора. Опитайте отново."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Проверете дали приложението ви показва"
+      "value": "Не можа да се одобри входът. Опитайте отново."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Проверете дали телевизорът ви показва"
+      "value": "Проверете дали този код съвпада"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Въведете кода от телевизора или приложението"
+      "value": "Въведете кода, показан на устройството ви"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86918,13 +87422,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Влезте с акаунта си в телевизор или друго устройство."
+      "value": "Вход в телевизор, приложение или друго устройство."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Вход в телевизор"
+      "value": "Одобряване на входа"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86944,13 +87448,13 @@
     },
     {
       "type": 0,
-      "value": ", за да одобрите телевизор. Само от самия акаунт може да се влезе в телевизор."
+      "value": ", за да одобрите този вход. Само от самия акаунт могат да се одобряват устройства."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Спрете да преглеждате като този потребител, за да одобрите телевизор. Само от самия акаунт може да се влезе в телевизор."
+      "value": "Спрете да преглеждате като този потребител, за да одобрите този вход. Само от самия акаунт могат да се одобряват устройства."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86968,39 +87472,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Не намерихме този код. Проверете кода на телевизора си."
+      "value": "Не намерихме този код. Проверете кода и опитайте отново."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Не сега"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "По-старите приложения за телевизор показват вместо това "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Одобрявайте само устройство, което е пред вас в момента."
+      "value": "Отхвърляне"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Одобрявайте само телевизор, който е пред вас в момента."
+      "value": "Одобрявайте само ако сами сте започнали входа."
     }
   ],
   "web.auth.activate.playOn": [
@@ -87026,7 +87510,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Всеки, който използва този телевизор, може да избира от вашите профили. Профилите с PIN остават заключени."
+      "value": "Така устройството получава достъп до профилите ви. Профилите с PIN остават заключени."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -87073,6 +87557,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Заявено "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -87086,7 +87580,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Този телевизор спря да чака. Започнете отново от телевизора."
+      "value": "Това устройство спря да чака. Започнете входа отново от него."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -87095,10 +87589,38 @@
       "value": "Този вход беше отхвърлен."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Готово. Извършва се вход на "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "…"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Входът на "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " е извършен."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Този код изтече. Телевизорът ви показва нов. Използвайте него."
+      "value": "Този код е изтекъл. Генерирайте нов код на устройството и опитайте отново."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -87182,25 +87704,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Входът на този телевизор вече е завършен."
+      "value": "В това устройство вече е извършен вход."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Този телевизор е одобрен и завършва входа."
+      "value": "Това устройство е одобрено и завършва входа."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Готово. Телевизорът ви влиза."
+      "value": "Готово. Извършва се вход в устройството ви…"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Входът на телевизора ви е завършен."
+      "value": "Входът в устройството ви е извършен."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -87244,7 +87766,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Да влезе ли устройството "
+      "value": "Да се разреши ли вход на "
     },
     {
       "type": 1,
@@ -87258,7 +87780,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Да влезе ли това устройство?"
+      "value": "Да се разреши ли вход на това устройство?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87278,13 +87800,13 @@
     },
     {
       "type": 0,
-      "value": ", за да одобрите този телевизор."
+      "value": ", за да одобрите този вход."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Вход на телевизора"
+      "value": "Одобряване на входа"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88330,7 +88852,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Не можа да се извърши вход на устройството. Опитайте отново."
+      "value": "Не можа да се одобри входът. Опитайте отново."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -109776,6 +110298,12 @@
       "value": "Превежда се…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Скриване на редовете на сървъра, добавени след този експорт:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109794,6 +110322,12 @@
     {
       "type": 0,
       "value": ", като заменят разделите, които сте добавили тук преди. Промените ви в разделите на този сървър се запазват."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Редовете на този сървър са се променили, откакто този файл е експортиран, затова изберете по-долу редовете, които да се скрият."
     }
   ],
   "web.home.layout.checking": [
@@ -109844,6 +110378,26 @@
     {
       "type": 0,
       "value": "Включва „Скриване на гледаните елементи“."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Скрива избраните редове в: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", без да променя другите ви редове там."
     }
   ],
   "web.home.layout.import": [
@@ -109948,6 +110502,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -110156,6 +110728,12 @@
     {
       "type": 0,
       "value": "Раздел без име"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Скриване на редовете на сървъра, които не са в този файл:"
     }
   ],
   "web.home.page.customize": [

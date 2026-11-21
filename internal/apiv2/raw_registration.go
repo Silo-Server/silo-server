@@ -159,10 +159,8 @@ func RegisterRaw(reg *Registry, raw RawOperation, handler http.Handler) {
 			fail("raw path parameter must be explicitly documented: " + name)
 		}
 	}
-	for _, declared := range reg.Declared() {
-		if declared.Method == op.Method && declared.Path == rawRouterPath(op.Path, raw.WildcardParam) {
-			fail("duplicate raw route")
-		}
+	if reg.hasDeclaredRoute(op.Method, rawRouterPath(op.Path, raw.WildcardParam)) {
+		fail("duplicate raw route")
 	}
 	if op.Metadata == nil {
 		op.Metadata = map[string]any{}
@@ -215,9 +213,7 @@ func RegisterRaw(reg *Registry, raw RawOperation, handler http.Handler) {
 	reg.api.OpenAPI().AddOperation(&op.Operation)
 	routeOp := op.Operation
 	routeOp.Path = rawRouterPath(op.Path, raw.WildcardParam)
-	reg.mu.Lock()
-	reg.ops = append(reg.ops, Declared{Method: op.Method, Path: routeOp.Path, OperationID: op.OperationID, Class: op.Class, RetrySafety: op.RetrySafety})
-	reg.mu.Unlock()
+	reg.recordDeclared(Declared{Method: op.Method, Path: routeOp.Path, OperationID: op.OperationID, Class: op.Class, RetrySafety: op.RetrySafety})
 	serve := func(ctx huma.Context) {
 		r, w := humachi.Unwrap(ctx)
 		handler.ServeHTTP(w, r.WithContext(ctx.Context()))

@@ -449,6 +449,12 @@
       "value": "Prijavite se putem prijave svoje mreže da biste nastavili."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Ovaj čvor postavlja konfiguracija implementacije poslužitelja. Uklonite ga ondje i ponovno pokrenite API poslužitelje da biste njime upravljali ovdje."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -14003,7 +14009,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — kolekcija koju prikazuju nije ni ovdje ni u sigurnosnoj kopiji"
+              "value": " nije moguće vratiti — kolekcija koju prikazuje nije ni ovdje ni u sigurnosnoj kopiji"
             }
           ]
         },
@@ -14049,7 +14055,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihove su postavke šifrirane drugim ključem SECRET_KEY"
+              "value": " nije moguće vratiti — postavke su šifrirane drugim ključem SECRET_KEY"
             }
           ]
         },
@@ -14095,7 +14101,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — ovaj ih poslužitelj ne može prihvatiti"
+              "value": " nije moguće vratiti — ovaj poslužitelj to ne može prihvatiti"
             }
           ]
         },
@@ -14187,7 +14193,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihove datoteke nedostaju na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuće datoteke nedostaju na ovom poslužitelju"
             }
           ]
         },
@@ -14233,7 +14239,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihove mape nisu na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuće mape nisu na ovom poslužitelju"
             }
           ]
         },
@@ -14279,7 +14285,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihova grupa pristupa nije na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuća grupa pristupa nije na ovom poslužitelju"
             }
           ]
         },
@@ -14325,7 +14331,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihov naslov nije u katalogu ovog poslužitelja"
+              "value": " nije moguće vratiti — pripadajući naslov nije u katalogu ovog poslužitelja"
             }
           ]
         },
@@ -14371,7 +14377,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — proširili bi pristup pa ovaj poslužitelj zadržava svoje strože vrijednosti"
+              "value": " nije moguće vratiti — to bi proširilo pristup pa ovaj poslužitelj zadržava svoje strože vrijednosti"
             }
           ]
         },
@@ -14417,7 +14423,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihova medijateka nije na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuća medijateka nije na ovom poslužitelju"
             }
           ]
         },
@@ -14463,7 +14469,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihovu medijateku ovdje nije moguće vratiti"
+              "value": " nije moguće vratiti — pripadajuću medijateku ovdje nije moguće vratiti"
             }
           ]
         },
@@ -14542,6 +14548,52 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nije moguće vratiti — okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nije moguće vratiti — okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nije moguće vratiti — okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14555,7 +14607,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — šifrirani su drugim ključem SECRET_KEY"
+              "value": " nije moguće vratiti — šifrirano je drugim ključem SECRET_KEY"
             }
           ]
         },
@@ -14601,7 +14653,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — najprije ih treba instalirati iz kataloga dodataka"
+              "value": " nije moguće vratiti — najprije to treba instalirati iz kataloga dodataka"
             }
           ]
         },
@@ -14647,7 +14699,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihov glavni profil mora se vratiti zajedno s njima"
+              "value": " nije moguće vratiti — zajedno s tim mora se vratiti i pripadajući glavni profil"
             }
           ]
         },
@@ -14693,7 +14745,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — nema ih u sigurnosnoj kopiji"
+              "value": " nije moguće vratiti — sigurnosna kopija to ne sadrži"
             }
           ]
         },
@@ -14877,7 +14929,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — ovaj bi im poslužitelj dao veći pristup nego sigurnosna kopija"
+              "value": " nije moguće vratiti — ovaj bi poslužitelj tome dao veći pristup nego sigurnosna kopija"
             }
           ]
         },
@@ -14969,7 +15021,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — ovdje su već isti"
+              "value": " nije moguće vratiti — ovdje je već isto"
             }
           ]
         },
@@ -15061,7 +15113,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihovu kopiju u sigurnosnoj kopiji nije moguće pročitati"
+              "value": " nije moguće vratiti — pripadajuću kopiju u sigurnosnoj kopiji nije moguće pročitati"
             }
           ]
         },
@@ -15107,7 +15159,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — povezuju se s vanjskim uslugama, a ovaj poslužitelj ne može provjeriti sigurnosnu kopiju"
+              "value": " nije moguće vratiti — povezuje se s vanjskim uslugama, a ovaj poslužitelj ne može provjeriti sigurnosnu kopiju"
             }
           ]
         },
@@ -15232,6 +15284,52 @@
     {
       "type": 0,
       "value": "Adresa usluge mijenja se bez njezinih vjerodajnica u sigurnosnoj kopiji pa ih vraćanje ovdje briše i isključuje uslugu dok ih ponovno ne unesete."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postavka zadržava trenutačnu vrijednost jer okruženje ovog poslužitelja postavlja nju ili dio njezine veze."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postavke zadržavaju trenutačne vrijednosti jer okruženje ovog poslužitelja postavlja njih ili dio njihove veze."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postavki zadržava trenutačne vrijednosti jer okruženje ovog poslužitelja postavlja njih ili dio njihove veze."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15798,8 +15896,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Sakrij ih"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij ih"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij ih"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -15984,8 +16110,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Prikaži ih"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži ih"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži ih"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -18660,6 +18814,12 @@
       "value": "Drugi se račun ovdje prijavljuje istim korisničkim imenom ili e-adresom."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze pa ovaj poslužitelj zadržava svoje trenutačne vrijednosti."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19894,6 +20054,16 @@
     {
       "type": 0,
       "value": " (zadržano: strože)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (zadržano: okruženje)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -33612,7 +33782,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Feed nedavno pokrenutih sesija reprodukcije"
+      "value": "Najnovije reprodukcije na svim računima"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35420,6 +35590,72 @@
     {
       "type": 0,
       "value": "Učitavanje aktivnosti nije uspjelo."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " – reproducirano: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " – reproducirano: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -55335,6 +55571,12 @@
       "value": "Unesite adresu poslužitelja da biste dovršili postavke."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ključ postavlja konfiguracija implementacije poslužitelja"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -56263,6 +56505,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Postavlja ga konfiguracija implementacije poslužitelja. Uklonite ga ondje i ponovno pokrenite API poslužitelje da biste ga izbrisali ovdje."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -59029,6 +59277,130 @@
       "value": "Generiranje je zaustavljeno. Spremljene preporuke ostaju vidljive u odjeljku Otkrij do ponovnog pokretanja poslužitelja."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Rangiranje profila ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Dohvaćanje TMDB popisa ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Pretraživanje naslova i izrada embeddinga ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Uklonjen je "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " istekli naslov"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Uklonjena su "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " istekla naslova"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Uklonjeno je "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " isteklih naslova"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -59073,6 +59445,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Prije izrade preporuka za Otkrij riješite sukob zaključavanja embeddinga u nastavku."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Najprije pokrenite posao Embeddingi kako bi Silo imao vektore medijateke za usporedbu."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Prije izrade preporuka za Otkrij povežite pružatelja embeddinga u odjeljku AI usluge."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Nijedan profil još nema profil ukusa. Pokrenite posao Profili ukusa kad netko pogleda ili ocijeni naslove."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -61283,6 +61679,32 @@
       "value": "Ostaje prazno dok se ne uključe preporuke za Otkrij pod Administracija → Preporuke."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Preporučeni retci ostaju prazni dok se ne uključe preporuke za Otkrij pod "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Administracija → Preporuke"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Isključeno u odjeljku Preporuke"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -62890,6 +63312,12 @@
       "value": "Novi retci dodaju se na dno stranice Otkrij"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Otvori postavke preporuka"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -62902,6 +63330,12 @@
       "value": "MDBList u svom feedu ne prenosi redoslijed spremljen na stranici popisa. Odaberite onaj koji se tamo prikazuje."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Vaš profil još nema preporuka za Otkrij. Pokrenite posao Preporuke za Otkrij ili pogledajte i ocijenite nekoliko naslova kako biste pregledali ovaj redak."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -62912,6 +63346,12 @@
     {
       "type": 0,
       "value": "Odaberite popis ili zalijepite njegovu poveznicu da biste vidjeli njegove naslove."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Uključite preporuke za Otkrij pod Administracija → Preporuke kako biste pregledali ovaj redak."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -63798,6 +64238,12 @@
     {
       "type": 0,
       "value": "Poruka je poslana"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Reproduktor nije potvrdio primitak poruke. Možda će se prikazati sa zakašnjenjem ili se uopće neće prikazati."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -66739,6 +67185,12 @@
       "value": "Provjera veze nije uspjela."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nije moguće provjeriti postavlja li ovo okruženje poslužitelja. Ponovno učitajte stranicu da biste to uredili."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -67309,6 +67761,30 @@
     {
       "type": 0,
       "value": "Ažuriranje kanala nije uspjelo"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Ponovno učitajte da biste vidjeli trenutačne vrijednosti. Vaše izmjene postavki koje su se promijenile te spremljenih lozinki i ključeva poništavaju se; ostale izmjene ostaju."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Ponovno učitaj"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nije moguće ponovno učitati postavke. Pokušajte ponovno."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Postavke su promijenjene drugdje"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -72895,6 +73371,24 @@
       "value": "Prelazak na drugi model zahtijeva ponovno postavljanje embeddinga, čime se svi brišu. Drugi pružatelj koji poslužuje isti model primjenjuje se nakon ponovnog pokretanja."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Dodaj u Otkrij"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Nije moguće dodati preporučene retke na stranicu Otkrij."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Preporučeni retci dodani su na stranicu Otkrij."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -72917,6 +73411,44 @@
     {
       "type": 0,
       "value": "Koliko naslova koji nisu u medijateci poslužitelj čuva za preporuke. Svaki se traži na TMDB-u i pretvara u embedding. Izrada embeddinga obično je jeftina, ali veći broj može koštati više ili trajati dulje, ovisno o vašem pružatelju embeddinga, i zauzima više prostora za pohranu."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Vaša stranica Otkrij još ne prikazuje nijedan redak tipa Preporuke."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Uključite postavku „Omogući preporuke“ iznad i ponovno pokrenite poslužitelj kako bi se preporuke za Otkrij mogle pokrenuti."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Zahtjevi su trenutačno isključeni. Uključite ih u "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Postavkama zahtjeva"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " kako bi gledatelji mogli vidjeti stranicu Otkrij."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Otvori stranicu Otkrij"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -82181,6 +82713,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Pohranu nije moguće premjestiti ovamo dok okruženje postavlja postavke pohrane ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Najprije uklonite te varijable i ponovno pokrenite sve API poslužitelje."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -83373,6 +83919,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Ovaj raspored dolazi iz postavki sigurnosnih kopija. Promijenite ga na stranici "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Poslužitelj › Sigurnosne kopije"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
@@ -94614,25 +95180,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Prijava TV-a nije uspjela. Pokušajte ponovno."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Provjerite prikazuje li vaša aplikacija"
+      "value": "Nije moguće odobriti prijavu. Pokušajte ponovno."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Provjerite prikazuje li vaš TV"
+      "value": "Provjerite podudara li se ovaj kôd"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Unesite kod s TV-a ili aplikacije"
+      "value": "Unesite kôd prikazan na vašem uređaju"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94644,13 +95204,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Prijavite TV ili drugi uređaj svojim računom."
+      "value": "Prijavite TV, aplikaciju ili drugi uređaj."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Prijava TV-a"
+      "value": "Odobrenje prijave"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94670,13 +95230,13 @@
     },
     {
       "type": 0,
-      "value": " da biste odobrili TV. Samo taj račun može prijaviti TV."
+      "value": " da biste odobrili ovu prijavu. Samo sam vlasnik računa može odobravati uređaje."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Prestanite pregledavati kao ovaj korisnik da biste odobrili TV. Samo taj račun može prijaviti TV."
+      "value": "Prestanite pregledavati kao ovaj korisnik da biste odobrili ovu prijavu. Samo sam vlasnik računa može odobravati uređaje."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94694,39 +95254,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Nismo pronašli taj kod. Provjerite kod na TV-u."
+      "value": "Nismo pronašli taj kôd. Provjerite kôd i pokušajte ponovno."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ne sada"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Starije TV aplikacije umjesto toga prikazuju "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Odobrite samo uređaj koji je upravo ispred vas."
+      "value": "Odbij"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Odobrite samo TV koji je upravo ispred vas."
+      "value": "Odobrite ovo samo ako ste sami pokrenuli prijavu."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94752,7 +95292,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Svatko tko koristi ovaj TV može odabrati neki od vaših profila. Profili s PIN-om ostaju zaključani."
+      "value": "Tako uređaj dobiva pristup vašim profilima. Profili s PIN-om ostaju zaključani."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94799,6 +95339,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Zatraženo "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -94812,7 +95362,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Ovaj TV više ne čeka. Počnite ponovno na TV-u."
+      "value": "Ovaj uređaj više ne čeka. Ponovno pokrenite prijavu na njemu."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -94821,10 +95371,34 @@
       "value": "Ova je prijava odbijena."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Gotovo. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": ": prijava je u tijeku."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": ": prijava je dovršena."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Ovaj je kod istekao. Vaš TV prikazuje novi. Upotrijebite taj kod."
+      "value": "Ovaj je kôd istekao. Zatražite novi kôd na uređaju i pokušajte ponovno."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -94908,25 +95482,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Taj je TV već prijavljen."
+      "value": "Ovaj je uređaj već prijavljen."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Ovaj je TV odobren i dovršava prijavu."
+      "value": "Ovaj je uređaj odobren i dovršava prijavu."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Gotovo. Vaš se TV prijavljuje."
+      "value": "Gotovo. Vaš se uređaj prijavljuje."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Vaš je TV prijavljen."
+      "value": "Vaš je uređaj prijavljen."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -94970,7 +95544,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Prijaviti uređaj "
+      "value": "Dopustiti da se "
     },
     {
       "type": 1,
@@ -94978,13 +95552,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " prijavi?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Prijaviti ovaj uređaj?"
+      "value": "Dopustiti prijavu ovog uređaja?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -95004,13 +95578,13 @@
     },
     {
       "type": 0,
-      "value": " da biste odobrili ovaj TV."
+      "value": " da biste odobrili ovu prijavu."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Prijavi TV"
+      "value": "Odobri prijavu"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -96056,7 +96630,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Nije moguće prijaviti uređaj. Pokušajte ponovno."
+      "value": "Nije moguće odobriti prijavu. Pokušajte ponovno."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -119573,6 +120147,12 @@
       "value": "Prevođenje…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sakrij retke poslužitelja dodane nakon ovog izvoza:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -119591,6 +120171,12 @@
     {
       "type": 0,
       "value": " i zamjenjuju odjeljke koje ste ovdje prethodno dodali. Vaše promjene odjeljaka ovog poslužitelja ostaju."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Retci ovog poslužitelja promijenili su se nakon izvoza ove datoteke pa u nastavku odaberite retke koje želite sakriti."
     }
   ],
   "web.home.layout.checking": [
@@ -119641,6 +120227,26 @@
     {
       "type": 0,
       "value": "Uključuje opciju Sakrij pogledane stavke."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Sakriva odabrane retke na: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " bez mijenjanja vaših ostalih redaka ondje."
     }
   ],
   "web.home.layout.import": [
@@ -119745,6 +120351,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -119964,6 +120588,12 @@
     {
       "type": 0,
       "value": "Odjeljak bez naziva"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sakrij retke poslužitelja kojih nema u ovoj datoteci:"
     }
   ],
   "web.home.page.customize": [

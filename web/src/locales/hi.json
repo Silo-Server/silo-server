@@ -449,6 +449,12 @@
       "value": "जारी रखने के लिए अपने नेटवर्क के साइन इन से साइन इन करें।"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "यह नोड सर्वर के डिप्लॉयमेंट कॉन्फ़िगरेशन में सेट है। इसे यहाँ मैनेज करने के लिए इसे वहाँ से हटाएँ और API सर्वर रीस्टार्ट करें।"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -13751,6 +13757,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " रीस्टोर नहीं किया जा सकता — जो सेटिंग अलग हैं उन्हें, या उनके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " रीस्टोर नहीं किए जा सकते — जो सेटिंग अलग हैं उन्हें, या उनके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13764,7 +13804,7 @@
             },
             {
               "type": 0,
-              "value": " रीस्टोर नहीं किया जा सकता — यह किसी दूसरी SECRET_KEY से एन्क्रिप्ट किया गया है"
+              "value": " रीस्टोर नहीं किया जा सकता — इसे किसी दूसरी SECRET_KEY से एन्क्रिप्ट किया गया है"
             }
           ]
         },
@@ -13776,7 +13816,7 @@
             },
             {
               "type": 0,
-              "value": " रीस्टोर नहीं किए जा सकते — ये किसी दूसरी SECRET_KEY से एन्क्रिप्ट किए गए हैं"
+              "value": " रीस्टोर नहीं किए जा सकते — इन्हें किसी दूसरी SECRET_KEY से एन्क्रिप्ट किया गया है"
             }
           ]
         }
@@ -14070,7 +14110,7 @@
             },
             {
               "type": 0,
-              "value": " रीस्टोर नहीं किया जा सकता — यह यहाँ पहले से एक जैसा है"
+              "value": " रीस्टोर नहीं किया जा सकता — यहाँ इसमें और बैकअप में कोई अंतर नहीं है"
             }
           ]
         },
@@ -14082,7 +14122,7 @@
             },
             {
               "type": 0,
-              "value": " रीस्टोर नहीं किए जा सकते — ये यहाँ पहले से एक जैसे हैं"
+              "value": " रीस्टोर नहीं किए जा सकते — यहाँ इनमें और बैकअप में कोई अंतर नहीं है"
             }
           ]
         }
@@ -14273,6 +14313,40 @@
     {
       "type": 0,
       "value": "बैकअप में एक सेवा का पता उसके क्रेडेंशियल के बिना बदलता है, इसलिए रीस्टोर करने पर यहाँ वे क्रेडेंशियल साफ़ हो जाते हैं और उन्हें फिर से डालने तक सेवा बंद रहती है।"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " सेटिंग अपनी मौजूदा वैल्यू रखती है, क्योंकि इसे, या इसके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है।"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " सेटिंग अपनी मौजूदा वैल्यू रखती हैं, क्योंकि इन्हें, या इनके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है।"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14743,8 +14817,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "इन्हें छिपाएँ"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इसे छिपाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इन्हें छिपाएँ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14901,8 +14995,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "इन्हें दिखाएँ"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इसे दिखाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इन्हें दिखाएँ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17125,6 +17239,12 @@
       "value": "यहाँ एक दूसरा खाता इसी यूज़रनेम या ईमेल से साइन इन करता है।"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "जो सेटिंग अलग हैं उन्हें, या उनके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है, इसलिए यह सर्वर अपनी मौजूदा वैल्यू रखता है।"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18199,6 +18319,16 @@
     {
       "type": 0,
       "value": " (रखा गया: ज़्यादा सख़्त)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (बरकरार: एनवायरनमेंट)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -30406,7 +30536,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "हाल ही में शुरू हुए प्लेबैक सेशन की फ़ीड"
+      "value": "सभी खातों के सबसे हाल के प्ले"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32035,6 +32165,80 @@
     {
       "type": 0,
       "value": "गतिविधि लोड नहीं की जा सकी।"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ने "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " को चलाया"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ने "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " को चलाया"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49128,6 +49332,12 @@
       "value": "सेटिंग पूरी करने के लिए सर्वर का पता डालें।"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "कुंजी सर्वर के डिप्लॉयमेंट कॉन्फ़िगरेशन में सेट है"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 1,
@@ -50032,6 +50242,12 @@
     {
       "type": 0,
       "value": " मिटाएँ"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "यह सर्वर के डिप्लॉयमेंट कॉन्फ़िगरेशन में सेट है। इसे यहाँ मिटाने के लिए वहाँ से हटाएँ और API सर्वर रीस्टार्ट करें।"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52641,6 +52857,106 @@
       "value": "सुझाव बनना बंद हो गया है। सर्वर के रीस्टार्ट होने तक स्टोर किए गए सुझाव डिस्कवर में दिखते रहेंगे।"
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "प्रोफ़ाइलों की रैंकिंग हो रही है ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDB सूचियाँ फ़ेच हो रही हैं ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "टाइटल जाँचे और एम्बेड किए जा रहे हैं ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " एक्सपायर हुआ टाइटल हटाया गया"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " एक्सपायर हुए टाइटल हटाए गए"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -52673,6 +52989,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव बनाने से पहले नीचे दिया गया एम्बेडिंग लॉक कॉन्फ़्लिक्ट हल करें।"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "पहले एम्बेडिंग जॉब चलाएँ, ताकि Silo के पास तुलना के लिए लाइब्रेरी वेक्टर हों।"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव बनाने से पहले AI सेवाएँ में कोई एम्बेडिंग प्रोवाइडर कनेक्ट करें।"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "अभी किसी भी प्रोफ़ाइल की रुचि प्रोफ़ाइल नहीं है। जब किसी ने टाइटल देखे हों या उन्हें रेटिंग दी हो, तब रुचि प्रोफ़ाइलें जॉब चलाएँ।"
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54559,6 +54899,32 @@
       "value": "जब तक एडमिन → सुझाव में डिस्कवर सुझाव चालू नहीं किए जाते, यह खाली रहेगी।"
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "जब तक "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "एडमिन → सुझाव"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " में डिस्कवर सुझाव चालू नहीं किए जाते, सुझाव वाली पंक्तियाँ खाली रहेंगी।"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "सुझाव में बंद"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56029,6 +56395,12 @@
       "value": "नई पंक्तियाँ डिस्कवर में सबसे नीचे जुड़ती हैं"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "सुझाव सेटिंग खोलें"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56041,6 +56413,12 @@
       "value": "MDBList की फ़ीड में सूची के पेज पर सेव किया गया क्रम नहीं आता। वह क्रम चुनें जो वहाँ दिखता है।"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "आपकी प्रोफ़ाइल के लिए अभी कोई डिस्कवर सुझाव नहीं हैं। इस पंक्ति का प्रीव्यू देखने के लिए डिस्कवर सुझाव चलाएँ या कुछ टाइटल देखें और उन्हें रेटिंग दें।"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56051,6 +56429,12 @@
     {
       "type": 0,
       "value": "टाइटल देखने के लिए कोई सूची चुनें या उसका लिंक पेस्ट करें।"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "इस पंक्ति का प्रीव्यू देखने के लिए एडमिन → सुझाव में डिस्कवर सुझाव चालू करें।"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -56869,6 +57253,12 @@
     {
       "type": 0,
       "value": "मैसेज भेजा गया"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "प्लेयर ने मैसेज मिलने की पुष्टि नहीं की। हो सकता है कि यह देर से दिखे या बिल्कुल न दिखे।"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -59747,6 +60137,12 @@
       "value": "कनेक्शन की जाँच विफल रही।"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "यह जाँचा नहीं जा सका कि सर्वर का एनवायरनमेंट इसे सेट करता है या नहीं। इसे बदलने के लिए पेज फिर से लोड करें।"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60301,6 +60697,30 @@
     {
       "type": 0,
       "value": "चैनल अपडेट नहीं किया जा सका"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "मौजूदा वैल्यू देखने के लिए फिर से लोड करें। जो सेटिंग बदल गई हैं उनमें, और सेव किए गए पासवर्ड और कुंजियों में किए गए आपके बदलाव वापस ले लिए जाएँगे; आपके बाकी बदलाव बने रहेंगे।"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "फिर से लोड करें"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "सेटिंग फिर से लोड नहीं की जा सकी। फिर से कोशिश करें।"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "सेटिंग कहीं और बदली गई हैं"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -65747,6 +66167,24 @@
       "value": "किसी दूसरे मॉडल पर जाने के लिए एम्बेडिंग रीसेट करनी होंगी, जिससे वे सभी मिट जाती हैं। उसी मॉडल वाला कोई दूसरा प्रोवाइडर रीस्टार्ट के बाद लागू होता है।"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "डिस्कवर में जोड़ें"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "सुझाव वाली पंक्तियाँ डिस्कवर पेज में नहीं जोड़ी जा सकीं।"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "सुझाव वाली पंक्तियाँ डिस्कवर पेज में जोड़ी गईं।"
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -65769,6 +66207,44 @@
     {
       "type": 0,
       "value": "सर्वर सुझाव देने के लिए ऐसे कितने टाइटल रखे जो लाइब्रेरी में नहीं हैं। हर टाइटल की जानकारी TMDB से ली जाती है और उसे एम्बेड किया जाता है। एम्बेडिंग आम तौर पर सस्ती होती है, लेकिन ज़्यादा संख्या रखने पर आपके एम्बेडिंग प्रोवाइडर के हिसाब से खर्च बढ़ सकता है या ज़्यादा समय लग सकता है, और स्टोरेज भी ज़्यादा लगता है।"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "आपके डिस्कवर पेज पर अभी कोई सुझाव पंक्ति नहीं दिखती।"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव चलाने से पहले ऊपर दी गई सेटिंग “सुझाव चालू करें” को चालू करें और सर्वर रीस्टार्ट करें।"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "अनुरोध अभी बंद हैं। "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "अनुरोध सेटिंग"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " में इन्हें चालू करें, ताकि दर्शक डिस्कवर पेज देख सकें।"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "डिस्कवर पेज खोलें"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -74927,6 +75403,20 @@
       "value": ")।"
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "जब तक एनवायरनमेंट स्टोरेज की सेटिंग ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": ") सेट करता है, तब तक स्टोरेज को यहाँ नहीं ले जाया जा सकता। पहले इन वेरिएबल को अनसेट करें और हर API सर्वर को रीस्टार्ट करें।"
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76065,6 +76555,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "यह शेड्यूल बैकअप सेटिंग से आता है। इसे "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "सर्वर › बैकअप"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " में बदलें।"
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
@@ -86272,25 +86782,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "टीवी में साइन इन नहीं किया जा सका। फिर से कोशिश करें।"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "जाँच लें कि आपके ऐप पर यह दिख रहा है"
+      "value": "साइन-इन को मंज़ूरी नहीं दी जा सकी। फिर से कोशिश करें।"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "जाँच लें कि आपके टीवी पर यह दिख रहा है"
+      "value": "पक्का करें कि यह कोड मेल खाता है"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "अपने टीवी या ऐप पर दिख रहा कोड डालें"
+      "value": "अपने डिवाइस पर दिख रहा कोड डालें"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86302,13 +86806,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "अपने खाते से किसी टीवी या दूसरे डिवाइस में साइन इन करें।"
+      "value": "किसी टीवी, ऐप या दूसरे डिवाइस में साइन इन करें।"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "टीवी में साइन इन करें"
+      "value": "साइन-इन को मंज़ूरी दें"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86320,7 +86824,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "टीवी को मंज़ूरी देने के लिए "
+      "value": "इस साइन-इन को मंज़ूरी देने के लिए "
     },
     {
       "type": 1,
@@ -86328,13 +86832,13 @@
     },
     {
       "type": 0,
-      "value": " के रूप में देखना बंद करें। सिर्फ़ वही खाता खुद टीवी में साइन इन कर सकता है।"
+      "value": " के रूप में देखना बंद करें। डिवाइसों को सिर्फ़ वही खाता खुद मंज़ूरी दे सकता है।"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "टीवी को मंज़ूरी देने के लिए इस उपयोगकर्ता के रूप में देखना बंद करें। सिर्फ़ वही खाता खुद टीवी में साइन इन कर सकता है।"
+      "value": "इस साइन-इन को मंज़ूरी देने के लिए इस उपयोगकर्ता के रूप में देखना बंद करें। डिवाइसों को सिर्फ़ वही खाता खुद मंज़ूरी दे सकता है।"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86352,39 +86856,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "वह कोड नहीं मिला। अपने टीवी पर कोड जाँच लें।"
+      "value": "वह कोड नहीं मिला। कोड जाँचें और फिर से कोशिश करें।"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "अभी नहीं"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "पुराने टीवी ऐप इसके बजाय "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " दिखाते हैं।"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "सिर्फ़ उसी डिवाइस को मंज़ूरी दें जो इस समय आपके सामने है।"
+      "value": "अस्वीकार करें"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "सिर्फ़ उसी टीवी को मंज़ूरी दें जो इस समय आपके सामने है।"
+      "value": "इसे सिर्फ़ तभी मंज़ूरी दें, जब साइन-इन आपने खुद शुरू किया हो।"
     }
   ],
   "web.auth.activate.playOn": [
@@ -86406,7 +86890,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "इस टीवी का इस्तेमाल करने वाला कोई भी व्यक्ति आपकी प्रोफ़ाइलों में से चुन सकता है। PIN वाली प्रोफ़ाइलें लॉक रहती हैं।"
+      "value": "इससे उसे आपकी प्रोफ़ाइलों का ऐक्सेस मिल जाता है। PIN वाली प्रोफ़ाइलें लॉक रहती हैं।"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86453,6 +86937,16 @@
       "value": " अनुरोध किया गया"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "अनुरोध किया गया: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 1,
@@ -86466,7 +86960,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "इस टीवी ने इंतज़ार करना बंद कर दिया। टीवी पर फिर से शुरू करें।"
+      "value": "इस डिवाइस ने इंतज़ार करना बंद कर दिया। उस पर फिर से साइन इन शुरू करें।"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86475,10 +86969,38 @@
       "value": "यह साइन-इन अस्वीकार कर दिया गया।"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "हो गया। डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " में साइन इन हो रहा है।"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " में साइन इन हो गया है।"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "इस कोड की समय-सीमा खत्म हो गई। आपका टीवी नया कोड दिखा रहा है। इसके बजाय वह कोड इस्तेमाल करें।"
+      "value": "इस कोड की समय-सीमा खत्म हो गई। डिवाइस पर नया कोड पाएँ और फिर से कोशिश करें।"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86562,25 +87084,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "उस टीवी में पहले से साइन इन है।"
+      "value": "इस डिवाइस में पहले से साइन इन है।"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "इस टीवी को मंज़ूरी मिल गई है और यह साइन-इन पूरा कर रहा है।"
+      "value": "इस डिवाइस को मंज़ूरी मिल गई है और यह साइन-इन पूरा कर रहा है।"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "हो गया। आपके टीवी में साइन इन हो रहा है।"
+      "value": "हो गया। आपके डिवाइस में साइन इन हो रहा है।"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "आपके टीवी में साइन इन हो गया है।"
+      "value": "आपके डिवाइस में साइन इन हो गया है।"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86623,18 +87145,22 @@
   ],
   "web.auth.activate.signInDevice": [
     {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
       "type": 1,
       "value": "device"
     },
     {
       "type": 0,
-      "value": " में साइन इन करें?"
+      "value": " को साइन इन करने दें?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "इस डिवाइस में साइन इन करें?"
+      "value": "इस डिवाइस को साइन इन करने दें?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86646,7 +87172,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "इस टीवी को मंज़ूरी देने के लिए "
+      "value": "इस साइन-इन को मंज़ूरी देने के लिए "
     },
     {
       "type": 1,
@@ -86660,7 +87186,7 @@
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "टीवी में साइन इन करें"
+      "value": "साइन-इन को मंज़ूरी दें"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -87698,7 +88224,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "डिवाइस में साइन इन नहीं किया जा सका। फिर से कोशिश करें।"
+      "value": "साइन-इन को मंज़ूरी नहीं दी जा सकी। फिर से कोशिश करें।"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -108734,6 +109260,12 @@
       "value": "अनुवाद हो रहा है…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "इस एक्सपोर्ट के बाद जोड़ी गई सर्वर पंक्तियाँ छिपाएँ:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -108752,6 +109284,12 @@
     {
       "type": 0,
       "value": ", और ये उन सेक्शन की जगह ले लेते हैं जो आपने यहाँ पहले जोड़े थे। इस सर्वर के सेक्शन में आपके बदलाव बने रहते हैं।"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "यह फ़ाइल एक्सपोर्ट होने के बाद इस सर्वर की पंक्तियाँ बदल गई हैं, इसलिए छिपाने के लिए नीचे से पंक्तियाँ चुनें।"
     }
   ],
   "web.home.layout.checking": [
@@ -108802,6 +109340,26 @@
     {
       "type": 0,
       "value": "“देखे गए आइटम छिपाएँ” चालू करता है।"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "इन पर चुनी गई पंक्तियाँ छिपाता है: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", और वहाँ आपकी दूसरी पंक्तियों को नहीं बदलता।"
     }
   ],
   "web.home.layout.import": [
@@ -108906,6 +109464,24 @@
     {
       "type": 0,
       "value": "।"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109122,6 +109698,12 @@
     {
       "type": 0,
       "value": "बिना नाम का सेक्शन"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "वे सर्वर पंक्तियाँ छिपाएँ जो इस फ़ाइल में नहीं हैं:"
     }
   ],
   "web.home.page.customize": [

@@ -449,6 +449,12 @@
       "value": "Devam etmek için ağınızın oturum açma sayfası üzerinden oturum açın."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Bu düğüm, sunucunun dağıtım yapılandırması tarafından ayarlanır. Düğümü burada yönetmek için oradan kaldırıp API sunucularını yeniden başlatın."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -13352,7 +13358,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — gösterdikleri koleksiyon ne burada ne de yedekte var"
+              "value": " geri yüklenemiyor — gösterdiği koleksiyon ne burada ne de yedekte var"
             }
           ]
         },
@@ -13420,7 +13426,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — bu sunucu bunları kabul edemiyor"
+              "value": " geri yüklenemiyor — bu sunucu bunu kabul edemiyor"
             }
           ]
         },
@@ -13556,7 +13562,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — erişim grupları bu sunucuda yok"
+              "value": " geri yüklenemiyor — erişim grubu bu sunucuda yok"
             }
           ]
         },
@@ -13590,7 +13596,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — içerikleri bu sunucunun kataloğunda yok"
+              "value": " geri yüklenemiyor — içeriği bu sunucunun kataloğunda yok"
             }
           ]
         },
@@ -13624,7 +13630,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — erişimi genişletecekleri için bu sunucu daha sıkı değerlerini koruyor"
+              "value": " geri yüklenemiyor — erişimi genişleteceği için bu sunucu kendi daha sıkı değerlerini koruyor"
             }
           ]
         },
@@ -13636,7 +13642,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — erişimi genişletecekleri için bu sunucu daha sıkı değerlerini koruyor"
+              "value": " geri yüklenemiyor — erişimi genişletecekleri için bu sunucu kendi daha sıkı değerlerini koruyor"
             }
           ]
         }
@@ -13658,7 +13664,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — kitaplıkları bu sunucuda yok"
+              "value": " geri yüklenemiyor — kitaplığı bu sunucuda yok"
             }
           ]
         },
@@ -13692,7 +13698,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — kitaplıkları burada geri yüklenemiyor"
+              "value": " geri yüklenemiyor — kitaplığı burada geri yüklenemiyor"
             }
           ]
         },
@@ -13747,6 +13753,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " geri yüklenemiyor — farklı olan ayarları veya bağlantılarının bir kısmını bu sunucunun ortamı belirliyor"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " geri yüklenemiyor — farklı olan ayarları veya bağlantılarının bir kısmını bu sunucunun ortamı belirliyor"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13760,7 +13800,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — farklı bir SECRET_KEY ile şifrelenmişler"
+              "value": " geri yüklenemiyor — farklı bir SECRET_KEY ile şifrelenmiş"
             }
           ]
         },
@@ -13794,7 +13834,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — önce bir eklenti kataloğundan yüklenmeleri gerekiyor"
+              "value": " geri yüklenemiyor — önce bir eklenti kataloğundan yüklenmesi gerekiyor"
             }
           ]
         },
@@ -13828,7 +13868,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — birincil profillerinin de birlikte geri yüklenmesi gerekiyor"
+              "value": " geri yüklenemiyor — birincil profilinin de birlikte geri yüklenmesi gerekiyor"
             }
           ]
         },
@@ -13862,7 +13902,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — yedekte bulunmuyorlar"
+              "value": " geri yüklenemiyor — yedekte bulunmuyor"
             }
           ]
         },
@@ -13998,7 +14038,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — bu sunucu onlara yedektekinden daha fazla erişim verirdi"
+              "value": " geri yüklenemiyor — bu sunucu buna yedektekinden daha fazla erişim verirdi"
             }
           ]
         },
@@ -14010,7 +14050,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — bu sunucu onlara yedektekinden daha fazla erişim verirdi"
+              "value": " geri yüklenemiyor — bu sunucu bunlara yedektekinden daha fazla erişim verirdi"
             }
           ]
         }
@@ -14066,7 +14106,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — burada zaten aynılar"
+              "value": " geri yüklenemiyor — burada zaten aynı"
             }
           ]
         },
@@ -14134,7 +14174,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — yedekteki kopyaları okunamıyor"
+              "value": " geri yüklenemiyor — yedekteki kopyası okunamıyor"
             }
           ]
         },
@@ -14168,7 +14208,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — dış hizmetlere bağlanıyorlar ve bu sunucu yedeği doğrulayamıyor"
+              "value": " geri yüklenemiyor — dış hizmetlere bağlanıyor ve bu sunucu yedeği doğrulayamıyor"
             }
           ]
         },
@@ -14269,6 +14309,40 @@
     {
       "type": 0,
       "value": "Bir hizmetin adresi, yedekte kimlik bilgileri olmadan değişiyor; bu nedenle geri yükleme buradaki kimlik bilgilerini temizler ve bunlar yeniden girilene kadar hizmeti kapatır."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ayar mevcut değerini koruyor: bu ayarı veya ait olduğu bağlantının bir kısmını bu sunucunun ortamı belirliyor."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ayar mevcut değerlerini koruyor: bu ayarları veya ait oldukları bağlantının bir kısmını bu sunucunun ortamı belirliyor."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14739,8 +14813,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Gizle"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gizle"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gizle"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14897,8 +14991,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Göster"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Göster"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Göster"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17057,6 +17171,12 @@
       "value": "Buradaki başka bir hesap, bunun kullanıcı adı veya e-postasıyla oturum açıyor."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Farklı olan ayarları veya bunların bağlantısının bir kısmını bu sunucunun ortamı belirlediğinden bu sunucu mevcut değerlerini korur."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18131,6 +18251,16 @@
     {
       "type": 0,
       "value": " (korundu: daha katı)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (korundu: ortam)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -30274,7 +30404,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Yakın zamanda başlatılan oynatma oturumlarının listesi"
+      "value": "Tüm hesaplardaki en son oynatmalar"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -31891,6 +32021,80 @@
     {
       "type": 0,
       "value": "Etkinlik yüklenemedi."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " içeriğini oynattı"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " içeriğini oynattı"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -48928,6 +49132,12 @@
       "value": "Ayarları tamamlamak için sunucu adresini girin."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Anahtar, sunucunun dağıtım yapılandırması tarafından ayarlanır"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 1,
@@ -49832,6 +50042,12 @@
     {
       "type": 0,
       "value": " düğümünü sil"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Sunucunun dağıtım yapılandırması tarafından ayarlanır. Burada silmek için oradan kaldırıp API sunucularını yeniden başlatın."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52409,6 +52625,114 @@
       "value": "Oluşturma durduruldu. Depolanan öneriler, sunucu yeniden başlatılana kadar Keşfet’te görünmeye devam eder."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Profiller sıralanıyor ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDB listeleri getiriliyor ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "İçerik bilgileri alınıyor ve gömmeler oluşturuluyor ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Süresi dolmuş "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " içerik temizlendi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Süresi dolmuş "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " içerik temizlendi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -52441,6 +52765,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Keşfet önerilerini oluşturmadan önce aşağıdaki gömme kilidi çakışmasını çözün."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Silo’nun karşılaştırma yapacağı kitaplık vektörleri olması için önce “Gömmeler” işini çalıştırın."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Keşfet önerilerini oluşturmadan önce “Yapay zekâ hizmetleri” sayfasında bir gömme sağlayıcısı bağlayın."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Henüz hiçbir profilin zevk profili yok. Biri içerik izledikten veya puanladıktan sonra “Zevk profilleri” işini çalıştırın."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54351,6 +54699,32 @@
       "value": "Keşfet önerileri Yönetim → Öneriler kısmında açılana kadar boş kalır."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Öneri satırları, Keşfet önerileri "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Yönetim → Öneriler"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " kısmında açılana kadar boş kalır."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Öneriler’de kapalı"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -55821,6 +56195,12 @@
       "value": "Yeni satırlar Keşfet’in en altına eklenir"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Öneriler ayarlarını aç"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -55833,6 +56213,12 @@
       "value": "MDBList akışı, listenin sayfasında kaydedilen sıralama düzenini içermez. Sayfada görünen düzeni seçin."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Profilinizin henüz Keşfet önerisi yok. Bu satırı önizlemek için “Keşfet önerileri” işini çalıştırın veya birkaç içerik izleyip puanlayın."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -55843,6 +56229,12 @@
     {
       "type": 0,
       "value": "İçeriklerini görmek için bir liste seçin veya bağlantısını yapıştırın."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Bu satırı önizlemek için Keşfet önerilerini Yönetim → Öneriler kısmında açın."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -56621,6 +57013,12 @@
     {
       "type": 0,
       "value": "Mesaj gönderildi"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Oynatıcı mesajı onaylamadı. Mesaj geç gösterilebilir veya hiç gösterilmeyebilir."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -59475,6 +59873,12 @@
       "value": "Bağlantı denetimi başarısız oldu."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Sunucu ortamının bu ayarı belirleyip belirlemediği kontrol edilemedi. Düzenlemek için sayfayı yeniden yükleyin."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60029,6 +60433,30 @@
     {
       "type": 0,
       "value": "Kanal güncellenemedi"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Güncel değerleri görmek için yeniden yükleyin. Değişen ayarlarda ve kayıtlı parolalarla anahtarlarda yaptığınız düzenlemeler geri alınır; diğer düzenlemeleriniz korunur."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Yeniden yükle"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Ayarlar yeniden yüklenemedi. Tekrar deneyin."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Ayarlar başka bir yerde değiştirildi"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -65455,6 +65883,24 @@
       "value": "Başka bir modele geçmek gömmelerin sıfırlanmasını gerektirir; bu işlem tüm gömmeleri siler. Aynı modeli sunan başka bir sağlayıcı ise yeniden başlatmadan sonra uygulanır."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Keşfet’e ekle"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Öneri satırları Keşfet sayfasına eklenemedi."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Öneri satırları Keşfet sayfasına eklendi."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -65477,6 +65923,44 @@
     {
       "type": 0,
       "value": "Sunucunun öneri yapmak için tuttuğu, kitaplıkta olmayan içerik sayısı. Her biri TMDB’de aranır ve gömmesi oluşturulur. Gömme genellikle ucuzdur, ancak daha yüksek bir sayı gömme sağlayıcınıza bağlı olarak daha pahalıya mal olabilir veya daha uzun sürebilir; ayrıca daha fazla depolama alanı kullanır."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Keşfet sayfanızda henüz hiçbir Öneriler satırı gösterilmiyor."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Keşfet önerilerinin çalışabilmesi için yukarıdaki “Önerileri etkinleştir” seçeneğini açın ve sunucuyu yeniden başlatın."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "İstekler şu anda kapalı. İzleyicilerin Keşfet sayfasını görebilmesi için bunları "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "İstek ayarları"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " kısmında açın."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Keşfet sayfasını aç"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -74595,6 +75079,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Ortam değişkenleri depolama ayarlarını belirlediği sürece ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": ") depolama buraya taşınamaz. Önce bu değişkenlerin ayarını kaldırın ve tüm API sunucularını yeniden başlatın."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -75733,6 +76231,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Bu zamanlama yedekleme ayarlarından gelir. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Sunucu › Yedekler"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " sayfasından değiştirin."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
@@ -85932,25 +86450,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "TV’de oturum açılamadı. Tekrar deneyin."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Uygulamanızın şunu gösterdiğini kontrol edin"
+      "value": "Oturum açma onaylanamadı. Tekrar deneyin."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "TV’nizin şunu gösterdiğini kontrol edin"
+      "value": "Bu kodun eşleştiğinden emin olun"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "TV’nizdeki veya uygulamanızdaki kodu girin"
+      "value": "Cihazınızda gösterilen kodu girin"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -85962,13 +86474,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Hesabınızla bir TV’de veya başka bir cihazda oturum açın."
+      "value": "Bir TV’de, uygulamada veya başka bir cihazda oturum açın."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "TV’de oturum aç"
+      "value": "Oturum açmayı onayla"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -85980,7 +86492,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "Bir TV’yi onaylamak için "
+      "value": "Bu oturum açmayı onaylamak için "
     },
     {
       "type": 1,
@@ -85988,13 +86500,13 @@
     },
     {
       "type": 0,
-      "value": " kullanıcısı olarak görüntülemeyi bırakın. TV’de yalnızca hesabın kendisi oturum açabilir."
+      "value": " kullanıcısı olarak görüntülemeyi bırakın. Cihazları yalnızca hesabın kendisi onaylayabilir."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Bir TV’yi onaylamak için bu kullanıcı olarak görüntülemeyi bırakın. TV’de yalnızca hesabın kendisi oturum açabilir."
+      "value": "Bu oturum açmayı onaylamak için bu kullanıcı olarak görüntülemeyi bırakın. Cihazları yalnızca hesabın kendisi onaylayabilir."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86012,39 +86524,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Bu kod bulunamadı. TV’nizdeki kodu kontrol edin."
+      "value": "Bu kod bulunamadı. Kodu kontrol edip tekrar deneyin."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Şimdi değil"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Eski TV uygulamaları bunun yerine şunu gösterir: "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Yalnızca şu anda önünüzde olan bir cihazı onaylayın."
+      "value": "Reddet"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Yalnızca şu anda önünüzde olan bir TV’yi onaylayın."
+      "value": "Bunu yalnızca oturum açma işlemini kendiniz başlattıysanız onaylayın."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86066,7 +86558,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Bu TV’yi kullanan herkes profillerinizden birini seçebilir. PIN’li profiller kilitli kalır."
+      "value": "Bu, cihaza profillerinize erişim izni verir. PIN korumalı profiller kilitli kalır."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86113,6 +86605,16 @@
       "value": " istendi"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "İstendi: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86126,7 +86628,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Bu TV beklemeyi bıraktı. TV’de yeniden başlayın."
+      "value": "Bu cihaz beklemeyi bıraktı. Cihazda oturum açmayı yeniden başlatın."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86135,10 +86637,34 @@
       "value": "Bu oturum açma isteği reddedildi."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Tamamlandı. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " oturum açıyor."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " oturum açtı."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Bu kodun süresi doldu. TV’niz yeni bir kod gösteriyor. Bunun yerine o kodu kullanın."
+      "value": "Bu kodun süresi doldu. Cihazdan yeni bir kod alıp tekrar deneyin."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86222,25 +86748,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Bu TV’de zaten oturum açılmış."
+      "value": "Bu cihazda zaten oturum açık."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Bu TV onaylandı ve oturum açma işlemini tamamlıyor."
+      "value": "Bu cihaz onaylandı ve oturum açma işlemini tamamlıyor."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Tamamlandı. TV’nizde oturum açılıyor."
+      "value": "Tamamlandı. Cihazınızda oturum açılıyor."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "TV’nizde oturum açıldı."
+      "value": "Cihazınızda oturum açıldı."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86288,13 +86814,13 @@
     },
     {
       "type": 0,
-      "value": " cihazında oturum açılsın mı?"
+      "value": " için oturum açmaya izin verilsin mi?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Bu cihazda oturum açılsın mı?"
+      "value": "Bu cihazın oturum açmasına izin verilsin mi?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86306,7 +86832,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "Bu TV’yi onaylamak için "
+      "value": "Bu oturum açmayı onaylamak için "
     },
     {
       "type": 1,
@@ -86320,7 +86846,7 @@
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "TV’de oturum aç"
+      "value": "Oturum açmayı onayla"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -87354,7 +87880,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Cihazda oturum açılamadı. Tekrar deneyin."
+      "value": "Oturum açma onaylanamadı. Tekrar deneyin."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -108200,6 +108726,12 @@
       "value": "Çevriliyor…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Bu dışa aktarımdan sonra eklenen sunucu satırlarını gizle:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -108218,6 +108750,12 @@
     {
       "type": 0,
       "value": " ve daha önce burada eklediğiniz kısımların yerini alır. Bu sunucunun kısımlarında yaptığınız değişiklikler korunur."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Bu dosya dışa aktarıldıktan sonra bu sunucunun satırları değişti. Gizlemek istediğiniz satırları aşağıdan seçin."
     }
   ],
   "web.home.layout.checking": [
@@ -108268,6 +108806,26 @@
     {
       "type": 0,
       "value": "İzlenen öğeleri gizle ayarını açar."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Seçili satırları şu sayfalarda gizler: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ". Oradaki diğer satırlarınız değişmez."
     }
   ],
   "web.home.layout.import": [
@@ -108372,6 +108930,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -108588,6 +109164,12 @@
     {
       "type": 0,
       "value": "Adsız kısım"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Bu dosyada olmayan sunucu satırlarını gizle:"
     }
   ],
   "web.home.page.customize": [

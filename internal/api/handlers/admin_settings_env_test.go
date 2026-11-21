@@ -56,3 +56,49 @@ func TestCheckEnvironmentSettingsKeepsRecordedStorage(t *testing.T) {
 		t.Errorf("recorded location with other storage settings: %v", err)
 	}
 }
+
+// Backups, the Discord application, MDBList, the Meilisearch index, the
+// web media origin, prepared-download budget and realtime monitoring can be
+// set from the environment, with an admin save's checks.
+func TestCheckEnvironmentSettingsDeploymentSettings(t *testing.T) {
+	checked, err := CheckEnvironmentSettings(nil, readEnv(t, map[string]string{
+		"SILO_WEB_MEDIA_URL":                     "https://media.example.com/",
+		"SILO_MEILISEARCH_INDEX":                 "silo-home",
+		"SILO_MDBLIST_API_KEY":                   "mdblist-key",
+		"SILO_DISCORD_CLIENT_ID":                 "123456789012345678",
+		"SILO_DISCORD_CLIENT_SECRET":             "discord-secret",
+		"SILO_DISCORD_BOT_TOKEN":                 "discord-token",
+		"SILO_DOWNLOAD_ARTIFACT_MAX_BYTES":       "10737418240",
+		"SILO_SCANNER_REALTIME_MONITORING":       "false",
+		"SILO_BACKUP_ENABLED":                    "false",
+		"SILO_BACKUP_TIME":                       "04:30",
+		"SILO_BACKUP_KEEP":                       "14",
+		"SILO_BACKUP_INCLUDE_SUBTITLES":          "false",
+		"SILO_BACKUP_INCLUDE_INTRO_FINGERPRINTS": "true",
+	}), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"server.web_media_url":              "https://media.example.com",
+		"catalog.search.meilisearch.index":  "silo-home",
+		"mdblist.api_key":                   "mdblist-key",
+		"discord.client_id":                 "123456789012345678",
+		"discord.client_secret":             "discord-secret",
+		"discord.bot_token":                 "discord-token",
+		"download.artifact_max_bytes":       "10737418240",
+		"scanner.realtime_monitoring":       "false",
+		"backup.enabled":                    "false",
+		"backup.time":                       "04:30",
+		"backup.keep":                       "14",
+		"backup.include_subtitles":          "false",
+		"backup.include_intro_fingerprints": "true",
+	}
+	got := checked.Values(config.EnvScopeStored)
+	for key, value := range want {
+		if got[key] != value {
+			t.Errorf("%s = %q, want %q", key, got[key], value)
+		}
+	}
+
+}

@@ -449,6 +449,12 @@
       "value": "Ak chcete pokračovať, prihláste sa prostredníctvom prihlásenia vo vašej sieti."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Tento uzol je nastavený v konfigurácii nasadenia servera. Odstráňte ho tam a reštartujte servery API, aby ste ho mohli spravovať tu."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -14706,7 +14712,7 @@
             },
             {
               "type": 0,
-              "value": " položka sa nedá obnoviť – zobrazená kolekcia nie je tu ani v zálohe"
+              "value": " položka sa nedá obnoviť – kolekcia, ktorú zobrazuje, nie je tu ani v zálohe"
             }
           ]
         },
@@ -14718,7 +14724,7 @@
             },
             {
               "type": 0,
-              "value": " položky sa nedajú obnoviť – zobrazená kolekcia nie je tu ani v zálohe"
+              "value": " položky sa nedajú obnoviť – kolekcia, ktorú zobrazujú, nie je tu ani v zálohe"
             }
           ]
         },
@@ -14730,7 +14736,7 @@
             },
             {
               "type": 0,
-              "value": " položky sa nedá obnoviť – zobrazená kolekcia nie je tu ani v zálohe"
+              "value": " položky sa nedá obnoviť – kolekcia, ktorú zobrazujú, nie je tu ani v zálohe"
             }
           ]
         },
@@ -14742,7 +14748,7 @@
             },
             {
               "type": 0,
-              "value": " položiek sa nedá obnoviť – zobrazená kolekcia nie je tu ani v zálohe"
+              "value": " položiek sa nedá obnoviť – kolekcia, ktorú zobrazujú, nie je tu ani v zálohe"
             }
           ]
         }
@@ -15389,6 +15395,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položka sa nedá obnoviť – prostredie tohto servera určuje odlišné nastavenia alebo časť jej pripojenia"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položky sa nedajú obnoviť – prostredie tohto servera určuje odlišné nastavenia alebo časť ich pripojenia"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položky sa nedá obnoviť – prostredie tohto servera určuje odlišné nastavenia alebo časť ich pripojenia"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položiek sa nedá obnoviť – prostredie tohto servera určuje odlišné nastavenia alebo časť ich pripojenia"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15924,7 +15988,7 @@
             },
             {
               "type": 0,
-              "value": " položka sa nedá obnoviť – tu je už rovnaká"
+              "value": " položka sa nedá obnoviť – už je tu rovnaká"
             }
           ]
         },
@@ -15936,7 +16000,7 @@
             },
             {
               "type": 0,
-              "value": " položky sa nedajú obnoviť – tu sú už rovnaké"
+              "value": " položky sa nedajú obnoviť – už sú tu rovnaké"
             }
           ]
         },
@@ -15948,7 +16012,7 @@
             },
             {
               "type": 0,
-              "value": " položky sa nedá obnoviť – tu sú už rovnaké"
+              "value": " položky sa nedá obnoviť – už sú tu rovnaké"
             }
           ]
         },
@@ -15960,7 +16024,7 @@
             },
             {
               "type": 0,
-              "value": " položiek sa nedá obnoviť – tu sú už rovnaké"
+              "value": " položiek sa nedá obnoviť – už sú tu rovnaké"
             }
           ]
         }
@@ -16247,6 +16311,64 @@
     {
       "type": 0,
       "value": "Adresa služby sa mení bez jej prihlasovacích údajov v zálohe, preto ich obnovenie tu vymaže a službu vypne, kým sa znova nezadajú."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavenie si ponechá aktuálnu hodnotu, pretože prostredie tohto servera určuje priamo jeho alebo časť jeho pripojenia."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavenia si ponechajú aktuálne hodnoty, pretože prostredie tohto servera určuje priamo ich alebo časť ich pripojenia."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavenia si ponechá aktuálne hodnoty, pretože prostredie tohto servera určuje priamo ich alebo časť ich pripojenia."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechá aktuálne hodnoty, pretože prostredie tohto servera určuje priamo ich alebo časť ich pripojenia."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -16909,8 +17031,44 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Skryť ich"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skryť"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skryť ich"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skryť ich"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skryť ich"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17131,8 +17289,44 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Zobraziť ich"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobraziť"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobraziť ich"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobraziť ich"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobraziť ich"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -20239,6 +20433,12 @@
       "value": "Iný účet na tomto serveri sa prihlasuje rovnakým používateľským menom alebo e-mailom."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Prostredie tohto servera určuje odlišné nastavenia alebo časť ich pripojenia, preto tento server ponecháva svoje aktuálne hodnoty."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -21633,6 +21833,16 @@
     {
       "type": 0,
       "value": " (ponechané: prísnejšie)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (ponechané: prostredie)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -36830,7 +37040,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Zoznam nedávno spustených relácií prehrávania"
+      "value": "Najnovšie prehratia zo všetkých účtov"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -38809,6 +39019,80 @@
     {
       "type": 0,
       "value": "Nepodarilo sa načítať aktivitu."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "Používateľ "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " prehral titul "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "Používateľ "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " prehral titul "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -61214,6 +61498,12 @@
       "value": "Ak chcete dokončiť nastavenia, zadajte adresu servera."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Kľúč je nastavený v konfigurácii nasadenia servera"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -62186,6 +62476,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nastavené v konfigurácii nasadenia servera. Ak ho chcete odstrániť tu, odstráňte ho tam a reštartujte servery API."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -65169,6 +65465,146 @@
       "value": "Generovanie sa zastavilo. Uložené odporúčania zostanú viditeľné v sekcii Objavovať, kým sa server nereštartuje."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Zoraďujú sa odporúčania pre profily ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Načítavajú sa zoznamy TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Vyhľadávajú sa tituly a vytvárajú sa ich embeddingy ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazal sa "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titul s uplynutou platnosťou"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazali sa "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tituly s uplynutou platnosťou"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazalo sa "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titulu s uplynutou platnosťou"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazalo sa "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titulov s uplynutou platnosťou"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -65225,6 +65661,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Pred vytváraním odporúčaní v sekcii Objavovať vyriešte konflikt zámku embeddingov nižšie."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Najprv spustite úlohu Embeddingy, aby Silo malo vektory knižnice na porovnanie."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Pred vytváraním odporúčaní v sekcii Objavovať pripojte poskytovateľa embeddingov v časti Služby AI."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Žiadny profil zatiaľ nemá profil vkusu. Keď niekto pozrie alebo ohodnotí tituly, spustite úlohu Profily vkusu."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -67835,6 +68295,32 @@
       "value": "Zostane prázdny, kým nezapnete odporúčania v sekcii Objavovať v časti Správa → Odporúčania."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Odporúčané rady zostanú prázdne, kým nezapnete odporúčania v sekcii Objavovať v časti "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Správa → Odporúčania"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Vypnuté v časti Odporúčania"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -69547,6 +70033,12 @@
       "value": "Nové rady sa pridajú na koniec stránky Objavovať"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Otvoriť nastavenia stránky Odporúčania"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -69559,6 +70051,12 @@
       "value": "Feed zo služby MDBList neobsahuje zoradenie uložené na stránke zoznamu. Vyberte to, ktoré zoznam zobrazuje."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Váš profil zatiaľ nemá žiadne odporúčania v sekcii Objavovať. Ak chcete zobraziť ukážku tohto radu, spustite úlohu Odporúčania v sekcii Objavovať alebo si pozrite a ohodnoťte niekoľko titulov."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -69569,6 +70067,12 @@
     {
       "type": 0,
       "value": "Vyberte zoznam alebo vložte jeho odkaz, aby ste videli jeho tituly."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Ak chcete zobraziť ukážku tohto radu, zapnite odporúčania v sekcii Objavovať v časti Správa → Odporúčania."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -70583,6 +71087,12 @@
     {
       "type": 0,
       "value": "Správa bola odoslaná"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Prehrávač nepotvrdil prijatie správy. Môže sa zobraziť s oneskorením alebo sa nezobrazí vôbec."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -73591,6 +74101,12 @@
       "value": "Kontrola pripojenia zlyhala."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nepodarilo sa overiť, či toto nastavenie určuje prostredie servera. Ak ho chcete upraviť, znova načítajte stránku."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -74177,6 +74693,30 @@
     {
       "type": 0,
       "value": "Kanál sa nepodarilo aktualizovať"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Znova načítajte nastavenia, aby sa zobrazili aktuálne hodnoty. Vaše úpravy zmenených nastavení a uložených hesiel a kľúčov sa zrušia; ostatné úpravy zostanú zachované."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Znova načítať"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nastavenia sa nepodarilo znova načítať. Skúste to znova."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Nastavenia sa zmenili inde"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -79863,6 +80403,24 @@
       "value": "Prechod na iný model vyžaduje obnovenie embeddingov, čím sa všetky odstránia. Iný poskytovateľ s rovnakým modelom sa uplatní po reštarte."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Pridať do sekcie Objavovať"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Nepodarilo sa pridať odporúčané rady na stránku Objavovať."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Odporúčané rady sa pridali na stránku Objavovať."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -79885,6 +80443,44 @@
     {
       "type": 0,
       "value": "Koľko titulov, ktoré nie sú v knižnici, si server uchováva na odporúčanie. Každý z nich sa vyhľadá v službe TMDB a vytvorí sa preň embedding. Vytváranie embeddingov je zvyčajne lacné, no vyšší počet môže v závislosti od vášho poskytovateľa embeddingov stáť viac alebo trvať dlhšie a zaberie viac úložiska."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Vaša stránka Objavovať zatiaľ nezobrazuje žiadne rady typu Odporúčania."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Aby sa mohli spúšťať odporúčania v sekcii Objavovať, zapnite vyššie možnosť „Povoliť odporúčania“ a reštartujte server."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Žiadosti sú momentálne vypnuté. Zapnite ich v "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "nastaveniach žiadostí"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", aby diváci videli stránku Objavovať."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Otvoriť stránku Objavovať"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -89291,6 +89887,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Úložisko sa sem nedá presunúť, kým nastavenia úložiska určujú premenné prostredia ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Najprv tieto premenné zrušte a reštartujte všetky servery API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -90549,6 +91159,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Tento plán pochádza z nastavení záloh. Zmeniť ho môžete v časti "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Zálohy"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
@@ -102720,25 +103350,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Televízor sa nepodarilo prihlásiť. Skúste to znova."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Skontrolujte, či aplikácia zobrazuje"
+      "value": "Nepodarilo sa schváliť prihlásenie. Skúste to znova."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Skontrolujte, či televízor zobrazuje"
+      "value": "Skontrolujte, či sa tento kód zhoduje"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Zadajte kód z televízora alebo aplikácie"
+      "value": "Zadajte kód zobrazený vo vašom zariadení"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -102750,13 +103374,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Prihláste televízor alebo iné zariadenie pomocou svojho účtu."
+      "value": "Prihláste televízor, aplikáciu alebo iné zariadenie."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Prihlásiť televízor"
+      "value": "Schválenie prihlásenia"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -102768,7 +103392,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "Ak chcete schváliť televízor, ukončite zobrazenie ako používateľ "
+      "value": "Ak chcete schváliť toto prihlásenie, ukončite zobrazenie ako používateľ "
     },
     {
       "type": 1,
@@ -102776,13 +103400,13 @@
     },
     {
       "type": 0,
-      "value": ". Televízor môže prihlásiť iba samotný účet."
+      "value": ". Zariadenia môže schváliť iba samotný účet."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Ak chcete schváliť televízor, ukončite zobrazenie ako tento používateľ. Televízor môže prihlásiť iba samotný účet."
+      "value": "Ak chcete schváliť toto prihlásenie, ukončite zobrazenie ako tento používateľ. Zariadenia môže schváliť iba samotný účet."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -102800,39 +103424,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Tento kód sme nenašli. Skontrolujte kód na televízore."
+      "value": "Tento kód sa nenašiel. Skontrolujte kód a skúste to znova."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Teraz nie"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Staršie aplikácie pre TV namiesto toho zobrazujú "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Schváľte iba zariadenie, ktoré máte práve pred sebou."
+      "value": "Zamietnuť"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Schváľte iba televízor, ktorý máte práve pred sebou."
+      "value": "Schváľte to iba vtedy, ak ste prihlásenie začali vy."
     }
   ],
   "web.auth.activate.playOn": [
@@ -102858,7 +103462,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Ktokoľvek, kto používa tento televízor, si môže vybrať z vašich profilov. Profily s PIN kódom zostanú zamknuté."
+      "value": "Zariadenie tak získa prístup k vašim profilom. Profily s PIN kódom zostanú zamknuté."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -102905,6 +103509,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Vyžiadané "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -102918,7 +103532,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Tento televízor prestal čakať. Začnite znova na televízore."
+      "value": "Toto zariadenie prestalo čakať. Spustite na ňom prihlásenie znova."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -102927,10 +103541,38 @@
       "value": "Toto prihlásenie bolo zamietnuté."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Hotovo. Zariadenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sa prihlasuje."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Zariadenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " je prihlásené."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Platnosť tohto kódu vypršala. Televízor zobrazuje nový. Použite ten kód."
+      "value": "Platnosť tohto kódu vypršala. Získajte v zariadení nový kód a skúste to znova."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -103014,25 +103656,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Tento televízor je už prihlásený."
+      "value": "Toto zariadenie je už prihlásené."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Tento televízor bol schválený a dokončuje prihlásenie."
+      "value": "Toto zariadenie bolo schválené a dokončuje prihlásenie."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Hotovo. Televízor sa prihlasuje."
+      "value": "Hotovo. Vaše zariadenie sa prihlasuje."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Televízor je prihlásený."
+      "value": "Vaše zariadenie je prihlásené."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -103076,7 +103718,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Prihlásiť zariadenie "
+      "value": "Povoliť prihlásenie zariadenia "
     },
     {
       "type": 1,
@@ -103090,7 +103732,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Prihlásiť toto zariadenie?"
+      "value": "Povoliť prihlásenie tohto zariadenia?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -103102,7 +103744,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "Prihláste sa na server "
+      "value": "Ak chcete schváliť toto prihlásenie, prihláste sa na server "
     },
     {
       "type": 1,
@@ -103110,13 +103752,13 @@
     },
     {
       "type": 0,
-      "value": " a schváľte tento televízor."
+      "value": "."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Prihlásiť televízor"
+      "value": "Schváliť prihlásenie"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -104166,7 +104808,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Zariadenie sa nepodarilo prihlásiť. Skúste to znova."
+      "value": "Nepodarilo sa schváliť prihlásenie. Skúste to znova."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -130090,6 +130732,12 @@
       "value": "Prekladá sa…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skryť rady servera pridané od tohto exportu:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -130108,6 +130756,12 @@
     {
       "type": 0,
       "value": " a nahradia sekcie, ktoré ste sem pridali predtým. Vaše zmeny sekcií tohto servera zostanú zachované."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Rady tohto servera sa od exportu tohto súboru zmenili, preto nižšie vyberte rady, ktoré chcete skryť."
     }
   ],
   "web.home.layout.checking": [
@@ -130158,6 +130812,26 @@
     {
       "type": 0,
       "value": "Zapne možnosť Skryť pozreté položky."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Skryje vybrané rady na: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " bez zmeny vašich ostatných radov na týchto stránkach."
     }
   ],
   "web.home.layout.import": [
@@ -130262,6 +130936,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -130488,6 +131180,12 @@
     {
       "type": 0,
       "value": "Sekcia bez názvu"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skryť rady servera, ktoré nie sú v tomto súbore:"
     }
   ],
   "web.home.page.customize": [

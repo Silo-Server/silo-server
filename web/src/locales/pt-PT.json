@@ -449,6 +449,12 @@
       "value": "Inicie sessão através do início de sessão da sua rede para continuar."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Este nó é definido pela configuração de implementação do servidor. Remova-o aí e reinicie os servidores da API para o gerir aqui."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -14539,7 +14545,7 @@
             },
             {
               "type": 0,
-              "value": " — alargaria o acesso, por isso este servidor mantém os seus valores mais restritivos"
+              "value": " — alargaria o acesso, por isso este servidor mantém os seus próprios valores mais restritivos"
             }
           ]
         },
@@ -14746,6 +14752,64 @@
             {
               "type": 0,
               "value": " — outra conta aqui inicia sessão com o mesmo nome de utilizador ou email"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Não é possível restaurar "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — o ambiente deste servidor define as opções que diferem, ou parte da respetiva ligação"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Não é possível restaurar "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — o ambiente deste servidor define as opções que diferem, ou parte da respetiva ligação"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Não é possível restaurar "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — o ambiente deste servidor define as opções que diferem, ou parte da respetiva ligação"
             }
           ]
         }
@@ -15614,6 +15678,52 @@
       "value": "O endereço de um serviço muda sem as respetivas credenciais na cópia de segurança, por isso o restauro limpa-as aqui e desativa o serviço até serem introduzidas novamente."
     }
   ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " definição mantém o valor atual porque o ambiente deste servidor a define, ou define parte da respetiva ligação."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de definições mantêm os valores atuais porque o ambiente deste servidor as define, ou define parte das respetivas ligações."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " definições mantêm os valores atuais porque o ambiente deste servidor as define, ou define parte das respetivas ligações."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.caveat.filesMissing": [
     {
       "type": 6,
@@ -16178,8 +16288,36 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Ocultar"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ocultar"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ocultar"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ocultar"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16364,8 +16502,36 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Mostrar"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrar"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrar"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrar"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -19024,6 +19190,12 @@
       "value": "Outra conta aqui inicia sessão com o mesmo nome de utilizador ou email."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "O ambiente deste servidor define as opções que diferem, ou parte da respetiva ligação, por isso este servidor mantém os valores atuais."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -20226,6 +20398,16 @@
     {
       "type": 0,
       "value": " (mantido: mais restritivo)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (mantido: ambiente)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -33916,7 +34098,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Lista das sessões de reprodução iniciadas recentemente"
+      "value": "Reproduções mais recentes em todas as contas"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35712,6 +35894,72 @@
     {
       "type": 0,
       "value": "Não foi possível carregar a atividade."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " reproduziu "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " reproduziu "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -55455,6 +55703,12 @@
       "value": "Introduza o endereço do servidor para completar as definições."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Chave definida pela configuração de implementação do servidor"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -56379,6 +56633,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Definido pela configuração de implementação do servidor. Remova-o aí e reinicie os servidores da API para o eliminar aqui."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -59177,6 +59437,118 @@
       "value": "A geração parou. As recomendações guardadas continuam visíveis em Descobrir até o servidor reiniciar."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "A classificar perfis ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "A obter listas do TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "A consultar títulos e a criar embeddings ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " título expirado removido"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de títulos expirados removidos"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " títulos expirados removidos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -59221,6 +59593,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Resolva o conflito do bloqueio de embeddings abaixo antes de gerar as recomendações em Descobrir."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Execute primeiro o trabalho Embeddings para que o Silo tenha vetores da biblioteca com que comparar."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Ligue um fornecedor de embeddings em Serviços de IA antes de gerar as recomendações em Descobrir."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Ainda nenhum perfil tem perfil de gosto. Execute Perfis de gosto quando alguém tiver visto ou avaliado títulos."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -61455,6 +61851,32 @@
       "value": "Fica vazia até as recomendações em Descobrir serem ativadas em Administração → Recomendações."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "As filas recomendadas ficam vazias até as Recomendações em Descobrir serem ativadas em "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Administração → Recomendações"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Desativado em Recomendações"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -63062,6 +63484,12 @@
       "value": "As novas filas vão para o fim da página Descobrir"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Abrir definições de Recomendações"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -63074,6 +63502,12 @@
       "value": "O feed da MDBList não inclui a ordenação guardada na página da lista. Escolha a que essa página mostra."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "O seu perfil ainda não tem recomendações em Descobrir. Execute Recomendações em Descobrir ou veja e avalie alguns títulos para pré-visualizar esta fila."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -63084,6 +63518,12 @@
     {
       "type": 0,
       "value": "Escolha uma lista ou cole o respetivo link para ver os títulos."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Ative as Recomendações em Descobrir em Administração → Recomendações para pré-visualizar esta fila."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -63994,6 +64434,12 @@
     {
       "type": 0,
       "value": "Mensagem enviada"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "O leitor não confirmou a receção da mensagem. Pode ser mostrada com atraso ou nem chegar a ser mostrada."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -66939,6 +67385,12 @@
       "value": "A verificação da ligação falhou."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Não foi possível verificar se o ambiente do servidor define esta opção. Recarregue a página para a editar."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -67509,6 +67961,30 @@
     {
       "type": 0,
       "value": "Não foi possível atualizar o canal"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Recarregue para ver os valores atuais. As suas alterações às definições que mudaram e às palavras-passe e chaves guardadas são anuladas; as restantes alterações são mantidas."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Recarregar"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível recarregar as definições. Tente novamente."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Definições alteradas noutro local"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -73087,6 +73563,24 @@
       "value": "Mudar para outro modelo requer repor os embeddings, o que os elimina todos. Outro fornecedor que sirva o mesmo modelo aplica-se após um reinício."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Adicionar a Descobrir"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível adicionar as filas recomendadas à página Descobrir."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "As filas recomendadas foram adicionadas à página Descobrir."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -73109,6 +73603,44 @@
     {
       "type": 0,
       "value": "Quantos títulos que não estão na biblioteca o servidor guarda para recomendar. Cada um é consultado no TMDB e convertido em embedding. Criar embeddings costuma ser barato, mas um número mais alto pode custar mais ou demorar mais, consoante o seu fornecedor de embeddings, e ocupa mais armazenamento."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "A sua página Descobrir ainda não mostra nenhuma fila de Recomendações."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Ative a opção Ativar recomendações acima e reinicie o servidor para que as Recomendações em Descobrir possam ser executadas."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Os pedidos estão desativados. Ative-os nas "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Definições de pedidos"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " para que os espetadores possam ver a página Descobrir."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Abrir página Descobrir"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -82401,6 +82933,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Não é possível mover o armazenamento para aqui enquanto o ambiente definir as definições de armazenamento ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Primeiro, remova a definição dessas variáveis e reinicie todos os servidores de API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -83593,6 +84139,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Este agendamento vem das definições das cópias de segurança. Altere-o em "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Servidor › Cópias de segurança"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
@@ -94806,25 +95372,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Não foi possível iniciar sessão na TV. Tente novamente."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Confirme que a sua app mostra"
+      "value": "Não foi possível aprovar o início de sessão. Tente novamente."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Confirme que a sua TV mostra"
+      "value": "Confirme que este código coincide"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Introduza o código da sua TV ou app"
+      "value": "Introduza o código apresentado no seu dispositivo"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94836,13 +95396,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Inicie sessão numa TV ou noutro dispositivo com a sua conta."
+      "value": "Inicie sessão numa TV, numa app ou noutro dispositivo."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Iniciar sessão numa TV"
+      "value": "Aprovar início de sessão"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94862,13 +95422,13 @@
     },
     {
       "type": 0,
-      "value": " para aprovar uma TV. Só a própria conta pode iniciar sessão numa TV."
+      "value": " para aprovar este início de sessão. Só a própria conta pode aprovar dispositivos."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Deixe de ver como este utilizador para aprovar uma TV. Só a própria conta pode iniciar sessão numa TV."
+      "value": "Deixe de ver como este utilizador para aprovar este início de sessão. Só a própria conta pode aprovar dispositivos."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94886,39 +95446,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Não foi possível encontrar esse código. Verifique o código na sua TV."
+      "value": "Não foi possível encontrar esse código. Verifique o código e tente novamente."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Agora não"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "As apps de TV mais antigas mostram "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " em vez disso."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Aprove apenas um dispositivo que esteja à sua frente neste momento."
+      "value": "Recusar"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Aprove apenas uma TV que esteja à sua frente neste momento."
+      "value": "Aprove apenas se o início de sessão tiver sido pedido por si."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94944,7 +95484,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Qualquer pessoa que use esta TV pode escolher entre os seus perfis. Os perfis com PIN continuam bloqueados."
+      "value": "Isto dá ao dispositivo acesso aos seus perfis. Os perfis com PIN continuam bloqueados."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94991,6 +95531,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Pedido "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -95004,7 +95554,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Esta TV deixou de esperar. Comece novamente na TV."
+      "value": "Este dispositivo deixou de esperar. Volte a iniciar sessão no dispositivo."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -95013,10 +95563,34 @@
       "value": "Este início de sessão foi recusado."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Concluído. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " está a iniciar sessão."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " tem sessão iniciada."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Este código expirou. A sua TV está a mostrar um novo. Use esse código."
+      "value": "Este código expirou. Obtenha um novo código no dispositivo e tente novamente."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -95100,25 +95674,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Essa TV já tem sessão iniciada."
+      "value": "Este dispositivo já tem sessão iniciada."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Esta TV foi aprovada e está a concluir o início de sessão."
+      "value": "Este dispositivo foi aprovado e está a concluir o início de sessão."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Concluído. A sua TV está a iniciar sessão."
+      "value": "Concluído. O seu dispositivo está a iniciar sessão."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "A sua TV tem sessão iniciada."
+      "value": "O seu dispositivo tem sessão iniciada."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -95162,7 +95736,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Iniciar sessão no dispositivo "
+      "value": "Permitir que "
     },
     {
       "type": 1,
@@ -95170,13 +95744,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " inicie sessão?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Iniciar sessão neste dispositivo?"
+      "value": "Permitir que este dispositivo inicie sessão?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -95196,13 +95770,13 @@
     },
     {
       "type": 0,
-      "value": " para aprovar esta TV."
+      "value": " para aprovar este início de sessão."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Iniciar sessão na TV"
+      "value": "Aprovar início de sessão"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -96248,7 +96822,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Não foi possível iniciar sessão no dispositivo. Tente novamente."
+      "value": "Não foi possível aprovar o início de sessão. Tente novamente."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -119571,6 +120145,12 @@
       "value": "A traduzir…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ocultar as filas do servidor adicionadas desde esta exportação:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -119589,6 +120169,12 @@
     {
       "type": 0,
       "value": ", substituindo as secções que adicionou aqui anteriormente. As suas alterações às secções deste servidor mantêm-se."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "As filas deste servidor mudaram desde que este ficheiro foi exportado, por isso escolha abaixo as filas que quer ocultar."
     }
   ],
   "web.home.layout.checking": [
@@ -119639,6 +120225,26 @@
     {
       "type": 0,
       "value": "Ativa Ocultar itens vistos."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Oculta as filas selecionadas em: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " sem alterar as suas outras filas aí."
     }
   ],
   "web.home.layout.import": [
@@ -119743,6 +120349,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -119962,6 +120586,12 @@
     {
       "type": 0,
       "value": "Secção sem título"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ocultar as filas do servidor que não estão neste ficheiro:"
     }
   ],
   "web.home.page.customize": [

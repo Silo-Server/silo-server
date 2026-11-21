@@ -311,9 +311,11 @@ ifneq ($(CONTRACT_GO_TESTS),0)
 endif
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
 		base=$$(git merge-base $(BASE_REF) HEAD) && \
-		{ git show "$$base:$(APIV2_OPENAPI)" > "$$tmp/base.json" 2>/dev/null || : ; } && \
-		go run ./cmd/apiv2-contract-diff -base "$$tmp/base.json" -revision $(APIV2_OPENAPI) -contracts contracts/api/v2 \
-		|| { echo "::error::$(APIV2_OPENAPI) has an unapproved breaking change against $$base; see contracts/api/v2/breaking-approvals.schema.json"; exit 1; }
+		base_entry=$$(git ls-tree --name-only "$$base" -- "$(APIV2_OPENAPI)") && \
+		{ [ -z "$$base_entry" ] || git show "$$base:$(APIV2_OPENAPI)" > "$$tmp/base.json" \
+			|| { echo "::error::failed to read $(APIV2_OPENAPI) at $$base"; exit 1; }; } && \
+		{ go run ./cmd/apiv2-contract-diff -base "$$tmp/base.json" -revision $(APIV2_OPENAPI) -contracts contracts/api/v2 \
+			|| { echo "::error::$(APIV2_OPENAPI) has an unapproved breaking change against $$base; see contracts/api/v2/breaking-approvals.schema.json"; exit 1; }; }
 
 # Regenerate the native API v2 contract fixtures through the real v2 router.
 # The bodies are what the server answers, byte for byte, for synthetic

@@ -449,6 +449,12 @@
       "value": "A folytatáshoz jelentkezzen be a hálózat saját bejelentkezésén keresztül."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Ezt a csomópontot a szerver telepítési konfigurációja állítja be. Távolítsa el onnan, és indítsa újra az API-szervereket, hogy itt kezelhesse."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -13324,7 +13330,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – az általuk megjelenített gyűjtemény sem itt, sem a biztonsági mentésben nincs meg"
+              "value": " nem állítható vissza – az általa megjelenített gyűjtemény sem itt, sem a biztonsági mentésben nincs meg"
             }
           ]
         },
@@ -13358,7 +13364,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a beállításaik egy másik SECRET_KEY kulccsal vannak titkosítva"
+              "value": " nem állítható vissza – a beállításai egy másik SECRET_KEY kulccsal vannak titkosítva"
             }
           ]
         },
@@ -13392,7 +13398,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – ez a szerver nem tudja fogadni őket"
+              "value": " nem állítható vissza – ez a szerver nem tudja fogadni"
             }
           ]
         },
@@ -13460,7 +13466,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a hozzájuk tartozó fájlok hiányoznak ezen a szerveren"
+              "value": " nem állítható vissza – a hozzá tartozó fájlok hiányoznak ezen a szerveren"
             }
           ]
         },
@@ -13494,7 +13500,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a hozzájuk tartozó mappák nincsenek ezen a szerveren"
+              "value": " nem állítható vissza – a hozzá tartozó mappák nincsenek ezen a szerveren"
             }
           ]
         },
@@ -13528,7 +13534,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a hozzáférési csoportjuk nincs ezen a szerveren"
+              "value": " nem állítható vissza – a hozzáférési csoportja nincs ezen a szerveren"
             }
           ]
         },
@@ -13562,7 +13568,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a hozzájuk tartozó cím nem szerepel ennek a szervernek a katalógusában"
+              "value": " nem állítható vissza – a hozzá tartozó cím nem szerepel ennek a szervernek a katalógusában"
             }
           ]
         },
@@ -13596,7 +13602,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – bővítenék a hozzáférést, ezért ez a szerver megtartja a szigorúbb értékeit"
+              "value": " nem állítható vissza – bővítené a hozzáférést, ezért ez a szerver megtartja a saját szigorúbb értékeit"
             }
           ]
         },
@@ -13630,7 +13636,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a könyvtáruk nincs ezen a szerveren"
+              "value": " nem állítható vissza – a könyvtára nincs ezen a szerveren"
             }
           ]
         },
@@ -13664,7 +13670,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a könyvtáruk itt nem állítható vissza"
+              "value": " nem állítható vissza – a könyvtára itt nem állítható vissza"
             }
           ]
         },
@@ -13719,6 +13725,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nem állítható vissza – ennek a szervernek a környezete határozza meg az eltérő beállításokat vagy a kapcsolatuk egy részét"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nem állítható vissza – ennek a szervernek a környezete határozza meg az eltérő beállításokat vagy a kapcsolatuk egy részét"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13732,7 +13772,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – egy másik SECRET_KEY kulccsal vannak titkosítva"
+              "value": " nem állítható vissza – egy másik SECRET_KEY kulccsal van titkosítva"
             }
           ]
         },
@@ -13766,7 +13806,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – előbb telepíteni kell őket egy bővítménykatalógusból"
+              "value": " nem állítható vissza – előbb telepíteni kell egy bővítménykatalógusból"
             }
           ]
         },
@@ -13800,7 +13840,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – az elsődleges profiljukat is velük együtt kell visszaállítani"
+              "value": " nem állítható vissza – az elsődleges profilját is vele együtt kell visszaállítani"
             }
           ]
         },
@@ -13834,7 +13874,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a biztonsági mentés nem tartalmazza őket"
+              "value": " nem állítható vissza – a biztonsági mentés nem tartalmazza"
             }
           ]
         },
@@ -13970,7 +14010,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – ez a szerver több hozzáférést adna nekik, mint a biztonsági mentés"
+              "value": " nem állítható vissza – ez a szerver több hozzáférést adna neki, mint a biztonsági mentés"
             }
           ]
         },
@@ -14038,7 +14078,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – itt már ugyanilyenek"
+              "value": " nem állítható vissza – itt már ugyanilyen"
             }
           ]
         },
@@ -14106,7 +14146,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – a biztonsági mentésben lévő példányuk nem olvasható"
+              "value": " nem állítható vissza – a biztonsági mentésben lévő példánya nem olvasható"
             }
           ]
         },
@@ -14140,7 +14180,7 @@
             },
             {
               "type": 0,
-              "value": " nem állítható vissza – külső szolgáltatásokhoz csatlakoznak, és ez a szerver nem tudja ellenőrizni a biztonsági mentést"
+              "value": " nem állítható vissza – külső szolgáltatásokhoz csatlakozik, és ez a szerver nem tudja ellenőrizni a biztonsági mentést"
             }
           ]
         },
@@ -14241,6 +14281,40 @@
     {
       "type": 0,
       "value": "Egy szolgáltatás címe megváltozik, de a hitelesítő adatai nincsenek a biztonsági mentésben, ezért a visszaállítás itt törli őket, és kikapcsolja a szolgáltatást, amíg újra meg nem adják őket."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " beállítás megtartja a jelenlegi értékét, mert ennek a szervernek a környezete határozza meg azt vagy a kapcsolatának egy részét."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " beállítás megtartja a jelenlegi értékét, mert ennek a szervernek a környezete határozza meg őket vagy a kapcsolatuk egy részét."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14695,8 +14769,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Elrejtés"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Elrejtés"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Elrejtés"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14845,8 +14939,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Megjelenítés"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Megjelenítés"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Megjelenítés"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17185,6 +17299,12 @@
       "value": "Itt egy másik fiók jelentkezik be a felhasználónevével vagy e-mail-címével."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Ennek a szervernek a környezete határozza meg az eltérő beállításokat vagy a kapcsolatuk egy részét, ezért ez a szerver megtartja a jelenlegi értékeit."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18243,6 +18363,16 @@
     {
       "type": 0,
       "value": " (megtartva: szigorúbb)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (megtartva: környezet)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -30518,7 +30648,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "A nemrég elindított lejátszási munkamenetek listája"
+      "value": "Legutóbbi lejátszások az összes fiókban"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32135,6 +32265,72 @@
     {
       "type": 0,
       "value": "Nem sikerült betölteni a tevékenységet."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " lejátszotta: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " lejátszotta: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49300,6 +49496,12 @@
       "value": "A beállítások kiegészítéséhez adja meg a szervercímet."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "A kulcsot a szerver telepítési konfigurációja állítja be"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50212,6 +50414,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "A szerver telepítési konfigurációja állítja be. Ha itt törölni szeretné, távolítsa el onnan, majd indítsa újra az API-szervereket."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52825,6 +53033,106 @@
       "value": "A generálás leállt. A tárolt ajánlások a szerver újraindításáig láthatók maradnak a Felfedezés oldalon."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Profilok rangsorolása ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDB-listák lekérése ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Címek lekérése és beágyazása ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " lejárt cím törölve"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " lejárt cím törölve"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -52857,6 +53165,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "A felfedezési ajánlások összeállítása előtt oldja fel az alábbi beágyazási zárolási ütközést."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Először futtassa a Beágyazások műveletet, hogy a Silónak legyenek könyvtárvektorai az összehasonlításhoz."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "A felfedezési ajánlások összeállítása előtt csatlakoztasson egy beágyazási szolgáltatót az MI-szolgáltatások oldalon."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Még egyik profilnak sincs ízlésprofilja. Futtassa az Ízlésprofilok műveletet, ha valaki már megtekintett vagy értékelt címeket."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54683,6 +55015,32 @@
       "value": "Üres marad, amíg be nem kapcsolja a felfedezési ajánlásokat itt: Adminisztráció → Ajánlások."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Az ajánlott sorok üresek maradnak, amíg be nem kapcsolja a felfedezési ajánlásokat itt: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Adminisztráció → Ajánlások"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Kikapcsolva az Ajánlások oldalon"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56153,6 +56511,12 @@
       "value": "Az új sorok a Felfedezés oldal aljára kerülnek"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Ajánlások beállításainak megnyitása"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56165,6 +56529,12 @@
       "value": "Az MDBList hírcsatornája nem tartalmazza a lista oldalán mentett rendezést. Válassza ki azt, amelyet az oldal mutat."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "A profiljához még nincsenek felfedezési ajánlások. A sor előnézetéhez futtassa a Felfedezési ajánlások műveletet, vagy tekintsen meg és értékeljen néhány címet."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56175,6 +56545,12 @@
     {
       "type": 0,
       "value": "Válasszon listát, vagy illessze be a hivatkozását a címek megtekintéséhez."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "A sor előnézetéhez kapcsolja be a felfedezési ajánlásokat itt: Adminisztráció → Ajánlások."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -56993,6 +57369,12 @@
     {
       "type": 0,
       "value": "Üzenet elküldve"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "A lejátszó nem erősítette meg az üzenet fogadását. Lehet, hogy az üzenet később jelenik meg, vagy egyáltalán nem."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -59851,6 +60233,12 @@
       "value": "Nem sikerült ellenőrizni a kapcsolatot."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nem sikerült ellenőrizni, hogy a szerver környezete beállítja-e ezt. A szerkesztéshez töltse be újra az oldalt."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60405,6 +60793,30 @@
     {
       "type": 0,
       "value": "Nem sikerült frissíteni a csatornát"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Az aktuális értékek megtekintéséhez töltse be újra a beállításokat. A közben módosult beállításokon, valamint a mentett jelszavakon és kulcsokon végzett változtatásai elvesznek; a többi változtatása megmarad."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Újratöltés"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült újratölteni a beállításokat. Próbálja újra."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "A beállítások máshol módosultak"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -65863,6 +66275,24 @@
       "value": "Másik modellre váltáshoz alaphelyzetbe kell állítani a beágyazásokat, ami mindet törli. Ha egy másik szolgáltató ugyanazt a modellt szolgálja ki, az újraindítás után lép érvénybe."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Hozzáadás a Felfedezés oldalhoz"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült hozzáadni az ajánlott sorokat a Felfedezés oldalhoz."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Ajánlott sorok hozzáadva a Felfedezés oldalhoz."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -65885,6 +66315,44 @@
     {
       "type": 0,
       "value": "Hány, a könyvtárban nem szereplő címet tárol a szerver, amelyekből ajánlani lehet. Mindegyiket lekéri a TMDB-ből, és beágyazást készít hozzá. A beágyazás általában olcsó, de nagyobb szám a beágyazási szolgáltatótól függően többe kerülhet vagy tovább tarthat, és több tárhelyet használ."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "A Felfedezés oldalon még egyetlen Ajánlások típusú sor sem jelenik meg."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "A felfedezési ajánlások futtatásához kapcsolja be fent az Ajánlások engedélyezése beállítást, és indítsa újra a szervert."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "A kérések jelenleg ki vannak kapcsolva. Kapcsolja be őket itt: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Kérések beállításai"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", hogy a nézők láthassák a Felfedezés oldalt."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Felfedezés oldal megnyitása"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -75043,6 +75511,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "A tárhely nem helyezhető át ide, amíg környezeti változók adják meg a tárolási beállításokat ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Előbb szüntesse meg ezeknek a változóknak a beállítását, és indítsa újra az összes API-szervert."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76177,6 +76659,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Ez az ütemezés a biztonsági mentési beállításokból származik. A "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Szerver › Biztonsági mentések"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " oldalon módosíthatja."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
@@ -86368,25 +86870,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Nem sikerült bejelentkeztetni a TV-t. Próbálja újra."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Ellenőrizze, hogy az alkalmazás ezt mutatja-e"
+      "value": "Nem sikerült jóváhagyni a bejelentkezést. Próbálja újra."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Ellenőrizze, hogy a TV ezt mutatja-e"
+      "value": "Ellenőrizze, hogy egyezik-e ez a kód"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Adja meg a TV-n vagy az alkalmazásban látható kódot"
+      "value": "Adja meg az eszközön látható kódot"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86398,13 +86894,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "TV vagy más eszköz bejelentkeztetése a fiókjával."
+      "value": "TV, alkalmazás vagy más eszköz bejelentkeztetése."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "TV bejelentkeztetése"
+      "value": "Bejelentkezés jóváhagyása"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86416,7 +86912,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "A TV jóváhagyásához fejezze be a megtekintést "
+      "value": "A bejelentkezés jóváhagyásához fejezze be a megtekintést "
     },
     {
       "type": 1,
@@ -86424,13 +86920,13 @@
     },
     {
       "type": 0,
-      "value": " nevében. TV bejelentkeztetésére csak maga a fiók jogosult."
+      "value": " nevében. Eszközöket csak maga a fiók hagyhat jóvá."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "A TV jóváhagyásához fejezze be a megtekintést ennek a felhasználónak a nevében. TV bejelentkeztetésére csak maga a fiók jogosult."
+      "value": "A bejelentkezés jóváhagyásához fejezze be a megtekintést ennek a felhasználónak a nevében. Eszközöket csak maga a fiók hagyhat jóvá."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86448,39 +86944,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Ez a kód nem található. Ellenőrizze a TV-n látható kódot."
+      "value": "Nem találjuk ezt a kódot. Ellenőrizze a kódot, és próbálja újra."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Most nem"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "A régebbi TV-alkalmazások helyette ezt mutatják: "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Csak olyan eszközt hagyjon jóvá, amely most Ön előtt van."
+      "value": "Elutasítás"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Csak olyan TV-t hagyjon jóvá, amely most Ön előtt van."
+      "value": "Csak akkor hagyja jóvá, ha a bejelentkezést Ön indította el."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86506,7 +86982,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Aki ezt a TV-t használja, választhat a profiljai közül. A PIN-kóddal védett profilok zárolva maradnak."
+      "value": "Ezzel az eszköz hozzáférést kap a profiljaihoz. A PIN-kóddal védett profilok zárolva maradnak."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86553,6 +87029,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Igényelve: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86566,7 +87052,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Ez a TV már nem várakozik. Kezdje újra a TV-n."
+      "value": "Ez az eszköz már nem várakozik. Indítsa újra rajta a bejelentkezést."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86575,10 +87061,38 @@
       "value": "Ezt a bejelentkezést elutasították."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Kész. Bejelentkezés folyamatban: "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Bejelentkezett: "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Ez a kód lejárt. A TV már egy újat mutat. Használja azt a kódot."
+      "value": "Ez a kód lejárt. Kérjen új kódot az eszközön, és próbálja újra."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86612,7 +87126,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "Kész. Ez az eszköz bejelentkezik a(z) "
+      "value": "Kész. Ez az eszköz a(z) "
     },
     {
       "type": 1,
@@ -86620,7 +87134,7 @@
     },
     {
       "type": 0,
-      "value": " nevű profillal."
+      "value": " nevű profillal jelentkezik be."
     }
   ],
   "web.auth.activate.result.quickConnectExpired": [
@@ -86662,25 +87176,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Ez a TV már bejelentkezett."
+      "value": "Ez az eszköz már bejelentkezett."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Ez a TV jóváhagyást kapott, és befejezi a bejelentkezést."
+      "value": "Ez az eszköz jóváhagyást kapott, és befejezi a bejelentkezést."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Kész. A TV bejelentkezik."
+      "value": "Kész. Az eszköz most jelentkezik be."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "A TV bejelentkezett."
+      "value": "Az eszköz bejelentkezett."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86724,7 +87238,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Bejelentkezteti a(z) "
+      "value": "Engedélyezi a(z) "
     },
     {
       "type": 1,
@@ -86732,13 +87246,13 @@
     },
     {
       "type": 0,
-      "value": " eszközt?"
+      "value": " eszköz bejelentkezését?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Bejelentkezteti ezt az eszközt?"
+      "value": "Engedélyezi ennek az eszköznek a bejelentkezését?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86758,13 +87272,13 @@
     },
     {
       "type": 0,
-      "value": " szerverre a TV jóváhagyásához."
+      "value": " szerverre ennek a bejelentkezésnek a jóváhagyásához."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "TV bejelentkeztetése"
+      "value": "Bejelentkezés jóváhagyása"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -87826,7 +88340,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Nem sikerült bejelentkeztetni az eszközt. Próbálja újra."
+      "value": "Nem sikerült jóváhagyni a bejelentkezést. Próbálja újra."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -108948,6 +109462,12 @@
       "value": "Fordítás…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Az export óta hozzáadott szerversorok elrejtése:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -108966,6 +109486,12 @@
     {
       "type": 0,
       "value": ", és felváltják az itt korábban hozzáadott szakaszokat. Az ezen a szerveren lévő szakaszokon végzett módosítások megmaradnak."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "A szerver sorai megváltoztak a fájl exportálása óta, ezért alább válassza ki az elrejtendő sorokat."
     }
   ],
   "web.home.layout.checking": [
@@ -109016,6 +109542,26 @@
     {
       "type": 0,
       "value": "Bekapcsolja a Megtekintett elemek elrejtése beállítást."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Elrejti a kijelölt sorokat a következő oldalakon: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", az ottani többi sor módosítása nélkül."
     }
   ],
   "web.home.layout.import": [
@@ -109120,6 +109666,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109328,6 +109892,12 @@
     {
       "type": 0,
       "value": "Névtelen szakasz"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "A fájlban nem szereplő szerversorok elrejtése:"
     }
   ],
   "web.home.page.customize": [

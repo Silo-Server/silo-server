@@ -449,6 +449,12 @@
       "value": "Log masuk melalui log masuk rangkaian anda untuk meneruskan."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Nod ini ditetapkan oleh konfigurasi penggunaan pelayan. Alih keluar nod itu di sana dan mulakan semula pelayan API untuk mengurusnya di sini."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -12697,7 +12703,7 @@
             },
             {
               "type": 0,
-              "value": " tidak boleh dipulihkan — koleksi yang dipaparkan tiada di sini atau dalam sandaran"
+              "value": " tidak boleh dipulihkan — koleksi yang dipaparkannya tiada di sini atau dalam sandaran"
             }
           ]
         }
@@ -12851,7 +12857,7 @@
             },
             {
               "type": 0,
-              "value": " tidak boleh dipulihkan — judulnya tiada dalam katalog pelayan ini"
+              "value": " tidak boleh dipulihkan — tajuknya tiada dalam katalog pelayan ini"
             }
           ]
         }
@@ -12948,6 +12954,28 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tidak boleh dipulihkan — persekitaran pelayan ini menetapkan tetapan yang berbeza, atau sebahagian sambungannya"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13005,7 +13033,7 @@
             },
             {
               "type": 0,
-              "value": " tidak boleh dipulihkan — profil utamanya mesti dipulihkan bersama"
+              "value": " tidak boleh dipulihkan — profil utamanya mesti dipulihkan bersamanya"
             }
           ]
         }
@@ -13115,7 +13143,7 @@
             },
             {
               "type": 0,
-              "value": " tidak boleh dipulihkan — pelayan ini akan memberikan akses lebih luas berbanding sandaran"
+              "value": " tidak boleh dipulihkan — pelayan ini akan memberikannya akses lebih luas berbanding sandaran"
             }
           ]
         }
@@ -13302,6 +13330,28 @@
     {
       "type": 0,
       "value": "Alamat satu perkhidmatan berubah tanpa bukti kelayakannya dalam sandaran, jadi pemulihan mengosongkan bukti kelayakan itu di sini dan mematikan perkhidmatan tersebut sehingga dimasukkan semula."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tetapan mengekalkan nilai semasa kerana persekitaran pelayan ini menetapkannya, atau sebahagian sambungannya."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -13640,8 +13690,20 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Sembunyikan"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13754,8 +13816,20 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Tunjukkan"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -15566,6 +15640,12 @@
       "value": "Akaun lain di sini log masuk dengan nama pengguna atau e-mel akaun ini."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Persekitaran pelayan ini menetapkan tetapan yang berbeza, atau sebahagian sambungannya, jadi pelayan ini mengekalkan nilai semasanya."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16500,6 +16580,16 @@
     {
       "type": 0,
       "value": " (dikekalkan: lebih ketat)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (dikekalkan: persekitaran)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -27456,7 +27546,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Suapan sesi main balik yang baru dimulakan"
+      "value": "Main balik terkini merentas semua akaun"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -28914,6 +29004,72 @@
     {
       "type": 0,
       "value": "Tidak dapat memuatkan aktiviti."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " memainkan "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " memainkan "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -43808,6 +43964,12 @@
       "value": "Masukkan alamat pelayan untuk melengkapkan tetapan."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Kunci ditetapkan oleh konfigurasi penggunaan pelayan"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -44704,6 +44866,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh konfigurasi penggunaan pelayan. Alih keluar nod itu di sana dan mulakan semula pelayan API untuk memadamnya di sini."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -47128,6 +47296,94 @@
       "value": "Penjanaan telah dihentikan. Cadangan yang disimpan kekal kelihatan dalam Teroka sehingga pelayan dimulakan semula."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Menyusun kedudukan profil ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Mengambil senarai TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Mencari dan membenamkan tajuk ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tajuk tamat tempoh dikosongkan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -47148,6 +47404,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Selesaikan konflik kunci pembenaman di bawah sebelum membina cadangan Teroka."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Jalankan kerja Pembenaman dahulu supaya Silo mempunyai vektor pustaka untuk dibandingkan."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Sambungkan pembekal pembenaman dalam Perkhidmatan AI sebelum membina cadangan Teroka."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Belum ada profil yang mempunyai profil citarasa. Jalankan Profil citarasa setelah seseorang menonton atau memberi penarafan kepada tajuk."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -48622,6 +48902,32 @@
       "value": "Kekal kosong sehingga cadangan Teroka dihidupkan dalam Pentadbir → Cadangan."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Baris cadangan kekal kosong sehingga Cadangan Teroka dihidupkan dalam "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pentadbir → Cadangan"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Mati dalam Cadangan"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -49983,6 +50289,12 @@
       "value": "Baris baharu diletakkan di bahagian bawah Teroka"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Buka tetapan Cadangan"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -49995,6 +50307,12 @@
       "value": "Suapan MDBList tidak membawa isihan yang disimpan pada halaman senarai. Pilih isihan yang dipaparkannya."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Profil anda belum mempunyai cadangan Teroka. Jalankan Cadangan Teroka atau tonton dan beri penarafan kepada beberapa tajuk untuk melihat pratonton baris ini."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -50005,6 +50323,12 @@
     {
       "type": 0,
       "value": "Pilih senarai atau tampal pautannya untuk melihat tajuknya."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Hidupkan Cadangan Teroka dalam Pentadbir → Cadangan untuk melihat pratonton baris ini."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -50723,6 +51047,12 @@
     {
       "type": 0,
       "value": "Mesej dihantar"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Pemain tidak mengesahkan mesej itu. Mesej itu mungkin dipaparkan lewat atau tidak dipaparkan sama sekali."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -53518,6 +53848,12 @@
       "value": "Semakan sambungan gagal."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menyemak sama ada persekitaran pelayan menetapkan tetapan ini. Muat semula halaman untuk mengeditnya."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -54056,6 +54392,30 @@
     {
       "type": 0,
       "value": "Gagal mengemas kini saluran"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Muat semula untuk melihat nilai semasa. Suntingan anda pada tetapan yang berubah, serta pada kata laluan dan kunci yang disimpan, dibatalkan; suntingan anda yang lain dikekalkan."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Muat semula"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuat semula tetapan. Sila cuba lagi."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Tetapan diubah di tempat lain"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -59406,6 +59766,24 @@
       "value": "Beralih kepada model lain memerlukan penetapan semula pembenaman, yang memadam kesemuanya. Pembekal lain yang menyediakan model yang sama berkuat kuasa selepas dimulakan semula."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Tambah ke Teroka"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menambah baris cadangan ke halaman Teroka."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Baris cadangan ditambah ke halaman Teroka."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -59428,6 +59806,44 @@
     {
       "type": 0,
       "value": "Bilangan tajuk yang belum ada dalam pustaka yang disimpan oleh pelayan untuk dicadangkan. Setiap tajuk dicari di TMDB dan dijadikan embedding. Embedding biasanya murah, tetapi bilangan yang lebih tinggi boleh menelan kos lebih tinggi atau mengambil masa lebih lama bergantung pada pembekal embedding anda, dan menggunakan lebih banyak storan."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Halaman Teroka anda belum memaparkan sebarang baris Cadangan."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Hidupkan “Dayakan cadangan” di atas dan mulakan semula pelayan sebelum Cadangan Teroka boleh dijalankan."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Permintaan kini dimatikan. Hidupkannya dalam "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Tetapan permintaan"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " supaya penonton boleh melihat halaman Teroka."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Buka halaman Teroka"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -68436,6 +68852,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Storan tidak boleh dipindahkan ke sini semasa persekitaran menetapkan tetapan storan ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Nyahtetapkan pemboleh ubah itu dan mulakan semula setiap pelayan API dahulu."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -69500,6 +69930,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Jadual ini datang daripada tetapan sandaran. Ubah jadual ini di "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pelayan › Sandaran"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
@@ -78825,25 +79275,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Tidak dapat log masuk pada TV. Sila cuba lagi."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Pastikan apl anda memaparkan"
+      "value": "Tidak dapat meluluskan log masuk. Sila cuba lagi."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Pastikan TV anda memaparkan"
+      "value": "Pastikan kod ini sepadan"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Masukkan kod pada TV atau apl anda"
+      "value": "Masukkan kod yang dipaparkan pada peranti anda"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -78855,13 +79299,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Log masuk pada TV atau peranti lain dengan akaun anda."
+      "value": "Log masuk TV, apl atau peranti lain."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Log masuk pada TV"
+      "value": "Luluskan log masuk"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -78881,13 +79325,13 @@
     },
     {
       "type": 0,
-      "value": " untuk meluluskan TV. Hanya akaun itu sendiri boleh log masuk pada TV."
+      "value": " untuk meluluskan log masuk ini. Hanya akaun itu sendiri boleh meluluskan peranti."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Berhenti melihat sebagai pengguna ini untuk meluluskan TV. Hanya akaun itu sendiri boleh log masuk pada TV."
+      "value": "Berhenti melihat sebagai pengguna ini untuk meluluskan log masuk ini. Hanya akaun itu sendiri boleh meluluskan peranti."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -78905,39 +79349,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Kod itu tidak ditemui. Semak kod pada TV anda."
+      "value": "Kod itu tidak ditemui. Semak kod dan cuba lagi."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Bukan sekarang"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Apl TV versi lama memaparkan "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " sebagai gantinya."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Luluskan hanya peranti yang berada di hadapan anda sekarang."
+      "value": "Tolak"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Luluskan hanya TV yang berada di hadapan anda sekarang."
+      "value": "Luluskan ini hanya jika anda sendiri yang memulakan log masuk."
     }
   ],
   "web.auth.activate.playOn": [
@@ -78963,7 +79387,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Sesiapa yang menggunakan TV ini boleh memilih daripada profil anda. Profil dengan PIN kekal berkunci."
+      "value": "Ini memberikan peranti itu akses kepada profil anda. Profil dengan PIN kekal dikunci."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -79010,6 +79434,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Diminta "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -79023,7 +79457,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "TV ini berhenti menunggu. Mulakan semula pada TV."
+      "value": "Peranti ini berhenti menunggu. Mulakan log masuk semula pada peranti itu."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -79032,10 +79466,34 @@
       "value": "Log masuk ini telah ditolak."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Selesai. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sedang log masuk."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " telah log masuk."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Kod ini telah tamat tempoh. TV anda kini memaparkan kod baharu. Gunakan kod itu."
+      "value": "Kod ini telah tamat tempoh. Dapatkan kod baharu pada peranti itu dan cuba lagi."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -79119,25 +79577,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "TV itu sudah log masuk."
+      "value": "Peranti ini sudah log masuk."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "TV ini telah diluluskan dan sedang menyelesaikan log masuk."
+      "value": "Peranti ini telah diluluskan dan sedang menyelesaikan log masuk."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Selesai. TV anda sedang log masuk."
+      "value": "Selesai. Peranti anda sedang log masuk."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "TV anda sudah log masuk."
+      "value": "Peranti anda telah log masuk."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -79215,13 +79673,13 @@
     },
     {
       "type": 0,
-      "value": " untuk meluluskan TV ini."
+      "value": " untuk meluluskan log masuk ini."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Log masuk TV"
+      "value": "Luluskan log masuk"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -80267,7 +80725,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Tidak dapat log masuk peranti. Sila cuba lagi."
+      "value": "Tidak dapat meluluskan log masuk. Sila cuba lagi."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -99357,6 +99815,12 @@
       "value": "Menterjemah…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sembunyikan baris pelayan yang ditambah sejak eksport ini:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -99375,6 +99839,12 @@
     {
       "type": 0,
       "value": ", menggantikan bahagian yang anda tambah di sini sebelum ini. Perubahan anda pada bahagian pelayan ini kekal."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Baris pelayan ini telah berubah sejak fail ini dieksport, jadi pilih baris yang mahu disembunyikan di bawah."
     }
   ],
   "web.home.layout.checking": [
@@ -99425,6 +99895,26 @@
     {
       "type": 0,
       "value": "Menghidupkan Sembunyikan item yang telah ditonton."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Menyembunyikan baris yang dipilih pada: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " tanpa mengubah baris anda yang lain di sana."
     }
   ],
   "web.home.layout.import": [
@@ -99529,6 +100019,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -99726,6 +100234,12 @@
     {
       "type": 0,
       "value": "Bahagian tanpa tajuk"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sembunyikan baris pelayan yang tiada dalam fail ini:"
     }
   ],
   "web.home.page.customize": [

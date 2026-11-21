@@ -449,6 +449,12 @@
       "value": "Συνδεθείτε μέσω της υπηρεσίας σύνδεσης του δικτύου σας για να συνεχίσετε."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Αυτός ο κόμβος ορίζεται από τη διαμόρφωση ανάπτυξης του διακομιστή. Αφαιρέστε τον από εκεί και επανεκκινήστε τους διακομιστές API για να τον διαχειρίζεστε εδώ."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -13418,7 +13424,7 @@
             },
             {
               "type": 0,
-              "value": " δεν μπορούν να επαναφερθούν – οι ρυθμίσεις έχουν κρυπτογραφηθεί με διαφορετικό SECRET_KEY"
+              "value": " δεν μπορούν να επαναφερθούν – οι ρυθμίσεις τους έχουν κρυπτογραφηθεί με διαφορετικό SECRET_KEY"
             }
           ]
         }
@@ -13520,7 +13526,7 @@
             },
             {
               "type": 0,
-              "value": " δεν μπορούν να επαναφερθούν – τα αρχεία λείπουν από αυτόν τον διακομιστή"
+              "value": " δεν μπορούν να επαναφερθούν – τα αρχεία τους λείπουν από αυτόν τον διακομιστή"
             }
           ]
         }
@@ -13554,7 +13560,7 @@
             },
             {
               "type": 0,
-              "value": " δεν μπορούν να επαναφερθούν – οι φάκελοι δεν υπάρχουν σε αυτόν τον διακομιστή"
+              "value": " δεν μπορούν να επαναφερθούν – οι φάκελοί τους δεν υπάρχουν σε αυτόν τον διακομιστή"
             }
           ]
         }
@@ -13588,7 +13594,7 @@
             },
             {
               "type": 0,
-              "value": " δεν μπορούν να επαναφερθούν – η ομάδα πρόσβασης δεν υπάρχει σε αυτόν τον διακομιστή"
+              "value": " δεν μπορούν να επαναφερθούν – η ομάδα πρόσβασής τους δεν υπάρχει σε αυτόν τον διακομιστή"
             }
           ]
         }
@@ -13644,7 +13650,7 @@
             },
             {
               "type": 0,
-              "value": " δεν μπορεί να επαναφερθεί – θα διεύρυνε την πρόσβαση, οπότε αυτός ο διακομιστής διατηρεί τις αυστηρότερες τιμές του"
+              "value": " δεν μπορεί να επαναφερθεί – θα διεύρυνε την πρόσβαση, οπότε αυτός ο διακομιστής διατηρεί τις δικές του αυστηρότερες τιμές"
             }
           ]
         },
@@ -13759,6 +13765,40 @@
             {
               "type": 0,
               "value": " δεν μπορούν να επαναφερθούν – άλλος λογαριασμός εδώ συνδέεται με το ίδιο όνομα χρήστη ή email"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " δεν μπορεί να επαναφερθεί – το περιβάλλον αυτού του διακομιστή ορίζει τις ρυθμίσεις που διαφέρουν ή μέρος της σύνδεσής τους"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " δεν μπορούν να επαναφερθούν – το περιβάλλον αυτού του διακομιστή ορίζει τις ρυθμίσεις που διαφέρουν ή μέρος της σύνδεσής τους"
             }
           ]
         }
@@ -14291,6 +14331,40 @@
       "value": "Η διεύθυνση μιας υπηρεσίας αλλάζει χωρίς τα διαπιστευτήριά της στο αντίγραφο ασφαλείας, οπότε η επαναφορά τα διαγράφει εδώ και απενεργοποιεί την υπηρεσία μέχρι να εισαχθούν ξανά."
     }
   ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ρύθμιση διατηρεί την τρέχουσα τιμή της, επειδή την ορίζει το περιβάλλον αυτού του διακομιστή ή αυτό ορίζει μέρος της σύνδεσής της."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ρυθμίσεις διατηρούν τις τρέχουσες τιμές τους, επειδή τις ορίζει το περιβάλλον αυτού του διακομιστή ή αυτό ορίζει μέρος της σύνδεσής τους."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.caveat.filesMissing": [
     {
       "type": 6,
@@ -14735,8 +14809,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Απόκρυψη"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14885,8 +14979,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Εμφάνιση"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17113,6 +17227,12 @@
       "value": "Ένας άλλος λογαριασμός εδώ συνδέεται με το ίδιο όνομα χρήστη ή email."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Το περιβάλλον αυτού του διακομιστή ορίζει τις ρυθμίσεις που διαφέρουν ή μέρος της σύνδεσής τους, οπότε αυτός ο διακομιστής διατηρεί τις τρέχουσες τιμές του."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18195,6 +18315,16 @@
     {
       "type": 0,
       "value": " (διατηρείται: αυστηρότερη)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (διατηρείται: περιβάλλον)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -30606,7 +30736,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Λίστα συνεδριών αναπαραγωγής που ξεκίνησαν πρόσφατα"
+      "value": "Οι πιο πρόσφατες αναπαραγωγές σε όλους τους λογαριασμούς"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32239,6 +32369,72 @@
     {
       "type": 0,
       "value": "Δεν ήταν δυνατή η φόρτωση της δραστηριότητας."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " αναπαρήγαγε το στοιχείο "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " αναπαρήγαγε το στοιχείο "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49708,6 +49904,12 @@
       "value": "Εισαγάγετε τη διεύθυνση του διακομιστή για να ολοκληρωθούν οι ρυθμίσεις."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Κλειδί ορισμένο από τη διαμόρφωση ανάπτυξης του διακομιστή"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50620,6 +50822,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ορίζεται από τη διαμόρφωση ανάπτυξης του διακομιστή. Αφαιρέστε τον κόμβο από εκεί και επανεκκινήστε τους διακομιστές API για να τον διαγράψετε εδώ."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -53241,6 +53449,114 @@
       "value": "Η δημιουργία προτάσεων σταμάτησε. Οι αποθηκευμένες προτάσεις παραμένουν ορατές στην Ανακάλυψη μέχρι την επανεκκίνηση του διακομιστή."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Κατάταξη προφίλ ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Ανάκτηση λιστών TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Αναζήτηση και ενσωμάτωση τίτλων ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εκκαθαρίστηκε "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " τίτλος που έληξε"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εκκαθαρίστηκαν "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " τίτλοι που έληξαν"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53273,6 +53589,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Επιλύστε την παρακάτω διένεξη κλειδώματος ενσωματώσεων πριν από τη δημιουργία προτάσεων Ανακάλυψης."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Εκτελέστε πρώτα τη διεργασία «Ενσωματώσεις», ώστε το Silo να έχει διανύσματα της βιβλιοθήκης για σύγκριση."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Συνδέστε έναν πάροχο ενσωματώσεων στην ενότητα «Υπηρεσίες AI» πριν από τη δημιουργία προτάσεων Ανακάλυψης."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Κανένα προφίλ δεν έχει ακόμα προφίλ προτιμήσεων. Εκτελέστε τη διεργασία «Προφίλ προτιμήσεων» μόλις κάποιος παρακολουθήσει ή βαθμολογήσει τίτλους."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -55131,6 +55471,32 @@
       "value": "Παραμένει κενή μέχρι να ενεργοποιηθούν οι προτάσεις Ανακάλυψης στη Διαχείριση → Προτάσεις."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Οι γραμμές προτάσεων παραμένουν κενές μέχρι να ενεργοποιηθούν οι προτάσεις Ανακάλυψης στη "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Διαχείριση → Προτάσεις"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Ανενεργό στις Προτάσεις"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56609,6 +56975,12 @@
       "value": "Οι νέες γραμμές προστίθενται στο κάτω μέρος της Ανακάλυψης"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Άνοιγμα των ρυθμίσεων Προτάσεων"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56621,6 +56993,12 @@
       "value": "Η ροή του MDBList δεν περιλαμβάνει την ταξινόμηση που έχει αποθηκευτεί στη σελίδα της λίστας. Επιλέξτε αυτήν που εμφανίζεται εκεί."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Το προφίλ σας δεν έχει ακόμα προτάσεις Ανακάλυψης. Εκτελέστε τη διεργασία «Προτάσεις Ανακάλυψης» ή παρακολουθήστε και βαθμολογήστε μερικούς τίτλους για να δείτε προεπισκόπηση αυτής της γραμμής."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56631,6 +57009,12 @@
     {
       "type": 0,
       "value": "Επιλέξτε μια λίστα ή επικολλήστε τον σύνδεσμό της για να δείτε τους τίτλους της."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Ενεργοποιήστε τις προτάσεις Ανακάλυψης στη Διαχείριση → Προτάσεις για να δείτε προεπισκόπηση αυτής της γραμμής."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -57425,6 +57809,12 @@
     {
       "type": 0,
       "value": "Το μήνυμα στάλθηκε"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Το πρόγραμμα αναπαραγωγής δεν επιβεβαίωσε τη λήψη του μηνύματος. Μπορεί να εμφανιστεί με καθυστέρηση ή να μην εμφανιστεί καθόλου."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -60299,6 +60689,12 @@
       "value": "Ο έλεγχος σύνδεσης απέτυχε."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατός ο έλεγχος για το αν το περιβάλλον του διακομιστή ορίζει αυτήν τη ρύθμιση. Ανανεώστε τη σελίδα για να την επεξεργαστείτε."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60853,6 +61249,30 @@
     {
       "type": 0,
       "value": "Αποτυχία ενημέρωσης καναλιού"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Επιλέξτε «Ανανέωση» για να δείτε τις τρέχουσες τιμές. Οι αλλαγές σας σε ρυθμίσεις που άλλαξαν, καθώς και σε αποθηκευμένους κωδικούς πρόσβασης και κλειδιά, αναιρούνται. Οι υπόλοιπες αλλαγές σας διατηρούνται."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Ανανέωση"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η ανανέωση των ρυθμίσεων. Δοκιμάστε ξανά."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Οι ρυθμίσεις άλλαξαν αλλού"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -66319,6 +66739,24 @@
       "value": "Η αλλαγή σε άλλο μοντέλο απαιτεί επαναφορά των ενσωματώσεων, η οποία τις διαγράφει όλες. Ένας άλλος πάροχος που εξυπηρετεί το ίδιο μοντέλο εφαρμόζεται μετά από επανεκκίνηση."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Προσθήκη στην Ανακάλυψη"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η προσθήκη γραμμών προτάσεων στη σελίδα Ανακάλυψης."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Οι γραμμές προτάσεων προστέθηκαν στη σελίδα Ανακάλυψης."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66341,6 +66779,44 @@
     {
       "type": 0,
       "value": "Πόσους τίτλους που δεν υπάρχουν στη βιβλιοθήκη διατηρεί ο διακομιστής για να κάνει προτάσεις. Για τον καθένα γίνεται αναζήτηση στο TMDB και δημιουργείται ενσωμάτωση. Η ενσωμάτωση είναι συνήθως φθηνή, αλλά ένας μεγαλύτερος αριθμός μπορεί να κοστίσει περισσότερο ή να διαρκέσει περισσότερο, ανάλογα με τον πάροχο ενσωματώσεων, και χρησιμοποιεί περισσότερο χώρο αποθήκευσης."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Η σελίδα Ανακάλυψης δεν εμφανίζει ακόμα καμία γραμμή Προτάσεων."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Ενεργοποιήστε την επιλογή «Ενεργοποίηση προτάσεων» παραπάνω και επανεκκινήστε τον διακομιστή, για να μπορούν να εκτελεστούν οι προτάσεις Ανακάλυψης."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Τα αιτήματα είναι προς το παρόν ανενεργά. Ενεργοποιήστε τα στις "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Ρυθμίσεις αιτημάτων"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", ώστε οι θεατές να βλέπουν τη σελίδα Ανακάλυψης."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Άνοιγμα σελίδας Ανακάλυψης"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -75531,6 +76007,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Δεν είναι δυνατή η μετακίνηση του χώρου αποθήκευσης εδώ όσο οι μεταβλητές περιβάλλοντος ορίζουν ρυθμίσεις αποθήκευσης ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Πρώτα καταργήστε τον ορισμό αυτών των μεταβλητών και επανεκκινήστε κάθε διακομιστή API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76665,6 +77155,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Αυτό το πρόγραμμα προέρχεται από τις ρυθμίσεις αντιγράφων ασφαλείας. Αλλάξτε το στη σελίδα "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Διακομιστής › Αντίγραφα ασφαλείας"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
@@ -86980,25 +87490,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Δεν ήταν δυνατή η σύνδεση της τηλεόρασης. Δοκιμάστε ξανά."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Ελέγξτε ότι η εφαρμογή σας εμφανίζει"
+      "value": "Δεν ήταν δυνατή η έγκριση της σύνδεσης. Δοκιμάστε ξανά."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Ελέγξτε ότι η τηλεόρασή σας εμφανίζει"
+      "value": "Βεβαιωθείτε ότι αυτός ο κωδικός ταιριάζει"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Εισαγάγετε τον κωδικό που εμφανίζεται στην τηλεόραση ή στην εφαρμογή σας"
+      "value": "Εισαγάγετε τον κωδικό που εμφανίζεται στη συσκευή σας"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -87010,13 +87514,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Συνδέστε μια τηλεόραση ή άλλη συσκευή με τον λογαριασμό σας."
+      "value": "Σύνδεση τηλεόρασης, εφαρμογής ή άλλης συσκευής."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Σύνδεση τηλεόρασης"
+      "value": "Έγκριση σύνδεσης"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -87036,13 +87540,13 @@
     },
     {
       "type": 0,
-      "value": " για να εγκρίνετε μια τηλεόραση. Μόνο ο ίδιος ο λογαριασμός μπορεί να συνδέσει μια τηλεόραση."
+      "value": " για να εγκρίνετε αυτή τη σύνδεση. Μόνο ο ίδιος ο λογαριασμός μπορεί να εγκρίνει συσκευές."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Σταματήστε την προβολή ως αυτός ο χρήστης για να εγκρίνετε μια τηλεόραση. Μόνο ο ίδιος ο λογαριασμός μπορεί να συνδέσει μια τηλεόραση."
+      "value": "Σταματήστε την προβολή ως αυτός ο χρήστης για να εγκρίνετε αυτή τη σύνδεση. Μόνο ο ίδιος ο λογαριασμός μπορεί να εγκρίνει συσκευές."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -87060,39 +87564,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Δεν βρέθηκε αυτός ο κωδικός. Ελέγξτε τον κωδικό στην τηλεόρασή σας."
+      "value": "Δεν ήταν δυνατή η εύρεση αυτού του κωδικού. Ελέγξτε τον κωδικό και δοκιμάστε ξανά."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Όχι τώρα"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Οι παλαιότερες εφαρμογές τηλεόρασης εμφανίζουν στη θέση του τις λέξεις "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Εγκρίνετε μόνο μια συσκευή που βρίσκεται μπροστά σας αυτή τη στιγμή."
+      "value": "Απόρριψη"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Εγκρίνετε μόνο μια τηλεόραση που βρίσκεται μπροστά σας αυτή τη στιγμή."
+      "value": "Εγκρίνετε μόνο αν ξεκινήσατε εσείς τη σύνδεση."
     }
   ],
   "web.auth.activate.playOn": [
@@ -87118,7 +87602,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Όποιος χρησιμοποιεί αυτή την τηλεόραση μπορεί να επιλέξει από τα προφίλ σας. Τα προφίλ με PIN παραμένουν κλειδωμένα."
+      "value": "Έτσι αποκτά πρόσβαση στα προφίλ σας. Τα προφίλ με PIN παραμένουν κλειδωμένα."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -87165,6 +87649,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Ζητήθηκε "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -87178,7 +87672,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Αυτή η τηλεόραση σταμάτησε να περιμένει. Ξεκινήστε ξανά από την τηλεόραση."
+      "value": "Αυτή η συσκευή σταμάτησε να περιμένει. Ξεκινήστε ξανά τη σύνδεση σε αυτήν."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -87187,10 +87681,38 @@
       "value": "Αυτή η σύνδεση απορρίφθηκε."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Ολοκληρώθηκε. Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " συνδέεται."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " συνδέθηκε."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Αυτός ο κωδικός έληξε. Η τηλεόρασή σας εμφανίζει έναν νέο. Χρησιμοποιήστε εκείνον τον κωδικό."
+      "value": "Αυτός ο κωδικός έληξε. Λάβετε νέο κωδικό στη συσκευή και δοκιμάστε ξανά."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -87274,25 +87796,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Η τηλεόραση έχει ήδη συνδεθεί."
+      "value": "Αυτή η συσκευή έχει ήδη συνδεθεί."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Αυτή η τηλεόραση εγκρίθηκε και ολοκληρώνει τη σύνδεση."
+      "value": "Αυτή η συσκευή εγκρίθηκε και ολοκληρώνει τη σύνδεση."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Ολοκληρώθηκε. Η τηλεόρασή σας συνδέεται."
+      "value": "Ολοκληρώθηκε. Η συσκευή σας συνδέεται."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Η τηλεόρασή σας συνδέθηκε."
+      "value": "Η συσκευή σας συνδέθηκε."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -87336,7 +87858,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Σύνδεση της συσκευής "
+      "value": "Να επιτραπεί η σύνδεση της συσκευής "
     },
     {
       "type": 1,
@@ -87350,7 +87872,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Σύνδεση αυτής της συσκευής;"
+      "value": "Να επιτραπεί η σύνδεση αυτής της συσκευής;"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87370,13 +87892,13 @@
     },
     {
       "type": 0,
-      "value": " για να εγκρίνετε αυτή την τηλεόραση."
+      "value": " για να εγκρίνετε αυτή τη σύνδεση."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Σύνδεση τηλεόρασης"
+      "value": "Έγκριση σύνδεσης"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88426,7 +88948,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Δεν ήταν δυνατή η σύνδεση της συσκευής. Δοκιμάστε ξανά."
+      "value": "Δεν ήταν δυνατή η έγκριση της σύνδεσης. Δοκιμάστε ξανά."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -109854,6 +110376,12 @@
       "value": "Μετάφραση…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Απόκρυψη γραμμών του διακομιστή που προστέθηκαν μετά από αυτή την εξαγωγή:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109872,6 +110400,12 @@
     {
       "type": 0,
       "value": " και αντικαθιστούν ενότητες που είχατε προσθέσει εδώ παλαιότερα. Οι αλλαγές σας στις ενότητες αυτού του διακομιστή παραμένουν."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Οι γραμμές αυτού του διακομιστή άλλαξαν από τότε που εξήχθη αυτό το αρχείο, οπότε επιλέξτε παρακάτω όποιες γραμμές θέλετε να αποκρύψετε."
     }
   ],
   "web.home.layout.checking": [
@@ -109922,6 +110456,26 @@
     {
       "type": 0,
       "value": "Ενεργοποιεί την επιλογή «Απόκρυψη στοιχείων που έχετε δει»."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Αποκρύπτει τις επιλεγμένες γραμμές στις σελίδες: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " χωρίς να αλλάζει τις άλλες γραμμές σας εκεί."
     }
   ],
   "web.home.layout.import": [
@@ -110026,6 +110580,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -110234,6 +110806,12 @@
     {
       "type": 0,
       "value": "Ενότητα χωρίς τίτλο"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Απόκρυψη γραμμών του διακομιστή που δεν υπάρχουν σε αυτό το αρχείο:"
     }
   ],
   "web.home.page.customize": [

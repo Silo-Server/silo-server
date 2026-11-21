@@ -413,9 +413,10 @@ the deletion of a complete upload, and the restore job.
   same daily trigger; one backs up and the others record the skip. A
   scheduled run that takes the lock after another server already backed up
   its slot skips too ("skipped: tonight's backup already ran on another
-  server"): a successful nightly records its slot, the latest `backup.time`
-  at or before it started in its server's local time zone, in
-  `backup_status.last_nightly_slot`, and a scheduled run skips when the
+  server"): a successful nightly records the slot it took the lock for, the
+  latest `backup.time` at or before that moment in its server's local time
+  zone, in `backup_status.last_nightly_slot`; a `backup.time` change while
+  it runs does not move it. A scheduled run skips when the
   recorded slot is later than its own previous slot (the same wall-clock
   time a calendar day earlier, so each night across a daylight saving
   change backs up once). Servers in different time zones, or a
@@ -598,9 +599,11 @@ previous release left:
   deleted after it was taken: artwork, avatars, or branding replaced or
   removed since stay as they are now, and a restored row may name a file
   that is gone.
-- It reads only `server_settings` rows, with defaults for keys the old
+- It reads the `server_settings` rows, with defaults for keys the old
   release never wrote: the first upgrade to a release with backups finds no
-  `backup.*` rows and backs up to the default destination. Blob storage comes
+  `backup.*` rows and backs up to the default destination. The one
+  setting it takes from the environment is `SILO_BACKUP_ENABLED`, over
+  `backup.enabled`. Blob storage comes
   from the stored settings, as at startup, opened without recording anything.
 - The core inventory checks each table with `to_regclass`, so tables the old
   schema lacks are recorded as absent. `pg_dump` excludes the same table data
@@ -620,7 +623,11 @@ lock still held through `Up`, when:
 - `SILO_SKIP_BACKUP_BEFORE_MIGRATE=true` is set. It applies to the process it
   is set on; remove it after that start. A value that is not a boolean does
   not skip;
-- `backup.enabled` is `false`;
+- the effective `backup.enabled` is `false`: `SILO_BACKUP_ENABLED` when it is
+  set, as it will be once startup stores it, otherwise the stored value. Every
+  server that migrates reads that variable, `--migrate-only` included; the
+  other `SILO_BACKUP_*` variables wait for startup, so a lower
+  `SILO_BACKUP_KEEP` rotates nothing away before the migrations succeed;
 - the user store is SQLite (backups refuse there, and the upgrade that imports
   it must not be blocked; the warning tells the admin to back up the database
   and the SQLite file themselves);

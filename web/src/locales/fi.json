@@ -449,6 +449,12 @@
       "value": "Kirjaudu sisään verkkosi kirjautumispalvelun kautta jatkaaksesi."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Tämä solmu on asetettu palvelimen käyttöönottomäärityksissä. Poista solmu sieltä ja käynnistä API-palvelimet uudelleen, jotta voit hallita sitä täällä."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -13380,7 +13386,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden näyttämää kokoelmaa ei ole täällä eikä varmuuskopiossa"
+              "value": " ei palautettavissa — sen näyttämää kokoelmaa ei ole täällä eikä varmuuskopiossa"
             }
           ]
         },
@@ -13414,7 +13420,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden asetukset on salattu eri SECRET_KEY-avaimella"
+              "value": " ei palautettavissa — sen asetukset on salattu eri SECRET_KEY-avaimella"
             }
           ]
         },
@@ -13448,7 +13454,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — tämä palvelin ei voi ottaa niitä vastaan"
+              "value": " ei palautettavissa — tämä palvelin ei voi ottaa sitä vastaan"
             }
           ]
         },
@@ -13516,7 +13522,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden tiedostot puuttuvat tältä palvelimelta"
+              "value": " ei palautettavissa — sen tiedostot puuttuvat tältä palvelimelta"
             }
           ]
         },
@@ -13550,7 +13556,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden kansioita ei ole tällä palvelimella"
+              "value": " ei palautettavissa — sen kansioita ei ole tällä palvelimella"
             }
           ]
         },
@@ -13584,7 +13590,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden käyttöoikeusryhmää ei ole tällä palvelimella"
+              "value": " ei palautettavissa — sen käyttöoikeusryhmää ei ole tällä palvelimella"
             }
           ]
         },
@@ -13618,7 +13624,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden nimikettä ei ole tämän palvelimen luettelossa"
+              "value": " ei palautettavissa — sen nimikettä ei ole tämän palvelimen luettelossa"
             }
           ]
         },
@@ -13652,7 +13658,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — ne laajentaisivat käyttöoikeuksia, joten tämä palvelin säilyttää tiukemmat arvonsa"
+              "value": " ei palautettavissa — se laajentaisi käyttöoikeuksia, joten tämä palvelin säilyttää omat tiukemmat arvonsa"
             }
           ]
         },
@@ -13686,7 +13692,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden kirjastoa ei ole tällä palvelimella"
+              "value": " ei palautettavissa — sen kirjastoa ei ole tällä palvelimella"
             }
           ]
         },
@@ -13720,7 +13726,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden kirjastoa ei voi palauttaa tänne"
+              "value": " ei palautettavissa — sen kirjastoa ei voi palauttaa tänne"
             }
           ]
         },
@@ -13775,6 +13781,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ei palautettavissa — tämän palvelimen ympäristö määrittää poikkeavat asetukset tai osan niiden yhteydestä"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ei palautettavissa — tämän palvelimen ympäristö määrittää poikkeavat asetukset tai osan niiden yhteydestä"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13788,7 +13828,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — ne on salattu eri SECRET_KEY-avaimella"
+              "value": " ei palautettavissa — se on salattu eri SECRET_KEY-avaimella"
             }
           ]
         },
@@ -13822,7 +13862,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — ne on ensin asennettava laajennusluettelosta"
+              "value": " ei palautettavissa — se on ensin asennettava laajennusluettelosta"
             }
           ]
         },
@@ -13856,7 +13896,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — niiden pääprofiili on palautettava samalla"
+              "value": " ei palautettavissa — sen pääprofiili on palautettava samalla"
             }
           ]
         },
@@ -13890,7 +13930,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — varmuuskopiossa ei ole niitä"
+              "value": " ei palautettavissa — varmuuskopiossa ei ole sitä"
             }
           ]
         },
@@ -14026,7 +14066,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — tämä palvelin antaisi niille enemmän käyttöoikeuksia kuin varmuuskopio"
+              "value": " ei palautettavissa — tämä palvelin antaisi sille enemmän käyttöoikeuksia kuin varmuuskopio"
             }
           ]
         },
@@ -14094,7 +14134,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — ne ovat täällä jo samat"
+              "value": " ei palautettavissa — se on täällä jo sama"
             }
           ]
         },
@@ -14162,7 +14202,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — varmuuskopion kopiota niistä ei voi lukea"
+              "value": " ei palautettavissa — varmuuskopion kopiota siitä ei voi lukea"
             }
           ]
         },
@@ -14196,7 +14236,7 @@
             },
             {
               "type": 0,
-              "value": " ei palautettavissa — ne yhdistävät ulkoisiin palveluihin, eikä tämä palvelin voi varmentaa varmuuskopiota"
+              "value": " ei palautettavissa — se yhdistää ulkoisiin palveluihin, eikä tämä palvelin voi varmentaa varmuuskopiota"
             }
           ]
         },
@@ -14297,6 +14337,40 @@
     {
       "type": 0,
       "value": "Palvelun osoite muuttuu, mutta varmuuskopiossa ei ole sen tunnistetietoja, joten palautus tyhjentää ne täällä ja poistaa palvelun käytöstä, kunnes ne syötetään uudelleen."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " asetus säilyttää nykyisen arvonsa, koska tämän palvelimen ympäristö määrittää sen tai osan sen yhteydestä."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " asetusta säilyttää nykyiset arvonsa, koska tämän palvelimen ympäristö määrittää ne tai osan niiden yhteydestä."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14751,8 +14825,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Piilota ne"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Piilota se"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Piilota ne"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14901,8 +14995,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Näytä ne"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näytä se"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näytä ne"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17145,6 +17259,12 @@
       "value": "Toinen tili täällä kirjautuu sisään sen käyttäjänimellä tai sähköpostiosoitteella."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Tämän palvelimen ympäristö määrittää poikkeavat asetukset tai osan niiden yhteydestä, joten tämä palvelin säilyttää nykyiset arvonsa."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18235,6 +18355,16 @@
     {
       "type": 0,
       "value": " (säilytetty: tiukempi)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (säilytetty: ympäristö)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -30554,7 +30684,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Syöte äskettäin aloitetuista toistoistunnoista"
+      "value": "Viimeisimmät toistot kaikilla tileillä"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32191,6 +32321,72 @@
     {
       "type": 0,
       "value": "Toiminnan lataaminen epäonnistui."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " toisti kohteen "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " toisti kohteen "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49468,6 +49664,12 @@
       "value": "Viimeistele asetukset antamalla palvelimen osoite."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Avain asetettu palvelimen käyttöönottomäärityksissä"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50388,6 +50590,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Asetettu palvelimen käyttöönottomäärityksissä. Poista solmu sieltä ja käynnistä API-palvelimet uudelleen, jotta voit poistaa sen täällä."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52997,6 +53205,114 @@
       "value": "Luonti on pysähtynyt. Tallennetut suositukset näkyvät Tutustu-osiossa, kunnes palvelin käynnistetään uudelleen."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Järjestetään profiilien rivejä ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Haetaan TMDB-listoja ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Haetaan ja upotetaan nimikkeitä ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Poistettu "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vanhentunut nimike"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Poistettu "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " vanhentunutta nimikettä"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53029,6 +53345,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Ratkaise alla oleva upotuslukituksen ristiriita ennen Tutustu-suositusten muodostamista."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Suorita ensin Upotukset-työ, jotta Silolla on kirjaston vektoreita vertailua varten."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Yhdistä upotuspalvelu sivulla Tekoälypalvelut ennen Tutustu-suositusten muodostamista."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Yhdelläkään profiililla ei ole vielä makuprofiilia. Suorita Makuprofiilit, kun joku on katsonut tai arvioinut nimikkeitä."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54887,6 +55227,32 @@
       "value": "Pysyy tyhjänä, kunnes Tutustu-suositukset otetaan käyttöön kohdassa Ylläpito → Suositukset."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Suositusrivit pysyvät tyhjinä, kunnes Tutustu-suositukset otetaan käyttöön kohdassa "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Ylläpito → Suositukset"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Pois käytöstä kohdassa Suositukset"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56365,6 +56731,12 @@
       "value": "Uudet rivit lisätään Tutustu-sivun loppuun"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Avaa Suositukset-asetukset"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56377,6 +56749,12 @@
       "value": "MDBList-palvelun syöte ei sisällä listan sivulle tallennettua järjestystä. Valitse järjestys, jota sivu käyttää."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Profiilillasi ei ole vielä Tutustu-suosituksia. Suorita Tutustu-suositukset tai katso ja arvioi muutama nimike, niin voit esikatsella tätä riviä."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56387,6 +56765,12 @@
     {
       "type": 0,
       "value": "Valitse lista tai liitä sen linkki nähdäksesi sen nimikkeet."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Ota Tutustu-suositukset käyttöön kohdassa Ylläpito → Suositukset, niin voit esikatsella tätä riviä."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -57169,6 +57553,12 @@
     {
       "type": 0,
       "value": "Viesti lähetetty"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Soitin ei vahvistanut viestin vastaanottamista. Viesti voi näkyä myöhässä tai jäädä kokonaan näkymättä."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -60047,6 +60437,12 @@
       "value": "Yhteyden tarkistus epäonnistui."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Ei voitu tarkistaa, määrittääkö palvelimen ympäristö tämän asetuksen. Lataa sivu uudelleen, jos haluat muokata sitä."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60601,6 +60997,30 @@
     {
       "type": 0,
       "value": "Kanavan päivittäminen epäonnistui"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Lataa uudelleen, niin näet nykyiset arvot. Muokkauksesi muuttuneisiin asetuksiin sekä tallennettuihin salasanoihin ja avaimiin kumotaan; muut muokkauksesi säilyvät."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Lataa uudelleen"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Asetusten lataaminen uudelleen epäonnistui. Yritä uudelleen."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Asetuksia muutettiin muualla"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -66067,6 +66487,24 @@
       "value": "Vaihtaminen toiseen malliin vaatii upotusten nollaamisen, mikä poistaa ne kaikki. Toinen samaa mallia tarjoava palvelu otetaan käyttöön uudelleenkäynnistyksen jälkeen."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Lisää Tutustu-sivulle"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Suositusrivien lisääminen Tutustu-sivulle epäonnistui."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Suositusrivit lisättiin Tutustu-sivulle."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66089,6 +66527,44 @@
     {
       "type": 0,
       "value": "Kuinka monta kirjastosta puuttuvaa nimikettä palvelin säilyttää suositusten pohjaksi. Jokainen niistä haetaan TMDB:stä ja upotetaan. Upottaminen on yleensä edullista, mutta suurempi määrä voi upotuspalvelustasi riippuen maksaa enemmän tai kestää pidempään, ja se vie enemmän tallennustilaa."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Tutustu-sivullasi ei näy vielä yhtään suositusriviä."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Ota yllä oleva asetus ”Ota suositukset käyttöön” päälle ja käynnistä palvelin uudelleen, ennen kuin Tutustu-suosituksia voidaan suorittaa."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Pyynnöt ovat tällä hetkellä pois käytöstä. Ota ne käyttöön kohdassa "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pyyntöjen asetukset"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", jotta katsojat näkevät Tutustu-sivun."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Avaa Tutustu-sivu"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -75255,6 +75731,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Tallennustilaa ei voi siirtää tänne niin kauan kuin ympäristömuuttujat määrittävät tallennusasetuksia ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Poista ensin näiden muuttujien määritykset ja käynnistä jokainen API-palvelin uudelleen."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76381,6 +76871,26 @@
     {
       "type": 1,
       "value": "range"
+    }
+  ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Tämä aikataulu tulee varmuuskopioinnin asetuksista. Muuta sitä kohdassa "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Palvelin › Varmuuskopiot"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.tasks.detail.breadcrumb.admin": [
@@ -86556,25 +87066,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Tv:n kirjautuminen epäonnistui. Yritä uudelleen."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Tarkista, että sovelluksessa näkyy"
+      "value": "Kirjautumisen hyväksyminen epäonnistui. Yritä uudelleen."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Tarkista, että tv:ssä näkyy"
+      "value": "Varmista, että tämä koodi täsmää"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Syötä tv:ssä tai sovelluksessa näkyvä koodi"
+      "value": "Anna laitteessasi näkyvä koodi"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86586,13 +87090,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Kirjaudu tilillesi tv:llä tai muulla laitteella."
+      "value": "Kirjaudu sisään tv:llä, sovelluksella tai muulla laitteella."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Tv:n sisäänkirjautuminen"
+      "value": "Hyväksy kirjautuminen"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86612,13 +87116,13 @@
     },
     {
       "type": 0,
-      "value": ", jotta voit hyväksyä tv:n. Vain tilin oma käyttäjä voi hyväksyä tv:n kirjautumisen."
+      "value": ", jotta voit hyväksyä tämän kirjautumisen. Vain tilin oma käyttäjä voi hyväksyä laitteita."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Lopeta katselu tänä käyttäjänä, jotta voit hyväksyä tv:n. Vain tilin oma käyttäjä voi hyväksyä tv:n kirjautumisen."
+      "value": "Lopeta katselu tänä käyttäjänä, jotta voit hyväksyä tämän kirjautumisen. Vain tilin oma käyttäjä voi hyväksyä laitteita."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86636,39 +87140,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Koodia ei löytynyt. Tarkista tv:ssä näkyvä koodi."
+      "value": "Koodia ei löytynyt. Tarkista koodi ja yritä uudelleen."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ei nyt"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Vanhemmat tv-sovellukset näyttävät sen sijaan sanat "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Hyväksy vain laite, joka on juuri nyt edessäsi."
+      "value": "Hylkää"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Hyväksy vain tv, joka on juuri nyt edessäsi."
+      "value": "Hyväksy tämä vain, jos aloitit kirjautumisen itse."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86694,7 +87178,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Kuka tahansa tämän tv:n käyttäjä voi valita profiileistasi. PIN-koodilla suojatut profiilit pysyvät lukittuina."
+      "value": "Laite saa näin pääsyn profiileihisi. PIN-koodilla suojatut profiilit pysyvät lukittuina."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86741,6 +87225,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Pyydetty "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86754,7 +87248,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Tv lopetti odottamisen. Aloita uudelleen tv:ssä."
+      "value": "Tämä laite lopetti odottamisen. Aloita kirjautuminen siinä uudelleen."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86763,10 +87257,34 @@
       "value": "Tämä kirjautuminen hylättiin."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Valmis. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " kirjautuu sisään."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " on kirjautunut sisään."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Tämä koodi vanheni. Tv:ssä näkyy nyt uusi koodi. Käytä sitä."
+      "value": "Tämä koodi vanheni. Hae laitteeseen uusi koodi ja yritä uudelleen."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86850,25 +87368,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Tv on jo kirjautunut sisään."
+      "value": "Tämä laite on jo kirjautunut sisään."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Tämä tv hyväksyttiin, ja sen kirjautuminen viimeistellään."
+      "value": "Tämä laite hyväksyttiin, ja sen kirjautuminen viimeistellään."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Valmis. Tv kirjautuu sisään."
+      "value": "Valmis. Laitteesi kirjautuu sisään."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Tv on kirjautunut sisään."
+      "value": "Laitteesi on kirjautunut sisään."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86912,7 +87430,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Hyväksytäänkö laitteen "
+      "value": "Sallitaanko laitteen "
     },
     {
       "type": 1,
@@ -86920,13 +87438,13 @@
     },
     {
       "type": 0,
-      "value": " kirjautuminen?"
+      "value": " kirjautua sisään?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Hyväksytäänkö tämän laitteen kirjautuminen?"
+      "value": "Sallitaanko tämän laitteen kirjautua sisään?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86946,13 +87464,13 @@
     },
     {
       "type": 0,
-      "value": ", jotta voit hyväksyä tämän tv:n."
+      "value": ", jotta voit hyväksyä tämän kirjautumisen."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Hyväksy tv:n kirjautuminen"
+      "value": "Hyväksy kirjautuminen"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88002,7 +88520,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Laitteen sisäänkirjautuminen epäonnistui. Yritä uudelleen."
+      "value": "Kirjautumisen hyväksyminen epäonnistui. Yritä uudelleen."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -109516,6 +110034,12 @@
       "value": "Käännetään…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Piilota palvelimen rivit, jotka on lisätty tämän viennin jälkeen:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109534,6 +110058,12 @@
     {
       "type": 0,
       "value": ", ja ne korvaavat osiot, jotka lisäsit tänne aiemmin. Tämän palvelimen osioihin tekemäsi muutokset säilyvät."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Tämän palvelimen rivit ovat muuttuneet tiedoston viennin jälkeen, joten valitse alta piilotettavat rivit."
     }
   ],
   "web.home.layout.checking": [
@@ -109584,6 +110114,26 @@
     {
       "type": 0,
       "value": "Asettaa Piilota katsotut kohteet -asetuksen päälle."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Piilottaa valitut rivit sivuilla: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " muuttamatta muita rivejäsi niillä."
     }
   ],
   "web.home.layout.import": [
@@ -109688,6 +110238,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109896,6 +110464,12 @@
     {
       "type": 0,
       "value": "Nimetön osio"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Piilota palvelimen rivit, jotka eivät ole tässä tiedostossa:"
     }
   ],
   "web.home.page.customize": [
