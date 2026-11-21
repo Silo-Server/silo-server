@@ -126,6 +126,12 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   it only while it shows the URL or path (`dir={value ? "ltr" : undefined}`).
   `dir="auto"` leaves an empty field's example in the page's direction, and
   `type="url"` rejects addresses without a scheme.
+- Shown text (not an input) whose URL, path, or file name can hold Arabic or Hebrew
+  segments, such as a library folder or an import source, goes through `PathText`
+  (`src/components/PathText.tsx`): left to right overall, each part between `/ ? & = #` in
+  its own direction. A plain `dir="ltr"` box swaps two adjacent Arabic or Hebrew segments.
+  `PathText` is inline, so a `truncate` container around it still sets `dir="ltr"` to clip
+  the end rather than the start.
 - A name that can be in either script and is cut with `truncate` (a username, say) takes
   `dir="auto"`: it reads in the direction of its first strong character (a letter, or
   right-to-left punctuation such as `؟`), and left to right when it has none, as a name
