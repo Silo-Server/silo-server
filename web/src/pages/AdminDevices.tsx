@@ -821,11 +821,12 @@ function Histogram({ counts, max }: { counts: number[]; max: number }) {
 /**
  * A segment of one of the page's segmented controls. The chosen one carries a
  * foreground bar along its bottom edge: a fill alone sits within 1.5:1 of its
- * neighbours, and in high contrast every label is the same colour.
+ * neighbours, and in high contrast every label is the same colour. Forced
+ * colors drops the shadow, so there the label is underlined instead.
  */
 function segmentClass(selected: boolean) {
   return selected
-    ? "bg-surface-hover text-foreground shadow-[inset_0_-2px_0_var(--foreground)]"
+    ? "bg-surface-hover text-foreground shadow-[inset_0_-2px_0_var(--foreground)] forced-colors:underline forced-colors:decoration-2 forced-colors:underline-offset-2"
     : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground";
 }
 
