@@ -14838,7 +14838,7 @@
   "web.admin.backups.key.explanation": [
     {
       "type": 0,
-      "value": "تتطلب استعادة أي نسخة مفتاح SECRET_KEY الخاص بهذا الخادم. لا يعرض Silo المفتاح أبدًا ولا يحتفظ بنسخة منه في أي مكان آخر. إذا كان المفتاح موجودًا فقط في ملف .env على هذا الخادم وتعطّل القرص، فلن يمكن استعادة هذه النسخ الاحتياطية، ولن يستطيع أحد استردادها."
+      "value": "تتطلب استعادة أي نسخة مفتاح SECRET_KEY الخاص بهذا الخادم. لا يعرض Silo المفتاح أبدًا ولا يحتفظ بنسخة منه في أي مكان آخر. إذا كان المفتاح موجودًا فقط في ملف \u200E.env على هذا الخادم وتعطّل القرص، فلن يمكن استعادة هذه النسخ الاحتياطية، ولن يستطيع أحد استردادها."
     }
   ],
   "web.admin.backups.key.heading": [
@@ -24795,6 +24795,194 @@
       "value": "."
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "صورة الخلفية"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنصر مجموعة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عنصر مجموعة واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عنصرا مجموعة"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عناصر مجموعة"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنصرًا من المجموعة"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنصر مجموعة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "استبدال المجموعة"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "الإعدادات"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "الوصف"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "حالة التفعيل"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "حالة التمييز"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "حد العناصر"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "ترتيب العناصر"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "المكتبات"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "الموضع"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "الملصق"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "ترتيب الفرز"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "المصدر"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "جدولة المزامنة"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "العنوان"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "ترجمة العنوان"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "النوع"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "الظهور"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "الويب فقط"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -28239,18 +28427,10 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الحسابات"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -28258,7 +28438,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -28266,22 +28446,6 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الحسابات"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الحسابات"
-            }
-          ]
-        },
         "other": {
           "value": [
             {
@@ -28290,25 +28454,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الملفات"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -28316,27 +28470,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "إخفاء الملفين"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الملفات"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الملفات"
             }
           ]
         },
@@ -28348,25 +28486,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الملفات"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -28374,27 +28502,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "إخفاء الملفين"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الملفات"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاء الملفات"
             }
           ]
         },
@@ -28406,9 +28518,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -29205,18 +29315,10 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الحسابات"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -29224,27 +29326,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "عرض الحسابين"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الحسابات"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الحسابات"
             }
           ]
         },
@@ -29256,9 +29342,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -29369,18 +29453,10 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الملفات"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -29388,27 +29464,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "عرض الملفين"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الملفات"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الملفات"
             }
           ]
         },
@@ -29420,25 +29480,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الملفات"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -29446,27 +29496,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "عرض الملفين"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الملفات"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرض الملفات"
             }
           ]
         },
@@ -29478,9 +29512,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -32678,7 +32710,7 @@
   "web.admin.common.connectionCheck.result.meilisearchRedirected": [
     {
       "type": 0,
-      "value": "أعاد Meilisearch توجيه الفحص إلى عنوان آخر. أدخل العنوان الذي يعيد التوجيه إليه، مثل عنوان URL الذي يبدأ بـ https://، ثم أدخل مفتاح API مرة أخرى."
+      "value": "أعاد Meilisearch توجيه الفحص إلى عنوان آخر. أدخل العنوان الذي يعيد التوجيه إليه، مثل عنوان URL الذي يبدأ بـ https://\u200E، ثم أدخل مفتاح API مرة أخرى."
     }
   ],
   "web.admin.common.connectionCheck.result.redisConnected": [
@@ -35456,7 +35488,7 @@
   "web.admin.common.libraryEditor.metadata.localMetadataDescription": [
     {
       "type": 0,
-      "value": "يقرأ ملفات .nfo والصور الفنية المحفوظة بجوار الوسائط. يعمل أولًا في كل مستوى، لذا تتقدم قيمه على المزودين البعيدين؛ والحقول التي تقفلها أثناء تعديل عنصر تتقدم على كليهما."
+      "value": "يقرأ ملفات \u200E.nfo والصور الفنية المحفوظة بجوار الوسائط. يعمل أولًا في كل مستوى، لذا تتقدم قيمه على المزودين البعيدين؛ والحقول التي تقفلها أثناء تعديل عنصر تتقدم على كليهما."
     }
   ],
   "web.admin.common.libraryEditor.metadata.noProviders": [
@@ -86723,7 +86755,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "أعد التحميل لعرض القيم الحالية. تُلغى تعديلاتك على الإعدادات التي تغيّرت، وعلى كلمات المرور والمفاتيح المحفوظة مع الإعدادات المرتبطة بها؛ ويُحتفظ بتعديلاتك الأخرى."
+      "value": "أعد التحميل لعرض القيم الحالية. إذا تغيّر شيء في هذه الصفحة، أو عدّلت كلمة مرور أو مفتاحًا محفوظًا، فستُلغى جميع تعديلاتك؛ وإلا فسيُحتفظ بها."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -90529,7 +90561,7 @@
   "web.admin.settings.notifications.serverChannels.namePlaceholder": [
     {
       "type": 0,
-      "value": "المجتمع #new-content"
+      "value": "المجتمع \u200E#new-content"
     }
   ],
   "web.admin.settings.notifications.serverChannels.noEvents": [
@@ -99686,7 +99718,7 @@
   "web.admin.settings.security.localNetwork.description": [
     {
       "type": 0,
-      "value": "يتيح لكل حساب استيراد السجل من خوادم Plex وEmby وJellyfin ومزامنته معها على عناوين الشبكة المحلية مثل 192.168.x.x أو localhost. يستطيع المسؤولون ذلك دائمًا."
+      "value": "يتيح لكل حساب استيراد السجل من خوادم Plex وEmby وJellyfin ومزامنته معها على عناوين الشبكة المحلية مثل \u200E192.168.x.x أو localhost. يستطيع المسؤولون ذلك دائمًا."
     }
   ],
   "web.admin.settings.security.localNetwork.group": [
@@ -104070,6 +104102,28 @@
       "value": "title"
     }
   ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.admin.tasks.detail.sampleTitle": [
     {
       "type": 1,
@@ -104555,13 +104609,13 @@
   "web.admin.tasks.task.backfill_hdr10_plus.description": [
     {
       "type": 0,
-      "value": "يقرأ الإطار الأول من فيديو HDR الذي فُحص قبل أن يكتشف Silo تنسيق HDR10+، مرة واحدة لكل ملف، لكي تُصنَّف ملفات HDR10+ على أنها HDR10+ بدلًا من HDR10."
+      "value": "يقرأ الإطار الأول من فيديو HDR الذي فُحص قبل أن يكتشف Silo تنسيق HDR10+\u200E، مرة واحدة لكل ملف، لكي تُصنَّف ملفات HDR10+\u200E على أنها HDR10+\u200E بدلًا من HDR10."
     }
   ],
   "web.admin.tasks.task.backfill_hdr10_plus.name": [
     {
       "type": 0,
-      "value": "اكتشاف فيديو HDR10+"
+      "value": "اكتشاف فيديو HDR10+\u200E"
     }
   ],
   "web.admin.tasks.task.backfill_matroska_track_numbers.description": [
@@ -117296,7 +117350,7 @@
   "web.audiobooks.player.speedTitle": [
     {
       "type": 0,
-      "value": "سرعة التشغيل (shift+. / shift+,)"
+      "value": "سرعة التشغيل (shift+\u200E. / shift+\u200E,\u200E)"
     }
   ],
   "web.audiobooks.player.startFailed": [
@@ -128739,7 +128793,7 @@
   "web.collections.copy.mdblistLinkInvalid": [
     {
       "type": 0,
-      "value": "الصق رابط قائمة على mdblist.com، مثل https://mdblist.com/lists/…"
+      "value": "الصق رابط قائمة على mdblist.com، مثل https://mdblist.com/lists/…\u200E"
     }
   ],
   "web.collections.copy.mdblistSearchOffProfile": [
@@ -153925,7 +153979,7 @@
   "web.home.rows.seasonal.listInvalid": [
     {
       "type": 0,
-      "value": "استخدم رابط قائمة MDBList عامة (https://mdblist.com/lists/…)."
+      "value": "استخدم رابط قائمة MDBList عامة (https://mdblist.com/lists/…\u200E)."
     }
   ],
   "web.home.rows.seasonal.nameMissing": [
@@ -157001,7 +157055,7 @@
   "web.item.split.imdbPlaceholder": [
     {
       "type": 0,
-      "value": "معرّف IMDb \u200F(tt…)"
+      "value": "معرّف IMDb \u200F(tt…\u200E)"
     }
   ],
   "web.item.split.loadingFiles": [
@@ -171690,7 +171744,7 @@
   "web.settings.connectApps.glance.needsPin": [
     {
       "type": 0,
-      "value": "يتطلب #PIN"
+      "value": "يتطلب \u200E#PIN"
     }
   ],
   "web.settings.connectApps.glance.rename": [
@@ -172016,7 +172070,7 @@
   "web.settings.connectApps.troubleshooting.hashPasswordAnswer": [
     {
       "type": 0,
-      "value": "اكتبها كاملة وأضف #PIN على أي حال. يقسم Silo عند آخر # فقط."
+      "value": "اكتبها كاملة وأضف \u200E#PIN على أي حال. يقسم Silo عند آخر # فقط."
     }
   ],
   "web.settings.connectApps.troubleshooting.hashPasswordQuestion": [
@@ -172044,7 +172098,7 @@
     },
     {
       "type": 0,
-      "value": "»، أو كان ملف شخصي واحد فقط بلا PIN. إضافة #ProfileName تعمل دائمًا."
+      "value": "»، أو كان ملف شخصي واحد فقط بلا PIN. إضافة \u200E#ProfileName تعمل دائمًا."
     }
   ],
   "web.settings.connectApps.troubleshooting.noProfileQuestion": [
@@ -177698,7 +177752,7 @@
   "web.settings.overlays.badge.resolutionHdr.description": [
     {
       "type": 0,
-      "value": "شارة واحدة تجمع الدقة والنطاق الديناميكي (مثل «4K DV»، «4K HDR10+»، «1080p HDR»)"
+      "value": "شارة واحدة تجمع الدقة والنطاق الديناميكي (مثل «4K DV»، «4K HDR10+\u200E»، «1080p HDR»)"
     }
   ],
   "web.settings.overlays.badge.resolutionHdr.label": [
@@ -184283,7 +184337,7 @@
   "web.settings.yourData.import.fileHint": [
     {
       "type": 0,
-      "value": "ملف .json من «تصدير بياناتي»، بحجم أقصاه "
+      "value": "ملف \u200E.json من «تصدير بياناتي»، بحجم أقصاه "
     },
     {
       "type": 1,

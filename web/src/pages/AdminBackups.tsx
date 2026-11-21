@@ -252,15 +252,16 @@ export default function AdminBackups() {
   let commandSource: FullRestoreSource = "download";
   if (commandBackup) commandSource = isBucketLocation(commandBackup.location) ? "bucket" : "folder";
 
+  const destinationAvailable = list?.destination_available ?? true;
+  // The server lists nothing when it can't read the destination, which says
+  // nothing about what the destination holds. The status area's warning says
+  // why no backups are listed.
+  const destinationUnread = configured && !destinationAvailable;
+
   const lock = lockBlocker(list?.busy ?? false, active);
   const blocker = startBackup.isPending
     ? null
-    : backUpNowBlocker({
-        configured,
-        lock,
-        warnings,
-        destinationAvailable: list?.destination_available ?? true,
-      });
+    : backUpNowBlocker({ configured, lock, warnings, destinationAvailable });
 
   // Report how the backup this page started ended, once a list read after the
   // start shows its run. A run that ends some other way (another server's
@@ -327,8 +328,9 @@ export default function AdminBackups() {
           subtitle={t("web.admin.backups.header.subtitle")}
           className="mb-4"
           actions={
-            // On a phone the actions start at the left, so each takes its own
-            // row there and the reason "Back up now" can't run sits right under it.
+            // On a phone the page header lines its actions up at the start, so
+            // each one gets its own full-width row there, and the reason "Back up
+            // now" can't run sits right under that button.
             <div className="flex flex-col items-end gap-1 max-sm:w-full max-sm:items-stretch">
               <div className="flex flex-wrap justify-end gap-2">
                 {uploadAvailable ? (
@@ -434,7 +436,7 @@ export default function AdminBackups() {
             {t("common.tryAgain")}
           </Button>
         </div>
-      ) : items.length === 0 && running ? (
+      ) : destinationUnread ? null : items.length === 0 && running ? (
         <div className="surface-panel rounded-2xl p-6" role="status">
           <p className="font-medium">{t("web.admin.backups.list.firstRunning")}</p>
           <p className="text-muted-foreground text-sm">
@@ -527,6 +529,7 @@ export default function AdminBackups() {
             }
             onSetUpS3={() => setSettingUpS3(true)}
             onConfirmKey={needsKey ? () => setConfirmingKey(true) : undefined}
+            listShown={!destinationUnread}
           />
           {configured ? (
             <RestoreCommandGroup

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { EpisodeListItem } from "@/api/types";
 import { useAppLanguage } from "@/i18n";
+import { cn } from "@/lib/utils";
 import MachineTranslatedLabel from "./MachineTranslatedLabel";
 import { hasMachineTranslation } from "./machineTranslation";
 import { episodeCardMetadata, episodeCardSpokenTitle, episodeCardTitle } from "./episodeCardText";
@@ -38,8 +39,10 @@ export default function EpisodeCardCaption({
     <div className="mt-2 space-y-1">
       <div className="flex items-center gap-2">
         <p
-          className="text-foreground min-w-0 flex-1 truncate text-sm font-semibold"
-          style={isCurrent ? { color: "var(--primary)" } : undefined}
+          className={cn(
+            "min-w-0 flex-1 truncate text-sm font-semibold",
+            isCurrent ? "text-primary" : "text-foreground",
+          )}
         >
           <span aria-hidden="true">{episodeCardTitle(episode)}</span>
           <span className="sr-only">{episodeCardSpokenTitle(episode)}</span>
@@ -56,7 +59,10 @@ export default function EpisodeCardCaption({
       {overview && (
         // Three lines are reserved, as on the Apple card, so short descriptions
         // keep the row's cards the same height.
-        <p className="bidi-text text-muted-foreground line-clamp-3 min-h-[3lh] text-xs leading-relaxed">
+        <p
+          dir="auto"
+          className="bidi-text text-muted-foreground line-clamp-3 min-h-[3lh] text-xs leading-relaxed"
+        >
           {overview}
         </p>
       )}

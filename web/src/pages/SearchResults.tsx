@@ -38,12 +38,12 @@ import {
   buildCatalogQueryUpdateHref,
   readCatalogRequestPage,
   searchSortsByRelevance,
-  withCatalogRequestPage,
   type CatalogSearchState,
 } from "./catalogSearchParams";
 import {
   readSearchView,
   splitOverviewResults,
+  withRequestPage,
   withSearchView,
   type SearchResultsView,
 } from "./searchResultsView";
@@ -319,7 +319,7 @@ export default function SearchResults({
         libraryHadHits={!libraryEmpty}
         libraryResultsKnown={libraryResultsKnown}
         page={readCatalogRequestPage(searchParams)}
-        onPageChange={(page) => setSearchParams(withCatalogRequestPage(searchParams, page))}
+        onPageChange={(page) => setSearchParams(withRequestPage(searchParams, view, page))}
       />
     ) : null;
 

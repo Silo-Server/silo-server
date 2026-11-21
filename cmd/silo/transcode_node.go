@@ -16,6 +16,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/envutil"
 	"github.com/Silo-Server/silo-server/internal/logfilter"
 	"github.com/Silo-Server/silo-server/internal/logstream"
 	"github.com/Silo-Server/silo-server/internal/netadmin"
@@ -47,7 +48,11 @@ const envCoreURL = "SILO_CORE_URL"
 // although a transcode node now declares its URL and name: an env file shared
 // with a proxy sets them, and honoring them on upgrade would rewrite rows. A
 // node declares them with SILO_NODE_URL and SILO_NODE_NAME (nodedeclare).
-var transcodeNodeIgnoredEnv = []string{envDatabaseURL, envRedisURL, envSecretKey, envNodeURL, envNodeName}
+// The secrets' _FILE variants are warned about too.
+var transcodeNodeIgnoredEnv = []string{
+	envDatabaseURL, envRedisURL, envSecretKey, envNodeURL, envNodeName,
+	envDatabaseURL + envutil.SecretFileSuffix, envRedisURL + envutil.SecretFileSuffix, envSecretKey + envutil.SecretFileSuffix,
+}
 
 // The variables a transcode node once read; see transcodeNodeIgnoredEnv.
 const (

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import {
   CircleCheck,
@@ -57,6 +57,17 @@ const OUTCOME = {
   },
 } satisfies Record<RestoreReportItem["outcome"], { label: MessageKey; [key: string]: unknown }>;
 
+/** Keeps each "·" with the word after it, so a wrapped line never ends on a separator. */
+function keepSeparatorsWithNext(node: ReactNode): ReactNode {
+  if (typeof node === "string") return node.replace(/· /g, "·\u00a0");
+  return Array.isArray(node) ? node.map(keepSeparatorsWithNext) : node;
+}
+
+/** Joins a short status's words ("Left out") with no-break spaces. */
+function nonBreaking(text: string): string {
+  return text.replace(/ /g, "\u00a0");
+}
+
 function ReportRow({ item }: { item: RestoreReportItem }) {
   const t = useT();
   const outcome = OUTCOME[item.outcome];
@@ -77,17 +88,33 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
         ? t("web.admin.backups.restore.run.restart")
         : null,
   ].filter((detail): detail is string => Boolean(detail));
+  const label = displayLabel(item);
   return (
     <li className="border-border/60 flex items-start gap-3 border-b py-3 last:border-b-0">
       <outcome.Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", outcome.tone)} />
-      <div className="min-w-0 flex-1">
-        <p className="text-sm">
+      {/* Part of a name that can't wrap, such as one long run of joined emoji, is clipped
+          sideways at the row's edge, in the item's line and in its profiles' lines; the words
+          around it still wrap. The 0.25em of padding, offset by a negative margin, keeps
+          letters whole whose ink reaches past their edge. */}
+      <div className="-mx-[0.25em] min-w-0 flex-1 overflow-x-clip px-[0.25em]">
+        <p className="text-sm wrap-anywhere">
           {t("web.admin.backups.restore.run.itemLine", {
-            label: displayLabel(item),
+            label,
             section: t(SECTION_TITLES[item.section]),
-            outcome: t(outcome.label),
-            b: (chunks) => <span className="font-medium">{chunks}</span>,
-            muted: (chunks) => <span className="text-muted-foreground">{chunks}</span>,
+            // The status stays whole: no break at its spaces or between its Chinese, Japanese,
+            // or Korean characters. One wider than the line still breaks, through
+            // `wrap-anywhere`. (An inline block would let the line break before it, leaving
+            // the message's "·" at the end of a line.) <bdi> keeps the direction isolation a
+            // string value gets in right-to-left languages.
+            outcome: <bdi className="break-keep">{nonBreaking(t(outcome.label))}</bdi>,
+            b: (chunks) => (
+              <span title={label} className="font-medium">
+                {chunks}
+              </span>
+            ),
+            muted: (chunks) => (
+              <span className="text-muted-foreground">{keepSeparatorsWithNext(chunks)}</span>
+            ),
           })}
         </p>
         {details.map((detail, position) => (
@@ -141,15 +168,29 @@ function AccountReport({
             const outcome = OUTCOME[profile.outcome];
             return (
               <li key={profile.id}>
-                <p className="flex items-center gap-1.5 text-[13px]">
-                  <outcome.Icon aria-hidden="true" className={cn("size-3.5", outcome.tone)} />
-                  <span className="font-medium">{profile.label}</span>
-                  <span className="text-muted-foreground">
-                    {t("web.admin.backups.restore.run.profileOutcome", {
-                      outcome: profile.created
-                        ? t("web.admin.backups.restore.outcome.created")
-                        : t(outcome.label),
-                    })}
+                {/* rem text with a unitless line height keeps the line taller than the
+                    rem-sized icon at any browser font size, so the icon stays centered on it. */}
+                <p className="flex items-start gap-1.5 text-[0.8125rem] leading-normal">
+                  <span className="flex min-h-lh shrink-0 items-center">
+                    <outcome.Icon aria-hidden="true" className={cn("size-3.5", outcome.tone)} />
+                  </span>
+                  <span className="min-w-0 wrap-anywhere">
+                    {/* The outcome moves to the next line as a unit, so its "·" stays with the
+                        word it introduces, and wraps inside itself only when it can't fit on a
+                        line. The gap is the name's margin, left behind at the end of the line. */}
+                    <span className="me-1.5 font-medium">
+                      {/* <bdi> isolates the name's direction. It sits inside the span, so the
+                          margin follows the page's direction, not the name's. */}
+                      <bdi title={profile.label}>{profile.label}</bdi>
+                    </span>
+                    <wbr />
+                    <span className="text-muted-foreground inline-block">
+                      {t("web.admin.backups.restore.run.profileOutcome", {
+                        outcome: profile.created
+                          ? t("web.admin.backups.restore.outcome.created")
+                          : t(outcome.label),
+                      })}
+                    </span>
                   </span>
                 </p>
                 {[
@@ -177,7 +218,10 @@ function AccountReport({
                           ),
                         })}
                         {data.notes.map((note, position) => (
-                          <span key={position} className="text-muted-foreground block">
+                          <span
+                            key={position}
+                            className="text-muted-foreground block wrap-anywhere"
+                          >
                             {note}
                           </span>
                         ))}
@@ -260,8 +304,10 @@ export function RestoreRun({
     return (
       <div className="max-w-[70rem] space-y-5">
         <div className="surface-panel space-y-3 rounded-2xl p-5" role="status">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />
+          <div className="flex items-start gap-2 text-sm font-medium wrap-anywhere">
+            <span className="flex min-h-lh shrink-0 items-center">
+              <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />
+            </span>
             {stopping
               ? t("web.admin.backups.restore.run.stopping")
               : job.state === "queued"

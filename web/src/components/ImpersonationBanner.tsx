@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 
+import { useRootHeightProperty } from "@/hooks/useRootHeightProperty";
 import { useT } from "@/i18n";
 
 interface ImpersonationBannerProps {
@@ -16,6 +17,9 @@ export default function ImpersonationBanner({
 }: ImpersonationBannerProps) {
   const t = useT();
   const [isEnding, setIsEnding] = useState(false);
+  // Pinned chrome and in-page jumps clear the banner by this height; see
+  // `--impersonation-banner-height` in app.css.
+  const bannerRef = useRootHeightProperty("--impersonation-banner-height");
 
   async function handleEnd() {
     setIsEnding(true);
@@ -29,7 +33,13 @@ export default function ImpersonationBanner({
   const initial = userName.charAt(0).toUpperCase() || "?";
 
   return (
-    <div role="status" aria-live="polite" className="impersonation-banner sticky top-0 z-50">
+    <div
+      ref={bannerRef}
+      role="status"
+      aria-live="polite"
+      data-sticky-header
+      className="impersonation-banner sticky top-0 z-50"
+    >
       <div className="impersonation-banner-inner flex items-center gap-3 px-4 py-2 sm:gap-4 sm:px-6 lg:ps-8 lg:pe-8">
         <div className="flex shrink-0 items-center gap-2">
           <span className="relative inline-flex h-2 w-2" aria-hidden="true">
@@ -45,7 +55,10 @@ export default function ImpersonationBanner({
           <span className="impersonation-chip flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[11px] font-bold">
             {initial}
           </span>
-          <span className="text-foreground truncate text-sm font-semibold tracking-tight">
+          <span
+            dir="auto"
+            className="text-foreground truncate text-sm font-semibold tracking-tight"
+          >
             {userName}
           </span>
         </div>

@@ -10,9 +10,9 @@ import {
 } from "react";
 import { Link, useLocation } from "react-router";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Menu, Search } from "lucide-react";
+import { Menu, Search, X } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -389,7 +389,13 @@ export default function Layout({ children }: LayoutProps) {
       itemDetailsReady={itemDetailsReady}
       enteredItemFromHome={enteredItemFromHome}
     >
-      <div ref={shellRef} className="bg-background relative min-h-[100dvh] overflow-x-clip">
+      {/* `flow-root` keeps the phone header's top margin inside this wrapper.
+        With `overflow-x-clip` alone the margin collapses through it, and the
+        body's background shows as a band above the header. */}
+      <div
+        ref={shellRef}
+        className="bg-background relative flow-root min-h-[100dvh] overflow-x-clip"
+      >
         <a
           href="#main-content"
           className="focus:bg-background focus:text-foreground focus:ring-ring sr-only focus:not-sr-only focus:fixed focus:start-4 focus:top-4 focus:z-50 focus:rounded-lg focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:ring-2 focus:outline-none"
@@ -423,12 +429,13 @@ export default function Layout({ children }: LayoutProps) {
           )}
         </div>
 
-        {/* Mobile header — visible below lg. Slides up on scroll-down within
-          the Calendar route to free vertical space; pulling up reveals it. */}
+        {/* Mobile header — visible below lg, pinned below any impersonation
+          banner. Slides up on scroll-down within the Calendar route to free
+          vertical space; pulling up reveals it. */}
         <div
           ref={mobileHeaderRef}
           data-sticky-header
-          className={`mobile-header glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 transition-transform duration-200 ease-out motion-reduce:transition-none lg:hidden ${
+          className={`mobile-header glass-dark border-border/70 sticky top-(--impersonation-banner-height) z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 transition-transform duration-200 ease-out motion-reduce:transition-none lg:hidden ${
             mobileHeaderHidden ? "-translate-y-[140%]" : "translate-y-0"
           }`}
         >
@@ -479,28 +486,46 @@ export default function Layout({ children }: LayoutProps) {
 
         {/* Mobile sidebar drawer */}
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <SheetContent side="left" className="w-[280px] p-0 sm:max-w-[280px]">
+          {/* Matches AppSidebar's 260px surface. That surface is fixed at z-40, so
+              it would cover the sheet's built-in close button; this one sits
+              above it, centred in the sidebar's logo row. */}
+          <SheetContent
+            side="left"
+            showCloseButton={false}
+            className="w-[260px] border-e-0 p-0 sm:max-w-[260px]"
+          >
             <SheetHeader className="sr-only">
               <SheetTitle>{t("web.shell.layout.navigationTitle")}</SheetTitle>
             </SheetHeader>
+            <SheetClose asChild>
+              <button
+                type="button"
+                aria-label={t("web.ui.close")}
+                className="text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/60 absolute end-3 top-12 z-50 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-xl transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </SheetClose>
             <AppSidebar onNavigate={() => setMobileOpen(false)} />
           </SheetContent>
         </Sheet>
 
-        {/* Desktop admin activity indicator (top-right, hidden on mobile) */}
+        {/* Desktop admin activity indicator (top-right below any impersonation
+            banner, hidden on mobile) */}
         {showAdminActivity && (
-          <div className="fixed end-5 top-6 z-40 hidden lg:block">
+          <div className="fixed end-5 top-[calc(1.5rem+var(--impersonation-banner-height))] z-40 hidden lg:block">
             <AdminActivityIndicator />
           </div>
         )}
 
-        {/* Main content — offset by sidebar width on desktop */}
+        {/* Main content — offset by sidebar width on desktop. `scroll-mt-24`
+          keeps Skip to content's jump clear of the pinned phone header. */}
         <main
           id="main-content"
           tabIndex={-1}
           data-sidebar-target-collapsed={targetDetailImmersion ? "true" : undefined}
           data-sidebar-visual-collapsed={visualDetailImmersion ? "true" : undefined}
-          className={`sidebar-main-stage relative min-h-screen outline-none ${
+          className={`sidebar-main-stage relative min-h-screen scroll-mt-24 outline-none lg:scroll-mt-0 ${
             targetDetailImmersion ? "lg:ms-16" : "lg:ms-[260px]"
           } ${hasBackgroundBar ? "pb-32 sm:pb-36" : ""}`}
           style={{ viewTransitionName: "main-content" }}

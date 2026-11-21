@@ -5,7 +5,8 @@ import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
 
 // Caption typography shared by poster cards, so a library title and a title
-// known only from TMDB read the same under their artwork.
+// known only from TMDB read the same under their artwork. A title with
+// MEDIA_CARD_TITLE_CLASS also takes dir="auto" (see `.bidi-text` in app.css).
 export const MEDIA_CARD_CAPTION_CLASS = "px-1 pt-3";
 export const MEDIA_CARD_TITLE_CLASS =
   "bidi-text block truncate text-[0.875rem] font-semibold tracking-tight hover:underline";

@@ -291,7 +291,9 @@ export default function ImageSelectorTab({ item, enabled, onImageApplied }: Imag
               )}
             >
               {p.id === null ? t("web.item.images.allProviders") : p.id.toUpperCase()}
-              <span className="tabular-nums opacity-60">{numberText(p.count)}</span>
+              <span className="text-muted-foreground font-(--font-weight-ui) tabular-nums">
+                {numberText(p.count)}
+              </span>
             </button>
           ))}
         </div>

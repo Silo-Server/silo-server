@@ -356,7 +356,7 @@ function MatcherQueueDetail({
             >
               <code
                 className={cn("min-w-0 font-mono", touch ? "max-w-full break-all" : "truncate")}
-                dir={touch ? "ltr" : undefined}
+                dir="ltr"
               >
                 {path}
               </code>
