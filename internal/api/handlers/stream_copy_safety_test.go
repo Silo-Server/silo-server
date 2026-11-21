@@ -261,11 +261,16 @@ func TestHandleTranscodeServe_RefusesRevivingACopyUnsafeHLSRecipe(t *testing.T) 
 		for _, executor := range []struct {
 			name    string
 			nodeURL string
+			// liveCopy keeps a stale direct-play copy of the session on this
+			// replica, as one does after another replica replans it onto a node.
+			liveCopy bool
 		}{
 			{name: "local"},
 			{name: "transcode-node", nodeURL: node.URL},
+			{name: "transcode-node-stale-copy", nodeURL: node.URL, liveCopy: true},
 		} {
 			t.Run(route.name+"/"+executor.name, func(t *testing.T) {
+				nodeHits.Store(0)
 				unsafe := true
 				file := copySafetyStreamFile(t, &unsafe)
 
@@ -274,6 +279,13 @@ func TestHandleTranscodeServe_RefusesRevivingACopyUnsafeHLSRecipe(t *testing.T) 
 				handler.JWTSecret = secret
 
 				sessionID := "lost-hls-" + route.name + "-" + executor.name
+				if executor.liveCopy {
+					stale, err := sessionMgr.StartSession(1, "profile-1", file.ID, playback.PlayDirect, false)
+					if err != nil {
+						t.Fatalf("start stale copy: %v", err)
+					}
+					sessionID = stale.ID
+				}
 				card := copySafetyHLSCard(sessionID, file.ID, executor.nodeURL)
 
 				rr := httptest.NewRecorder()
@@ -284,7 +296,7 @@ func TestHandleTranscodeServe_RefusesRevivingACopyUnsafeHLSRecipe(t *testing.T) 
 				}
 				// Nothing may be registered: the refused session would otherwise
 				// count against the user's stream cap with no transport behind it.
-				if _, err := sessionMgr.GetSession(sessionID); !errors.Is(err, playback.ErrSessionNotFound) {
+				if _, err := sessionMgr.GetSession(sessionID); !executor.liveCopy && !errors.Is(err, playback.ErrSessionNotFound) {
 					t.Fatalf("GetSession error = %v, want no session registered by a refused revival", err)
 				}
 				if got := nodeHits.Load(); got != 0 {

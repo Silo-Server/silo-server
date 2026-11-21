@@ -3248,9 +3248,14 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 			// A forced software failover must not reconstruct the stale hardware
 			// recipe that preceded it. If a concurrent caller already registered a
 			// runtime, also verify the returned process rather than trusting the card.
+			// Callers reach here only once the route runs on this server, so a
+			// recipe still naming an earlier node is rebuilt here; the manager
+			// refuses to start a card that names a node.
+			localRecipe := *ps.Recipe
+			localRecipe.TranscodeNodeURL = ""
 			if requiredToneMapMode != "" && ps.Recipe.ToneMapMode != requiredToneMapMode {
 				// Fall through to build a newly validated recipe in the required mode.
-			} else if reconstructed, reconstructErr := h.tm.ReconstructTranscodeWithError(ctx, upstreamSessionID, -1, *ps.Recipe); reconstructErr != nil && ps.Recipe.ToneMapMode != "" {
+			} else if reconstructed, reconstructErr := h.tm.ReconstructTranscodeWithError(ctx, upstreamSessionID, -1, localRecipe); reconstructErr != nil && ps.Recipe.ToneMapMode != "" {
 				// A frozen tone-map recipe must not be bypassed by a fresh plan after
 				// execution-time source validation fails.
 				return nil, reconstructErr
