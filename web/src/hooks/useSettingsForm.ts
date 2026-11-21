@@ -477,13 +477,13 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       if (result.settingsSnapshot && stillStaged.length > 0) {
         editBaseline.current = result.settingsSnapshot;
         // The save was accepted over the old baseline, so the secrets set now
-        // are the ones set then, as this save changed them. The server's
-        // values leave out the secrets this save set.
+        // are the ones set then, as this save changed them. The server trims
+        // what it stores, and its values leave out the secrets this save set.
         const secretsThen = baselineConfigured.current;
         if (secretsThen) {
           const secretsNow = new Set(secretsThen);
           for (const key of submittedKeys) {
-            if (values[key] === "") secretsNow.delete(key);
+            if ((values[key] ?? "").trim() === "") secretsNow.delete(key);
             else if (!Object.hasOwn(result.values, key)) secretsNow.add(key);
           }
           baselineConfigured.current = [...secretsNow];
