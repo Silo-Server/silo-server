@@ -987,9 +987,9 @@ function MediaCell({ session }: { session: AdminSession }) {
 }
 
 /**
- * Position through the title, with a bar, and whether the viewer paused. It
- * wraps, so a narrow Stream column puts the pause label on a second line
- * rather than over the User column.
+ * Position through the title, with a bar, and whether the viewer paused. The
+ * bar narrows before anything wraps; past that the line wraps, so its end
+ * (usually the pause label) never paints over the next column.
  */
 function ProgressLine({ session }: { session: AdminSession }) {
   const t = useT();
@@ -999,7 +999,7 @@ function ProgressLine({ session }: { session: AdminSession }) {
       {progress !== null ? (
         <span
           aria-hidden="true"
-          className="bg-border h-1 w-14 shrink-0 overflow-hidden rounded-full"
+          className="bg-border h-1 max-w-14 min-w-9 flex-1 overflow-hidden rounded-full"
         >
           <span
             className={`block h-full rounded-full ${session.is_paused ? "bg-warning" : "bg-primary"}`}
