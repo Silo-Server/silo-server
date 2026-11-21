@@ -133,6 +133,8 @@ export function DashboardGrid({
     id: WidgetId;
     /** The resize handle the session started from. */
     handle: Element;
+    /** The pointer that pressed it; other pointers' moves and releases are ignored. */
+    pointerId: number;
     title: string;
     startX: number;
     /** 1, or -1 right to left, where the handle grows the widget leftward. */
@@ -156,8 +158,8 @@ export function DashboardGrid({
     scrollOffsetY: number;
   } | null>(null);
 
-  // The node the current drag started from: the dragged widget or a link or
-  // image inside it, or the Add widget sheet item.
+  // The node the current drag started from: the dragged widget, a link, image,
+  // or selected Text node inside it, or the Add widget sheet item.
   const dragSourceRef = useRef<Node | null>(null);
 
   const endDrag = useCallback(() => {
@@ -220,9 +222,17 @@ export function DashboardGrid({
       if (!isCustomizing) return;
       const id = findWidgetIdFromEvent(event);
       if (!id) return;
+      // One gesture at a time: a link or image inside a widget stays draggable
+      // while another pointer resizes.
+      if (resizeSessionRef.current) {
+        event.preventDefault();
+        return;
+      }
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", id);
-      dragSourceRef.current = event.target as Node;
+      // The native target: a selection drag starts from a Text node, which
+      // React reports as its parent element.
+      dragSourceRef.current = event.nativeEvent.target as Node;
       setDraggedId(id);
     },
     [findWidgetIdFromEvent, isCustomizing],
@@ -369,6 +379,9 @@ export function DashboardGrid({
       // menu and never delivers the matching pointerup, which would leave the
       // resize session stuck.
       if (!event.isPrimary || event.button !== 0) return;
+      // One gesture at a time: a mouse press is primary even while a touch
+      // resizes or drags.
+      if (resizeSessionRef.current || dragSourceRef.current) return;
       const widget = getDashboardWidget(id);
       event.preventDefault();
       event.stopPropagation();
@@ -379,6 +392,7 @@ export function DashboardGrid({
       resizeSessionRef.current = {
         id,
         handle: event.currentTarget,
+        pointerId: event.pointerId,
         title: t(widget.titleKey),
         startX: event.clientX,
         inlineSign: isRightToLeft(event.currentTarget) ? -1 : 1,
@@ -451,7 +465,7 @@ export function DashboardGrid({
   const handleResizePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
       const session = resizeSessionRef.current;
-      if (!session) return;
+      if (session?.pointerId !== event.pointerId) return;
       session.latestClientX = event.clientX;
       session.latestClientY = event.clientY;
       applyResizePreview();
@@ -465,7 +479,7 @@ export function DashboardGrid({
   const handleResizePointerEnd = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
       const session = resizeSessionRef.current;
-      if (!session) return;
+      if (session?.pointerId !== event.pointerId) return;
       endResize();
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
@@ -490,6 +504,9 @@ export function DashboardGrid({
       const forward = key === "ArrowRight" || key === "ArrowDown";
       if (!backward && !forward) return;
       event.preventDefault();
+      // One gesture at a time: a pointer press on a resize handle leaves focus
+      // on this button, and reordering would cut that resize short.
+      if (resizeSessionRef.current) return;
       const index = entries.findIndex((entry) => entry.id === id);
       if (index === -1) return;
       const nextIndex = backward ? index - 1 : index + 1;
@@ -527,6 +544,9 @@ export function DashboardGrid({
       const rowStep = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : undefined;
       if (columnStep === undefined && rowStep === undefined) return;
       event.preventDefault();
+      // One gesture at a time: a pointer holding a handle owns the size, and
+      // its release would overwrite the step anyway.
+      if (resizeSessionRef.current) return;
       const widget = getDashboardWidget(id);
       const nextSpan = clamp(currentSpan + (columnStep ?? 0), widget.minSpan, widget.maxSpan);
       const nextRows = clamp(currentRows + (rowStep ?? 0), widget.minRows, widget.maxRows);
@@ -723,6 +743,10 @@ export function DashboardGrid({
                   // a specific spot; clicking (the keyboard path) appends.
                   draggable
                   onDragStart={(event) => {
+                    if (resizeSessionRef.current) {
+                      event.preventDefault();
+                      return;
+                    }
                     event.dataTransfer.setData(WIDGET_ADD_DRAG_TYPE, widget.id);
                     event.dataTransfer.effectAllowed = "copy";
                     dragSourceRef.current = event.currentTarget;

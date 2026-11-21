@@ -17,12 +17,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/backup"
 	"github.com/Silo-Server/silo-server/internal/cache"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/database"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 // newBackupService builds the backup subsystem over the operational store,
@@ -30,7 +30,7 @@ import (
 // encrypts with. A deployment without an operational store (an S3 artwork
 // backend with no private bucket) still gets a service, so the Backups page
 // can say why there is nowhere to write, or keep backups in an S3 bucket.
-func newBackupService(pool *pgxpool.Pool, bc *config.BootstrapConfig, settings *catalog.EncryptedSettingsRepo, deps *api.Dependencies) *backup.Service {
+func newBackupService(pool *pgxpool.Pool, bc *config.BootstrapConfig, settings *serversettings.EncryptedSettingsRepo, deps *api.Dependencies) *backup.Service {
 	archiveKey, err := backup.NewArchiveKey(bc.SecretKey)
 	if err != nil {
 		log.Fatalf("backup archive key: %v", err)
@@ -135,7 +135,7 @@ func upgradeBackupOptions(ctx context.Context, pool *pgxpool.Pool, bc *config.Bo
 	if err != nil {
 		return backup.Options{}, fmt.Errorf("backup manifest key: %w", err)
 	}
-	settings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)
+	settings := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), cipher)
 	all, err := settings.GetAll(ctx)
 	if err != nil {
 		return backup.Options{}, fmt.Errorf("reading settings: %w", err)
@@ -168,7 +168,7 @@ func upgradeBackupOptions(ctx context.Context, pool *pgxpool.Pool, bc *config.Bo
 // newProfileTransfer serves profile export and import, which read and write
 // the PostgreSQL user store; nil on the SQLite bridge backend, so the
 // capability reports not_configured there.
-func newProfileTransfer(pool *pgxpool.Pool, settings *catalog.EncryptedSettingsRepo, cfg *config.Config) *backup.ProfileTransfer {
+func newProfileTransfer(pool *pgxpool.Pool, settings *serversettings.EncryptedSettingsRepo, cfg *config.Config) *backup.ProfileTransfer {
 	if cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.UserDB.Backend), "sqlite") {
 		return nil
 	}

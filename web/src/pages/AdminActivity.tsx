@@ -894,6 +894,7 @@ function StreamRow({
                 <Link
                   to={`/admin/users/${session.user_id}`}
                   title={username}
+                  dir="auto"
                   className={`${ROW_LINK_CLASS} min-w-0 truncate`}
                 >
                   {username}
@@ -1041,6 +1042,7 @@ function ProfilePill({ session }: { session: AdminSession }) {
   return profile ? (
     <span
       title={profile}
+      dir="auto"
       className="border-primary/30 bg-primary/10 text-primary max-w-[7rem] shrink-0 truncate rounded border px-1.5 py-0.5 text-[10px] leading-none"
     >
       {profile}
@@ -1067,6 +1069,8 @@ function ViewerCell({
     ? `${clientLabelFull || clientLabel} — ${clientUserAgent}`
     : clientLabelFull || clientLabel;
   const clientIP = session.client_ip?.trim() || "";
+  // A long IPv6 address truncates, so the tooltip carries the whole address.
+  const clientIPTitle = `${clientIP} — ${t("web.admin.activity.ipLookup.heading")}`;
   const location =
     session.stream_location === "local"
       ? t("web.player.routeBadge.local")
@@ -1079,6 +1083,7 @@ function ViewerCell({
         <Link
           to={`/admin/users/${session.user_id}`}
           title={username}
+          dir="auto"
           className={`${ROW_LINK_CLASS} truncate text-[13px] font-medium`}
         >
           {username}
@@ -1105,8 +1110,8 @@ function ViewerCell({
             <button
               type="button"
               onClick={() => onIPLookup(clientIP)}
-              title={t("web.admin.activity.ipLookup.heading")}
-              className={`${ROW_LINK_CLASS} shrink-0 tabular-nums`}
+              title={clientIPTitle}
+              className={`${ROW_LINK_CLASS} truncate tabular-nums`}
             >
               {clientIP}
             </button>

@@ -686,7 +686,7 @@ export function DeviceProfileTabs({
               >
                 {initial}
               </span>
-              <span className="max-w-[120px] truncate text-[12.5px] font-medium">
+              <span dir="auto" className="max-w-[120px] truncate text-[12.5px] font-medium">
                 {profile.profileName || t("web.admin.common.deviceOverrides.tabs.unnamed")}
               </span>
               <span

@@ -190,7 +190,9 @@ export default function ProfilesSettings() {
 
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate text-sm font-semibold">{profile.name}</span>
+                        <span dir="auto" className="truncate text-sm font-semibold">
+                          {profile.name}
+                        </span>
                         {profile.id === activeProfileID ? (
                           <Badge variant="outline">
                             {t("web.settings.profiles.badge.current")}
