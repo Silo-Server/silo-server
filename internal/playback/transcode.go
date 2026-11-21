@@ -1793,13 +1793,10 @@ func toneMappedTextSubtitleFilter(opts TranscodeOpts) string {
 func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []string {
 	subInput := fmt.Sprintf("[0:s:%d]", opts.SubtitleTrackIndex)
 	var graph string
+	before, after := bitmapSubtitleScale(opts)
 	if opts.ToneMapMode == tonemap.ModeSoftware {
 		filters := tonemap.SoftwareFilter(opts.ToneMapSourceKind, opts.ToneMapFilter)
-		graph = "[0:v:0]" + filters + "[vmain];[vmain]" + subInput + bitmapSubtitleOverlay
-		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
-			graph += "," + scale
-		}
-		graph += "[vout]"
+		graph = bitmapSubtitleGraph(opts, subInput, joinFilters(filters, before), after)
 		return append(args, "-filter_complex", graph)
 	}
 
@@ -1821,19 +1818,17 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 				vaapiScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
 		}
 	case transcodeHWNVENC:
+		var filters string
 		if tonemap.IsSDRSource(opts.ToneMapSourceKind) {
-			graph = "[0:v:0]" + nvencSDRFallbackDownload(opts) + "," + tonemap.SoftwareFilter(opts.ToneMapSourceKind, "") + "[vmain];[vmain]" + subInput + bitmapSubtitleOverlay
+			filters = nvencSDRFallbackDownload(opts) + "," + tonemap.SoftwareFilter(opts.ToneMapSourceKind, "")
 		} else {
-			graph = "[0:v:0]" + tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12[vmain];[vmain]" +
-				subInput + bitmapSubtitleOverlay
+			filters = tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12"
 		}
-		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
-			graph += "," + scale
-		}
-		graph += ",format=nv12,hwupload_cuda," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		graph = bitmapSubtitleGraph(opts, subInput, joinFilters(filters, before),
+			joinFilters(after, "format=nv12,hwupload_cuda", tonemap.HDRMetadataRemovalFilter()))
 	case transcodeHWVideoToolbox:
-		graph = "[0:v:0]" + videoToolboxToneMapCPUFilter(opts) + "[vmain];[vmain]" +
-			subInput + bitmapSubtitleOverlay + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		// The VideoToolbox filter already scales to the target.
+		graph = bitmapSubtitleGraph(opts, subInput, videoToolboxToneMapCPUFilter(opts), tonemap.HDRMetadataRemovalFilter())
 	}
 	if graph == "" {
 		return args
@@ -2040,16 +2035,63 @@ func hwSurfaceToCPUFilter(opts TranscodeOpts) string {
 	return "hwdownload,format=" + tonemap.SurfaceDownloadPixelFormat(opts.SourceVideoBitDepth) + ",format=yuv420p"
 }
 
-// bitmapSubtitleOverlay composites a decoded bitmap subtitle onto CPU frames.
-// A PGS canvas keeps the disc's frame size, usually 1920x1080, while many
-// encodes crop the black bars, so the canvas is centred horizontally and
-// anchored to the bottom of the frame: dialogue near the canvas bottom stays
-// inside a cropped picture. A canvas the size of the frame lands at 0,0. The
-// canvas is placed, not resized: on a frame narrower than the canvas, such as
-// one a tone map scaled before the overlay, wide lines are clipped at the
-// sides. The GPU composites (overlay_vaapi, overlay_opencl) still place at 0,0
-// because moving them needs a check on Intel hardware.
-const bitmapSubtitleOverlay = "overlay=x=(main_w-overlay_w)/2:y=main_h-overlay_h:eof_action=pass"
+// bitmapSubtitleComposite overlays the decoded bitmap subtitle sub onto the CPU
+// frames at the pad main. A PGS canvas keeps the disc's frame size, usually
+// 1920x1080, while the frame can be smaller: an encode that cropped the black
+// bars, or video already scaled to the target. So each subtitle frame is fitted
+// inside the video frame, keeping its aspect ratio, and centered. A canvas the
+// size of the frame stays at 0,0. Other bitmap codecs keep the plain overlay at
+// 0,0. The GPU composites (overlay_vaapi, overlay_opencl) are not built here and
+// still place the canvas at 0,0.
+func bitmapSubtitleComposite(opts TranscodeOpts, main, sub string) string {
+	if !IsPGS(opts.SubtitleCodec) {
+		return main + sub + "overlay=eof_action=pass"
+	}
+	return main + "split[bsmain][bsref];" +
+		sub + "[bsref]scale=w='min(rw,iw*rh/ih)':h='min(rh,ih*rw/iw)':eval=frame[bsub];" +
+		"[bsmain][bsub]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:eof_action=pass"
+}
+
+// bitmapSubtitleScale returns the target scale filter to run before and after
+// bitmapSubtitleComposite; at most one is non-empty. PGS scales first, so its
+// canvas is fitted at the encoder's input size. Other codecs composite at the
+// source size and scale after.
+func bitmapSubtitleScale(opts TranscodeOpts) (before, after string) {
+	scale := resolutionToScale(opts.TargetResolution)
+	if scale == "" {
+		return "", ""
+	}
+	if IsPGS(opts.SubtitleCodec) {
+		return scale, ""
+	}
+	return "", scale
+}
+
+// joinFilters joins the non-empty filters of a chain with commas.
+func joinFilters(filters ...string) string {
+	var nonEmpty []string
+	for _, f := range filters {
+		if f != "" {
+			nonEmpty = append(nonEmpty, f)
+		}
+	}
+	return strings.Join(nonEmpty, ",")
+}
+
+// bitmapSubtitleGraph labels the main video [vmain] after filters, then
+// composites the subtitle and runs tail, ending at [vout]. An empty main chain
+// becomes null, so the composite always reads a labeled pad and a deinterlace
+// prepended to [0:v:0] still feeds it.
+func bitmapSubtitleGraph(opts TranscodeOpts, sub, filters, tail string) string {
+	if filters == "" {
+		filters = "null"
+	}
+	graph := "[0:v:0]" + filters + "[vmain];" + bitmapSubtitleComposite(opts, "[vmain]", sub)
+	if tail != "" {
+		graph += "," + tail
+	}
+	return graph + "[vout]"
+}
 
 // appendBitmapSubtitleBurnInArgs adds burn-in arguments for BITMAP subtitle
 // codecs (PGS/VOBSUB/DVB). libass's subtitles= filter cannot render bitmap
@@ -2058,9 +2100,9 @@ const bitmapSubtitleOverlay = "overlay=x=(main_w-overlay_w)/2:y=main_h-overlay_h
 // pad [vout] replaces the raw video stream in stream mapping (see
 // appendStreamSelectionArgs), so -vf must never be emitted alongside this.
 //
-// Overlay runs at the source's native resolution FIRST and any target scaling
-// happens after, so bitmap subtitle geometry is never distorted by a
-// pre-scaling mismatch between the video and subtitle planes.
+// On the CPU paths a PGS track is scaled to the target first and its canvas
+// fitted to the frame (see bitmapSubtitleComposite); other bitmap codecs, and
+// the GPU composites, overlay at the source resolution and scale after.
 // eof_action=pass keeps the video flowing untouched once the subtitle stream
 // ends instead of freezing the last overlay frame on screen.
 //
@@ -2100,24 +2142,19 @@ func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string 
 		graph = subInput + "format=bgra,hwupload[sub];" +
 			"[0:v:0][sub]overlay_vaapi=eof_action=pass," + vaapiScaleFilter(opts.TargetResolution) + "[vout]"
 	default:
-		// NVENC and CPU: software overlay on CPU frames. Build the overlay
-		// fragment (subtitle input + optional post-scale) once, then wire it into
-		// the encode-specific pipeline.
-		cpuFilters := subInput + bitmapSubtitleOverlay
-		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
-			cpuFilters += "," + scale
-		}
+		// NVENC and CPU: software overlay on CPU frames.
+		before, after := bitmapSubtitleScale(opts)
 		if opts.HWAccel == transcodeHWNVENC && opts.SoftwareVideoDecode {
 			// CPU-decoded frames need no download; upload the composite to the
 			// configured CUDA device.
 			graph = softwareDecodedBitmapBurnInGraph(opts, subInput, false)
 		} else if opts.HWAccel == transcodeHWNVENC {
 			// Download to CPU for the overlay, then re-upload to CUDA.
-			graph = "[0:v:0]" + hwSurfaceToCPUFilter(opts) + "[vmain];[vmain]" + cpuFilters +
-				",format=nv12,hwupload_cuda[vout]"
+			graph = bitmapSubtitleGraph(opts, subInput, joinFilters(hwSurfaceToCPUFilter(opts), before),
+				joinFilters(after, "format=nv12,hwupload_cuda"))
 		} else {
 			// CPU encoding: overlay directly on decoded frames.
-			graph = "[0:v:0]" + cpuFilters + "[vout]"
+			graph = bitmapSubtitleGraph(opts, subInput, before, after)
 		}
 	}
 
@@ -2128,15 +2165,12 @@ func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string 
 // the finished NV12 frames for the hardware encoder. It is the Hi10 AVC
 // counterpart of the all-hardware overlay_vaapi graph above.
 func softwareDecodedBitmapBurnInGraph(opts TranscodeOpts, subInput string, qsv bool) string {
-	filters := subInput + bitmapSubtitleOverlay
-	if scale := resolutionToScale(opts.TargetResolution); scale != "" {
-		filters += "," + scale
-	}
-	filters += ",format=nv12,hwupload"
+	before, after := bitmapSubtitleScale(opts)
+	tail := joinFilters(after, "format=nv12,hwupload")
 	if qsv {
-		filters += ",hwmap=derive_device=qsv,format=qsv"
+		tail += ",hwmap=derive_device=qsv,format=qsv"
 	}
-	return "[0:v:0]format=yuv420p[vmain];[vmain]" + filters + "[vout]"
+	return bitmapSubtitleGraph(opts, subInput, joinFilters("format=yuv420p", before), tail)
 }
 
 // appendSubtitleBurnInArgs adds subtitle burn-in filter arguments for TEXT
