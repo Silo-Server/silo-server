@@ -108,17 +108,17 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
                 thumbhash={item.poster_thumbhash}
                 className="ring-border/60 aspect-[2/3] w-9 shrink-0 rounded-md ring-1 ring-inset"
               />
-              {/* A cut title keeps its start in either script; w-fit keeps a
-                  short one on the page's start side. */}
-              <span className="min-w-0 flex-1">
-                <span dir="auto" className="block w-fit max-w-full truncate text-sm">
+              {/* Only the title is cut, and it keeps its start in either script;
+                  the year stays after it in the page's reading order. */}
+              <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                <span dir="auto" className="min-w-0 truncate text-sm">
                   {item.title}
-                  {item.year ? (
-                    <span className="text-muted-foreground ms-1.5 text-xs">
-                      {numberText(item.year)}
-                    </span>
-                  ) : null}
                 </span>
+                {item.year ? (
+                  <span className="text-muted-foreground shrink-0 text-xs">
+                    {numberText(item.year)}
+                  </span>
+                ) : null}
               </span>
               <Button
                 type="button"
@@ -177,7 +177,7 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
                   <span dir="auto" className="block w-fit max-w-full truncate text-sm">
                     {collection.name}
                   </span>
-                  <span className="text-muted-foreground text-xs">
+                  <span className="text-muted-foreground block text-xs">
                     {collection.live
                       ? t("web.profiles.allowedTitles.titleCount", {
                           count: collection.item_count,
