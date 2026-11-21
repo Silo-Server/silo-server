@@ -117,6 +117,8 @@ export function BreakableKey({ value }: { value: string }) {
 }
 
 const PATH_SEPARATOR = ", ";
+/** Keeps a path's own spaces, so a copied path names the folder. */
+const KEEP_SPACES = "[white-space-collapse:preserve]";
 
 /**
  * Folder paths, each in its own `dir="ltr"` span, so two folders with Arabic
@@ -130,7 +132,7 @@ function FolderPaths({ paths }: { paths: readonly string[] }) {
       {paths.map((path, position) => (
         <Fragment key={position}>
           {position > 0 ? PATH_SEPARATOR : null}
-          <span dir="ltr" className="[white-space-collapse:preserve]">
+          <span dir="ltr" className={KEEP_SPACES}>
             {path}
           </span>
         </Fragment>
@@ -270,7 +272,11 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
     paths.length > 0 ? (
       // Paths read left to right in any language; w-fit keeps the list on the
       // page's start side.
-      <ul key="paths" dir="ltr" className="text-muted-foreground w-fit font-mono text-xs break-all">
+      <ul
+        key="paths"
+        dir="ltr"
+        className={cn("text-muted-foreground w-fit font-mono text-xs break-all", KEEP_SPACES)}
+      >
         {paths.map((path) => (
           <li key={path}>{path}</li>
         ))}
