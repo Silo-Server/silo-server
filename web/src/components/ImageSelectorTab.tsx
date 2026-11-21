@@ -367,7 +367,7 @@ export default function ImageSelectorTab({ item, enabled, onImageApplied }: Imag
 
                   {/* Current indicator */}
                   {isCurrent && (
-                    <div className="bg-primary/90 text-primary-foreground absolute start-1 top-1 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-semibold">
+                    <div className="bg-primary text-primary-foreground absolute start-1 top-1 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-semibold">
                       <Check className="size-2.5" />
                       {t("web.item.images.current")}
                     </div>

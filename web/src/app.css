@@ -236,15 +236,6 @@
     transform: scale(1);
   }
 }
-@keyframes pulse-opacity {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
 @keyframes fade-out {
   from {
     opacity: 1;
@@ -718,12 +709,14 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   /* Code, paths, JSON and log text read left to right inside any page. Inline
      code takes its direction from its own text and keeps the page's direction
      for its margins (a logical margin resolves against the element's own
-     direction). */
+     direction). Code with a dir keeps the browser's isolate, because
+     plaintext would ignore the dir: a path marked left to right lays out
+     left to right even when its first folder is Arabic. */
   pre {
     direction: ltr;
     unicode-bidi: isolate;
   }
-  :is(code, kbd, samp) {
+  :is(code, kbd, samp):not([dir]) {
     unicode-bidi: plaintext;
   }
   /* Titles, names, taglines and overviews from metadata take their direction
@@ -2458,6 +2451,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   }
 
   /* ── Live Badge ──────────────────────────────────────────── */
+  /* Static on purpose: pulsing the opacity of 10px text drops it below AA
+     contrast. The label color is light enough to keep 4.5:1 where high
+     contrast lightens the surface under the badge (the Profiles panel and
+     the selected sidebar row). */
   .live-badge {
     margin-inline-start: auto;
     padding: 2px 8px;
@@ -2465,14 +2462,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     font-size: 10px;
     font-weight: 700;
     background: rgba(255, 60, 60, 0.12);
-    color: #f87171;
+    color: #fca5a5;
     border: 1px solid rgba(255, 60, 60, 0.2);
-    animation: pulse-opacity 2s ease-in-out infinite;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .live-badge {
-      animation: none;
-    }
   }
 
   /* ── Progress Bar ────────────────────────────────────────── */

@@ -94,11 +94,11 @@ function settingValues(t: Translate, setting: RestoreSetting): { now: string; ba
 /**
  * A setting key or dotted name that may break after its dots and underscores,
  * so a narrow column wraps "playback.watched_threshold" or "silo.tmdb 1.2.3"
- * between words, not inside one. A dot before a digit stays, keeping a version
- * number whole.
+ * between words, not inside one. A dot before a digit, another dot or a space
+ * stays, keeping a version number and an ellipsis whole.
  */
 export function BreakableKey({ value }: { value: string }) {
-  const parts = value.replace(/(_|\.(?=\D))/g, "$1\u0000").split("\u0000");
+  const parts = value.replace(/(_|\.(?=[^\d.\s]))/g, "$1\u0000").split("\u0000");
   return (
     <>
       {parts.map((part, position) => (
@@ -225,7 +225,10 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
       </SettingFieldStatus>
     ) : null,
     item.restart_required ? (
-      <p key="restart" className="text-muted-foreground flex items-baseline gap-2 text-xs">
+      <p
+        key="restart"
+        className="text-muted-foreground flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-balance"
+      >
         <RestartBadge /> {t("web.admin.backups.restore.rows.restart")}
       </p>
     ) : null,
@@ -275,8 +278,10 @@ export const ItemRow = memo(function ItemRow({
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
+        {/* Named from the plain label: Chromium reads a <wbr> in it as a space. */}
         <Checkbox
           id={controlId}
+          aria-label={label}
           checked={checked}
           disabled={!item.selectable}
           onCheckedChange={(value) => onToggle(toggleKeys(sectionId, item), value === true)}
