@@ -504,6 +504,9 @@ export function DashboardGrid({
       const forward = key === "ArrowRight" || key === "ArrowDown";
       if (!backward && !forward) return;
       event.preventDefault();
+      // One gesture at a time: a pointer press on a resize handle leaves focus
+      // on this button, and reordering would cut that resize short.
+      if (resizeSessionRef.current) return;
       const index = entries.findIndex((entry) => entry.id === id);
       if (index === -1) return;
       const nextIndex = backward ? index - 1 : index + 1;
