@@ -29,7 +29,7 @@ import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 
 import { OmittedAccounts } from "./BackupWarningDetails";
 import { Disclosure } from "./Disclosure";
-import { ItemRow, SameRow, type ToggleKeys } from "./RestoreRows";
+import { BreakableKey, ItemRow, SameRow, type ToggleKeys } from "./RestoreRows";
 import { AccountRow, DataTypesPanel } from "./RestoreUsers";
 import {
   FILTER_THRESHOLD,
@@ -65,8 +65,10 @@ import {
   type SelectionKeys,
 } from "./restoreModel";
 
-/** Between the never-restored setting keys. */
-const KEY_SEPARATOR = ", ";
+/** After each never-restored setting key but the last, kept on the key's line. */
+const KEY_COMMA = ",";
+/** Between the never-restored setting keys, where a line may break. */
+const KEY_GAP = " ";
 
 const BAR_COLORS: Record<ItemState, string> = {
   differs: "bg-[var(--settings-accent)]",
@@ -351,11 +353,22 @@ function NeverRestored({ keys }: { keys: readonly string[] }) {
         </Disclosure>
       </div>
       {open ? (
-        <p id={listId} className="text-muted-foreground ps-5 pt-1 text-xs leading-relaxed">
-          {neverRestoredSettings(keys).map((key, position) => (
+        <p
+          id={listId}
+          className="text-muted-foreground ps-5 pt-1 text-xs leading-relaxed break-words"
+        >
+          {neverRestoredSettings(keys).map((key, position, entries) => (
             <span key={key}>
-              {position > 0 ? KEY_SEPARATOR : null}
-              <code className="font-mono">{key}</code>
+              {position > 0 ? KEY_GAP : null}
+              {/* Whole on a line when it fits. A longer key wraps at its dots and
+                  underscores with its later lines indented; text-pretty avoids a
+                  short last line where the browser supports it. */}
+              <span className="inline-block max-w-full ps-[1ch] -indent-[1ch] text-pretty">
+                <code className="font-mono">
+                  <BreakableKey value={key} />
+                </code>
+                {position < entries.length - 1 ? KEY_COMMA : null}
+              </span>
             </span>
           ))}
         </p>
