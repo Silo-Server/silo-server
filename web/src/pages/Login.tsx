@@ -576,7 +576,7 @@ export default function Login() {
                     <span className="flex flex-col items-start text-start">
                       <span>{label}</span>
                       {owner && (
-                        <span className="text-xs font-(--font-weight-ui)">
+                        <span className="text-xs font-normal">
                           {t("web.auth.login.network.via", { provider: entry.display_name })}
                         </span>
                       )}
