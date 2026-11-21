@@ -713,7 +713,9 @@ export default function Login() {
                       {t("web.auth.login.device.goToAndEnter", {
                         url: deviceSession.verification_uri,
                         address: (chunks) => (
-                          <span className="text-foreground break-all">{chunks}</span>
+                          <code className="text-foreground [font-family:inherit] break-all">
+                            {chunks}
+                          </code>
                         ),
                       })}
                     </p>

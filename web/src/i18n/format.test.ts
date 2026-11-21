@@ -161,6 +161,26 @@ describe("formatWith", () => {
       formatWith(mixed, "home.section.recentlyAddedIn", { library: "/srv", code: tag("code") }),
     ).toBe(`في <code>cd ${FSI}/srv${PDI}</code>`);
   });
+
+  it.each([
+    { tag: "url", id: "web.settings.connectApps.provider.tvCode", name: "activate_url" },
+    { tag: "address", id: "web.auth.login.device.goToAndEnter", name: "url" },
+    { tag: "mono", id: "web.admin.nodes.form.renderDeviceHelp", name: "example" },
+    { tag: "id", id: "web.item.split.previewHeading", name: "target_id" },
+  ] as const)(
+    "leaves a value bare in a right-to-left language inside a $tag tag",
+    ({ tag, id, name }) => {
+      // These tags render as <code> elements too, so they get the code tag's rule.
+      const arabic = createAppIntl("ar-XB", {});
+      const out = formatWith(arabic, id, {
+        [name]: "/dev/dri",
+        count: 2,
+        file_count: 2,
+        [tag]: (chunks: unknown[]) => `<${tag}>${chunks.join("")}</${tag}>`,
+      });
+      expect(out).toContain(`<${tag}>/dev/dri</${tag}>`);
+    },
+  );
 });
 
 describe("Arabic digits follow the format locale", () => {
