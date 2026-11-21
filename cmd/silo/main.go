@@ -70,6 +70,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
+	"github.com/Silo-Server/silo-server/internal/directconn"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -1533,6 +1534,7 @@ func main() {
 	// OnServerSettingUpdated closure, which only runs on admin requests after
 	// startup completes.
 	var ipResolver *clientip.Resolver
+	var directConn *directconn.Service
 	// Assigned below when recommendations start; nil (a no-op) otherwise.
 	var settingsRecWorker *recommendations.Worker
 	// Assigned below with the marker plugin providers; nil without plugins.
@@ -1598,6 +1600,11 @@ func main() {
 			return nil
 		},
 		OnServerSettingUpdated: func(_ context.Context, key, value string) {
+			if directConn != nil && strings.HasPrefix(key, "direct_connections.") {
+				if err := directConn.SettingsChanged(context.Background()); err != nil {
+					slog.WarnContext(context.Background(), "direct connections: settings reload failed", "component", "directconn", "error", err)
+				}
+			}
 			// Key-scoped reload for the client-IP trust boundary: unlike the
 			// whole-config watcher reload below, this cannot be blocked by an
 			// unrelated malformed setting failing config.LoadFromDB. Uses a
@@ -3180,6 +3187,26 @@ func main() {
 	}
 	ipResolver = clientip.NewResolver(trustedCIDRs)
 	deps.ClientIPResolver = ipResolver
+	if mode == "" || mode == "integrated" || mode == "api" {
+		directConn = directconn.New(appCtx, directconn.Config{Settings: settingsRepo, Logger: slog.Default(), Tuning: tuningCfg, Adjustments: adjustments, HeldAtStart: netadmin.Current().HeldAtStart})
+		deps.DirectConnections = directConn
+		// Subscribe before the initial read: Subscribe returns once Redis
+		// confirms it, so a change another replica commits after that point
+		// reaches this service, and one committed before it is in the read.
+		if err := eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+			if event.Type != cache.EventSettingsChanged {
+				return
+			}
+			if err := directConn.SettingsChanged(appCtx); err != nil {
+				slog.WarnContext(appCtx, "direct connections: settings reload failed", "component", "directconn", "error", err)
+			}
+		}); err != nil {
+			slog.WarnContext(appCtx, "direct connections: settings subscription failed", "component", "directconn", "error", err)
+		}
+		if err := directConn.SettingsChanged(appCtx); err != nil {
+			slog.WarnContext(appCtx, "direct connections: initial settings read failed", "component", "directconn", "error", err)
+		}
+	}
 	// Hot-reload trusted proxies on settings changes via two complementary
 	// paths. The direct event-bus subscription re-reads only the clientip key,
 	// so a malformed unrelated setting (which fails the whole-config reload)
@@ -4432,7 +4459,7 @@ func main() {
 	defer stopLANDiscovery()
 	// Bind before serving so resident plugins, which reverse-proxy to this
 	// listener, are only started once it exists.
-	apiListener, _, apiListenErr := tcpcongestion.Listen(appCtx, "tcp", cfg.Server.Listen, tcpcongestion.ListenerAPI, opts)
+	apiListener, apiListenResult, apiListenErr := tcpcongestion.Listen(appCtx, "tcp", cfg.Server.Listen, tcpcongestion.ListenerAPI, opts)
 	if apiListenErr != nil {
 		if pluginProvisionWriter != nil {
 			pluginProvisionWriter.Close()
@@ -4471,8 +4498,20 @@ func main() {
 			}
 		}
 	}
-	startCompatServer(appCtx, compatSrv, tcpcongestion.ListenerJellyfin, opts, errCh)
-	startCompatServer(appCtx, absSrv, tcpcongestion.ListenerABS, opts, errCh)
+	jellyfinListenResult := startCompatServer(appCtx, compatSrv, tcpcongestion.ListenerJellyfin, opts, errCh)
+	absListenResult := startCompatServer(appCtx, absSrv, tcpcongestion.ListenerABS, opts, errCh)
+	if directConn != nil {
+		listeners := make([]directconn.Listener, 0, 3)
+		if apiListenErr == nil {
+			listeners = append(listeners, directConnectionListener(apiListenResult))
+		}
+		for _, result := range []*tcpcongestion.Result{jellyfinListenResult, absListenResult} {
+			if result != nil {
+				listeners = append(listeners, directConnectionListener(*result))
+			}
+		}
+		directConn.SetListeners(listeners)
+	}
 	netadmin.Release()
 	// Step 11: Wait for termination signal.
 	sigCh := make(chan os.Signal, 1)
@@ -5569,4 +5608,9 @@ type audiobooksSettingsAdapter struct {
 
 func (a *audiobooksSettingsAdapter) GetString(ctx context.Context, key string) (string, error) {
 	return a.repo.Get(ctx, key)
+}
+
+// directConnectionListener keeps the netadmin constructor out of directconn.
+func directConnectionListener(result tcpcongestion.Result) directconn.Listener {
+	return directconn.Listener{Listener: result.Listener, Requested: result.Requested, Granted: result.Granted, State: result.State, Reason: result.Reason, Errno: result.Errno, SendBuffer: directconn.SendBuffer{Requested: result.SendBuffer.Requested, Granted: result.SendBuffer.Granted, State: result.SendBuffer.State, Reason: result.SendBuffer.Reason, Errno: result.SendBuffer.Errno}}
 }
