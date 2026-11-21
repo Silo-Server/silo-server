@@ -146,6 +146,9 @@ export default function EmailSettings() {
             onClear={() => form.setValue("email.smtp_password", "")}
             cleared={form.isClearStaged("email.smtp_password")}
             onChange={(v) => form.setValue("email.smtp_password", v)}
+            // Emptying the field takes its draft back, so it holds still while
+            // a save is in flight: the save would still store what was typed.
+            disabled={form.isSaving}
             restartRequired={restartKeys.has("email.smtp_password")}
             managedByEnv={form.envVar("email.smtp_password")}
           />

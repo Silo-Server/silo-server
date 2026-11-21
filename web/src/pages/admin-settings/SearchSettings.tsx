@@ -190,7 +190,9 @@ export default function SearchSettings() {
                 onClear={() => form.setValue(MEILI_API_KEY, "")}
                 cleared={form.isClearStaged(MEILI_API_KEY)}
                 hint={t("web.admin.settings.search.meili.apiKey.hint")}
-                disabled={!meiliEnabled || connectionUnknown}
+                // Emptying the field takes its draft back, so it holds still
+                // while a save is in flight, like the Email password.
+                disabled={!meiliEnabled || connectionUnknown || form.isSaving}
                 managedByEnv={form.envVar(MEILI_API_KEY)}
                 restartRequired={restartKeys.has(MEILI_API_KEY)}
               />
