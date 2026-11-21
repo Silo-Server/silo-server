@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -183,16 +184,11 @@ func TestWebPushResubscribeRecordsTheNewLoginDB(t *testing.T) {
 	}
 }
 
-// A push queued while the login was live must not leave once it has ended: the
-// retry schedule can hold an attempt for half an hour after the revoke.
-func TestQueuedWebPushStopsWhenTheRegisteringLoginEndsDB(t *testing.T) {
-	repo, pool := loginSessionWebPushDB(t)
-	ctx := t.Context()
-	var sent atomic.Int32
-	pushService := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		sent.Add(1)
-		w.WriteHeader(http.StatusCreated)
-	}))
+// webPushTestSender returns a sender with VAPID keys whose push service is
+// handler, and one subscription on the live login that it can encrypt to.
+func webPushTestSender(t *testing.T, repo *WebPushRepository, pool *pgxpool.Pool, handler http.HandlerFunc) (*webPushSender, *WebPushSubscription) {
+	t.Helper()
+	pushService := httptest.NewTLSServer(handler)
 	t.Cleanup(pushService.Close)
 
 	vapidPrivate, vapidPublic, err := webpush.GenerateVAPIDKeys()
@@ -211,7 +207,7 @@ func TestQueuedWebPushStopsWhenTheRegisteringLoginEndsDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sub, err := repo.Upsert(ctx, WebPushSubscription{
+	sub, err := repo.Upsert(t.Context(), WebPushSubscription{
 		ID: "sub", UserID: 7, ProfileID: "default", Endpoint: pushService.URL + "/browser",
 		P256dh:         base64.RawURLEncoding.EncodeToString(browserKey.PublicKey().Bytes()),
 		Auth:           base64.RawURLEncoding.EncodeToString(make([]byte, 16)),
@@ -220,6 +216,19 @@ func TestQueuedWebPushStopsWhenTheRegisteringLoginEndsDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return sender, sub
+}
+
+// A push queued while the login was live must not leave once it has ended: the
+// retry schedule can hold an attempt for half an hour after the revoke.
+func TestQueuedWebPushStopsWhenTheRegisteringLoginEndsDB(t *testing.T) {
+	repo, pool := loginSessionWebPushDB(t)
+	ctx := t.Context()
+	var sent atomic.Int32
+	sender, sub := webPushTestSender(t, repo, pool, func(w http.ResponseWriter, _ *http.Request) {
+		sent.Add(1)
+		w.WriteHeader(http.StatusCreated)
+	})
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO notification_deliveries (id, user_id, profile_id, type, reason_flags)
 		VALUES ('delivery', 7, 'default', $1, '{}'),
@@ -272,5 +281,39 @@ func TestQueuedWebPushStopsWhenTheRegisteringLoginEndsDB(t *testing.T) {
 	}
 	if sent.Load() != 1 {
 		t.Fatalf("sends after the revoke = %d, want 1", sent.Load())
+	}
+}
+
+// A push service's Retry-After lengthens the wait before the next attempt but
+// never shortens the schedule: a 429 asking for a second would otherwise use
+// up every attempt within a few sweeps.
+func TestWebPushRetryAfterNeverShortensTheScheduleDB(t *testing.T) {
+	repo, pool := loginSessionWebPushDB(t)
+	ctx := t.Context()
+	sender, sub := webPushTestSender(t, repo, pool, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO notification_deliveries (id, user_id, profile_id, type, reason_flags)
+		VALUES ('delivery', 7, 'default', $1, '{}')`, DeliveryTypeRequestDeclined); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO web_push_delivery_attempts (id, notification_delivery_id, subscription_id, attempt_number, outcome)
+		VALUES ('attempt', 'delivery', $1, 0, 'retrying')`, sub.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	sender.processAttempt(ctx, DeliveryAttempt{ID: "attempt", NotificationDeliveryID: "delivery", TargetID: sub.ID})
+	var state string
+	var wait time.Duration
+	if err := pool.QueryRow(ctx, `
+		SELECT outcome, next_retry_at - attempted_at FROM web_push_delivery_attempts WHERE id = 'attempt'`,
+	).Scan(&state, &wait); err != nil {
+		t.Fatal(err)
+	}
+	if state != WebhookOutcomeRetrying || wait < 25*time.Second {
+		t.Fatalf("attempt after a 429 with Retry-After: 1 = %s, next try in %s; want retrying in about 30s", state, wait)
 	}
 }

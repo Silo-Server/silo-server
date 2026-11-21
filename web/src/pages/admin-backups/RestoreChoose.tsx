@@ -22,6 +22,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
 import { useAppLanguage, useT } from "@/i18n";
 import { pendingCount } from "@/lib/profileDataTypes";
 import { cn } from "@/lib/utils";
@@ -33,7 +34,6 @@ import { Disclosure } from "./Disclosure";
 import { PlanSentences } from "./RestoreReview";
 import { BreakableKey, ItemRow, SameRow, type ToggleKeys } from "./RestoreRows";
 import { AccountRow, DataTypesPanel } from "./RestoreUsers";
-import { OVERFLOW_CLIP, useOverflowsInline } from "./useOverflowsInline";
 import {
   FILTER_THRESHOLD,
   STATE_ORDER,
@@ -44,6 +44,7 @@ import {
   libraryNames,
   matchesFilter,
   nothingToRestoreText,
+  rowLibrary,
   rowSecondary,
   sectionProgress,
   stateCountsLabel,
@@ -172,7 +173,7 @@ function SectionIndex({
               onClick={() => scrollToSection(section.id)}
               className="hover:bg-accent focus-visible:ring-ring/50 flex w-full items-baseline justify-between gap-3 rounded-md px-2 py-1 text-start text-[13px] outline-none focus-visible:ring-[3px]"
             >
-              <span className="truncate">{t(SECTION_TITLES[section.id])}</span>
+              <span className="min-w-0 wrap-anywhere">{t(SECTION_TITLES[section.id])}</span>
               <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
                 {sectionProgress(section, selection)}
               </span>
@@ -222,7 +223,8 @@ function Rows({ sectionId, items, selection, onToggle, names, withLibrary = fals
             item={item}
             checked={selection.has(itemKey(sectionId, item.id))}
             onToggle={onToggle}
-            secondary={rowSecondary(item, names, withLibrary)}
+            secondary={rowSecondary(item, names)}
+            library={withLibrary ? rowLibrary(item, names) : null}
           />
         ),
       )}
@@ -333,7 +335,12 @@ function SameRows({
           className="bg-background/60 mt-1.5 max-h-80 overflow-y-auto rounded-md border px-3 py-1"
         >
           {items.map((item) => (
-            <SameRow key={item.id} item={item} secondary={rowSecondary(item, names, true)} />
+            <SameRow
+              key={item.id}
+              item={item}
+              secondary={rowSecondary(item, names)}
+              library={rowLibrary(item, names)}
+            />
           ))}
         </ul>
       ) : null}
@@ -727,14 +734,18 @@ export function RestoreChoose({
             far the summary is scrolled. The rule marks where the summary ends.
             A long notice scrolls within 8rem, so the summary keeps its room; in
             a window too short for both, it shrinks further and Review keeps
-            its row. */}
+            its row. A scroll box clips on every side, so the notice holds
+            0.25em above and below for marks that reach past its first and
+            last lines. Its height cap grows by that room, so the text still
+            gets 8rem, and its margins take the room back, the bottom one
+            being space-y-4's 1rem less the padding. */}
         <div className="lg:border-border/60 space-y-4 lg:flex lg:min-h-0 lg:flex-col lg:border-t lg:pt-4">
           {notice ? (
             <p
               ref={noticeRef}
               role="status"
               tabIndex={noticeScrolls ? 0 : undefined}
-              className="overlay-scroll focus-visible:outline-ring -mx-[0.25em] rounded-sm px-[0.25em] text-[13px] wrap-anywhere text-amber-600 focus-visible:outline-2 focus-visible:outline-offset-2 lg:max-h-32 lg:min-h-0 lg:overflow-y-auto dark:text-amber-400"
+              className="overlay-scroll focus-visible:outline-ring -mx-[0.25em] rounded-sm px-[0.25em] text-[13px] wrap-anywhere text-amber-600 focus-visible:outline-2 focus-visible:outline-offset-2 lg:-mt-[0.25em] lg:mb-[calc(1rem-0.25em)] lg:max-h-[calc(8rem+0.5em)] lg:min-h-0 lg:overflow-y-auto lg:py-[0.25em] dark:text-amber-400"
             >
               {/* A block child, so useScrolls sees the text grow. Only while a
                   name can't wrap to fit, such as a run of joined emoji, does it

@@ -2747,6 +2747,20 @@ func main() {
 		defer policySystem.Stop()
 	}
 
+	// Build a viewer scope resolver using the current userStoreProvider (raw
+	// for notifications before wrapping below, wrapped for downstream callers).
+	newViewerResolver := func(users access.UserRepository, tokens access.ProfileTokenValidator) scopeResolver {
+		if policySystem != nil {
+			return policy.NewViewerResolver(users, userStoreProvider, tokens, policySystem.PDP(), accessGroupStore).
+				WithUnratedContentPolicy(unratedContent).
+				WithAdminDefaults(adminDefaults)
+		}
+		// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+		return access.NewResolver(users, userStoreProvider, tokens, accessGroupStore).
+			WithUnratedContentPolicy(unratedContent).
+			WithAdminDefaults(adminDefaults)
+	}
+
 	// White-label branding: one service shared by the API (public read + admin
 	// upload), the frontend handler (index.html title, favicon, manifest), the
 	// artwork reconcile task, and outgoing email. It is built before the
@@ -2770,13 +2784,7 @@ func main() {
 	if deps.DB != nil && userStoreProvider != nil {
 		userRepo := auth.NewUserRepository(deps.DB)
 		profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
-		var notificationScopes notifications.ScopeResolver
-		if policySystem != nil {
-			notificationScopes = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		} else {
-			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		}
+		notificationScopes := newViewerResolver(userRepo, profileTokens)
 		notificationSystem = notifications.NewSystem(
 			deps.DB,
 			settingsRepo,
@@ -2893,15 +2901,7 @@ func main() {
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, catalog.NewProviderIDRepository(deps.DB))
 		// A sync's episodes follow what the profile may open, as any viewer
 		// read does, so it resolves scope the same way.
-		var watchProviderScopes interface {
-			Resolve(context.Context, access.ResolveInput) (access.Scope, error)
-		}
-		if policySystem != nil {
-			watchProviderScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
-		} else {
-			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path.
-			watchProviderScopes = access.NewResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
-		}
+		watchProviderScopes := newViewerResolver(auth.NewUserRepository(deps.DB), nil)
 		watchProviderLibrary := catalog.NewLibraryItemRepository(deps.DB)
 		watchProviderService.
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
@@ -3120,12 +3120,7 @@ func main() {
 			// Cached rows are built under the scope the API resolves for the
 			// profile's own requests, so reads do not filter them down.
 			recUserRepo := auth.NewUserRepository(deps.DB)
-			if policySystem != nil {
-				recEngine.WithScopeResolver(policy.NewViewerResolver(recUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults))
-			} else {
-				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				recEngine.WithScopeResolver(access.NewResolver(recUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults))
-			}
+			recEngine.WithScopeResolver(newViewerResolver(recUserRepo, nil))
 		}
 		deps.Recommender = recEngine
 		deps.CatalogSearchVectorizer = recEngine
@@ -3366,13 +3361,7 @@ func main() {
 			// Imports fill their item limit with titles their owner profile
 			// can access. Scheduled syncs start with the task manager below,
 			// so the owner resolver is wired here, not in the router.
-			var ownerScopes scopeResolver
-			if policySystem != nil {
-				ownerScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			} else {
-				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				ownerScopes = access.NewResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			}
+			ownerScopes := newViewerResolver(auth.NewUserRepository(deps.DB), nil)
 			userSync := usercollections.NewService(deps.UserStoreProvider, collItemRepo, libraryItemRepo, usercollections.NewOwnerAccess(ownerScopes), nil, slog.Default())
 			userSync.TMDBCollections = collectionService.TMDBCollections
 			// Syncs refresh collages and start with the task manager below,
@@ -3788,13 +3777,7 @@ func main() {
 		if userStoreProvider != nil {
 			userRepo := auth.NewUserRepository(deps.DB)
 			profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
-			var reconcileResolver scopeResolver
-			if policySystem != nil {
-				reconcileResolver = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			} else {
-				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				reconcileResolver = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			}
+			reconcileResolver := newViewerResolver(userRepo, profileTokens)
 			requestReconcileSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: reconcileResolver})
 		}
 		if notificationSystem != nil {
@@ -3951,12 +3934,7 @@ func main() {
 		if deps.ImageResolver != nil {
 			absDetailSvc.SetImageResolver(deps.ImageResolver)
 		}
-		var absScopeResolver scopeResolver
-		if policySystem != nil {
-			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		} else {
-			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		}
+		absScopeResolver := newViewerResolver(absUserRepo, nil)
 		absHDeps := audiobooks.ABSHandlerDeps{
 			Pool:     deps.DB,
 			Items:    absItemRepo,
@@ -4395,24 +4373,8 @@ func main() {
 			// user-disabled libraries, and rating/quality ceilings apply to
 			// the compat API exactly as they do to the native API.
 			if userStoreProvider != nil {
-				var compatScopeResolver jellycompat.ScopeResolver
-				if policySystem != nil {
-					compatScopeResolver = policy.NewViewerResolver(
-						userRepo,
-						userStoreProvider,
-						nil, // profile tokens unused: compat login already verifies PINs
-						policySystem.PDP(),
-						accessGroupStore,
-					).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-				} else {
-					// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-					compatScopeResolver = access.NewResolver(
-						userRepo,
-						userStoreProvider,
-						nil, // profile tokens unused: compat login already verifies PINs
-						accessGroupStore,
-					).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-				}
+				// profile tokens unused: compat login already verifies PINs
+				compatScopeResolver := newViewerResolver(userRepo, nil)
 				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(compatScopeResolver)
 				compatDeps.PlaybackScopeResolver = compatScopeResolver
 			}

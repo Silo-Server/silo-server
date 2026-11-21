@@ -23,9 +23,9 @@ function textOverflows(element: HTMLElement) {
 }
 
 /**
- * Whether an element's text is wider than its box, such as a name holding one
- * long run of joined emoji that no line break can split. A row clips such text
- * sideways only while this is true: clipping text that fits would trim letters
+ * Whether an element's text is wider than its box, such as a name or folder path
+ * holding one long run of joined emoji that no line break can split. Clip such
+ * text sideways only while this is true: clipping text that fits would trim letters
  * whose ink reaches past their edge, and in Firefox also tall marks above and
  * below the line. Measured after layout, again whenever the box resizes or a
  * web font finishes loading, and whenever `content` changes.
@@ -67,3 +67,7 @@ export function useOverflowsInline<T extends HTMLElement>(content: unknown) {
  * container.
  */
 export const OVERFLOW_CLIP = "-ms-[0.25em] max-w-[calc(100%+0.25em)] overflow-x-clip ps-[0.25em]";
+
+/** `OVERFLOW_CLIP` for a narrow row only (below 42rem); a wider row truncates instead. */
+export const NARROW_OVERFLOW_CLIP =
+  "@max-2xl:-ms-[0.25em] @max-2xl:max-w-[calc(100%+0.25em)] @max-2xl:overflow-x-clip @max-2xl:ps-[0.25em]";

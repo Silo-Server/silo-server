@@ -1,8 +1,39 @@
-import { useState } from "react";
+import { Children, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 import { useRootHeightProperty } from "@/hooks/useRootHeightProperty";
 import { useT } from "@/i18n";
+import { getInitial } from "@/lib/text";
+
+/**
+ * A message part split into its edge spaces and the words between them. A
+ * trailing PDF or PDI mark (the `ar-XB` pseudo-locale's) counts as an edge too,
+ * so the space before it stays out of the part that is cut; leading marks stay
+ * with the words they apply to.
+ */
+const EDGE_SPACES = /^(\s*)([\s\S]*?)([\s\u202c\u2069]*)$/;
+
+/** Up to this many characters a name is short enough to keep whole. */
+const SHORT_NAME = 3;
+
+/**
+ * A narrow banner squeezes the "authorized by" sentence. Its words give up space
+ * only once the name is down to a letter and "…", and are then cut with "…" too.
+ * The spaces at their edges stay, so a cut word never runs into the name.
+ */
+function wordsYieldLast(message: ReactNode): ReactNode {
+  return Children.map(message, (part) => {
+    if (typeof part !== "string") return part;
+    const [, before = "", words = "", after = ""] = EDGE_SPACES.exec(part) ?? [];
+    return (
+      <>
+        {before ? <span className="shrink-0 whitespace-pre">{before}</span> : null}
+        <span className="min-w-0 overflow-hidden text-ellipsis whitespace-pre">{words}</span>
+        {after ? <span className="shrink-0 whitespace-pre">{after}</span> : null}
+      </>
+    );
+  });
+}
 
 interface ImpersonationBannerProps {
   userName: string;
@@ -30,7 +61,11 @@ export default function ImpersonationBanner({
     }
   }
 
-  const initial = userName.charAt(0).toUpperCase() || "?";
+  const initial = getInitial(userName) || "?";
+  // The authorizing name keeps at least a letter and "…" before the words around
+  // it give way. A short name is kept whole instead: a fixed floor wider than
+  // the name would leave a gap after it.
+  const nameFloor = [...impersonatorName].length <= SHORT_NAME ? "min-w-max" : "min-w-[2em]";
 
   return (
     <div
@@ -63,13 +98,25 @@ export default function ImpersonationBanner({
           </span>
         </div>
 
-        <span className="text-muted-foreground hidden truncate text-xs sm:inline">
+        <span className="text-muted-foreground hidden overflow-hidden text-xs whitespace-pre sm:flex">
           {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- decorative separator */}
           <span className="text-muted-foreground/60 me-2">·</span>
-          {t("web.shell.impersonation.authorizedBy", {
-            name: impersonatorName,
-            strong: (chunks) => <span className="text-foreground/80 font-medium">{chunks}</span>,
-          })}
+          {wordsYieldLast(
+            t("web.shell.impersonation.authorizedBy", {
+              name: (
+                <span dir="auto" className="truncate">
+                  {impersonatorName}
+                </span>
+              ),
+              strong: (chunks) => (
+                <span
+                  className={`text-foreground/80 flex max-w-max grow basis-0 overflow-hidden font-medium ${nameFloor}`}
+                >
+                  {chunks}
+                </span>
+              ),
+            }),
+          )}
         </span>
 
         <button

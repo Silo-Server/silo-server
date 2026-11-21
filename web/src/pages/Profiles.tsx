@@ -22,6 +22,7 @@ import { useProfiles } from "@/hooks/queries/profiles";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
 import { canAddProfile } from "@/lib/profile-management";
 import { useT, type MessageKey } from "@/i18n";
+import { getInitial } from "@/lib/text";
 
 type ManagePurpose = "add" | "manage";
 /** What a PIN prompt on the picker unlocks. */
@@ -251,7 +252,7 @@ export default function Profiles() {
                 <Avatar className="ring-border group-hover:ring-primary/30 h-20 w-20 ring-2 transition-colors">
                   {profile.avatar_url ? <AvatarImage src={profile.avatar_url} alt="" /> : null}
                   <AvatarFallback className="bg-surface text-primary text-2xl font-bold">
-                    {profile.name.charAt(0).toUpperCase()}
+                    {getInitial(profile.name)}
                   </AvatarFallback>
                 </Avatar>
                 {profile.has_pin ? (

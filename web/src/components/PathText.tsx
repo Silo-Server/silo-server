@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 // Only the first folders show before a path is cut, so only the folders before
 // the first this-many separators are isolated, and the rest stays one text
@@ -32,4 +32,22 @@ export function PathText({ path }: { path: string }) {
     nodes.push(rest.includes(separator) ? rest : <bdi key={start}>{rest}</bdi>);
   }
   return nodes;
+}
+
+/**
+ * The element for a message's rich-text `code` tag that holds a path
+ * (`Moves to <code>{dir}</code>`), as
+ * `code: (chunks) => <PathCode>{chunks}</PathCode>`: left to right, with each
+ * folder name in its own direction through `PathText`.
+ */
+export function PathCode({ children, className }: { children: ReactNode[]; className?: string }) {
+  return (
+    <code dir="ltr" className={className}>
+      {children.map((chunk, index) => (
+        <Fragment key={index}>
+          {typeof chunk === "string" ? <PathText path={chunk} /> : chunk}
+        </Fragment>
+      ))}
+    </code>
+  );
 }
