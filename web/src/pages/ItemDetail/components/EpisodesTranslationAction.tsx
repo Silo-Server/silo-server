@@ -1,6 +1,7 @@
 import { Languages } from "lucide-react";
 
 import { useT } from "@/i18n";
+import TranslatingStatus from "./TranslatingStatus";
 
 /**
  * The on-view translation status or action beside an Episodes heading. A
@@ -16,12 +17,7 @@ export default function EpisodesTranslationAction({
 }) {
   const t = useT();
   if (translating) {
-    return (
-      <span className="text-muted-foreground/70 inline-flex items-center gap-1.5 text-xs">
-        <Languages className="h-3 w-3 animate-pulse" />
-        {t("web.detail.translation.translating")}
-      </span>
-    );
+    return <TranslatingStatus label={t("web.detail.translation.translating")} />;
   }
   if (!onTranslate) return null;
   return (
