@@ -1242,7 +1242,7 @@ function DeviceGroup({
 
   return (
     <section>
-      <header className="bg-surface/95 border-border/40 sticky top-0 z-10 flex items-baseline justify-between gap-2 border-b px-3 py-2 backdrop-blur">
+      <header className="bg-surface border-border/40 sticky top-0 z-10 flex items-baseline justify-between gap-2 border-b px-3 py-2">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
