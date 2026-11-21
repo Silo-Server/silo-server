@@ -6,9 +6,11 @@ import type {
   RestoreSectionId,
   RestoreSetting,
 } from "@/api/v2/adminBackupRestore";
+import { PathList } from "@/components/PathList";
 import { RestartBadge } from "@/components/settings/RestartBadge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { useOverflowsInline } from "@/hooks/useOverflowsInline";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import {
   Table,
@@ -23,8 +25,7 @@ import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 
 import { RowDisclosure } from "./Disclosure";
 import { itemState, type ItemState } from "./restoreGroups";
-import { REASON_SENTENCES, displayLabel, toggleKeys } from "./restoreModel";
-import { useOverflowsInline } from "./useOverflowsInline";
+import { REASON_SENTENCES, displayLabel, nameDir, toggleKeys } from "./restoreModel";
 
 /** Toggles item keys; stable for the page's life so memoized rows don't re-render. */
 export type ToggleKeys = (keys: string[], checked: boolean) => void;
@@ -140,6 +141,55 @@ function FolderPaths({ paths }: { paths: readonly string[] }) {
         </Fragment>
       ))}
     </>
+  );
+}
+
+const MIDDLE_DOT = "·";
+
+/**
+ * A row's muted detail: the library's name, then what the item is here. Each part
+ * is cut at its own end, the name in its own direction and the text in the page's,
+ * so both keep their start: one cut line would lose the start of whichever part sits
+ * at its end. Each part's tooltip is on the part, so it reads in that part's direction
+ * too. When both don't fit on one line, the text moves to its own, so neither is cut
+ * short unless it is wider than the line on its own. As in UserDetailHeader, the
+ * separator sits before the text, pulled back over the gap, so when the text opens a
+ * line the separator falls past the clipped start edge.
+ */
+function DetailLine({
+  library,
+  text,
+  className,
+}: {
+  library: string | null;
+  text: string | null;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "text-muted-foreground flex w-fit max-w-full min-w-0 flex-wrap gap-x-(--sep) overflow-x-clip text-xs [--sep:0.65em]",
+        className,
+      )}
+    >
+      {library ? (
+        <span dir="auto" title={library} className="min-w-0 truncate">
+          {library}
+        </span>
+      ) : null}
+      {text ? (
+        <span className={cn("flex min-w-0", library && "-ms-(--sep)")}>
+          {library ? (
+            <span aria-hidden="true" className="w-(--sep) shrink-0 text-center">
+              {MIDDLE_DOT}
+            </span>
+          ) : null}
+          <span title={text} className="min-w-0 truncate">
+            {text}
+          </span>
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -272,20 +322,11 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
       </div>
     ) : null,
     paths.length > 0 ? (
-      // Paths read left to right in any language; align-with-page keeps each line,
-      // a short path's or a wrapped one's, on the page's start side.
-      <ul
+      <PathList
         key="paths"
-        dir="ltr"
-        className={cn(
-          "text-muted-foreground align-with-page font-mono text-xs break-all",
-          KEEP_SPACES,
-        )}
-      >
-        {paths.map((path) => (
-          <li key={path}>{path}</li>
-        ))}
-      </ul>
+        paths={paths}
+        className={cn("text-muted-foreground text-xs", KEEP_SPACES)}
+      />
     ) : null,
     missingPaths.length > 0 ? (
       // The list reads left to right inside the sentence, as on the row above.
@@ -343,12 +384,15 @@ export const ItemRow = memo(function ItemRow({
   checked,
   onToggle,
   secondary,
+  library = null,
 }: {
   sectionId: RestoreSectionId;
   item: RestoreItem;
   checked: boolean;
   onToggle: ToggleKeys;
   secondary: string | null;
+  /** The library to name before the detail, in lists not under a library heading. */
+  library?: string | null;
 }) {
   const t = useT();
   const controlId = useId();
@@ -357,8 +401,9 @@ export const ItemRow = memo(function ItemRow({
   const details = open ? itemDetails(t, item) : null;
   const hasDetails = hasItemDetails(item);
   const label = displayLabel(item);
-  const [nameRef, nameOverflows] = useOverflowsInline<HTMLLabelElement>(label);
+  const [nameRef, nameOverflows] = useOverflowsInline<HTMLSpanElement>(label);
   const paths = item.kind === "library" ? item.library?.paths : undefined;
+  const hasDetail = Boolean(secondary || library);
   // The row is its own container, since its width depends on the admin sidebar and
   // restore summary as much as on the viewport. A narrow row wraps the whole name
   // above the muted detail, so names that differ only at the end stay apart.
@@ -374,37 +419,55 @@ export const ItemRow = memo(function ItemRow({
           onCheckedChange={(value) => onToggle(toggleKeys(sectionId, item), value === true)}
         />
         <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
-          {/* block: Label is a flex box, which would clip the name without an ellipsis.
-              Beside a detail, a one-line row stops the name at 60% and ends it in "…";
-              Chromium breaks at <wbr> even under nowrap, so that row hides them. A name
-              with nothing beside it wraps instead, so it is never cut short. A name
-              clips sideways only while part of it can't wrap to fit, such as one long
-              run of joined emoji; a one-line row with a detail truncates instead. */}
+          {/* Beside a detail, a one-line row shares its width 3:2 between the name and
+              the detail, each no wider than its text, so either takes the room the other
+              doesn't need. Only when both are longer than their shares does the name
+              stop at 60% and end in "…"; Chromium breaks at <wbr> even under nowrap, so
+              that row hides them. A name with nothing beside it wraps instead, so it is
+              never cut short. A name clips sideways only while part of it can't wrap to
+              fit, such as one long run of joined emoji; a one-line row with a detail
+              truncates instead. The label spans a narrow row's column, so a click
+              anywhere on it toggles the row, and min-w-0 lets it shrink to its share of
+              a one-line row. The name inside reads in its own direction and is sized to
+              its text: a short one stays on the page's start side, and a cut or clipped
+              one keeps its start in either script. Its lines line up with the page's
+              (align-with-page), so a wrapped one stays beside the checkbox. It is the box
+              that's cut, measured and clipped, since it overflows toward its own end. */}
           <Label
-            ref={nameRef}
             htmlFor={controlId}
             title={label}
             className={cn(
               "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
-              secondary && "@2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden",
-              nameOverflows && (secondary ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
+              hasDetail && "@2xl:max-w-max @2xl:min-w-0 @2xl:flex-3",
               !item.selectable && "text-muted-foreground",
             )}
           >
-            <BreakableKey value={label} />
+            <span
+              ref={nameRef}
+              dir={nameDir(item)}
+              className={cn(
+                "align-with-page block w-fit max-w-full",
+                hasDetail && "@2xl:truncate @2xl:[&_wbr]:hidden",
+                nameOverflows && (hasDetail ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
+              )}
+            >
+              <BreakableKey value={label} />
+            </span>
           </Label>
-          {secondary ? (
+          {paths && secondary ? (
             // A library's line is its folder paths, which read left to right in any
-            // language, so they keep their start when cut short. w-fit keeps a short
-            // line under the name, on the page's start side; max-w-full stops a long
-            // one at the column's width so it is still cut short.
+            // language, so they keep their start when cut short. In a narrow row, w-fit
+            // keeps a short line under the name, on the page's start side; max-w-full
+            // stops a long one at the column's width so it is still cut short.
             <span
               title={secondary}
-              dir={paths ? "ltr" : undefined}
-              className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs"
+              dir="ltr"
+              className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs @2xl:max-w-max @2xl:flex-2"
             >
-              {paths ? <FolderPaths paths={paths} /> : secondary}
+              <FolderPaths paths={paths} />
             </span>
+          ) : hasDetail ? (
+            <DetailLine library={library} text={secondary} className="@2xl:max-w-max @2xl:flex-2" />
           ) : null}
         </div>
         {item.kind === "template_collection" ? (
@@ -447,25 +510,26 @@ export const ItemRow = memo(function ItemRow({
 export const SameRow = memo(function SameRow({
   item,
   secondary,
+  library,
 }: {
   item: RestoreItem;
   secondary: string | null;
+  library: string | null;
 }) {
   useT();
   const label = displayLabel(item);
   return (
     <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-[13px]">
+      {/* The name reads in its own direction, so a part that can't wrap is clipped
+          at the name's end rather than its start; its lines line up with the page's. */}
       <span
         title={label}
-        className="-mx-[0.25em] block min-w-0 overflow-x-clip px-[0.25em] text-pretty wrap-anywhere"
+        dir={nameDir(item)}
+        className="align-with-page -mx-[0.25em] block min-w-0 overflow-x-clip px-[0.25em] text-pretty wrap-anywhere"
       >
         <BreakableKey value={label} />
       </span>
-      {secondary ? (
-        <span title={secondary} className="text-muted-foreground min-w-0 truncate text-xs">
-          {secondary}
-        </span>
-      ) : null}
+      {secondary || library ? <DetailLine library={library} text={secondary} /> : null}
     </li>
   );
 });

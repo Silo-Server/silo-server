@@ -20,6 +20,7 @@ import { SectionError } from "../feedback";
 import { useReportCollapsed } from "../widgetChrome";
 import { SessionProfilePill } from "./SessionProfilePill";
 import { useT } from "@/i18n";
+import { getInitial } from "@/lib/text";
 
 /**
  * Most cards the widget mounts at once. The widget shows only what fits, and a
@@ -283,12 +284,15 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             {session.media_item_id ? (
               <Link
                 to={`/item/${session.media_item_id}`}
-                className="hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
+                dir="auto"
+                className="bidi-text hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
               >
                 {title}
               </Link>
             ) : (
-              <div className="truncate text-sm font-bold">{title}</div>
+              <div dir="auto" className="bidi-text truncate text-sm font-bold">
+                {title}
+              </div>
             )}
             {/* Same episode line as the Activity page's Stream column. */}
             <div className="text-muted-foreground mb-1.5 truncate text-xs">
@@ -300,12 +304,15 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             {session.media_item_id ? (
               <Link
                 to={`/item/${session.media_item_id}`}
-                className="hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
+                dir="auto"
+                className="bidi-text hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
               >
                 {title}
               </Link>
             ) : (
-              <div className="truncate text-sm font-bold">{title}</div>
+              <div dir="auto" className="bidi-text truncate text-sm font-bold">
+                {title}
+              </div>
             )}
             {session.media_type && (
               <div className="text-muted-foreground mb-1.5 truncate text-xs">
@@ -335,7 +342,9 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
               title={session.client_user_agent || clientLabel}
               className="border-border/60 bg-muted/30 text-muted-foreground inline-flex max-w-[9rem] rounded border px-1.5 py-0.5 text-[9px] font-semibold"
             >
-              <span className="truncate">{clientLabel}</span>
+              <span dir="auto" className="truncate">
+                {clientLabel}
+              </span>
             </span>
           ) : null}
           <PlaybackRouteBadges session={session} />
@@ -351,7 +360,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             className="text-primary-foreground flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
             style={{ background: `var(--primary)` }}
           >
-            {username.charAt(0).toUpperCase()}
+            {getInitial(username)}
           </div>
           <span dir="auto" className="min-w-0 truncate text-xs font-medium">
             {username}
