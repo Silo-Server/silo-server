@@ -20,7 +20,11 @@ import {
 } from "@/hooks/queries/admin/subtitles";
 import { useT, type MessageKey } from "@/i18n";
 import { sortSubtitleProviders } from "@/lib/subtitleProviders";
-import { SettingField, SettingFieldRow } from "@/pages/admin-settings/SettingField";
+import {
+  SettingField,
+  SettingFieldRow,
+  SettingFieldStatus,
+} from "@/pages/admin-settings/SettingField";
 
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
 import { useStepSummary } from "../useStep";
@@ -141,27 +145,46 @@ function ProviderRow({
   const rowDisabled = disabled || draft.loading || draft.loadFailed || draft.saveFailed;
 
   let description = meta ? t(meta.description) : "";
+  if (draft.loadFailed && !draft.saveFailed) description = t("web.setup.subtitles.loadFailed");
+
+  let status = null;
   if (draft.saveFailed) {
-    description = draft.loadFailed
-      ? t("web.admin.settings.providers.subtitles.loadFailed")
-      : t("web.admin.settings.providers.subtitles.saveNotConfirmed");
-  } else if (draft.loadFailed) {
-    description = t("web.setup.subtitles.loadFailed");
+    // A locked row says why it is locked, and Continue waits on it.
+    status = (
+      <SettingFieldStatus tone="warn">
+        <span className="min-w-0 [overflow-wrap:anywhere]">
+          {draft.loadFailed
+            ? t("web.admin.settings.providers.subtitles.loadFailed")
+            : t("web.admin.settings.providers.subtitles.saveNotConfirmed")}
+        </span>
+      </SettingFieldStatus>
+    );
+  } else if (hasCredentials && !draft.dirty) {
+    status = (
+      <span className="text-muted-foreground text-xs">
+        {t("web.setup.subtitles.credentialsSaved")}
+      </span>
+    );
   }
+
+  const reloadButton = draft.saveFailed ? (
+    <Button
+      type="button"
+      variant="secondary"
+      size="sm"
+      onClick={onReload}
+      disabled={disabled || draft.loading}
+      // The label is long and longer still in most languages, so it wraps
+      // rather than widening the card on a phone.
+      className="h-auto min-h-8 min-w-0 shrink py-1.5 text-start whitespace-normal"
+    >
+      {t("web.admin.settings.providers.subtitles.reload")}
+    </Button>
+  ) : null;
 
   return (
     <>
-      <SettingFieldRow
-        label={displayName}
-        description={description}
-        status={
-          hasCredentials && !draft.dirty ? (
-            <span className="text-muted-foreground text-xs">
-              {t("web.setup.subtitles.credentialsSaved")}
-            </span>
-          ) : undefined
-        }
-      >
+      <SettingFieldRow label={displayName} description={description} status={status}>
         <Switch
           checked={draft.enabled}
           aria-label={t("web.setup.subtitles.enableLabel", { provider: displayName })}
@@ -198,44 +221,39 @@ function ProviderRow({
             />
           )}
           <div className="setup-provider-actions">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={runTest}
-              disabled={rowDisabled || test.isPending}
-            >
-              {test.isPending ? (
-                <>
-                  <Loader2 className="me-1.5 size-3 animate-spin" />
-                  {t("web.setup.subtitles.testing")}
-                </>
-              ) : (
-                t("web.setup.subtitles.test")
-              )}
-            </Button>
-            {testResult !== null ? (
-              <span className={testResult.success ? "text-green-500" : "text-red-400"}>
-                {testResult.success
-                  ? t("web.setup.wizard.connected")
-                  : (testResult.error ?? t("web.setup.subtitles.failed"))}
-              </span>
-            ) : null}
+            {/* A locked row can only be reloaded, so Reload takes Test's place. */}
+            {reloadButton ?? (
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={runTest}
+                  disabled={rowDisabled || test.isPending}
+                >
+                  {test.isPending ? (
+                    <>
+                      <Loader2 className="me-1.5 size-3 animate-spin" />
+                      {t("web.setup.subtitles.testing")}
+                    </>
+                  ) : (
+                    t("web.setup.subtitles.test")
+                  )}
+                </Button>
+                {testResult !== null ? (
+                  <span className={testResult.success ? "text-green-500" : "text-red-400"}>
+                    {testResult.success
+                      ? t("web.setup.wizard.connected")
+                      : (testResult.error ?? t("web.setup.subtitles.failed"))}
+                  </span>
+                ) : null}
+              </>
+            )}
           </div>
         </div>
-      ) : null}
-      {draft.saveFailed ? (
-        <div className="setup-provider-actions pb-3.5">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onReload}
-            disabled={disabled || draft.loading}
-          >
-            {t("web.admin.settings.providers.subtitles.reload")}
-          </Button>
-        </div>
+      ) : reloadButton ? (
+        // A provider switched off has no fields, so Reload gets its own row.
+        <div className="setup-provider-actions pb-3.5">{reloadButton}</div>
       ) : null}
     </>
   );
@@ -249,6 +267,8 @@ export function SubtitlesStep() {
   const [submitting, setSubmitting] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, ProviderDraft>>({});
   const loaded = useRef(new Set<string>());
+  // The failed save's toast says to fetch again and retry; a reload does that.
+  const saveErrorToast = useRef<string | number | undefined>(undefined);
 
   const providerList = useMemo(
     () => sortSubtitleProviders(providers.data?.providers ?? []),
@@ -385,11 +405,15 @@ export function SubtitlesStep() {
       }));
     }
     const reason = failures[0]!.reason;
-    toast.error(reason instanceof Error ? reason.message : t("web.setup.subtitles.saveFailed"));
+    saveErrorToast.current = toast.error(
+      reason instanceof Error ? reason.message : t("web.setup.subtitles.saveFailed"),
+    );
   }
 
   function reloadEditor(config: SubtitleProviderConfig) {
     const name = config.provider_name;
+    // Without an id, dismiss would clear every toast on screen.
+    if (saveErrorToast.current !== undefined) toast.dismiss(saveErrorToast.current);
     setDrafts((prev) => ({
       ...prev,
       [name]: { ...prev[name]!, loading: true, loadFailed: false },
