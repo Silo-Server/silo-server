@@ -12,6 +12,7 @@ import {
 import type { AdminUser } from "@/api/types";
 import { accountRoleLabel } from "@/lib/accountOwner";
 import { formatRelativeTime } from "@/lib/date";
+import { ltrUnlessRightToLeft } from "@/lib/direction";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { SectionError, UserSkeletonRows } from "../feedback";
 import { useT } from "@/i18n";
@@ -107,10 +108,11 @@ export function UsersWidget() {
                             </Badge>
                           )}
                         </div>
-                        {/* Left to right in any language, so a cut email keeps its
-                            start; w-fit keeps it on the page's start side. */}
+                        {/* Left to right unless written in a right-to-left script, so
+                            a cut email keeps its start; w-fit keeps it on the page's
+                            start side. */}
                         <div
-                          dir="ltr"
+                          dir={ltrUnlessRightToLeft(u.email)}
                           className="text-muted-foreground hidden w-fit max-w-full truncate text-[10px] sm:block"
                         >
                           {u.email}
