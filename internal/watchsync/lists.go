@@ -692,6 +692,9 @@ func (s *Service) removePendingListItems(ctx context.Context, conn Connection, c
 	if err := s.reconcileLocalListTitles(ctx, conn, b); err != nil {
 		return 0, err
 	}
+	if err := s.supersedeReAddedListTitles(ctx, conn, b); err != nil {
+		return 0, err
+	}
 	removed := 0
 	// Removal failures intentionally do not set last_error (which would strand
 	// the row from ListPendingListItemRemovals, since there is no per-run upsert
