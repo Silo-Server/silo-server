@@ -2047,8 +2047,10 @@ var (
 
 // supportsScaleReference reports whether the given FFmpeg binary's scale
 // filter takes a second, reference input whose size the rw and rh expressions
-// read (FFmpeg 7.1+). Older builds fail to parse the whole graph. Probed once
-// per binary path by running a tiny lavfi graph.
+// read (FFmpeg 7.1+). Older builds fail to parse the whole graph. Probed by
+// running a tiny lavfi graph; a definite answer, FFmpeg running the graph or
+// exiting with an error, is cached per binary path, while a probe that timed out
+// or couldn't start is asked again next time.
 func supportsScaleReference(bin string) bool {
 	scaleReferenceMu.Lock()
 	defer scaleReferenceMu.Unlock()
@@ -2063,6 +2065,11 @@ func supportsScaleReference(bin string) bool {
 		"-filter_complex", "[0:v][1:v]scale=w='min(rw,iw*rw/(ih*rdar))':h=rh",
 		"-f", "null", "-").Run()
 	available := err == nil
+	var exitErr *exec.ExitError
+	if !available && (ctx.Err() != nil || !errors.As(err, &exitErr)) {
+		slog.Warn("could not probe ffmpeg's scale filter; PGS burn-in keeps the plain overlay for now", "ffmpeg", bin, "error", err)
+		return false
+	}
 	if !available {
 		slog.Warn("ffmpeg's scale filter has no reference input; PGS burn-in keeps the plain overlay and needs FFmpeg 7.1+ to fit cropped and scaled frames", "ffmpeg", bin)
 	}

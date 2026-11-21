@@ -1040,3 +1040,18 @@ func TestPrepareSubtitleFilterInputLinksDecodedNonUTF8Path(t *testing.T) {
 		t.Fatalf("subtitle filter alias target = %q, want %q", target, rawInput)
 	}
 }
+
+// A probe that can't start FFmpeg isn't a "no": it isn't cached, so the next
+// transcode asks again instead of losing the fit until a restart.
+func TestScaleReferenceProbeDoesNotCacheAFailedStart(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "missing-ffmpeg")
+	if supportsScaleReference(bin) {
+		t.Fatal("a missing binary reported support")
+	}
+	scaleReferenceMu.Lock()
+	_, cached := scaleReferenceCache[bin]
+	scaleReferenceMu.Unlock()
+	if cached {
+		t.Fatal("a probe that could not start was cached")
+	}
+}
