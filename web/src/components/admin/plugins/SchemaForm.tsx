@@ -311,13 +311,23 @@ export function SchemaForm({
       );
     }
 
+    // Typed values are mostly machine strings (paths, URLs, LDAP filters, client
+    // IDs), which a right-to-left page would draw backwards (`/mnt/media` as
+    // `mnt/media/`). "auto" takes the direction from the value's first letter, so
+    // those read left to right while text typed in Arabic or Hebrew stays right
+    // to left. An empty field is left to right for its placeholder, which comes
+    // untranslated from the schema.
+    const text = String(effectiveValue(field, values) ?? "");
+    const textDir = text ? "auto" : "ltr";
+
     if (field.control === "TEXTAREA" || field.multiline) {
       return (
         <textarea
           id={id}
+          dir={textDir}
           className="border-input bg-background min-h-24 w-full rounded-md border px-3 py-2 text-sm"
           rows={field.rows && field.rows > 0 ? field.rows : 4}
-          value={String(effectiveValue(field, values) ?? "")}
+          value={text}
           placeholder={field.placeholder}
           onChange={(event) => setField(field.key, event.target.value)}
           disabled={locked}
@@ -338,7 +348,8 @@ export function SchemaForm({
               ? "number"
               : "text"
         }
-        value={String(effectiveValue(field, values) ?? "")}
+        dir={textDir}
+        value={text}
         placeholder={field.placeholder}
         onChange={(event) => setField(field.key, event.target.value)}
       />
