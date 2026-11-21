@@ -1333,8 +1333,12 @@ function DeviceRow({
   return (
     <Link
       to={href}
+      // The margin keeps a focused row clear of its group's sticky header and,
+      // below lg, the admin mobile header. Firefox doesn't scroll a partly
+      // visible row on focus, so ask for it; "nearest" is a no-op when clear.
+      onFocus={(e) => e.currentTarget.scrollIntoView({ block: "nearest" })}
       className={cn(
-        "group relative flex scroll-mt-10 items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors",
+        "group relative flex scroll-mt-24 items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors lg:scroll-mt-10",
         active ? "bg-surface-hover/70" : "hover:bg-surface-hover/40",
       )}
     >
