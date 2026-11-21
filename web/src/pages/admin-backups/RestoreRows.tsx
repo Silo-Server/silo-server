@@ -359,7 +359,7 @@ export const SameRow = memo(function SameRow({
   const label = displayLabel(item);
   return (
     <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-[13px]">
-      <span className="wrap-anywhere">
+      <span className="text-pretty wrap-anywhere">
         <BreakableKey value={label} />
       </span>
       {secondary ? (
