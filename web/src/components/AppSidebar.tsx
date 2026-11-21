@@ -749,15 +749,15 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                   className="group/row relative flex items-center"
                                 >
                                   {/* The end padding keeps the label clear of the unpin
-                                    button where it shows at rest (touch). A fine pointer
-                                    only reveals it on hover or focus, so the label keeps
-                                    the full width there. */}
+                                    button whenever it shows: always on touch, and on
+                                    hover or focus under a fine pointer, where the label
+                                    keeps its full width at rest. */}
                                   <ViewTransitionLink
                                     to={pinHref}
                                     onClick={onNavigate}
                                     className={`flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2.5 py-2.5 text-[0.78125rem] font-medium transition-colors duration-150 ${
                                       canToggle
-                                        ? "pe-7 [:where(:root[data-fine-pointer=true])_&]:pe-2.5"
+                                        ? "pe-7 group-focus-within/row:pe-7 group-hover/row:pe-7 [:where(:root[data-fine-pointer=true])_&]:pe-2.5"
                                         : ""
                                     } ${
                                       pinActive
@@ -784,7 +784,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                           label: pin.label,
                                         })
                                       }
-                                      className="pointer-reveal text-muted-foreground hover:text-destructive absolute end-1 rounded p-1"
+                                      className="pointer-reveal text-muted-foreground hover:text-destructive absolute inset-y-0 end-0 flex items-center rounded-xl px-2"
                                       title={t("web.shell.sidebar.unpin")}
                                       aria-label={t("web.shell.sidebar.unpin")}
                                       aria-describedby={pinLabelId}
