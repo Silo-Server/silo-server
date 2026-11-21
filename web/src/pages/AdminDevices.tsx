@@ -1334,18 +1334,24 @@ function DeviceRow({
   return (
     <Link
       to={href}
-      // The margin keeps a focused row clear of its group's sticky header and,
-      // below lg, the admin mobile header. Firefox doesn't scroll a partly
-      // visible row on focus, so ask for it; "nearest" is a no-op when clear.
-      // Keyboard focus only: a mouse press focuses on mousedown, and moving
-      // the row then would land the mouseup elsewhere and lose the click.
+      // The margin keeps a focused row clear of its group's sticky header.
+      // Firefox doesn't scroll a partly visible row on focus, so do it here,
+      // but only for keyboard focus (a mouse press focuses on mousedown, and
+      // moving the row would lose the click) and only when the header covers
+      // the row, so a row that's already clear doesn't move.
       onFocus={(e) => {
-        if (isKeyboardFocus(e.currentTarget)) {
-          e.currentTarget.scrollIntoView({ block: "nearest" });
+        const row = e.currentTarget;
+        const header = row.closest("section")?.querySelector("header");
+        if (
+          isKeyboardFocus(row) &&
+          header &&
+          row.getBoundingClientRect().top < header.getBoundingClientRect().bottom
+        ) {
+          row.scrollIntoView({ block: "nearest" });
         }
       }}
       className={cn(
-        "group relative flex scroll-mt-24 items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors lg:scroll-mt-10",
+        "group relative flex scroll-mt-10 items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors",
         active ? "bg-surface-hover/70" : "hover:bg-surface-hover/40",
       )}
     >
