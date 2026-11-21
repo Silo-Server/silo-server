@@ -56,10 +56,16 @@ type Props = {
    * shown under the control (e.g. why a server's type cannot change).
    */
   lockedKeys?: Readonly<Record<string, string>>;
+  /**
+   * Fields that hold server paths. On a right-to-left page their values stay
+   * left to right, even when a path starts with a right-to-left folder name.
+   */
+  pathKeys?: readonly string[];
 };
 
 const NO_HIDDEN_KEYS: readonly string[] = [];
 const NO_LOCKED_KEYS: Readonly<Record<string, string>> = {};
+const NO_PATH_KEYS: readonly string[] = [];
 
 function optionsFor(
   field: PluginAdminFormField,
@@ -111,7 +117,8 @@ function FieldDescription({ text }: { text?: string }) {
 // draw backwards there (`/mnt/media` as `mnt/media/`). "auto" takes the
 // direction from the value's first letter, so those read left to right while
 // text typed in Arabic or Hebrew stays right to left. A masked value keeps one
-// edge whatever its text. "auto" ignores the placeholder, so an empty field
+// edge whatever its text, and a known path field reads left to right like the
+// other path inputs. "auto" ignores the placeholder, so an empty field
 // takes its placeholder's direction: usually an untranslated path or URL from
 // the schema, but a host can pass translated text (a saved secret's hint).
 // A left-to-right page already draws these values in order and is left alone.
@@ -119,11 +126,11 @@ function textDirection(
   pageDir: "ltr" | "rtl",
   text: string,
   placeholder: string | undefined,
-  masked: boolean,
+  alwaysLeftToRight: boolean,
 ): "auto" | "ltr" | "rtl" | undefined {
   if (pageDir !== "rtl") return undefined;
   if (!text) return startsRightToLeft(placeholder ?? "") ? "rtl" : "ltr";
-  return masked ? "ltr" : "auto";
+  return alwaysLeftToRight ? "ltr" : "auto";
 }
 
 // Loading placeholder for a dynamic MULTI_SELECT (tags): a few shimmer chips.
@@ -195,6 +202,7 @@ export function SchemaForm({
   hiddenKeys = NO_HIDDEN_KEYS,
   expandSections = false,
   lockedKeys = NO_LOCKED_KEYS,
+  pathKeys = NO_PATH_KEYS,
 }: Props) {
   const t = useT();
   const pageDir = Direction.useDirection();
@@ -336,7 +344,8 @@ export function SchemaForm({
 
     const text = String(effectiveValue(field, values) ?? "");
     const masked = field.control === "PASSWORD" || field.secret;
-    const textDir = textDirection(pageDir, text, field.placeholder, masked);
+    const alwaysLeftToRight = masked || pathKeys.includes(field.key);
+    const textDir = textDirection(pageDir, text, field.placeholder, alwaysLeftToRight);
 
     if (field.control === "TEXTAREA" || field.multiline) {
       return (
