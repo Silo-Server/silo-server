@@ -1344,8 +1344,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
   }
 
+  /* An empty star's outline is a control boundary, so it needs 3:1 against
+     the pill: 3.7:1 on Cinema Dark, 5.6:1 in high contrast. It stays dimmer
+     than a filled star, which also differs in colour and fill. The removal
+     preview below dims every star on purpose while the pointer is on it. */
   .star-rating-star {
-    color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
+    color: color-mix(in srgb, var(--muted-foreground) 65%, transparent);
   }
 
   /* The stored rating is the resting state, so it survives a pointer that is
@@ -1368,7 +1372,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   :where(:root[data-fine-pointer="true"])
     .star-rating:not([data-suppress-preview]):has(.star-rating-star:hover)
     .star-rating-star {
-    color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
+    color: color-mix(in srgb, var(--muted-foreground) 65%, transparent);
   }
 
   :where(:root[data-fine-pointer="true"])
