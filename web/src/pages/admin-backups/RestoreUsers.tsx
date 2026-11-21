@@ -178,7 +178,7 @@ export const AccountRow = memo(function AccountRow({
   const administrator = t("web.admin.backups.restore.users.administrator");
   // Laid out like ItemRow (RestoreRows.tsx): a narrow row wraps the name above the
   // contact line. The admin badge, profile count and merge status would leave a 42rem
-  // row's name and contact about 220 px, so below 56rem the row shows only the badge's
+  // row's name and contact about 220 px, so below 52rem the row shows only the badge's
   // icon, and the merge status only when it names another account; the details show
   // the admin role and the status. The badge can cut a long merge destination short,
   // so the details show a merge in full at every width.
@@ -224,11 +224,11 @@ export const AccountRow = memo(function AccountRow({
             className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[11px] @2xl:inline-flex"
           >
             <ShieldCheck aria-hidden="true" className="size-3.5" />
-            <span className="sr-only @4xl:not-sr-only">{administrator}</span>
+            <span className="sr-only @[52rem]:not-sr-only">{administrator}</span>
           </span>
         ) : null}
         {account.profiles.length > 0 ? (
-          <span className="text-muted-foreground hidden shrink-0 text-[11px] whitespace-nowrap @4xl:inline">
+          <span className="text-muted-foreground hidden shrink-0 text-[11px] whitespace-nowrap @[52rem]:inline">
             {t("web.admin.backups.restore.users.profileCount", {
               count: account.profiles.length,
               count_text: account.profiles.length,
@@ -239,7 +239,7 @@ export const AccountRow = memo(function AccountRow({
           <span
             title={status}
             className={cn(
-              "hidden max-w-40 shrink-0 truncate text-xs @4xl:inline",
+              "hidden max-w-40 shrink-0 truncate text-xs @[52rem]:inline",
               merges && destination !== item.label && "@2xl:inline",
             )}
           >
@@ -262,10 +262,12 @@ export const AccountRow = memo(function AccountRow({
       {open ? (
         <div id={detailsId} className="space-y-1 ps-7 pb-3">
           {status ? (
-            <p className={cn("text-[13px] wrap-anywhere", !merges && "@4xl:hidden")}>{status}</p>
+            <p className={cn("text-[13px] wrap-anywhere", !merges && "@[52rem]:hidden")}>
+              {status}
+            </p>
           ) : null}
           {account.admin ? (
-            <p className="text-muted-foreground text-xs @4xl:hidden">{administrator}</p>
+            <p className="text-muted-foreground text-xs @[52rem]:hidden">{administrator}</p>
           ) : null}
           {why ? (
             <SettingFieldStatus tone={item.selectable || item.reason === "same" ? "muted" : "warn"}>
