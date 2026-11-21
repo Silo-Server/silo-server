@@ -313,19 +313,26 @@ export function DataTypesPanel({
           {DATA_TYPE_IDS.map((id) => {
             const controlId = `${baseId}-${id}`;
             const count = counts.get(id) ?? 0;
+            // The checkbox's box is one line of the row tall. The row has the label's text
+            // size, and that size class also replaces Label's leading-none, so both take
+            // the same inherited line height. The label is a block so its count wraps with
+            // its text instead of standing apart as a flex item, and text-pretty keeps the
+            // count from ending up alone on the last line where the browser supports it.
             return (
-              <div key={id} className="flex items-center gap-2">
-                <Checkbox
-                  id={controlId}
-                  checked={dataTypes.has(id)}
-                  onCheckedChange={(value) => {
-                    const next = new Set(dataTypes);
-                    if (value === true) next.add(id);
-                    else next.delete(id);
-                    onChange(next);
-                  }}
-                />
-                <Label htmlFor={controlId} className="text-[13px] font-normal">
+              <div key={id} className="flex items-start gap-2 text-[13px]">
+                <span className="flex h-lh shrink-0 items-center">
+                  <Checkbox
+                    id={controlId}
+                    checked={dataTypes.has(id)}
+                    onCheckedChange={(value) => {
+                      const next = new Set(dataTypes);
+                      if (value === true) next.add(id);
+                      else next.delete(id);
+                      onChange(next);
+                    }}
+                  />
+                </span>
+                <Label htmlFor={controlId} className="block text-[13px] font-normal text-pretty">
                   {count > 0
                     ? t("web.admin.backups.restore.users.dataTypeCount", {
                         label: DATA_TYPE_LABELS[id],
