@@ -432,12 +432,20 @@ export default function ActionBar({
     displayedPlayLabel
   );
 
-  const progressOverlay =
+  // A thin bar under the label, so the label stays on the solid accent. The
+  // fill is the label color (it reads wherever the label does); the faint
+  // track keeps 3:1 against it on every accent. In forced colors the track is
+  // a hollow outline and the fill a solid system color (through its slot, see
+  // app.css), so they differ by shape whatever the palette.
+  const progressBar =
     playProgress != null && playProgress > 0 && playProgress < 100 ? (
-      <span
-        className="border-primary-foreground/40 bg-primary-foreground/20 pointer-events-none absolute inset-y-0 start-0 border-e-2"
-        style={{ width: `${playProgress}%` }}
-      />
+      <span className="bg-primary-foreground/10 pointer-events-none absolute inset-x-4 bottom-1.5 h-[3px] overflow-hidden rounded-full forced-colors:bg-transparent forced-colors:outline forced-colors:outline-[GrayText]">
+        <span
+          data-slot="progress-indicator"
+          className="bg-primary-foreground absolute inset-y-0 start-0 min-w-1 rounded-full"
+          style={{ width: `${playProgress}%` }}
+        />
+      </span>
     ) : null;
 
   const openPlayChoiceDialog = () => setPlayChoiceOpen(true);
@@ -1077,7 +1085,7 @@ export default function ActionBar({
             >
               <Play className="size-[18px] fill-current" />
               {playText}
-              {progressOverlay}
+              {progressBar}
             </Button>
           ) : selectedVersion ? (
             <Button
@@ -1086,7 +1094,7 @@ export default function ActionBar({
             >
               <Play className="size-[18px] fill-current" />
               {playText}
-              {progressOverlay}
+              {progressBar}
             </Button>
           ) : (
             <Button
@@ -1095,7 +1103,7 @@ export default function ActionBar({
             >
               <Play className="size-[18px] fill-current" />
               {playText}
-              {progressOverlay}
+              {progressBar}
             </Button>
           )
         ) : (
