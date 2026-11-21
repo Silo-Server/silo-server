@@ -2957,10 +2957,14 @@ describe("usePlaybackSession version switches", () => {
       }),
     );
     expect(result.current.planAudioTracks).toEqual(liveAudio);
+    // The switch carries the viewer's click position. A progress sample from
+    // before the click must not move the replacement back to it.
+    act(() => result.current.updatePlaybackState(4, true));
     act(() => result.current.switchAudioTrack(1, 10));
     await waitFor(() => expect(replanBodies).toHaveLength(1));
     expect(replanBodies[0]).toMatchObject({
       operation: "track_change",
+      position_seconds: 10,
       selected_tracks: { audio: { id: "file:7:audio:1", index: 1 } },
     });
     expect(startCalls).toBe(1);

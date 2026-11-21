@@ -4548,6 +4548,10 @@ describe("VideoPlayer source timeline", () => {
       });
       await waitFor(() => expect(hlsJS.latest).not.toBe(stopped));
       expect(stoppedLoadSource).not.toHaveBeenCalled();
+      // The rebuilt generation owns the segment now. Loading its own playlist
+      // and requesting seg_00163.ts under its fresh token is legitimate; the
+      // fence only forbids re-requesting the displaced token.
+      expect(hlsJS.loadSource).toHaveBeenCalledWith("/api/v1/stream/session-1?revision=2");
     });
 
     it("reloads the playlist for a fenced segment during playback", async () => {
