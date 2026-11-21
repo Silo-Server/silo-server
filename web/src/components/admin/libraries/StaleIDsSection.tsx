@@ -114,7 +114,10 @@ export function StaleIDsSection() {
                   {/* The title and library name wrap, so a long one can't push the
                       table past its section; the title takes the width left over. */}
                   <TableCell className="w-full font-medium whitespace-normal">
-                    <span dir="auto" className="align-with-page block w-fit max-w-full break-words">
+                    <span
+                      dir="auto"
+                      className="align-with-page block w-fit max-w-full wrap-anywhere"
+                    >
                       {s.title}
                     </span>
                   </TableCell>
