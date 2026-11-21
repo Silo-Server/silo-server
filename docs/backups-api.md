@@ -84,7 +84,9 @@ go there) and the user store is PostgreSQL (a restore's own backup needs it).
 - `destination` (`default` or `s3`) and `destination_available`, false when
   the destination is missing, not set up, or cannot be reached. `items` lists
   only the current destination's backups; copies at a previous destination
-  stay there.
+  stay there. While `destination_available` is false, `items` is empty because
+  the server could not read the destination, not because it holds no backups;
+  a `destination_unavailable` warning says why.
 - `encrypted`: whether new backups are encrypted: `true` for `s3`, and for
   `default` when it is the private bucket. Clients should offer the key
   confirmation whenever `encrypted` is `true` and `key_confirmed` is not,

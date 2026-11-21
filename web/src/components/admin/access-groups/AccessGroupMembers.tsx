@@ -524,15 +524,21 @@ function AddUsersDialog({
                         })
                       }
                     />
-                    {/* A cut username keeps its start in either script. */}
-                    <span dir="auto" className="min-w-0 truncate font-medium">
+                    {/* The names grow from nothing in equal shares, each up to its full
+                        width: a short name shows whole and two long ones split the row.
+                        A cut name keeps its start in either script. */}
+                    <span dir="auto" className="max-w-max min-w-0 flex-1 truncate font-medium">
                       {user.username}
                     </span>
-                    <span className="text-muted-foreground ms-auto shrink-0 truncate text-xs">
-                      {user.access_group_id == null
-                        ? t("web.admin.access.groups.addUsers.noGroup")
-                        : (groupNames.get(String(user.access_group_id)) ??
-                          t("web.admin.access.groups.addUsers.unknownGroup"))}
+                    {/* The outer span keeps the page's direction, so ms-auto still puts
+                        it at the row's end; the inner one takes the name's own. */}
+                    <span className="text-muted-foreground ms-auto max-w-max min-w-0 flex-1 text-xs">
+                      <span dir="auto" className="block truncate">
+                        {user.access_group_id == null
+                          ? t("web.admin.access.groups.addUsers.noGroup")
+                          : (groupNames.get(String(user.access_group_id)) ??
+                            t("web.admin.access.groups.addUsers.unknownGroup"))}
+                      </span>
                     </span>
                   </label>
                 </li>

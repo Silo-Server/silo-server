@@ -210,6 +210,7 @@ export function BackupLocationGroup({
   onDestinationChange,
   onSetUpS3,
   onConfirmKey,
+  listShown,
 }: {
   /** Where the server's own storage is; "none" when it has none. */
   location: BackupLocation;
@@ -231,6 +232,11 @@ export function BackupLocationGroup({
    * opens the confirmation, offered beside the destination in use.
    */
   onConfirmKey?: () => void;
+  /**
+   * The page lists the destination's backups above. False while the
+   * destination can't be read, so the note doesn't point at a missing list.
+   */
+  listShown: boolean;
 }) {
   const t = useT();
   const ownCopy = {
@@ -259,7 +265,9 @@ export function BackupLocationGroup({
     else onDestinationChange(value === "s3" ? "s3" : "default");
   };
   return (
-    <div className="space-y-2">
+    // The page spaces this wrapper after the note. Without the note that space
+    // would add to the section's own padding, so it goes too.
+    <div className={cn("space-y-2", !listShown && "mb-0")}>
       <FieldGroup label={t("web.admin.backups.location.group")} dirty={dirty}>
         <RadioGroup
           value={destination}
@@ -295,9 +303,11 @@ export function BackupLocationGroup({
           </DestinationOption>
         </RadioGroup>
       </FieldGroup>
-      <p className="text-muted-foreground px-1 text-[13px] leading-relaxed">
-        {t("web.admin.backups.location.previousStays")}
-      </p>
+      {listShown ? (
+        <p className="text-muted-foreground px-1 text-[13px] leading-relaxed">
+          {t("web.admin.backups.location.previousStays")}
+        </p>
+      ) : null}
     </div>
   );
 }

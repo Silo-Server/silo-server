@@ -201,7 +201,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
         {/* Wraps at large text sizes, so the label, box, and unit stack instead of
             widening the row past its panel. */}
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-          <label className="text-muted-foreground text-xs text-balance">
+          <label className="text-muted-foreground text-xs text-balance break-words">
             {t("web.admin.tasks.detail.maxRuntimeLabel")}
           </label>
           <Input
