@@ -125,10 +125,9 @@ function MarkerHistoryRow({ row }: { row: MarkerEditAuditEntry }) {
         {formatHistoryDate(row.created_at)}
       </TableCell>
       <TableCell>
-        {/* The label takes the title's direction, so a cut one keeps its start;
-            w-fit keeps it on the page's start side. It is judged from the title
-            alone, not with dir="auto", because the label is a translated
-            template that a language may start with the type. */}
+        {/* The label takes the title's direction, so a cut one keeps its start.
+            Judged from the title alone: dir="auto" would also read the
+            translated template around it, which may start with a mark. */}
         <div
           dir={startsRightToLeft(title) ? "rtl" : "ltr"}
           className="w-fit max-w-[18rem] truncate font-medium"

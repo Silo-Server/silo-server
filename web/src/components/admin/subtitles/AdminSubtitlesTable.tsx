@@ -191,8 +191,7 @@ export default function AdminSubtitlesTable({
                   className="max-w-[200px] font-mono text-xs"
                   title={subtitle.release_name}
                 >
-                  {/* A release name takes its direction from its own text, like the
-                      file name. */}
+                  {/* A release name takes its direction from its own text. */}
                   <span dir="auto" className="block w-fit max-w-full truncate">
                     {subtitle.release_name || NONE}
                   </span>
