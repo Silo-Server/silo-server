@@ -780,8 +780,12 @@ func (s *swap) untilState(ctx context.Context, from dbState, act func() error, d
 }
 
 // restoreBlobs undoes every blob the journal records, newest first. Each undo
-// is idempotent, so a rollback that stopped can run again.
+// is idempotent, so a rollback that stopped can run again. Its writes may use
+// a local store's free-space reserve: a restore that stopped at the reserve
+// needs that room to put its preserved files back, and a rollback that stops
+// leaves the databases closed.
 func (s *swap) restoreBlobs(ctx context.Context) error {
+	ctx = blobstore.WithoutFreeSpaceReserve(ctx)
 	blobs := s.j.blobs
 	for i := len(blobs) - 1; i >= 0; i-- {
 		b := blobs[i]

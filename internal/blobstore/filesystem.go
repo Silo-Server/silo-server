@@ -215,7 +215,8 @@ func (c *contextReader) Read(p []byte) (int, error) {
 // A write that would leave less than the free-space reserve (reserveFor)
 // available, counting the other writes in flight, fails with ErrStorageFull:
 // before any directory is created when size is known, and otherwise as soon
-// as the data reaches the reserve.
+// as the data reaches the reserve. A ctx from WithoutFreeSpaceReserve is not
+// limited.
 func (f *Filesystem) publish(ctx context.Context, key string, size int64, exclusive bool, write func(io.Writer) error) (err error) {
 	defer func() {
 		if err == nil {
@@ -246,9 +247,11 @@ func (f *Filesystem) publish(ctx context.Context, key string, size int64, exclus
 			return ErrExists
 		}
 	}
-	budget, err := f.writeBudget()
-	if err != nil {
-		return err
+	budget := spaceBudget{limit: -1}
+	if !reserveExempt(ctx) {
+		if budget, err = f.writeBudget(); err != nil {
+			return err
+		}
 	}
 	// A write of known size claims its bytes before creating anything; a
 	// stream claims them as it writes.

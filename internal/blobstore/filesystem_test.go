@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"testing/iotest"
@@ -541,7 +542,57 @@ func TestFilesystemStopsAtFreeSpaceReserve(t *testing.T) {
 	if err = s.CreateExclusive(ctx, "kept/poster.jpg", bytes.NewReader(make([]byte, 64<<10)), ""); !errors.Is(err, ErrExists) {
 		t.Fatalf("exclusive create of an existing key at the reserve: %v", err)
 	}
+	// A restore's rollback putting a replaced file back may use the reserve.
+	if err = s.PutStream(WithoutFreeSpaceReserve(ctx), "kept/poster.jpg", bytes.NewReader([]byte("original")), ""); err != nil {
+		t.Fatalf("rollback write at the reserve: %v", err)
+	}
 	if n, err := s.Delete(ctx, []string{"kept/poster.jpg", "kept/during.jpg", "kept/fill.jpg"}); err != nil || n != 3 {
 		t.Fatalf("delete while full: %d %v", n, err)
 	}
+}
+
+// A long stream reads free space again as it goes, so space another writer
+// takes meanwhile (PostgreSQL growing beside a backup) stops the stream at
+// the reserve instead of letting it run on its first reading.
+func TestFilesystemStreamSeesSpaceTakenByOthers(t *testing.T) {
+	root := t.TempDir()
+	s, err := NewFilesystem(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const total, reserve = 100 << 30, 2 << 30
+	var written, others atomic.Int64
+	realStat := statSpace
+	statSpace = func(string) (int64, int64, error) {
+		return reserve + 3*streamRecheckBytes - written.Load() - others.Load(), total, nil
+	}
+	t.Cleanup(func() { statSpace = realStat })
+	// After the stream's first streamRecheckBytes, another writer takes
+	// enough that the rest of the stream no longer fits above the reserve.
+	src := &countingReader{n: 2 * streamRecheckBytes, written: &written, onPast: streamRecheckBytes, past: func() { others.Store(2 * streamRecheckBytes) }}
+	if err = s.PutStream(t.Context(), "backups/archive.tar", src, ""); !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("stream after another writer took the room: %v", err)
+	}
+}
+
+// countingReader yields n zero bytes, counting them in written, and calls
+// past once more than onPast bytes have been read.
+type countingReader struct {
+	n, onPast int64
+	written   *atomic.Int64
+	past      func()
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	if r.n <= 0 {
+		return 0, io.EOF
+	}
+	k := min(int64(len(p)), r.n)
+	clear(p[:k])
+	r.n -= k
+	if r.written.Add(k) > r.onPast && r.past != nil {
+		r.past()
+		r.past = nil
+	}
+	return int(k), nil
 }

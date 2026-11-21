@@ -1,6 +1,7 @@
 package blobstore
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -37,7 +38,28 @@ const (
 	// Small writes still fit just above the reserve, and without the margin
 	// each one would log a recovery between the refusals of larger ones.
 	lowSpaceRecoveryMargin = 256 << 20
+	// streamRecheckBytes is how much a stream writes between readings of
+	// free space, so space another writer takes during a long stream (a
+	// backup archive while PostgreSQL grows) counts against it before the
+	// stream reaches the reserve.
+	streamRecheckBytes = 32 << 20
 )
+
+type reserveExemptKey struct{}
+
+// WithoutFreeSpaceReserve returns a context whose local writes may use the
+// free-space reserve. Only a write that undoes another, such as a restore's
+// rollback putting back the files it replaced, should use it: refusing it
+// would leave the server worse off than finishing it, and the reserve is the
+// room it needs.
+func WithoutFreeSpaceReserve(ctx context.Context) context.Context {
+	return context.WithValue(ctx, reserveExemptKey{}, true)
+}
+
+func reserveExempt(ctx context.Context) bool {
+	exempt, _ := ctx.Value(reserveExemptKey{}).(bool)
+	return exempt
+}
 
 // statSpace reports the bytes this process may still write to the filesystem
 // holding path, as df's "available" column does, and the filesystem's size. A
@@ -49,6 +71,21 @@ var statSpace = func(path string) (available, total int64, err error) {
 	}
 	size := blockSize(&st)
 	return int64(st.Bavail) * size, int64(st.Blocks) * size, nil
+}
+
+// FreeForWrites reports how many bytes a local store at root can still take
+// before it reaches its free-space reserve, for a preflight such as a
+// backup's that should refuse up front rather than stop partway. ok is false
+// when the filesystem reports no size, which the reserve does not limit.
+func FreeForWrites(root string) (free int64, ok bool, err error) {
+	available, total, err := statSpace(root)
+	if err != nil {
+		return 0, false, err
+	}
+	if total <= 0 {
+		return 0, false, nil
+	}
+	return max(available-reserveFor(total), 0), true, nil
 }
 
 // reserveFor is the free space a store keeps on a filesystem of total bytes.
@@ -205,24 +242,45 @@ func (f *Filesystem) settle(n int64, b spaceBudget) {
 // removed their files, or space freed outside the store, still count against
 // it. So when a chunk does not fit, the stream reads free space again and
 // retries once before giving up.
+//
+// Space taken by writers outside this store (PostgreSQL, another process or
+// server) only shows in a fresh reading, so a stream also reads free space
+// again after every streamRecheckBytes it writes.
 type budgetWriter struct {
 	f      *Filesystem
 	w      io.Writer
 	budget spaceBudget
+	// sinceRead is how many bytes the stream has written since budget was
+	// read.
+	sinceRead int64
 }
 
 func (b *budgetWriter) Write(p []byte) (int, error) {
 	n := int64(len(p))
-	if _, ok := b.f.tryClaim(n, b.budget); !ok {
-		fresh, err := b.f.writeBudget()
-		if err != nil {
-			return 0, err
-		}
-		b.budget = fresh
-		if err = b.f.claim(n, b.budget); err != nil {
+	if b.budget.limit >= 0 && b.sinceRead >= streamRecheckBytes {
+		if err := b.refresh(); err != nil {
 			return 0, err
 		}
 	}
+	if _, ok := b.f.tryClaim(n, b.budget); !ok {
+		if err := b.refresh(); err != nil {
+			return 0, err
+		}
+		if err := b.f.claim(n, b.budget); err != nil {
+			return 0, err
+		}
+	}
+	b.sinceRead += n
 	defer b.f.settle(n, b.budget)
 	return b.w.Write(p)
+}
+
+// refresh reads free space again for the rest of the stream.
+func (b *budgetWriter) refresh() error {
+	fresh, err := b.f.writeBudget()
+	if err != nil {
+		return err
+	}
+	b.budget, b.sinceRead = fresh, 0
+	return nil
 }
