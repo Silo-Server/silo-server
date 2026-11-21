@@ -197,7 +197,14 @@ export const AccountRow = memo(function AccountRow({
             {item.label}
           </Label>
           {contact ? (
-            <span title={contact} className="text-muted-foreground min-w-0 truncate text-xs">
+            // Without the pending summary the line is the email (the label is the
+            // username), which reads left to right in any language and so keeps its
+            // start when cut short. With the summary first, the line follows the page.
+            <span
+              title={contact}
+              dir={pending ? undefined : "ltr"}
+              className="text-muted-foreground min-w-0 truncate text-xs"
+            >
               {contact}
             </span>
           ) : null}

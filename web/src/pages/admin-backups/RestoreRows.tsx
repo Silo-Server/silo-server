@@ -201,7 +201,9 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
       </SettingFieldStatus>
     ) : null,
     paths.length > 0 ? (
-      <ul key="paths" className="text-muted-foreground font-mono text-xs break-all">
+      // Paths read left to right in any language; w-fit keeps the list on the
+      // page's start side.
+      <ul key="paths" dir="ltr" className="text-muted-foreground w-fit font-mono text-xs break-all">
         {paths.map((path) => (
           <li key={path}>{path}</li>
         ))}
@@ -286,7 +288,13 @@ export const ItemRow = memo(function ItemRow({
             {label}
           </Label>
           {secondary ? (
-            <span title={secondary} className="text-muted-foreground min-w-0 truncate text-xs">
+            // A library's line is its folder paths, which read left to right in any
+            // language, so they keep their start when cut short.
+            <span
+              title={secondary}
+              dir={item.kind === "library" ? "ltr" : undefined}
+              className="text-muted-foreground min-w-0 truncate text-xs"
+            >
               {secondary}
             </span>
           ) : null}
