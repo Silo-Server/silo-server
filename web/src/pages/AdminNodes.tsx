@@ -1383,7 +1383,7 @@ function NodeForm({
 
 /** Rich-text tag for the device examples in the form help. */
 function mono(chunks: ReactNode[]) {
-  return <span className="font-mono">{chunks}</span>;
+  return <code className="font-mono">{chunks}</code>;
 }
 
 /** The node the key dialog acts on, and whether it has a key to replace. */

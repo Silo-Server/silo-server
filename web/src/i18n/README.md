@@ -73,9 +73,10 @@ function Dialog({ row }: { row: HomeRow }) {
 - **Right to left:** in an RTL language every printed string placeholder is
   wrapped in Unicode isolates, so a left-to-right title keeps its punctuation in
   place. `select` and `plural` arguments are not, and neither is a placeholder
-  printed only as the whole content of a `code` tag (`<code>{command}</code>`), so
-  it copies without invisible characters. Render a `code` tag as a `<code>`
-  element, which app.css isolates. English bytes never change.
+  printed only as the whole content of a `code`, `url`, `address`, `mono` or `id`
+  tag (`<code>{command}</code>`), so it copies without invisible characters.
+  Render those tags as `<code>` elements, which app.css isolates (add
+  `[font-family:inherit]` for text that isn't monospace). English bytes never change.
 - **Web-only keys** may use `select` and rich-text tags:
   `"Read the <link>guide</link>"` with
   `t(id, { link: (chunks) => <a href={url}>{chunks}</a> })`, which returns React nodes.
