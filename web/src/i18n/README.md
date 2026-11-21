@@ -135,8 +135,19 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   Where the box would stretch (a block, a `flex-col` child), size it to its text with
   `w-fit max-w-full` so a short name stays on the page's start side. A `flex-1` item
   can't be sized that way: keep `flex-1` on a wrapper and put the name in a
-  `block w-fit max-w-full` span inside it. Don't use `.bidi-text` for this: its
-  `unicode-bidi: plaintext` drops the "…" in Firefox and cuts the start in WebKit.
+  `block w-fit max-w-full` span inside it. A `flex-1` item capped at its text with
+  `max-w-max` can't stretch, so it can take `dir="auto"` itself unless it also carries
+  a logical margin, padding or border (`ms-auto`, `pe-2`, `border-s`): those follow
+  the element's own direction, so keep them on the outer element and put the name in
+  a `block` span inside it. `.bidi-text` alone doesn't keep the start: its
+  `unicode-bidi: plaintext` leaves the box in the page's direction, so Firefox drops
+  the "…" and WebKit cuts the start.
+- Titles, names, taglines and overviews from metadata use `.bidi-text` (`app.css`).
+  Where such text is cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
+  stylesheet), it also takes `dir="auto"`. Without it, text that runs the other way
+  loses its "…" in Firefox and its start in WebKit, and a clamped paragraph gets its "…"
+  at the start of its last line. `.bidi-text` keeps a short one on the page's start
+  side, so it needs no `w-fit`. The mixed-direction limit above applies here too.
 - A path shown as text, cut or not, takes `dir="ltr"` and renders through
   `PathText` (`src/components/PathText.tsx`), which keeps each folder name in its
   own direction; without it, folders named in Arabic swap places. An email cut with

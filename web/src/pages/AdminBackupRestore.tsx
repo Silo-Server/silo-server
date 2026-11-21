@@ -421,7 +421,13 @@ export default function AdminBackupRestore() {
           onSelectionChange={setChosen}
           dataTypes={dataTypes}
           onDataTypesChange={setDataTypes}
-          onReview={() => setReviewing(true)}
+          onReview={() => {
+            setReviewing(true);
+            // Review can be pressed far down a long chooser (beside it, pinned,
+            // on desktop; after it on a phone), and the review step would then
+            // open partway down the page.
+            window.scrollTo({ top: 0, behavior: "instant" });
+          }}
         />
       </div>
     );

@@ -57,6 +57,7 @@
   /* ── Interactive ─────────────────────────────────────────── */
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
   /* Text in the primary color. An admin accent sets --primary-text to a
      variant that reads on Cinema Dark's surfaces (lib/accentColor.ts); fills,
      borders, and rings keep the accent itself. */
@@ -558,12 +559,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      --surface-raised   Elevated surface (modals, floating panels)
      --card             Card background (usually = surface)
      --primary          Primary accent/action color
+     --primary-hover    Hovered solid primary fill under --primary-foreground
      --secondary        Secondary element backgrounds
      --muted            Muted backgrounds
      --accent           Active/highlighted element backgrounds
      --destructive      Danger/error text, icons, borders
      --destructive-fill Solid danger fill under --destructive-foreground
-     --<status>-label   Status text on a 10% tint of its own colour
+     --<status>-label   Status text on its own 10% tint or a surface
      --border           Default border color
      --sidebar          Sidebar background (often darkest surface)
    ================================================================ */
@@ -582,8 +584,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --info-foreground: oklch(0.98 0.01 250);
 
     /* Small status-coloured labels on a 10% tint of their own colour, such
-       as the play-method tags. Red falls below 4.5:1 there (3.8:1 on a
-       hovered row), so its label mixes toward --contrast-boost. High
+       as the play-method tags, or on a plain surface. Red falls below 4.5:1
+       on the tint (3.8:1 on a hovered row), so its label mixes toward
+       --contrast-boost. High
        contrast lightens the surfaces under every label, so it mixes each
        one further (see the block below). */
     --success-label: var(--success);
@@ -640,6 +643,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     /* Primary: white — for play buttons, key CTAs, active indicators */
     --primary: #e8e8ec;
     --primary-foreground: #141417;
+    /* The solid primary fill on hover: the primary faded a tenth toward the
+       page. An admin accent sets its own (web/src/lib/accentColor.ts), which
+       lightens instead when this fade would take its label below 4.5:1. */
+    --primary-hover: color-mix(in srgb, var(--primary) 90%, var(--background));
 
     /* Secondary & Muted: subtle surface variations */
     --secondary: #232328;
@@ -745,7 +752,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   /* Titles, names, taglines and overviews from metadata take their direction
      from their own text, so "56 Days" doesn't read "Days 56" in Arabic and an
      English sentence keeps its full stop and its ellipsis at the end. They
-     still line up with the page. Chromium knows only the prefixed keyword. */
+     still line up with the page. Chromium knows only the prefixed keyword.
+     Text cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
+     stylesheet) also takes dir="auto": plaintext leaves the element's own
+     direction at the page's, and Firefox and WebKit cut the text and draw the
+     "…" at that direction's end, so an English title in Arabic would lose its
+     start or its "…". */
   .bidi-text {
     unicode-bidi: plaintext;
     text-align: -webkit-match-parent;
@@ -1337,8 +1349,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
   }
 
+  /* An empty star's outline is a control boundary, so it needs 3:1 against
+     the pill: 3.7:1 on Cinema Dark, 5.6:1 in high contrast. It stays dimmer
+     than a filled star, which also differs in colour and fill. The removal
+     preview below dims every star on purpose while the pointer is on it. */
   .star-rating-star {
-    color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
+    color: color-mix(in srgb, var(--muted-foreground) 65%, transparent);
   }
 
   /* The stored rating is the resting state, so it survives a pointer that is
@@ -1361,7 +1377,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   :where(:root[data-fine-pointer="true"])
     .star-rating:not([data-suppress-preview]):has(.star-rating-star:hover)
     .star-rating-star {
-    color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
+    color: color-mix(in srgb, var(--muted-foreground) 65%, transparent);
   }
 
   :where(:root[data-fine-pointer="true"])
@@ -1805,8 +1821,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     box-shadow: 0 16px 36px -20px color-mix(in srgb, var(--primary) 60%, transparent);
   }
   .pill-primary:hover {
-    filter: brightness(0.96);
     transform: translateY(-1px);
+  }
+  /* Mouse only, like the `hover:` variant: a tap leaves :hover stuck on touch. */
+  :where(:root[data-fine-pointer="true"]) .pill-primary:hover {
+    background-color: var(--primary-hover);
   }
   .pill-secondary {
     background-color: var(--secondary);
@@ -2356,19 +2375,29 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
   /* Admin dashboard widget grid: single column on small screens, two columns
      on tablets (where .admin-widget-wide keeps the full row), and a 12-column
-     grid from lg up where each widget spans var(--widget-span) columns and
-     var(--widget-rows) fixed-height rows.
+     layout on wide screens where each widget spans var(--widget-span) columns
+     and var(--widget-rows) fixed-height rows.
 
-     Rows are only fixed from lg up. Below that the grid is one or two
-     content-sized columns, so a widget is already as narrow as it gets and a
-     row span picked for the wide layout would clip it — the same reason column
-     spans stop applying there. */
+     Rows are only fixed in the 12-column layout. Below it the grid is one or
+     two content-sized columns, so a widget is already as narrow as it gets and
+     a row span picked for the wide layout would clip it — the same reason
+     column spans stop applying there.
+
+     The 12-column layout needs both Tailwind's lg (64rem) and 1024px. Rem in a
+     media query follows the browser's default font size. With a larger
+     default, lg is past 1024px, and widgets' own lg: layouts (the Health
+     Strip's six columns) only fit their row from there. With a smaller one,
+     lg comes before 1024px, where the fixed 240px sidebar and the widgets'
+     px-sized text leave too little room for 12 columns. DashboardGrid's
+     resize handle and Now Playing's FIXED_ROWS_QUERY use the same pair, so the
+     handle shows exactly where spans and rows apply. */
   .admin-widget-grid {
     display: grid;
     grid-template-columns: 1fr;
     gap: 0.875rem;
     /* Height of one widget row. Declared here rather than in the media query so
-       DashboardGrid can read it back for a drag; it only takes effect at lg. */
+       DashboardGrid can read it back for a drag; it only takes effect in the
+       12-column layout. */
     --admin-row-h: 6.25rem;
   }
 
@@ -2378,10 +2407,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     min-width: 0;
   }
 
-  /* Plot area of a dashboard chart drawn with `fill`. From lg up it takes the
-     height the widget's fixed rows leave it. Below lg the rows are
-     content-sized, so there is no height to take and the plot would measure
-     0px; it keeps the 10rem a fixed-height chart gets instead. */
+  /* Plot area of a dashboard chart drawn with `fill`. In the 12-column layout
+     it takes the height the widget's fixed rows leave it. Below it the rows
+     are content-sized, so there is no height to take and the plot would
+     measure 0px; it keeps the 10rem a fixed-height chart gets instead. */
   .admin-chart-fill {
     flex: 1 1 0%;
     min-height: 10rem;
@@ -2416,7 +2445,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     background: transparent;
   }
 
-  @media (min-width: 640px) and (max-width: 1023px) {
+  /* No upper bound: the 12-column rule below sets every property this one
+     does, with the same specificity, so it has to stay after this block. */
+  @media (min-width: 640px) {
     .admin-widget-grid {
       grid-template-columns: repeat(2, 1fr);
     }
@@ -2430,7 +2461,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
   }
 
-  @media (min-width: 1024px) {
+  @media (min-width: 64rem) and (min-width: 1024px) {
     .admin-widget-grid {
       grid-template-columns: repeat(12, 1fr);
       grid-auto-rows: var(--admin-row-h);

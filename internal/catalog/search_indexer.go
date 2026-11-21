@@ -81,7 +81,7 @@ const catalogSearchExcludeMangaChaptersSQL = `NOT EXISTS (SELECT 1 FROM manga_ch
 
 type CatalogSearchIndexer struct {
 	pool          *pgxpool.Pool
-	settingsStore SettingsStore
+	settingsStore SearchSettingsStore
 	runtime       *CatalogSearchSettings
 	events        *SearchIndexEventRepository
 	// models names the locked embedding model. Documents carry only vectors
@@ -90,7 +90,7 @@ type CatalogSearchIndexer struct {
 	models CatalogSemanticModelProvider
 }
 
-func NewCatalogSearchIndexer(pool *pgxpool.Pool, settingsStore SettingsStore) *CatalogSearchIndexer {
+func NewCatalogSearchIndexer(pool *pgxpool.Pool, settingsStore SearchSettingsStore) *CatalogSearchIndexer {
 	return &CatalogSearchIndexer{
 		pool:          pool,
 		settingsStore: settingsStore,
@@ -103,7 +103,7 @@ func NewCatalogSearchIndexer(pool *pgxpool.Pool, settingsStore SettingsStore) *C
 // provider. Catalog search settings are restart-bound; rereading saved values
 // on the minute interval could otherwise publish an index the live provider
 // does not understand before the server restarts.
-func NewCatalogSearchIndexerFromSettings(pool *pgxpool.Pool, settingsStore SettingsStore, settings CatalogSearchSettings) *CatalogSearchIndexer {
+func NewCatalogSearchIndexerFromSettings(pool *pgxpool.Pool, settingsStore SearchSettingsStore, settings CatalogSearchSettings) *CatalogSearchIndexer {
 	settings.IndexTypes = slices.Clone(settings.IndexTypes)
 	return &CatalogSearchIndexer{
 		pool:          pool,

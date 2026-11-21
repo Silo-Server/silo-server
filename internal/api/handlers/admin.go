@@ -38,6 +38,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/s3client"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
@@ -744,8 +745,8 @@ type UpdateItemMetadataRequest struct {
 
 // sensitiveSettingKeys is the audited allowlist of secret-bearing settings
 // keys, shared with the at-rest encryption decorator so redaction and
-// encryption can never drift apart. See catalog.SensitiveSettingKeys.
-var sensitiveSettingKeys = catalog.SensitiveSettingKeys
+// encryption can never drift apart. See serversettings.SensitiveSettingKeys.
+var sensitiveSettingKeys = serversettings.SensitiveSettingKeys
 
 // machineManagedSettingKeys contains durable internal state that shares the
 // server_settings store but is not part of the administrator settings API.
