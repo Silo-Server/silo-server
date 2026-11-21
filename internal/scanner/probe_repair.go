@@ -378,10 +378,8 @@ func (e *PlaybackProbeEnsurer) ScanCopySafety(ctx context.Context, file *models.
 //
 // It exists because "unknown" and "known but unpersisted" are different states
 // that the media_files row cannot tell apart. A verdict whose write failed is
-// authoritative on this replica and invisible everywhere else, so the paths
-// that gate a revived stream-copy — and the race that withdraws one — have to
-// be able to ask this process what it already knows rather than only asking the
-// row.
+// authoritative on this replica and invisible everywhere else, so the race
+// calls this to land that write on the row the replans read.
 func (e *PlaybackProbeEnsurer) KnownCopySafetyVerdict(ctx context.Context, file *models.MediaFile) (bool, bool) {
 	if e == nil || file == nil {
 		return false, false
