@@ -78,6 +78,7 @@ var excludedUserTables = map[string]string{
 	"password_reset_tokens":            "credentials",
 	"user_devices":                     "device registrations",
 	"user_device_settings":             "settings bound to device registrations",
+	"user_device_profiles":             "profiles bound to device registrations",
 	"push_devices":                     excludedPush,
 	"apple_push_installations":         excludedPush,
 	"android_push_installations":       excludedPush,
