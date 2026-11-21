@@ -335,8 +335,15 @@ export function AccessGroupMembers({
                 className="hover:bg-accent/40 focus-visible:ring-ring/50 flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-md px-2 py-1.5 outline-none focus-visible:ring-[3px]"
               >
                 <span className="truncate font-medium">{member.username}</span>
+                {/* Left to right in any language, so a cut email keeps its start; w-fit
+                    keeps it on the page's start side. */}
                 {member.email ? (
-                  <span className="text-muted-foreground truncate text-xs">{member.email}</span>
+                  <span
+                    dir="ltr"
+                    className="text-muted-foreground w-fit max-w-full truncate text-xs"
+                  >
+                    {member.email}
+                  </span>
                 ) : null}
               </Link>
             </li>

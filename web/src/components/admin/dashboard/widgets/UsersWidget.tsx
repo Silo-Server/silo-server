@@ -107,7 +107,12 @@ export function UsersWidget() {
                             </Badge>
                           )}
                         </div>
-                        <div className="text-muted-foreground hidden truncate text-[10px] sm:block">
+                        {/* Left to right in any language, so a cut email keeps its
+                            start; w-fit keeps it on the page's start side. */}
+                        <div
+                          dir="ltr"
+                          className="text-muted-foreground hidden w-fit max-w-full truncate text-[10px] sm:block"
+                        >
                           {u.email}
                         </div>
                       </div>

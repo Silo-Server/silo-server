@@ -57,8 +57,12 @@ function AdminUserCompactRow({ row }: { row: AdminUserRow }) {
           <AdminUserRoleBadge user={user} />
           <AdminUserStatusBadge user={user} />
         </span>
+        {/* Left to right in any language, so a cut email keeps its start; w-fit keeps
+            it on the page's start side. */}
         {user.email ? (
-          <span className="text-muted-foreground block truncate text-sm">{user.email}</span>
+          <span dir="ltr" className="text-muted-foreground block w-fit max-w-full truncate text-sm">
+            {user.email}
+          </span>
         ) : null}
         {/* The group name gives way first, so the last-active time stays whole. */}
         <span className="text-muted-foreground flex gap-1 text-xs">
