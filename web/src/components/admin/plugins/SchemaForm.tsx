@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Loader2 } from "lucide-react";
+import { Direction } from "radix-ui";
 
 import type { PluginAdminForm, PluginAdminFormField, PluginAdminFormSection } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -105,6 +106,26 @@ function FieldDescription({ text }: { text?: string }) {
   return text ? <p className="text-muted-foreground text-xs leading-relaxed">{text}</p> : null;
 }
 
+// The direction of a text control on a right-to-left page. Typed values are
+// mostly machine strings (paths, URLs, LDAP filters, client IDs) that would
+// draw backwards there (`/mnt/media` as `mnt/media/`). "auto" takes the
+// direction from the value's first letter, so those read left to right while
+// text typed in Arabic or Hebrew stays right to left. A masked value keeps one
+// edge whatever its text. "auto" ignores the placeholder, so an empty field
+// takes its placeholder's direction: usually an untranslated path or URL from
+// the schema, but a host can pass translated text (a saved secret's hint).
+// A left-to-right page already draws these values in order and is left alone.
+function textDirection(
+  pageDir: "ltr" | "rtl",
+  text: string,
+  placeholder: string | undefined,
+  masked: boolean,
+): "auto" | "ltr" | "rtl" | undefined {
+  if (pageDir !== "rtl") return undefined;
+  if (!text) return startsRightToLeft(placeholder ?? "") ? "rtl" : "ltr";
+  return masked ? "ltr" : "auto";
+}
+
 // Loading placeholder for a dynamic MULTI_SELECT (tags): a few shimmer chips.
 function ChipsSkeleton() {
   return (
@@ -176,6 +197,7 @@ export function SchemaForm({
   lockedKeys = NO_LOCKED_KEYS,
 }: Props) {
   const t = useT();
+  const pageDir = Direction.useDirection();
   const hidden = useMemo(() => new Set(hiddenKeys), [hiddenKeys]);
   const byKey = useMemo(() => {
     const map = new Map<string, PluginAdminFormField>();
@@ -312,16 +334,9 @@ export function SchemaForm({
       );
     }
 
-    // Typed values are mostly machine strings (paths, URLs, LDAP filters, client
-    // IDs), which a right-to-left page would draw backwards (`/mnt/media` as
-    // `mnt/media/`). "auto" takes the direction from the value's first letter, so
-    // those read left to right while text typed in Arabic or Hebrew stays right
-    // to left. "auto" ignores the placeholder, so an empty field takes its
-    // placeholder's direction instead: usually an untranslated path or URL from
-    // the schema, but a host can pass translated text (a saved secret's hint).
     const text = String(effectiveValue(field, values) ?? "");
-    let textDir: "auto" | "ltr" | "rtl" = "auto";
-    if (!text) textDir = startsRightToLeft(field.placeholder ?? "") ? "rtl" : "ltr";
+    const masked = field.control === "PASSWORD" || field.secret;
+    const textDir = textDirection(pageDir, text, field.placeholder, masked);
 
     if (field.control === "TEXTAREA" || field.multiline) {
       return (
@@ -344,13 +359,7 @@ export function SchemaForm({
         id={id}
         disabled={locked}
         aria-describedby={describedBy}
-        type={
-          field.control === "PASSWORD" || field.secret
-            ? "password"
-            : field.control === "NUMBER"
-              ? "number"
-              : "text"
-        }
+        type={masked ? "password" : field.control === "NUMBER" ? "number" : "text"}
         dir={textDir}
         value={text}
         placeholder={field.placeholder}
