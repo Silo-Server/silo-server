@@ -111,14 +111,16 @@ const ROW_LINK_CLASS =
  * `overflow: hidden` would cut the top of "Ẩ" and Arabic vowel marks below the
  * line. Padding offset by a negative margin, as in `OVERFLOW_CLIP`, moves the clip
  * past the text's edges, so ink that reaches beyond them (the hook of a leading
- * "j") stays whole. A flex-item link needs `min-w-0` to shrink; a block link
- * needs `flow-root`, or the negative margins pass through it and stretch its
- * focus ring.
+ * "j") stays whole. The box takes no pointer events, so its padding can't catch
+ * a click meant for a neighbouring link or the row; the link's own box still
+ * does. A flex-item link needs `min-w-0` to shrink; a block link needs
+ * `flow-root`, or the negative margins pass through it and stretch its focus
+ * ring.
  */
 function RowLinkText({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
     <span
-      className={`-m-[0.25em] block overflow-x-clip p-[0.25em] text-ellipsis whitespace-nowrap ${className}`}
+      className={`pointer-events-none -m-[0.25em] block overflow-x-clip p-[0.25em] text-ellipsis whitespace-nowrap ${className}`}
     >
       {children}
     </span>
