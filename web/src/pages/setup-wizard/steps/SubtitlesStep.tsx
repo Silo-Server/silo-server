@@ -109,19 +109,20 @@ function ProviderRow({
   const canonical = draft.editor?.body ?? config;
   const hasCredentials = isOpenSubtitles ? canonical.has_credentials : canonical.has_api_key;
   const test = useTestSubtitleProvider();
-  // The result is kept with the exact credentials it tested and shown only
-  // while the draft still matches them, so editing a field clears it and a
-  // late response for an older draft is never shown against the new one.
+  // The result is kept with the exact credentials it tested, and the saved
+  // revision behind them, and shown only while both still match. Editing a
+  // field or reloading another admin's save clears it, and a late response
+  // for an older draft is never shown against the new one.
   const [tested, setTested] = useState<{
     signature: string;
     result: { success: boolean; error?: string };
   } | null>(null);
-  const signature = JSON.stringify(providerBody(name, draft));
+  const signature = JSON.stringify([draft.editor?.etag ?? null, providerBody(name, draft)]);
   const testResult = tested?.signature === signature ? tested.result : null;
 
   function runTest() {
     const body = providerBody(name, draft);
-    const testedSignature = JSON.stringify(body);
+    const testedSignature = signature;
     test.mutate(
       { provider: name, config: body },
       {
@@ -145,12 +146,15 @@ function ProviderRow({
   const rowDisabled = disabled || draft.loading || draft.loadFailed || draft.saveFailed;
 
   // Reload disappears once the saved state is back, so focus moves to the
-  // provider's switch instead of dropping to the page.
+  // provider's switch instead of dropping to the page. Focus the admin moved
+  // elsewhere meanwhile stays where it is.
   const switchRef = useRef<HTMLButtonElement>(null);
   const refocusAfterReload = useRef(false);
   useEffect(() => {
     if (!refocusAfterReload.current || draft.saveFailed) return;
     refocusAfterReload.current = false;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
     switchRef.current?.focus();
   }, [draft.saveFailed]);
 
@@ -178,21 +182,25 @@ function ProviderRow({
   }
 
   const reloadButton = draft.saveFailed ? (
+    // Its own key, so React doesn't turn this node into Test connection (and
+    // carry focus over) when the row unlocks.
     <Button
+      key="reload"
       type="button"
       variant="secondary"
       size="sm"
       onClick={() => {
-        // The reloaded credentials may be another admin's, so an earlier
-        // Test result says nothing about them.
-        setTested(null);
+        if (draft.loading) return;
         refocusAfterReload.current = true;
         onReload();
       }}
-      disabled={disabled || draft.loading}
+      disabled={disabled}
+      // Stays focusable while the reload runs, so a keyboard user keeps their
+      // place if it fails and can press it again.
+      aria-disabled={draft.loading || undefined}
       // The label is long and longer still in most languages, so it wraps
       // rather than widening the card on a phone.
-      className="h-auto min-h-8 min-w-0 shrink py-1.5 text-start whitespace-normal"
+      className="h-auto min-h-8 min-w-0 shrink py-1.5 text-start whitespace-normal aria-disabled:opacity-50"
     >
       {t("web.admin.settings.providers.subtitles.reload")}
     </Button>
@@ -276,6 +284,8 @@ function ProviderRow({
   );
 }
 
+const SAVE_ERROR_TOAST = "setup-subtitles-save-failed";
+
 export function SubtitlesStep() {
   const { markDone } = useWizardContext();
   const t = useT();
@@ -284,8 +294,6 @@ export function SubtitlesStep() {
   const [submitting, setSubmitting] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, ProviderDraft>>({});
   const loaded = useRef(new Set<string>());
-  // The failed save's toast says to fetch again and retry; a reload does that.
-  const saveErrorToast = useRef<string | number | undefined>(undefined);
 
   const providerList = useMemo(
     () => sortSubtitleProviders(providers.data?.providers ?? []),
@@ -422,15 +430,15 @@ export function SubtitlesStep() {
       }));
     }
     const reason = failures[0]!.reason;
-    saveErrorToast.current = toast.error(
-      reason instanceof Error ? reason.message : t("web.setup.subtitles.saveFailed"),
-    );
+    toast.error(reason instanceof Error ? reason.message : t("web.setup.subtitles.saveFailed"), {
+      id: SAVE_ERROR_TOAST,
+    });
   }
 
   function reloadEditor(config: SubtitleProviderConfig) {
     const name = config.provider_name;
-    // Without an id, dismiss would clear every toast on screen.
-    if (saveErrorToast.current !== undefined) toast.dismiss(saveErrorToast.current);
+    // The failed save's toast says to fetch again and retry; a reload does that.
+    toast.dismiss(SAVE_ERROR_TOAST);
     setDrafts((prev) => ({
       ...prev,
       [name]: { ...prev[name]!, loading: true, loadFailed: false },
