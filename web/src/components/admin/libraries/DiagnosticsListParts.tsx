@@ -29,10 +29,11 @@ import { cn } from "@/lib/utils";
 
 /*
  * Pieces shared by the diagnostics sections under the admin libraries list:
- * the table chrome they use from `lg` up and the card chrome below it.
+ * the table chrome they use from `lg` up (`xl` for the widest tables) and the
+ * card chrome below it.
  */
 
-/** Controls at least 44px tall below `lg`, where the sections show cards. */
+/** Controls at least 44px tall below `lg`, where every section shows cards. */
 export const TOUCH_CONTROL_CLASS = "max-lg:h-11!";
 
 /** A full-width labeled action at the bottom of a card. */
