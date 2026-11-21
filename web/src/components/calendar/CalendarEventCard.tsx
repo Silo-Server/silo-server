@@ -36,34 +36,40 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
         aria-label={event.title}
         className="block overflow-hidden rounded-xl"
       >
-        <div
-          className={`media-card-image relative aspect-[2/3] ${watched ? "opacity-60 grayscale" : ""}`}
-          style={
-            thumbhashUrl
-              ? {
-                  backgroundImage: `url(${thumbhashUrl})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }
-              : undefined
-          }
-        >
-          {event.poster_url && failedUrl !== event.poster_url ? (
-            <img
-              src={event.poster_url}
-              alt={event.title}
-              className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
-              loading="lazy"
-              onLoad={() => setLoaded(true)}
-              onError={() => setFailedUrl(event.poster_url ?? null)}
-            />
-          ) : (
-            !thumbhashUrl && (
-              // Every calendar entry that isn't a movie belongs to a series.
-              <DefaultArtwork mediaType={event.type === "movie" ? "movie" : "episode"} />
-            )
-          )}
-          <div className="from-background/70 pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t to-transparent opacity-90" />
+        <div className={`media-card-image relative aspect-[2/3] ${watched ? "bg-background" : ""}`}>
+          {/* A watched entry dims only its artwork; the badges and check mark
+              sit outside this layer so their labels keep full contrast. The
+              page background behind it keeps the dimmed artwork as dark as
+              when the whole card faded into the page. */}
+          <div
+            className={`absolute inset-0 ${watched ? "opacity-60 grayscale" : ""}`}
+            style={
+              thumbhashUrl
+                ? {
+                    backgroundImage: `url(${thumbhashUrl})`,
+                    backgroundSize: "cover",
+                    backgroundPosition: "center",
+                  }
+                : undefined
+            }
+          >
+            {event.poster_url && failedUrl !== event.poster_url ? (
+              <img
+                src={event.poster_url}
+                alt={event.title}
+                className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
+                loading="lazy"
+                onLoad={() => setLoaded(true)}
+                onError={() => setFailedUrl(event.poster_url ?? null)}
+              />
+            ) : (
+              !thumbhashUrl && (
+                // Every calendar entry that isn't a movie belongs to a series.
+                <DefaultArtwork mediaType={event.type === "movie" ? "movie" : "episode"} />
+              )
+            )}
+            <div className="from-background/70 pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t to-transparent opacity-90" />
+          </div>
           {event.badges.length > 0 && (
             <div className="absolute start-2.5 top-2.5 flex flex-wrap gap-1">
               {event.badges.map((badge) => (
