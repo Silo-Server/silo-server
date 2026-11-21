@@ -538,12 +538,12 @@ build compiles.
   and a new cgo import the node links fails the build.
 - **Node builds run only as a node.** `main` refuses every subcommand but
   `silo node`, and, after the transcode branch, any run without
-  `MODE=transcode` (`nodeBuild`, `cmd/silo/build_node.go`).
+  `MODE=transcode` (`nodebuild.Node`, `internal/nodebuild/node.go`).
 - **Version.** `silo node version` and the installer name the build as Admin
   shows the server's and each node's: the build number and the display
   revision.
 - **Installer.** `silo node install` and `silo node uninstall`
-  (`cmd/silo/node_command.go`; launchd and file work in
+  (`internal/nodeinstall/node_command.go`; launchd and file work in
   `node_install_darwin.go`) manage one per-user LaunchAgent,
   `org.siloserver.node`, and nothing system-wide. The cgo darwin build refuses
   to install itself, since it loads Homebrew libraries, and other platforms
@@ -554,19 +554,28 @@ build compiles.
 | `~/Library/Application Support/Silo/node/silo` | The binary. |
 | `~/Library/Application Support/Silo/node/node.env` | Mode 0600. The installer manages `MODE=transcode`, `SILO_CORE_URL`, `SILO_NODE_KEY_FILE` naming `node-key`, and `PORT` (default 8100, since Docker Desktop often publishes 8080). Any other variable in the file, such as one from [Startup and environment](#startup-and-environment), is kept across reruns, except `SILO_NODE_KEY`, which would clash with the key file. |
 | `~/Library/Application Support/Silo/node/node-key` | Mode 0600: the node key. |
-| `~/Library/LaunchAgents/org.siloserver.node.plist` | Runs the binary with `-env` and `node.env`, `RunAtLoad`, `KeepAlive`, and an `ExitTimeOut` of the default drain timeout plus a minute (660 seconds). |
+| `~/Library/LaunchAgents/org.siloserver.node.plist` | Runs the binary with `-env` and `node.env`, `RunAtLoad`, `KeepAlive`, and an `ExitTimeOut` of the drain timeout `node.env` sets plus a minute (660 seconds with the default). |
+| `~/Library/Application Support/Silo/node-install.lock` | Mode 0600, in a 0700 folder: the lock every install and uninstall holds. It sits outside the node's folder, which uninstall removes while it holds the lock, and is never removed, so two runs always lock the same file. |
 | `~/Library/Logs/Silo/node.log` | The node's output. Uninstall keeps it. |
 
 An install is also the upgrade: a rerun takes every value its flags leave out
 from the existing install, and replaces the binary unless it runs from the
-installed one. It checks everything it can before it writes anything: the
-flags and key, FFmpeg (Homebrew's `ffmpeg-full`, as `playback`'s discovery
+installed one. `--key -` asks for the key at the hidden prompt a first install
+without `--key` gets, so a rerun can replace the key without it reaching the
+command line. It checks everything it can before it writes anything: the
+flags and key, a `SILO_NODE_DRAIN_TIMEOUT` the node would ignore
+(`transcodenode.ParseDrainTimeout`, which the node parses it with), FFmpeg (Homebrew's `ffmpeg-full`, as `playback`'s discovery
 finds it), the server's `GET /api/v1/ready` (a `200` within five seconds, no
 redirects, so a server that is restarting or migrating stops the run), and the
-port (nothing else may answer on it). It then holds a lock file in the
-install directory, stages the new files beside the old ones, boots the old job
-out (SIGTERM, so it drains), swaps the files in, bootstraps the job, and waits
-up to 60 seconds for the node's `GET /api/v1/health`.
+port (nothing else may answer on it). It then takes the lock, reads the
+install again under it, stages the new files beside the old ones, boots the
+old job out (SIGTERM, so it drains), swaps the files in, bootstraps the job,
+and waits up to 60 seconds for the node's `GET /api/v1/health`. A stop waits
+for the stopped install's drain timeout plus two minutes, a minute past
+launchd's `ExitTimeOut`. The swap moves each file to `<file>.old` and keeps
+it until the new node is ready; a `<file>.old` already there is the last
+working file of a run that stopped mid-swap, so it stays the backup and the
+unverified file in its place is dropped.
 
 The node is ready when that answers `200` with a `node_control_version`, which
 neither the API server's health nor a proxy's carries, and without
@@ -575,13 +584,16 @@ restart, and the installer says so. The node opens its port only once the core
 accepted its key, so a ready node also shows that the key and core URL work.
 
 When the new job does not start or become ready, or the run is interrupted
-after the files were swapped, the previous files and job come back, with a
-context of their own, and the installer exits non-zero with the end of the
-log. A stop interrupted, or failed in launchctl, after the bootout went out
+after the files were swapped, the previous files come back, with a context of
+their own, and the previous job is bootstrapped only if launchd had it before
+the install, so a node that was stopped stays stopped. The installer exits
+non-zero with the end of the log. A stop interrupted, or failed in launchctl, after the bootout went out
 waits until launchd lets the old job go and bootstraps its plist again, so the
 old node is not left stopped. Only `launchctl print`'s "not found" status
-(113) counts as a job launchd does not have, and each launchctl call has its
-own timeout.
+(113) counts as a job launchd does not have. A bootout that answers
+`EINPROGRESS` (36), a job still shutting down, went out, and the installer
+waits for the job to go as it does after a bootout that timed out. Each
+launchctl call has its own timeout.
 
 ## Rate limit
 

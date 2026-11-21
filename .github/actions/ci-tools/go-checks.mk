@@ -17,7 +17,7 @@ lint:
 # cross-build fails on a new cgo import or a gap in imageutil's node stub.
 vet:
 	go vet ./...
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go vet -tags silo_node ./cmd/silo/ ./internal/imageutil/ ./web/
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go vet -tags silo_node ./cmd/silo/ ./internal/nodeinstall/ ./internal/nodebuild/ ./internal/imageutil/ ./web/
 	$(MAKE) -f Makefile build-node-darwin NODE_DARWIN_OUT=/dev/null
 
 # Package assertions belong to the tests lane; these check generated artifacts.

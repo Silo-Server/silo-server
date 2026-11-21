@@ -104,7 +104,9 @@ import (
 	_ "github.com/Silo-Server/silo-server/internal/metadata/nfo"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodebuild"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/nodeinstall"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
@@ -158,7 +160,9 @@ import (
 	siloweb "github.com/Silo-Server/silo-server/web"
 )
 
-const serverModeTranscode = "transcode"
+// nodeBuildOnly is what a node build answers anything but a transcode node
+// run or a "silo node" subcommand.
+const nodeBuildOnly = "this silo build runs only as a transcode node: install it with `silo node install`, or set MODE=transcode"
 
 // serverModeProxy is MODE for a proxy node.
 const serverModeProxy = "proxy"
@@ -803,7 +807,7 @@ func addRedisBootstrapSettings(redisURL, redisURLVar string, configured map[stri
 func main() {
 	// A node build has no image processing or web app, so it runs no
 	// subcommand but its own; flags still reach the transcode node.
-	if nodeBuild && len(os.Args) > 1 && os.Args[1] != "node" && !strings.HasPrefix(os.Args[1], "-") {
+	if nodebuild.Node && len(os.Args) > 1 && os.Args[1] != "node" && !strings.HasPrefix(os.Args[1], "-") {
 		log.Fatal(nodeBuildOnly)
 	}
 	var storageAdmission *pglock.NodeAdmission
@@ -878,7 +882,7 @@ func main() {
 	}
 
 	if len(os.Args) > 1 && os.Args[1] == "node" {
-		if err := runNodeCommand(os.Args[2:], os.Stdin, os.Stdout); err != nil {
+		if err := nodeinstall.Run(os.Args[2:], os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "silo node: %v\n", err)
 			os.Exit(1)
 		}
@@ -918,7 +922,7 @@ func main() {
 		runTranscodeNode()
 		return
 	}
-	if nodeBuild {
+	if nodebuild.Node {
 		log.Fatal(nodeBuildOnly)
 	}
 

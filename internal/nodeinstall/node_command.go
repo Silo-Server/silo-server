@@ -1,4 +1,6 @@
-package main
+// Package nodeinstall is the "silo node" command, which installs a Mac's
+// transcode node as a LaunchAgent.
+package nodeinstall
 
 import (
 	"bytes"
@@ -8,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -19,6 +22,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
 	"github.com/Silo-Server/silo-server/internal/envutil"
+	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
 
 const nodeCommandUsage = `usage:
@@ -39,12 +43,10 @@ place.
   --server URL   the Silo server's URL as this Mac reaches it, such as
                  http://localhost:8090 (required the first time)
   --key KEY      the key Admin > Nodes issued for this node (asked for when
-                 omitted the first time)
+                 omitted the first time). --key - asks for it at a hidden
+                 prompt, which replaces the installed key without putting
+                 it on the command line
   --port N       the port the node listens on (default 8100)`
-
-// nodeBuildOnly is what a node build answers anything but a transcode node
-// run or a "silo node" subcommand.
-const nodeBuildOnly = "this silo build runs only as a transcode node: install it with `silo node install`, or set MODE=transcode"
 
 // nodeLaunchdLabel names the node's LaunchAgent.
 const nodeLaunchdLabel = "org.siloserver.node"
@@ -53,12 +55,40 @@ const nodeLaunchdLabel = "org.siloserver.node"
 // listens on 8080, which Docker Desktop often publishes already.
 const defaultNodeInstallPort = 8100
 
-// nodeExitTimeout is how long launchd waits after SIGTERM before it kills the
-// node: the default drain budget and a minute to shut down.
-const nodeExitTimeout = defaultNodeDrainTimeout + time.Minute
+// nodeKeyPrompt is the --key value that asks for the key at a hidden prompt.
+const nodeKeyPrompt = "-"
 
-// runNodeCommand serves "silo node install|uninstall|version".
-func runNodeCommand(args []string, in io.Reader, out io.Writer) error {
+// nodeExitTimeout is how long launchd waits after SIGTERM before it kills a
+// node that drains for drain: the drain and a minute to shut down.
+func nodeExitTimeout(drain time.Duration) time.Duration {
+	return addCapped(drain, time.Minute)
+}
+
+// nodeStopTimeout bounds the installer's wait for a node that drains for
+// drain to exit: launchd's ExitTimeOut and a minute more.
+func nodeStopTimeout(drain time.Duration) time.Duration {
+	return addCapped(drain, 2*time.Minute)
+}
+
+func addCapped(d, extra time.Duration) time.Duration {
+	if d > math.MaxInt64-extra {
+		return math.MaxInt64
+	}
+	return d + extra
+}
+
+// nodeEnvDrainTimeout is the drain the node takes from node.env's other
+// variables. A value the node would not accept is an error.
+func nodeEnvDrainTimeout(extra map[string]string) (time.Duration, error) {
+	drain, err := transcodenode.ParseDrainTimeout(extra[transcodenode.EnvDrainTimeout])
+	if err != nil {
+		return 0, fmt.Errorf("node.env: %w", err)
+	}
+	return drain, nil
+}
+
+// Run serves "silo node install|uninstall|version".
+func Run(args []string, in io.Reader, out io.Writer) error {
 	if len(args) == 0 {
 		return errors.New(nodeCommandUsage)
 	}
@@ -154,7 +184,7 @@ func mergeNodeInstall(stored, given nodeInstallSettings) nodeInstallSettings {
 
 // nodeEnvManaged are the node.env variables the installer writes. A node key
 // set directly would clash with the key file, so it is dropped as well.
-var nodeEnvManaged = []string{"MODE", envCoreURL, envNodeKey + envutil.SecretFileSuffix, "PORT", envNodeKey}
+var nodeEnvManaged = []string{"MODE", transcodenode.EnvCoreURL, transcodenode.EnvNodeKey + envutil.SecretFileSuffix, "PORT", transcodenode.EnvNodeKey}
 
 // storedNodeInstall reads an existing install's settings from its node.env
 // and node-key contents. extra holds the other variables in node.env, which
@@ -164,7 +194,7 @@ func storedNodeInstall(env, key []byte) (stored nodeInstallSettings, extra map[s
 	if err != nil {
 		return nodeInstallSettings{}, nil, fmt.Errorf("node.env: %w", err)
 	}
-	stored = nodeInstallSettings{server: strings.TrimSpace(values[envCoreURL]), key: strings.TrimSpace(string(key))}
+	stored = nodeInstallSettings{server: strings.TrimSpace(values[transcodenode.EnvCoreURL]), key: strings.TrimSpace(string(key))}
 	if port, err := strconv.Atoi(strings.TrimSpace(values["PORT"])); err == nil {
 		stored.port = port
 	}
@@ -192,7 +222,7 @@ func nodeInstallPathsIn(home string) nodeInstallPaths {
 		binary: filepath.Join(dir, "silo"),
 		env:    filepath.Join(dir, "node.env"),
 		key:    filepath.Join(dir, "node-key"),
-		lock:   filepath.Join(dir, ".install.lock"),
+		lock:   filepath.Join(filepath.Dir(dir), "node-install.lock"), // outside dir, which uninstall removes under the lock
 		log:    filepath.Join(home, "Library", "Logs", "Silo", "node.log"),
 		plist:  filepath.Join(home, "Library", "LaunchAgents", nodeLaunchdLabel+".plist"),
 	}
@@ -203,9 +233,9 @@ func nodeInstallPathsIn(home string) nodeInstallPaths {
 // order. The node takes everything else from the server.
 func renderNodeEnv(s nodeInstallSettings, keyFile string, extra map[string]string) ([]byte, error) {
 	entries := [][2]string{
-		{"MODE", serverModeTranscode},
-		{envCoreURL, s.server},
-		{envNodeKey + envutil.SecretFileSuffix, keyFile},
+		{"MODE", transcodenode.Mode},
+		{transcodenode.EnvCoreURL, s.server},
+		{transcodenode.EnvNodeKey + envutil.SecretFileSuffix, keyFile},
 		{"PORT", strconv.Itoa(s.port)},
 	}
 	for _, name := range slices.Sorted(maps.Keys(extra)) {
@@ -223,18 +253,24 @@ func renderNodeEnv(s nodeInstallSettings, keyFile string, extra map[string]strin
 }
 
 // quoteNodeEnv quotes value for godotenv, which the node reads node.env with:
-// in double quotes, with $ escaped so it is not expanded. godotenv cannot
-// read back every backslash or double quote, so those are refused, with
-// control characters.
+// in double quotes, with $ escaped so it is not expanded, or in single quotes,
+// which expand nothing, when it holds a double quote. godotenv cannot read
+// back every backslash, nor a value with both quotes, so those are refused,
+// with control characters.
 func quoteNodeEnv(value string) (string, error) {
-	if strings.ContainsAny(value, `"\`) || strings.ContainsFunc(value, unicode.IsControl) {
-		return "", errors.New("the value holds a double quote, a backslash or a control character, which node.env cannot carry")
+	if strings.Contains(value, `\`) || strings.ContainsFunc(value, unicode.IsControl) ||
+		(strings.Contains(value, `"`) && strings.Contains(value, "'")) {
+		return "", errors.New("the value holds a backslash, a control character, or both kinds of quote, which node.env cannot carry")
+	}
+	if strings.Contains(value, `"`) {
+		return "'" + value + "'", nil
 	}
 	return `"` + strings.ReplaceAll(value, "$", `\$`) + `"`, nil
 }
 
-// renderNodePlist writes the LaunchAgent that runs the installed node.
-func renderNodePlist(p nodeInstallPaths) []byte {
+// renderNodePlist writes the LaunchAgent that runs the installed node, which
+// drains for drain on SIGTERM.
+func renderNodePlist(p nodeInstallPaths, drain time.Duration) []byte {
 	var b bytes.Buffer
 	str := func(s string) {
 		b.WriteString("<string>")
@@ -269,7 +305,7 @@ func renderNodePlist(p nodeInstallPaths) []byte {
 	key("ProcessType")
 	str("Interactive")
 	key("ExitTimeOut")
-	fmt.Fprintf(&b, "<integer>%d</integer>\n", int(nodeExitTimeout/time.Second))
+	fmt.Fprintf(&b, "<integer>%d</integer>\n", int(nodeExitTimeout(drain)/time.Second))
 	b.WriteString("</dict>\n</plist>\n")
 	return b.Bytes()
 }

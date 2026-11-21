@@ -73,6 +73,7 @@ COPY migrations/ migrations/
 COPY contracts/ contracts/
 COPY cmd/ cmd/
 COPY web/embed.go web/embed_node.go web/
+RUN --network=none CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags silo_node -trimpath -o /dev/null ./cmd/silo/
 ARG BUILD_REVISION
 ARG BUILD_DIRTY=false
 ARG BUILD_NUMBER

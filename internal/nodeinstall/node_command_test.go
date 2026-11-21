@@ -1,4 +1,4 @@
-package main
+package nodeinstall
 
 import (
 	"encoding/xml"
@@ -6,15 +6,24 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/joho/godotenv"
+
+	"github.com/Silo-Server/silo-server/internal/envutil"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
 
 // The node.env the installer writes is one the node starts from, with the key
 // read from node-key, even under a home whose path needs quoting.
 func TestRenderNodeEnvStartsTheNode(t *testing.T) {
-	key := nodeKeyFor(t, testTranscodeNodeID)
+	key, err := nodepool.GenerateNodeKey(6)
+	if err != nil {
+		t.Fatal(err)
+	}
 	paths := nodeInstallPathsIn(filepath.Join(t.TempDir(), "home $USER #1"))
 	if err := os.MkdirAll(paths.dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -31,7 +40,7 @@ func TestRenderNodeEnvStartsTheNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"MODE": serverModeTranscode, envCoreURL: settings.server, "SILO_NODE_KEY_FILE": paths.key, "PORT": "8100"}
+	want := map[string]string{"MODE": transcodenode.Mode, transcodenode.EnvCoreURL: settings.server, "SILO_NODE_KEY_FILE": paths.key, "PORT": "8100"}
 	if len(values) != len(want) {
 		t.Fatalf("node.env = %v, want exactly %v", values, want)
 	}
@@ -40,9 +49,16 @@ func TestRenderNodeEnvStartsTheNode(t *testing.T) {
 			t.Fatalf("%s = %q, want %q", name, values[name], value)
 		}
 	}
-	got, err := loadTranscodeNodeEnv(func(name string) string { return values[name] })
-	if err != nil || got.nodeKey != key || got.listen != ":8100" || got.coreURL != settings.server {
-		t.Fatalf("node env = %+v, %v; want the installed key, URL and port", got, err)
+	// The node reads its key as envutil.LookupSecret finds it, from node-key.
+	gotKey, _, err := envutil.LookupSecret(func(name string) string { return values[name] }, transcodenode.EnvNodeKey)
+	if err != nil || strings.TrimSpace(gotKey) != key {
+		t.Fatalf("node key = %q, %v; want the installed key", gotKey, err)
+	}
+	if _, err := nodepool.ParseNodeKey(strings.TrimSpace(gotKey)); err != nil {
+		t.Fatalf("installed key: %v", err)
+	}
+	if _, ok := transcodenode.ParseCoreURL(values[transcodenode.EnvCoreURL]); !ok {
+		t.Fatalf("%s = %q, not a URL the node accepts", transcodenode.EnvCoreURL, values[transcodenode.EnvCoreURL])
 	}
 
 	// A rerun reads the same settings back, and keeps a variable an operator
@@ -88,7 +104,8 @@ func TestMergeNodeInstallFlags(t *testing.T) {
 	}
 }
 
-// The plist's paths survive XML escaping.
+// The plist's paths survive XML escaping, and launchd waits for the drain
+// node.env sets.
 func TestRenderNodePlistEscapesPaths(t *testing.T) {
 	paths := nodeInstallPathsIn("/Users/a & <b>")
 	var doc struct {
@@ -100,7 +117,7 @@ func TestRenderNodePlistEscapesPaths(t *testing.T) {
 			} `xml:",any"`
 		} `xml:"dict"`
 	}
-	if err := xml.Unmarshal(renderNodePlist(paths), &doc); err != nil {
+	if err := xml.Unmarshal(renderNodePlist(paths, 15*time.Minute), &doc); err != nil {
 		t.Fatal(err)
 	}
 	values := map[string][]string{}
@@ -117,5 +134,59 @@ func TestRenderNodePlistEscapesPaths(t *testing.T) {
 	}
 	if got := values["StandardErrorPath"]; !slices.Equal(got, []string{paths.log}) {
 		t.Fatalf("StandardErrorPath = %q, want %q", got, paths.log)
+	}
+	if got := values["ExitTimeOut"]; !slices.Equal(got, []string{"960"}) {
+		t.Fatalf("ExitTimeOut = %q, want 960 (a 15-minute drain and a minute)", got)
+	}
+}
+
+// The installer takes node.env's drain as the node does, and refuses a value
+// the node would ignore.
+func TestNodeEnvDrainTimeout(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  time.Duration
+		ok    bool
+	}{
+		{"", transcodenode.DefaultDrainTimeout, true},
+		{"0", 0, true},
+		{"900", 15 * time.Minute, true},
+		{" 2h ", 2 * time.Hour, true},
+		{"-5m", 0, false},
+		{"soon", 0, false},
+	} {
+		extra := map[string]string{}
+		if test.value != "" {
+			extra[transcodenode.EnvDrainTimeout] = test.value
+		}
+		got, err := nodeEnvDrainTimeout(extra)
+		if got != test.want || (err == nil) != test.ok {
+			t.Errorf("nodeEnvDrainTimeout(%q) = %v, %v; want %v, ok %v", test.value, got, err, test.want, test.ok)
+		}
+	}
+}
+
+// A kept node.env value with a double quote is written so the node reads it
+// back unchanged; one that cannot round-trip is refused.
+func TestRenderNodeEnvKeepsQuotedValues(t *testing.T) {
+	settings := nodeInstallSettings{server: "http://localhost:8090", key: "k", port: 8100}
+	extra := map[string]string{"SILO_NODE_NAME": `Mac "Studio"`, "OTHER": "it's $HOME"}
+	env, err := renderNodeEnv(settings, "/k", extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := godotenv.Unmarshal(string(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range extra {
+		if values[name] != value {
+			t.Fatalf("%s = %q, want %q", name, values[name], value)
+		}
+	}
+	for _, value := range []string{`both " and '`, `back\slash`, "new\nline"} {
+		if _, err := renderNodeEnv(settings, "/k", map[string]string{"X": value}); err == nil {
+			t.Errorf("renderNodeEnv kept %q, which node.env cannot carry", value)
+		}
 	}
 }
