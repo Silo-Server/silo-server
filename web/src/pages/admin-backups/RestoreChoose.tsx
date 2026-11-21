@@ -29,6 +29,7 @@ import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 
 import { OmittedAccounts } from "./BackupWarningDetails";
 import { Disclosure } from "./Disclosure";
+import { PlanSentences } from "./RestoreReview";
 import { ItemRow, SameRow, type ToggleKeys } from "./RestoreRows";
 import { AccountRow, DataTypesPanel } from "./RestoreUsers";
 import {
@@ -240,13 +241,20 @@ function LibraryGroupRows({
         open={open}
         onOpenChange={setOpen}
         controls={listId}
-        className="text-foreground gap-1.5 text-[13px] font-medium"
+        className="text-foreground max-w-full gap-1.5 text-[13px] font-medium"
       >
         {/* One run of text, so the count follows the name's last word. A name
             with no spaces still breaks to fit. The name keeps its own direction,
             so a name in another script can't pull the count across it. The count
-            is an inline block, so it moves to the next line whole. */}
-        <span className="wrap-anywhere">
+            is an inline block, so it moves to the next line whole. The button and
+            the text stay within the row, which clips sideways the part of a name
+            that can't wrap, such as one long run of joined emoji. The 0.25em of
+            padding, offset by a negative margin, keeps letters whole whose ink
+            reaches past their edge. */}
+        <span
+          title={name}
+          className="-mx-[0.25em] min-w-0 overflow-x-clip px-[0.25em] wrap-anywhere"
+        >
           {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
           <span className="bidi-text me-1">{name}</span>{" "}
           <span className="text-muted-foreground inline-block font-normal tabular-nums">
@@ -669,10 +677,12 @@ export function RestoreChoose({
           background playback bar, and for the 6rem of page padding below this
           grid: without that, the end of the page pushes the panel back up
           under the control. A longer summary scrolls on its own, above
-          Review. */}
+          Review. min-w-0: on a narrow screen the summary shares the sections'
+          column, so a sentence it can't wrap would otherwise widen every
+          section past the screen. */}
       <aside
         aria-labelledby="restore-summary-heading"
-        className="surface-panel-subtle h-fit space-y-4 rounded-xl p-5 lg:sticky lg:top-[calc(4rem+var(--impersonation-banner-height))] lg:flex lg:max-h-[calc(100dvh-10rem-var(--impersonation-banner-height)-var(--playback-bar-clearance,0px))] lg:flex-col"
+        className="surface-panel-subtle h-fit min-w-0 space-y-4 rounded-xl p-5 lg:sticky lg:top-[calc(4rem+var(--impersonation-banner-height))] lg:flex lg:max-h-[calc(100dvh-10rem-var(--impersonation-banner-height)-var(--playback-bar-clearance,0px))] lg:flex-col"
       >
         {/* The 4px inset keeps the section buttons' focus rings clear of this
             box's clipping edge. The fade covers only the box's bottom padding,
@@ -690,15 +700,7 @@ export function RestoreChoose({
               {t("web.admin.backups.restore.choose.nothingChosen")}
             </p>
           ) : (
-            <ul className="list-disc space-y-1.5 ps-5 text-sm wrap-anywhere">
-              {plan.flatMap((group) =>
-                group.sentences.map((sentence, position) => (
-                  <li key={`${group.section}-${position}`}>
-                    {t("web.admin.backups.restore.plan.sentence", { sentence })}
-                  </li>
-                )),
-              )}
-            </ul>
+            <PlanSentences sentences={plan.flatMap((group) => group.sentences)} />
           )}
           <p className="text-muted-foreground text-[13px] leading-relaxed">
             {t("web.admin.backups.restore.choose.recoveryPoint")}

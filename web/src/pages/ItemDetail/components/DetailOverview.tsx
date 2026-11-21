@@ -41,6 +41,11 @@ export default function DetailOverview({
   const textRef = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
+  // Announce "Translated by AI" only after a translation ran in this view. A
+  // description that arrives already translated, such as on navigation to
+  // another item, shows the label without announcing it.
+  const [sawTranslation, setSawTranslation] = useState(false);
+  if (translating && !sawTranslation) setSawTranslation(true);
 
   // Only offer "More" when the clamp actually hides text; re-check on resize
   // because the line count depends on the column width.
@@ -72,8 +77,13 @@ export default function DetailOverview({
 
   return (
     <div className="detail-hero-description max-w-2xl">
+      {/* dir="auto" takes the first paragraph's direction. A collection's
+          description keeps its line breaks, so when a later paragraph runs the
+          other way and is clamped, Firefox and WebKit cut it on the wrong side;
+          no one direction suits every paragraph of one clamped block. */}
       <p
         ref={textRef}
+        dir="auto"
         className={`bidi-text text-muted-foreground leading-7 ${
           compact ? "text-sm" : "text-foreground/72 text-sm sm:text-[0.9375rem]"
         } ${clamp && !expanded ? CLAMP_CLASSES[clampLines] : ""}`}
@@ -91,10 +101,14 @@ export default function DetailOverview({
             {expanded ? t("web.detail.overview.less") : t("web.detail.overview.more")}
           </button>
         )}
-        {translating && (
-          <TranslatingStatus label={t("web.detail.translation.translating")} className="mt-1" />
-        )}
-        {!translating && machineTranslated && <MachineTranslatedLabel className="mt-1" />}
+        <TranslatingStatus
+          translating={translating}
+          label={t("web.detail.translation.translating")}
+          className="mt-1"
+        >
+          {sawTranslation && machineTranslated && <MachineTranslatedLabel />}
+        </TranslatingStatus>
+        {!sawTranslation && machineTranslated && <MachineTranslatedLabel className="mt-1" />}
         {!translating && onTranslate && (
           <button
             type="button"

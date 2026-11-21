@@ -1094,6 +1094,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                   </Avatar>
                 </span>
                 <span
+                  dir="auto"
                   className={`text-sidebar-foreground sidebar-fade max-w-[180px] truncate text-[0.8125rem] font-medium ${
                     showLabels ? "opacity-100" : "opacity-0"
                   }`}
@@ -1116,10 +1117,20 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     {(profile?.name ?? user?.username ?? "?").charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
+                {/* w-fit keeps a short name on the start side; the column would
+                    stretch it, and dir="auto" would then push it to the far edge. */}
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate text-[0.875rem] font-semibold">{displayName}</span>
+                  <span
+                    dir="auto"
+                    className="w-fit max-w-full truncate text-[0.875rem] font-semibold"
+                  >
+                    {displayName}
+                  </span>
                   {profile && user?.username && user.username !== profile.name && (
-                    <span className="text-muted-foreground truncate text-[0.6875rem] font-normal">
+                    <span
+                      dir="auto"
+                      className="text-muted-foreground w-fit max-w-full truncate text-[0.6875rem] font-normal"
+                    >
                       {user.username}
                     </span>
                   )}
