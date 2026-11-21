@@ -140,7 +140,8 @@ export function ListRow({
       {collapsed ? (
         <div
           aria-hidden
-          className="text-muted-foreground grid h-[30px] w-12 place-items-center sm:w-[74px]"
+          // The same tone as the collapsed text beside it.
+          className="text-foreground/65 grid h-[30px] w-12 place-items-center sm:w-[74px]"
         >
           <EyeOff className="size-[17px]" />
         </div>
@@ -149,7 +150,8 @@ export function ListRow({
       )}
       <div className={cn("min-w-0", onOpen && "cursor-pointer")} onClick={onOpen}>
         {collapsed ? (
-          <p className="text-muted-foreground truncate text-[13.5px]">
+          // Not text-muted-foreground: high contrast pins that brighter than the /80 name.
+          <p className="text-foreground/65 truncate text-[13.5px]">
             <b className="text-foreground/80 font-semibold">{title}</b>
             {collapsedText}
           </p>
