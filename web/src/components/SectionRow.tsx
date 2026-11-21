@@ -70,11 +70,11 @@ function SectionPinButton({
       {/* Unpinned, `pointer-reveal` hides the button only under a mouse, so it
           stays visible on touch screens and appears on keyboard focus. The
           carousel isn't a `group/row`, so the group-hover class reveals it
-          when the row is hovered. The `after:` inset widens the 28px button to
-          a 44px touch target without changing its look. */}
+          when the row is hovered. The `after:` inset makes the 28px button a
+          44px touch target without changing its look. */}
       <button
         onClick={() => togglePin(libraryId, { type: "section", id: sectionId, label })}
-        className={`relative rounded-full p-1.5 transition-colors after:absolute after:-inset-2 after:content-[''] ${
+        className={`relative rounded-full p-1.5 transition-colors after:absolute after:-inset-2 ${
           pinned
             ? "text-primary hover:text-primary/80"
             : "text-muted-foreground/70 hover:bg-accent/60 hover:text-muted-foreground pointer-reveal group-hover/carousel:opacity-100"
