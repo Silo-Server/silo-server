@@ -1723,6 +1723,7 @@ function IPLookupDialog({
             type="text"
             placeholder={t("web.admin.activity.ipLookup.placeholder")}
             aria-label={t("web.admin.activity.ipLookup.placeholder")}
+            dir={ipSearch ? "ltr" : undefined}
             value={ipSearch}
             onChange={(e) => setIPSearch(e.target.value)}
             className="placeholder:font-ui max-w-xs font-mono text-sm"
