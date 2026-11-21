@@ -2637,7 +2637,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     /* How far fixed chrome at the foot of a page rises, and how much the admin
        shell pads the end of its pages, to clear whichever background playback
        bar shows. useRootHeightProperty measures each bar, bottom inset
-       included, on the root while it shows. */
+       included, on the root while it shows. The audiobook bar's height stays
+       while Now Listening covers it, until playback ends. */
     --playback-bar-clearance: max(var(--watch-bar-height, 0px), var(--audiobook-bar-height, 0px));
     /* The impersonation banner pins to the top of the viewport above every
        route, and ImpersonationBanner measures its height here while it shows.
