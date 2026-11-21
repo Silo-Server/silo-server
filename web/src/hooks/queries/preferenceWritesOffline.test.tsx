@@ -1,6 +1,6 @@
 // A preference write held until reconnect replaces whatever another browser
-// saved for the same setting or title in the meantime, so these writes go out
-// at once and fail while offline.
+// saved for the same setting or title in the meantime, so these writes are
+// refused unsent while offline.
 import { createElement, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -16,8 +16,9 @@ import {
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "./subtitles";
 import { useDeleteAudioPreference, useSetAudioPreference } from "./trackPreferences";
 import type { VersionAudioTrack } from "@/api/types";
+import { SettingWriteOfflineError } from "./settingWriteOffline";
 
-type Mutation = { isError: boolean };
+type Mutation = { isError: boolean; error: unknown };
 type Row = { name: string; useHook: () => Mutation; send: (hook: Mutation) => void };
 function row<T extends Mutation>(useHook: () => T, send: (hook: T) => void): Row {
   return { name: useHook.name, useHook, send: send as (hook: Mutation) => void };
@@ -64,12 +65,15 @@ it.each([
   row(useDeleteSubtitlePreference, (h) => h.mutate("series-a")),
   row(useSetAudioPreference, (h) => h.mutate({ prefId: "series-a", trackIndex: 1, track })),
   row(useDeleteAudioPreference, (h) => h.mutate("series-a")),
-])("$name fails an offline write at once instead of holding it", async ({ useHook, send }) => {
+])("$name refuses an offline write unsent instead of holding it", async ({ useHook, send }) => {
   onlineManager.setOnline(false);
-  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+  const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+  vi.stubGlobal("fetch", fetchMock);
   const { result } = renderHook(useHook, { wrapper: harness() });
   act(() => send(result.current));
   await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(result.current.error).toBeInstanceOf(SettingWriteOfflineError);
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 // The browser can report offline while an earlier request for the same title
