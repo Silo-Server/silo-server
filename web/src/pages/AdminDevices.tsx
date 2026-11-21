@@ -1074,7 +1074,7 @@ function SavedViewRow({
       <span
         className={cn(
           "font-mono text-[10.5px] tabular-nums",
-          active ? "text-foreground/80" : "text-muted-foreground",
+          active ? "text-foreground" : "text-muted-foreground",
         )}
       >
         {numberText(count)}
@@ -1115,7 +1115,7 @@ function FacetCheckbox({
       <span
         className={cn(
           "font-mono text-[10.5px] tabular-nums",
-          checked ? "text-foreground/80" : "text-muted-foreground",
+          checked ? "text-foreground" : "text-muted-foreground",
         )}
       >
         {numberText(count)}
