@@ -305,6 +305,20 @@ export function effectiveValue(
   return value !== undefined ? value : field.default_value;
 }
 
+/** Whether a field holds a secret, which renders masked. */
+export function isSecretField(field: PluginAdminFormField): boolean {
+  return field.secret || field.control === "PASSWORD";
+}
+
+/**
+ * Whether a field renders as a multi-line text box. A secret never does: a
+ * textarea can't mask what is typed, so a secret stays a masked single-line
+ * input even when its plugin also marks it multiline.
+ */
+export function rendersMultiline(field: PluginAdminFormField): boolean {
+  return !isSecretField(field) && (field.control === "TEXTAREA" || field.multiline);
+}
+
 /**
  * The `dir` of a plugin form's text control on a right-to-left page. Typed
  * values are mostly machine strings (paths, URLs, LDAP filters, client IDs)
@@ -381,7 +395,7 @@ export function buildSchemaValues(
     const fieldType = ownValue(fieldTypes, field.key);
     const coerced = coerceFieldValue(field, rawSource, fieldType);
     if (coerced === undefined) {
-      if (options?.explicitClears && !field.secret && field.control !== "PASSWORD") {
+      if (options?.explicitClears && !isSecretField(field)) {
         out[field.key] = clearedFieldValue(field, fieldType);
       }
       continue;

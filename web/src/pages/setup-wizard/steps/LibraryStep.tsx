@@ -163,7 +163,9 @@ export function LibraryStep() {
               >
                 <Icon className="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{library.name}</p>
+                  <p dir="auto" className="w-fit max-w-full truncate text-sm font-medium">
+                    {library.name}
+                  </p>
                   {/* The paths cut themselves short, so in a right-to-left language a
                       long list still shows its first folders; whitespace-pre keeps the
                       space before them, which a flex item would drop. The type keeps

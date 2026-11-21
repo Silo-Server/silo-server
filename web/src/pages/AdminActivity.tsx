@@ -103,6 +103,14 @@ const SORT_DESC_MARK = "▼";
 const ROW_LINK_CLASS =
   "rounded-sm decoration-1 underline-offset-3 transition-colors hover:text-primary hover:underline active:underline focus-visible:text-primary focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 /**
+ * Truncates a row link with "…". Not `truncate`: its `overflow: hidden` clips
+ * the text to the link's rounded corners, which cuts off a first or last
+ * letter's descender (the "j" in "jordan") at some row offsets. Clipping only
+ * the inline axis keeps the corners out of it. `min-w-0` lets a flex item
+ * shrink, which `overflow: hidden` used to do.
+ */
+const ROW_LINK_TRUNCATE_CLASS = "min-w-0 overflow-x-clip text-ellipsis whitespace-nowrap";
+/**
  * A clickable row's highlight and lit expand chevron, held back while the
  * pointer is on a link or a button that does something else; the expand
  * controls keep them. Uses the app's pointer-gated hover variant.
@@ -214,7 +222,9 @@ function NodeFilterMenu({
         {selectedNode ? (
           <>
             <span className="text-muted-foreground">{selectedNode.label}</span>
-            <span className="truncate">{selectedNode.name}</span>
+            <span dir="auto" className="truncate">
+              {selectedNode.name}
+            </span>
           </>
         ) : (
           t("web.admin.activity.route.node")
@@ -223,8 +233,11 @@ function NodeFilterMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
+        // The cap and the padding keep a long node name's menu inside the screen with even
+        // margins, so the name is cut instead of pushing the menu past the edge.
+        collisionPadding={16}
         aria-label={t("web.admin.activity.summary.byNode")}
-        className="min-w-56"
+        className="max-w-[calc(100vw-2rem)] min-w-56"
       >
         {groups.map((group, index) => (
           <div key={group[0]!.kind} role="group" aria-label={group[0]!.label}>
@@ -239,7 +252,9 @@ function NodeFilterMenu({
                 onCheckedChange={(checked) => onSelect(checked ? node.key : null)}
                 className="text-[13px]"
               >
-                <span className="truncate">{node.name}</span>
+                <span dir="auto" className="truncate">
+                  {node.name}
+                </span>
                 <span className="text-muted-foreground ms-auto ps-4 tabular-nums">
                   {numberText(node.count)}
                 </span>
@@ -894,7 +909,8 @@ function StreamRow({
                 <Link
                   to={`/admin/users/${session.user_id}`}
                   title={username}
-                  className={`${ROW_LINK_CLASS} min-w-0 truncate`}
+                  dir="auto"
+                  className={`${ROW_LINK_CLASS} ${ROW_LINK_TRUNCATE_CLASS}`}
                 >
                   {username}
                 </Link>
@@ -905,7 +921,9 @@ function StreamRow({
                     <span aria-hidden="true" className="shrink-0">
                       {MIDDLE_DOT}
                     </span>
-                    <span className="truncate">{getSessionClientLabel(session)}</span>
+                    <span dir="auto" className="truncate">
+                      {getSessionClientLabel(session)}
+                    </span>
                   </>
                 ) : null}
               </div>
@@ -971,12 +989,13 @@ function TitleLink({ session }: { session: AdminSession }) {
     <Link
       to={itemHref}
       title={title}
-      className={`${ROW_LINK_CLASS} block w-fit max-w-full truncate text-[13px] font-medium`}
+      dir="auto"
+      className={`bidi-text ${ROW_LINK_CLASS} ${ROW_LINK_TRUNCATE_CLASS} block w-fit max-w-full text-[13px] font-medium`}
     >
       {title}
     </Link>
   ) : (
-    <div title={title} className="truncate text-[13px] font-medium">
+    <div title={title} dir="auto" className="bidi-text truncate text-[13px] font-medium">
       {title}
     </div>
   );
@@ -1041,6 +1060,7 @@ function ProfilePill({ session }: { session: AdminSession }) {
   return profile ? (
     <span
       title={profile}
+      dir="auto"
       className="border-primary/30 bg-primary/10 text-primary max-w-[7rem] shrink-0 truncate rounded border px-1.5 py-0.5 text-[10px] leading-none"
     >
       {profile}
@@ -1067,6 +1087,8 @@ function ViewerCell({
     ? `${clientLabelFull || clientLabel} — ${clientUserAgent}`
     : clientLabelFull || clientLabel;
   const clientIP = session.client_ip?.trim() || "";
+  // A long IPv6 address truncates, so the tooltip carries the whole address.
+  const clientIPTitle = `${clientIP} — ${t("web.admin.activity.ipLookup.heading")}`;
   const location =
     session.stream_location === "local"
       ? t("web.player.routeBadge.local")
@@ -1079,7 +1101,8 @@ function ViewerCell({
         <Link
           to={`/admin/users/${session.user_id}`}
           title={username}
-          className={`${ROW_LINK_CLASS} truncate text-[13px] font-medium`}
+          dir="auto"
+          className={`${ROW_LINK_CLASS} ${ROW_LINK_TRUNCATE_CLASS} text-[13px] font-medium`}
         >
           {username}
         </Link>
@@ -1088,7 +1111,7 @@ function ViewerCell({
       <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[12px]">
         <JellyfinSessionPill session={session} />
         {clientLabel ? (
-          <span title={clientTitle} className="truncate">
+          <span title={clientTitle} dir="auto" className="truncate">
             {clientLabel}
           </span>
         ) : null}
@@ -1105,8 +1128,8 @@ function ViewerCell({
             <button
               type="button"
               onClick={() => onIPLookup(clientIP)}
-              title={t("web.admin.activity.ipLookup.heading")}
-              className={`${ROW_LINK_CLASS} shrink-0 tabular-nums`}
+              title={clientIPTitle}
+              className={`${ROW_LINK_CLASS} ${ROW_LINK_TRUNCATE_CLASS} tabular-nums`}
             >
               {clientIP}
             </button>

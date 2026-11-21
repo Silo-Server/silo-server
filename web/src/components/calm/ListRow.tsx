@@ -15,6 +15,8 @@ export interface ListRowProps {
   /** Written to `data-row-id`, so a page can find the row to scroll it into view. */
   id: string;
   title: string;
+  /** "auto" for a title that can be in either script, such as a collection's name. */
+  titleDir?: "auto";
   /** Off or hidden: the row shrinks to a dashed line with `collapsedText` after its name. */
   collapsed: boolean;
   collapsedText: ReactNode;
@@ -89,6 +91,7 @@ export function Grip({
 export function ListRow({
   id,
   title,
+  titleDir,
   collapsed,
   collapsedText,
   art,
@@ -156,7 +159,9 @@ export function ListRow({
         ) : (
           <>
             <div className="flex min-w-0 items-center gap-2 text-[15px] font-semibold tracking-[-0.01em]">
-              <span className="truncate">{title}</span>
+              <span dir={titleDir} className="truncate">
+                {title}
+              </span>
               {tags}
             </div>
             <p className="text-muted-foreground mt-1 truncate text-[13px] leading-[1.45]">{meta}</p>
