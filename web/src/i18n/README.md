@@ -140,10 +140,10 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   the "…" and WebKit cuts the start.
 - Titles, names, taglines and overviews from metadata use `.bidi-text` (`app.css`).
   Where such text is cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
-  stylesheet), it also takes `dir="auto"`, or Firefox and WebKit cut it and draw the
-  "…" at the page's end of the line instead of the text's. `.bidi-text` keeps a short
-  one on the page's start side, so it needs no `w-fit`. The mixed-direction limit above
-  applies here too.
+  stylesheet), it also takes `dir="auto"`. Without it, text that runs the other way
+  loses its "…" in Firefox and its start in WebKit, and a clamped paragraph gets its "…"
+  at the start of its last line. `.bidi-text` keeps a short one on the page's start
+  side, so it needs no `w-fit`. The mixed-direction limit above applies here too.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also
