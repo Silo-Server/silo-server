@@ -467,7 +467,10 @@ function RootOverrideDialog({
         <DialogHeader className="max-sm:border-border max-sm:shrink-0 max-sm:border-b max-sm:ps-4 max-sm:pe-2 max-sm:pt-[calc(0.75rem+env(safe-area-inset-top))] max-sm:pb-3">
           <div className="flex items-start gap-3">
             <div className="flex min-w-0 flex-1 flex-col gap-2 max-sm:text-start">
-              <DialogTitle>{t("web.admin.libraries.rootOverride.title")}</DialogTitle>
+              {/* From sm up the built-in close button shows beside this title. */}
+              <DialogTitle className="sm:pe-6">
+                {t("web.admin.libraries.rootOverride.title")}
+              </DialogTitle>
               {/* The fixed phone header holds the full root path; a long one
                   scrolls here instead of squeezing the form below. */}
               <DialogDescription className="break-words max-sm:max-h-[25dvh] max-sm:overflow-y-auto">
