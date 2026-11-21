@@ -12,10 +12,11 @@ const (
 	// The retry card is the one affordance the viewer is offered, and the client
 	// re-issues a fresh start (a new playback attempt and session) from the
 	// position continuity left on screen. There is no wire field to carry "this
-	// is the retry", so the server has to remember the refusal it just answered;
-	// a couple of minutes covers the time a viewer takes to press the button
-	// without letting an old refusal change a later, unrelated start.
-	copySeekAnchorRefusalWindow = 2 * time.Minute
+	// is the retry", so the server has to remember the refusal it just answered.
+	// The window is long enough for a viewer who leaves the card up to come back
+	// to it; it is bounded so an old refusal cannot change a much later start,
+	// and a successful timeline clears it immediately.
+	copySeekAnchorRefusalWindow = 30 * time.Minute
 	// copySeekAnchorRefusalLimit bounds the tracker. Entries expire on read and
 	// record, so a large installation cannot accumulate one per refused seek
 	// forever.
