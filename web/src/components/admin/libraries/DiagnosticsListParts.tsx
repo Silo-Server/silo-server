@@ -230,8 +230,10 @@ export function DiagnosticsSearch({
         placeholder={placeholder}
         value={value}
         onChange={(e) => onValueChange(e.target.value)}
-        // 16px below sm so focusing it does not zoom the page on iOS.
-        className="h-8 ps-8 text-xs max-lg:h-11 max-lg:text-sm max-sm:text-base"
+        // 16px below sm so focusing it does not zoom the page on iOS. A placeholder
+        // too long for a phone (and long typed text, while the field isn't
+        // focused) ends in an ellipsis instead of stopping mid-word.
+        className="h-8 ps-8 text-xs text-ellipsis max-lg:h-11 max-lg:text-sm max-sm:text-base"
       />
     </div>
   );
