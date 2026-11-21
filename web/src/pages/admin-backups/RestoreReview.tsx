@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import type { RestoreDataTypeId, RestoreSet } from "@/api/v2/adminBackupRestore";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -85,6 +87,15 @@ export function RestoreReview({
   const t = useT();
   const plan = restorePlan(set, selection, dataTypes);
   const caveats = restoreCaveats(set, selection);
+  // Back and Restore are disabled while the request runs, which drops a focused one to the
+  // page. When the server refuses, focus moves to the refusal's action, or to the alert when
+  // it has none, unless the admin has put focus somewhere else in the meantime.
+  const refusalRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const alert = refusalRef.current;
+    if (alert && (document.activeElement === document.body || !document.activeElement))
+      (alert.querySelector("button") ?? alert).focus();
+  }, [refusal]);
   return (
     <div className="max-w-[70rem] space-y-5">
       {plan.map((group) => (
@@ -120,8 +131,10 @@ export function RestoreReview({
 
       {refusal ? (
         <div
+          ref={refusalRef}
           role="alert"
-          className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm"
+          tabIndex={-1}
+          className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm outline-none"
         >
           <p className="min-w-0 flex-1 basis-64 text-balance">
             {t("web.admin.backups.restore.review.refused", { reason: refusal.message })}
