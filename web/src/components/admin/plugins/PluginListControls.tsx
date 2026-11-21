@@ -83,10 +83,7 @@ export function FilterChips<T extends string>({
             {chip.label}
             {chip.count !== undefined ? (
               <span
-                className={cn(
-                  "text-[11.5px] tabular-nums",
-                  selected ? "opacity-70" : "text-muted-foreground",
-                )}
+                className={cn("text-[11px] tabular-nums", !selected && "text-muted-foreground")}
               >
                 {chip.count}
               </span>
