@@ -440,6 +440,7 @@
 ./internal/notifications TestWebPushResubscribeRecordsTheNewLoginDB
 ./internal/notifications TestWebPushSweepOfUnboundSubscriptionsDB
 ./internal/notifications TestQueuedWebPushStopsWhenTheRegisteringLoginEndsDB
+./internal/notifications TestWebPushRetryAfterNeverShortensTheScheduleDB
 
 # Session-less Android push retirement is ordered against registration by generation.
 ./internal/notifications TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB
