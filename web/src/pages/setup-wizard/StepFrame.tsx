@@ -71,7 +71,13 @@ export function StepFrame({
         <h1 className="setup-step-title">{title}</h1>
         <p className="setup-step-lede">{lede}</p>
       </header>
-      <div className="setup-step-body">{children}</div>
+      <div className="setup-step-body">
+        {/* Lock the fields while the step saves: an edit made after Continue
+            would miss the saved batch and the step would advance past it. */}
+        <fieldset disabled={busy} className="contents">
+          {children}
+        </fieldset>
+      </div>
       {actions}
     </>
   );
