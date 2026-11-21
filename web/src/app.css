@@ -2451,15 +2451,15 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   }
 
   /* ── Live Badge ──────────────────────────────────────────── */
-  /* Static on purpose: pulsing the opacity of 10px text drops it below AA
-     contrast. The label color is light enough to keep 4.5:1 where high
+  /* Static on purpose: pulsing the opacity of text this small drops it below
+     AA contrast. The label color is light enough to keep 4.5:1 where high
      contrast lightens the surface under the badge (the Profiles panel and
      the selected sidebar row). */
   .live-badge {
     margin-inline-start: auto;
     padding: 2px 8px;
     border-radius: 6px;
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 700;
     background: rgba(255, 60, 60, 0.12);
     color: #fca5a5;
