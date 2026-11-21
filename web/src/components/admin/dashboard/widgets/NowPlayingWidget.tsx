@@ -343,7 +343,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             the name truncates and the times keep their full width. */}
         <div className="mt-auto flex items-center gap-1.5">
           <div
-            className="text-primary-foreground flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[0.5625rem] font-bold"
+            className="text-primary-foreground flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full text-[0.5625rem] font-bold"
             style={{ background: `var(--primary)` }}
           >
             {username.charAt(0).toUpperCase()}

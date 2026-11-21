@@ -946,7 +946,7 @@ function HeroLine({
       <span>{page}</span>
       <span className="col-span-2 flex flex-wrap items-center gap-2 sm:col-span-1">
         <Select value={value} onValueChange={onChange} disabled={disabled}>
-          <SelectTrigger aria-label={label} className="h-[30px] w-auto max-w-full text-[0.8125rem]">
+          <SelectTrigger aria-label={label} className="h-7.5 w-auto max-w-full text-[0.8125rem]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

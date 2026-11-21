@@ -22,6 +22,8 @@ tester.run("text-size-in-rem", rule, {
     `<div className="text-sm text-[0.8125rem] text-[clamp(2rem,5vw,3.5rem)]" />`,
     // Other utilities that take pixels aren't font sizes.
     `<div className="leading-[18px] tracking-[0.5px] h-[13px]" />`,
+    // Only a whole class token counts, not one glued to other text.
+    `const hint = "Use text-[13px]. Or text-[13px]px";`,
   ],
   invalid: [
     fixed(
@@ -37,6 +39,10 @@ tester.run("text-size-in-rem", rule, {
     fixed(
       `<div className="[&_[data-slot=input]]:text-[13px]" />`,
       `<div className="[&_[data-slot=input]]:text-[0.8125rem]" />`,
+    ),
+    fixed(
+      `<div className="text-[13px]/[18px]" />`,
+      `<div className="text-[0.8125rem]/[1.125rem]" />`,
     ),
     fixed(`<div className="text-[length:13px]" />`, `<div className="text-[length:0.8125rem]" />`),
   ],

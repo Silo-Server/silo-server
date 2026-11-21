@@ -7,16 +7,22 @@
 
 import { classParts, classTokenVisitors } from "./class-tokens.js";
 
-const PX_SIZE = /^text-\[(length:)?(\d+(?:\.\d+)?)px\]/;
+// The whole utility: a pixel size, then optionally `/` and a line height.
+const PX_SIZE = /^text-\[(length:)?(\d+(?:\.\d+)?)px\](?:\/(.+))?$/;
+const PX_LINE_HEIGHT = /^\[(\d+(?:\.\d+)?)px\]$/;
+
+const rem = (px) => `${Number(px) / 16}rem`;
 
 /** The rem form of one class token, or null when it isn't a pixel font size. */
 function remClass(token) {
   const { variants, lead, utility, trail } = classParts(token);
   const match = PX_SIZE.exec(utility);
   if (match === null) return null;
-  const [whole, hint = "", px] = match;
-  const rem = `text-[${hint}${Number(px) / 16}rem]`;
-  return variants + lead + rem + utility.slice(whole.length) + trail;
+  const [, hint = "", px, lineHeight] = match;
+  // A pixel line height would stay put while the text grows, so it moves to rem too.
+  const pxLineHeight = lineHeight && PX_LINE_HEIGHT.exec(lineHeight);
+  const modifier = pxLineHeight ? `/[${rem(pxLineHeight[1])}]` : lineHeight ? `/${lineHeight}` : "";
+  return `${variants}${lead}text-[${hint}${rem(px)}]${modifier}${trail}`;
 }
 
 export default {

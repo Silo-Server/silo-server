@@ -163,7 +163,7 @@ const SEGMENTED_GROUP_CLASS =
   "border-border bg-border inline-flex max-w-full flex-wrap gap-px overflow-hidden rounded-md border";
 
 function segmentClass(active: boolean): string {
-  return `focus-visible:ring-ring inline-flex h-[30px] grow items-center justify-center gap-1.5 px-2.5 text-[0.75rem] font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset ${
+  return `focus-visible:ring-ring inline-flex h-7.5 grow items-center justify-center gap-1.5 px-2.5 text-[0.75rem] font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset ${
     active
       ? "bg-primary/10 text-foreground"
       : "bg-surface text-muted-foreground hover:bg-secondary hover:text-foreground"
