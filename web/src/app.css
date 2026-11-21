@@ -769,6 +769,23 @@ html[data-navigation-direction]::view-transition-new(main-content) {
       text-align: match-parent;
     }
   }
+  /* Chromium draws a clamp's "…" past the end of a line that is aligned to the
+     end of its own direction, where the clamp's overflow hides it: an English
+     overview cut in Arabic ended with no "…". While the clamp cuts such text,
+     it aligns to its own start instead, and text that fits still lines up with
+     the page. CSS can't tell when a clamp cuts, so the component measures it
+     and sets data-clamp-cut (`useClampCut`). :dir() limits the rule to text
+     that runs the other way from the element it sits in; text that runs that
+     element's way is already at its start. Firefox and WebKit draw the "…"
+     correctly with the page's alignment, so they keep it: scroll-state
+     support stands in for Chromium here, and an engine that gains it later
+     would still show the "…". */
+  @supports (container-type: scroll-state) {
+    :dir(ltr) > .bidi-text[data-clamp-cut]:dir(rtl),
+    :dir(rtl) > .bidi-text[data-clamp-cut]:dir(ltr) {
+      text-align: start;
+    }
+  }
   /* Text with a direction of its own in a block, such as a path or a name, whose
      lines line up the way the text around it does: at the right on a right-to-left
      page. An inherited `start` would resolve against the block's own `dir` instead.

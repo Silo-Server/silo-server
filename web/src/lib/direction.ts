@@ -36,6 +36,25 @@ export function emailDir(email: string): "ltr" | undefined {
   return first !== undefined && RTL_CHAR.test(first) ? undefined : "ltr";
 }
 
+// STRONG, or a directional mark: LRM sets left to right, and RLM and ALM right
+// to left (ALM is inside RTL_CHAR's range).
+const STRONG_OR_MARK = new RegExp(`[${STRONG.source.slice(1, -1)}\\u200e\\u200f\\u061c]`, "u");
+
+/**
+ * Whether the lines of text run different ways, each judged by its first
+ * character that sets direction, as `unicode-bidi: plaintext` judges each
+ * paragraph of text shown with its line breaks. A line with no such character
+ * (digits, punctuation) takes no side.
+ */
+export function mixesDirections(text: string): boolean {
+  const directions = new Set<boolean>();
+  for (const line of text.split("\n")) {
+    const first = STRONG_OR_MARK.exec(line)?.[0];
+    if (first !== undefined) directions.add(first === "\u200f" || RTL_CHAR.test(first));
+  }
+  return directions.size > 1;
+}
+
 // A letter, or a directional mark (LRM, RLM, ALM), which also sets direction.
 const LETTER_OR_MARK = /[\p{L}\u200E\u200F\u061C]/u;
 const RIGHT_TO_LEFT = /[\p{Script=Arabic}\p{Script=Hebrew}\u200F\u061C]/u;
