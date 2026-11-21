@@ -29,9 +29,10 @@ function windowWith(matches: boolean | undefined) {
   };
 }
 
-function pointer(type: string, eventType = "pointermove") {
+function pointer(type: string, eventType = "pointermove", buttons = 0) {
   const event = new Event(eventType, { bubbles: true }) as PointerEvent;
   Object.defineProperty(event, "pointerType", { value: type });
+  Object.defineProperty(event, "buttons", { value: buttons });
   return event;
 }
 
@@ -49,10 +50,24 @@ afterEach(() => {
 });
 
 describe("initPointerCapability", () => {
-  it("treats a pen as a fine pointer", () => {
+  it("treats a pen that hovers as a fine pointer, contact included", () => {
     start(false);
-    document.dispatchEvent(pointer("pen"));
+    // Hovering with the barrel button held is still hovering.
+    document.dispatchEvent(pointer("pen", "pointermove", 2));
     expect(document.documentElement.getAttribute(ATTR)).toBe("true");
+    document.dispatchEvent(pointer("touch", "pointerdown"));
+    document.dispatchEvent(pointer("pen", "pointermove", 1));
+    expect(document.documentElement.getAttribute(ATTR)).toBe("true");
+  });
+
+  it("treats a pen that only makes contact like touch", () => {
+    // A pen that can't hover could never uncover hover-only controls.
+    start(true);
+    document.dispatchEvent(pointer("mouse"));
+    document.dispatchEvent(pointer("pen", "pointerdown", 1));
+    expect(document.documentElement.getAttribute(ATTR)).toBe("false");
+    document.dispatchEvent(pointer("pen", "pointermove", 1));
+    expect(document.documentElement.getAttribute(ATTR)).toBe("false");
   });
 
   it("follows the last pointer used across a switch", () => {
