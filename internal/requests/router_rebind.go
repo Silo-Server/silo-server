@@ -47,6 +47,17 @@ func (r *Repository) RebindOrphanedIntegrations(ctx context.Context) ([]string, 
 // rebindOrphanedIntegrations runs the rebind for every server, or for the one
 // server id names. The caller holds the routing mode lock.
 func rebindOrphanedIntegrations(ctx context.Context, tx pgx.Tx, id *string) ([]string, error) {
+	// Lock the orphaned servers in id order first, as a route save does with
+	// FOR SHARE, so rebinding several servers cannot deadlock with it.
+	if _, err := tx.Exec(ctx, `
+		SELECT i.id FROM request_integrations i
+		WHERE i.plugin_id <> '' AND i.installation_id IS NOT NULL
+			AND ($1::text IS NULL OR i.id = $1)
+			AND NOT EXISTS (SELECT 1 FROM plugin_installations p WHERE p.id = i.installation_id)
+		ORDER BY i.id
+		FOR UPDATE`, id); err != nil {
+		return nil, fmt.Errorf("lock orphaned request integrations: %w", err)
+	}
 	rows, err := tx.Query(ctx, `
 		WITH candidates AS (
 			SELECT i.id, min(p.id) AS installation_id, count(DISTINCT p.id) AS matches
@@ -100,17 +111,8 @@ func (r *Repository) failUnboundTargets(ctx context.Context, tx pgx.Tx, id strin
 	if !unbound {
 		return nil
 	}
-	// Lock the parent requests before their targets, in id order, as account
-	// deletion and submission do, so this delete cannot deadlock with them.
-	if _, err := tx.Exec(ctx, `
-		SELECT id FROM media_requests
-		WHERE id IN (
-			SELECT request_id FROM media_request_targets
-			WHERE integration_id = $1 AND status IN ('queued', 'downloading'))
-		ORDER BY id
-		FOR UPDATE`, id); err != nil {
-		return fmt.Errorf("lock unbound integration requests: %w", err)
-	}
+	// Targets before their requests, the order UpdateTargetStatus takes them
+	// in, which the stalled-target sweep still runs on these targets.
 	rows, err := tx.Query(ctx, `
 		UPDATE media_request_targets
 		SET status = 'failed', last_error = $2, updated_at = now(), `+clearTargetDownload+`
