@@ -103,6 +103,14 @@ const SORT_DESC_MARK = "▼";
 const ROW_LINK_CLASS =
   "rounded-sm decoration-1 underline-offset-3 transition-colors hover:text-primary hover:underline active:underline focus-visible:text-primary focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 /**
+ * Truncates a row link with "…". Not `truncate`: its `overflow: hidden` clips
+ * the text to the link's rounded corners, which cuts off a first or last
+ * letter's descender (the "j" in "jordan") at some row offsets. Clipping only
+ * the inline axis keeps the corners out of it. `min-w-0` lets a flex item
+ * shrink, which `overflow: hidden` used to do.
+ */
+const ROW_LINK_TRUNCATE_CLASS = "min-w-0 overflow-x-clip text-ellipsis whitespace-nowrap";
+/**
  * A clickable row's highlight and lit expand chevron, held back while the
  * pointer is on a link or a button that does something else; the expand
  * controls keep them. Uses the app's pointer-gated hover variant.
@@ -895,7 +903,7 @@ function StreamRow({
                   to={`/admin/users/${session.user_id}`}
                   title={username}
                   dir="auto"
-                  className={`${ROW_LINK_CLASS} min-w-0 truncate`}
+                  className={`${ROW_LINK_CLASS} ${ROW_LINK_TRUNCATE_CLASS}`}
                 >
                   {username}
                 </Link>
@@ -972,7 +980,7 @@ function TitleLink({ session }: { session: AdminSession }) {
     <Link
       to={itemHref}
       title={title}
-      className={`${ROW_LINK_CLASS} block w-fit max-w-full truncate text-[13px] font-medium`}
+      className={`${ROW_LINK_CLASS} ${ROW_LINK_TRUNCATE_CLASS} block w-fit max-w-full text-[13px] font-medium`}
     >
       {title}
     </Link>
@@ -1084,7 +1092,7 @@ function ViewerCell({
           to={`/admin/users/${session.user_id}`}
           title={username}
           dir="auto"
-          className={`${ROW_LINK_CLASS} truncate text-[13px] font-medium`}
+          className={`${ROW_LINK_CLASS} ${ROW_LINK_TRUNCATE_CLASS} text-[13px] font-medium`}
         >
           {username}
         </Link>
@@ -1111,7 +1119,7 @@ function ViewerCell({
               type="button"
               onClick={() => onIPLookup(clientIP)}
               title={clientIPTitle}
-              className={`${ROW_LINK_CLASS} truncate tabular-nums`}
+              className={`${ROW_LINK_CLASS} ${ROW_LINK_TRUNCATE_CLASS} tabular-nums`}
             >
               {clientIP}
             </button>
