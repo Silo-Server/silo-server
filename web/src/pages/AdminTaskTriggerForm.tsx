@@ -198,34 +198,36 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
           </div>
         )}
 
-        {/* Wraps at large text sizes, so the label, box, and unit stack instead of
-            widening the row past its panel. */}
+        {/* At large text sizes the label wraps above the box instead of widening the
+            row past its panel; the box and its unit stay together. */}
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
           <label className="text-muted-foreground text-xs whitespace-nowrap">
             {t("web.admin.tasks.detail.maxRuntimeLabel")}
           </label>
-          <Input
-            type="number"
-            min={0}
-            step="any"
-            className={MAX_RUNTIME_INPUT_WIDTH}
-            placeholder={t("web.admin.tasks.detail.maxRuntimeNone")}
-            value={trigger.max_runtime_ms != null ? trigger.max_runtime_ms / 60_000 : ""}
-            onChange={(e) => {
-              // Fractional minutes keep sub-minute limits saved through the API.
-              // A typed 0 stays 0 (no limit) so "0.5" can be entered; only an
-              // empty field clears it.
-              const raw = e.target.value;
-              onChange({
-                ...trigger,
-                max_runtime_ms:
-                  raw === "" ? undefined : Math.max(0, Math.round(Number(raw) * 60_000)),
-              });
-            }}
-          />
-          <span className="text-muted-foreground text-xs">
-            {t("web.admin.tasks.detail.maxRuntimeUnit")}
-          </span>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              type="number"
+              min={0}
+              step="any"
+              className={MAX_RUNTIME_INPUT_WIDTH}
+              placeholder={t("web.admin.tasks.detail.maxRuntimeNone")}
+              value={trigger.max_runtime_ms != null ? trigger.max_runtime_ms / 60_000 : ""}
+              onChange={(e) => {
+                // Fractional minutes keep sub-minute limits saved through the API.
+                // A typed 0 stays 0 (no limit) so "0.5" can be entered; only an
+                // empty field clears it.
+                const raw = e.target.value;
+                onChange({
+                  ...trigger,
+                  max_runtime_ms:
+                    raw === "" ? undefined : Math.max(0, Math.round(Number(raw) * 60_000)),
+                });
+              }}
+            />
+            <span className="text-muted-foreground text-xs">
+              {t("web.admin.tasks.detail.maxRuntimeUnit")}
+            </span>
+          </div>
         </div>
       </div>
 
