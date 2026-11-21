@@ -97,7 +97,9 @@ function SuggestionRow({
           ) : null}
         </div>
         <div className="text-muted-foreground mt-0.5 truncate text-xs">
-          {suggesterName}
+          <span dir="auto" className="inline-block max-w-full truncate align-bottom">
+            {suggesterName}
+          </span>
           {suggestion.note ? (
             <span className="italic">
               {t("web.watchTogether.suggestions.note", { note: suggestion.note })}
