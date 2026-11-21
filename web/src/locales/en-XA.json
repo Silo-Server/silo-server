@@ -22187,14 +22187,26 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦Ĥîđé ţĥé åççöûñţ~~~~~~~⟧"
+              "value": "Ĥîđé ţĥé åççöûñţ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ĥîđé ţĥé åççöûñţš"
             }
           ]
         },
@@ -22202,25 +22214,39 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦Ĥîđé ţĥé åççöûñţš~~~~~~~⟧"
+              "value": "Ĥîđé ţĥé åççöûñţš"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~⟧"
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦Ĥîđé ţĥé ƒîļé~~~~~~⟧"
+              "value": "Ĥîđé ţĥé ƒîļé"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ĥîđé ţĥé ƒîļéš"
             }
           ]
         },
@@ -22228,25 +22254,39 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦Ĥîđé ţĥé ƒîļéš~~~~~~⟧"
+              "value": "Ĥîđé ţĥé ƒîļéš"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦Ĥîđé ƒîļé~~~~⟧"
+              "value": "Ĥîđé ƒîļé"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ĥîđé ƒîļéš"
             }
           ]
         },
@@ -22254,13 +22294,15 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦Ĥîđé ƒîļéš~~~~⟧"
+              "value": "Ĥîđé ƒîļéš"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -22697,14 +22739,26 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦Šĥöŵ ţĥé åççöûñţ~~~~~~~⟧"
+              "value": "Šĥöŵ ţĥé åççöûñţ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Šĥöŵ ţĥé åççöûñţš"
             }
           ]
         },
@@ -22712,13 +22766,15 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦Šĥöŵ ţĥé åççöûñţš~~~~~~~⟧"
+              "value": "Šĥöŵ ţĥé åççöûñţš"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~⟧"
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -22765,14 +22821,26 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦Šĥöŵ ţĥé ƒîļé~~~~~~⟧"
+              "value": "Šĥöŵ ţĥé ƒîļé"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Šĥöŵ ţĥé ƒîļéš"
             }
           ]
         },
@@ -22780,25 +22848,39 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦Šĥöŵ ţĥé ƒîļéš~~~~~~⟧"
+              "value": "Šĥöŵ ţĥé ƒîļéš"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦Šĥöŵ ƒîļé~~~~⟧"
+              "value": "Šĥöŵ ƒîļé"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Šĥöŵ ƒîļéš"
             }
           ]
         },
@@ -22806,13 +22888,15 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦Šĥöŵ ƒîļéš~~~~⟧"
+              "value": "Šĥöŵ ƒîļéš"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -66646,7 +66730,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "⟦Ŕéļöåđ ţö šéé ţĥé çûŕŕéñţ ṽåļûéš. Îƒ öñé öƒ ýöûŕ éđîţš îš ţö å šéţţîñĝ ţĥåţ çĥåñĝéđ, öŕ ţö å šåṽéđ þåššŵöŕđ öŕ ķéý, åļļ ýöûŕ éđîţš åŕé ûñđöñé; öţĥéŕŵîšé ţĥéý’ŕé ķéþţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ŕéļöåđ ţö šéé ţĥé çûŕŕéñţ ṽåļûéš. Îƒ šöɱéţĥîñĝ öñ ţĥîš þåĝé çĥåñĝéđ, öŕ ýöû éđîţéđ å šåṽéđ þåššŵöŕđ öŕ ķéý, åļļ ýöûŕ éđîţš åŕé ûñđöñé; öţĥéŕŵîšé ţĥéý’ŕé ķéþţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [

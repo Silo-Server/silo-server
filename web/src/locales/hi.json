@@ -20391,14 +20391,22 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "खाता छिपाएँ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खाते छिपाएँ"
             }
           ]
         },
@@ -20410,21 +20418,27 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "फ़ाइल छिपाएँ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें छिपाएँ"
             }
           ]
         },
@@ -20436,21 +20450,27 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "फ़ाइल छिपाएँ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें छिपाएँ"
             }
           ]
         },
@@ -20462,9 +20482,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -20845,14 +20863,22 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "खाता दिखाएँ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खाते दिखाएँ"
             }
           ]
         },
@@ -20864,9 +20890,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -20913,14 +20937,22 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "फ़ाइल दिखाएँ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें दिखाएँ"
             }
           ]
         },
@@ -20932,21 +20964,27 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "फ़ाइल दिखाएँ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें दिखाएँ"
             }
           ]
         },
@@ -20958,9 +20996,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -60842,7 +60878,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "मौजूदा वैल्यू देखने के लिए फिर से लोड करें। अगर आपका कोई बदलाव किसी ऐसी सेटिंग में है जो बदल गई है, या किसी सेव किए गए पासवर्ड या कुंजी में है, तो आपके सभी बदलाव वापस ले लिए जाएँगे; नहीं तो वे बने रहेंगे।"
+      "value": "मौजूदा वैल्यू देखने के लिए फिर से लोड करें। अगर इस पेज पर कुछ बदला है, या आपने किसी सेव किए गए पासवर्ड या कुंजी में बदलाव किया है, तो आपके सभी बदलाव वापस ले लिए जाएँगे; नहीं तो वे बने रहेंगे।"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [

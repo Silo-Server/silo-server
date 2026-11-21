@@ -267,6 +267,7 @@ export default function CompatibilityProxiesSettings() {
           <SettingField
             label={t("web.admin.settings.compatibilityProxies.jellyfin.address")}
             hint={PUBLIC_URL_HINT}
+            dir="ltr"
             value={publicURL}
             onChange={(v) => form.setValue("jellyfin_compat.public_url", v)}
             status={
@@ -594,6 +595,7 @@ export default function CompatibilityProxiesSettings() {
             <SettingField
               label={t("web.admin.settings.compatibilityProxies.advanced.webDir")}
               description={t("web.admin.settings.compatibilityProxies.advanced.webDirDescription")}
+              dir="ltr"
               value={form.getValue("jellyfin_compat.web_install_dir")}
               onChange={(v) => form.setValue("jellyfin_compat.web_install_dir", v)}
               restartRequired={restartKeys.has("jellyfin_compat.web_install_dir")}

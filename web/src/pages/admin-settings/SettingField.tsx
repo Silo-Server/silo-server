@@ -216,6 +216,8 @@ interface SettingFieldProps {
   restartRequired?: boolean;
   /** See {@link SettingFieldRowProps.managedByEnv}; disables the control. */
   managedByEnv?: string;
+  /** Direction of a `text` input. Pass `"ltr"` for a path or URL, which reads left to right in every language. */
+  dir?: "ltr";
   className?: string;
 }
 
@@ -234,6 +236,7 @@ export function SettingField({
   disabled: disabledProp,
   restartRequired,
   managedByEnv,
+  dir,
   className,
 }: SettingFieldProps) {
   const t = useT();
@@ -336,6 +339,7 @@ export function SettingField({
     <Input
       id={controlId}
       type="text"
+      dir={dir}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}

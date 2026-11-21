@@ -308,6 +308,7 @@ function S3Group({
         label={t("web.admin.settings.storage.s3.endpoint")}
         // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
         hint="https://s3.us-east-1.amazonaws.com"
+        dir="ltr"
         value={form.getValue(key("endpoint"))}
         onChange={(v) => form.setValue(key("endpoint"), v)}
         disabled={secrets.disabled || locationFieldsDisabled}
@@ -444,6 +445,7 @@ function S3Group({
                   dirty={keptForEdit("s3.public_read_endpoint")}
                   // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
                   hint="https://cdn.example.com"
+                  dir="ltr"
                   value={form.getValue("s3.public_read_endpoint")}
                   onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
                   restartRequired={restartKeys.has("s3.public_read_endpoint")}
@@ -932,6 +934,7 @@ export default function StorageSettings() {
           <SettingField
             label={t("web.admin.settings.storage.localPath")}
             hint={LOCAL_PATH_EXAMPLE}
+            dir="ltr"
             value={form.getValue("artwork.local_path")}
             onChange={(value) => form.setValue("artwork.local_path", value)}
             disabled={
@@ -1205,6 +1208,7 @@ export default function StorageSettings() {
                   </label>
                   <Input
                     id="storage-transition-local-path"
+                    dir="ltr"
                     value={transitionLocalPath}
                     onChange={(event) => setTransitionLocalPath(event.target.value)}
                     placeholder={LOCAL_PATH_EXAMPLE}

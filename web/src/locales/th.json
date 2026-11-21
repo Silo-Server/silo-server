@@ -18754,9 +18754,25 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนบัญชี"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนบัญชี"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18765,16 +18781,30 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนไฟล์"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนไฟล์"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18783,16 +18813,30 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนไฟล์"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อนไฟล์"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18801,9 +18845,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -19076,9 +19118,25 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงบัญชี"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงบัญชี"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -19087,9 +19145,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -19120,9 +19176,25 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงไฟล์"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงไฟล์"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -19131,16 +19203,30 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงไฟล์"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงไฟล์"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -19149,9 +19235,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -55465,7 +55549,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "โหลดซ้ำเพื่อดูค่าปัจจุบัน หากการแก้ไขรายการใดเป็นการแก้ไขการตั้งค่าที่มีการเปลี่ยนแปลง หรือรหัสผ่านหรือคีย์ที่บันทึกไว้ ระบบจะยกเลิกการแก้ไขทั้งหมด ไม่เช่นนั้นการแก้ไขจะยังคงอยู่"
+      "value": "โหลดซ้ำเพื่อดูค่าปัจจุบัน หากมีสิ่งใดในหน้านี้เปลี่ยนแปลง หรือคุณแก้ไขรหัสผ่านหรือคีย์ที่บันทึกไว้ ระบบจะยกเลิกการแก้ไขทั้งหมด ไม่เช่นนั้นการแก้ไขจะยังคงอยู่"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [

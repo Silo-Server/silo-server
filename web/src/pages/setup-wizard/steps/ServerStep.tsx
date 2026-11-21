@@ -67,6 +67,7 @@ export function ServerStep() {
           description={t("web.setup.server.publicUrlDescription")}
           // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
           hint="https://silo.example.com"
+          dir="ltr"
           value={form.getValue("server.public_url")}
           onChange={(v) => form.setValue("server.public_url", v)}
           managedByEnv={form.envVar("server.public_url")}
