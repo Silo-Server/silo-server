@@ -1334,6 +1334,8 @@ function NodeForm({
                 <>
                   <Input
                     id="node-hw-device-override"
+                    // Device paths read left to right; the translated placeholder keeps the page's direction.
+                    dir={hwDeviceOverride ? "ltr" : undefined}
                     value={hwDeviceOverride}
                     disabled={isLocked("hw_device_override")}
                     onChange={(e) => setHwDeviceOverride(e.target.value)}

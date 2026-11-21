@@ -399,7 +399,11 @@ export default function PlaybackSettings() {
                     }
                     description={
                       <>
-                        <span className="block font-mono">{row.path}</span>
+                        <span className="block">
+                          <span dir="ltr" className="font-mono">
+                            {row.path}
+                          </span>
+                        </span>
                         {row.missingOnNodes.length > 0 && (
                           <span className="mt-0.5 block text-amber-500">
                             {t("web.admin.settings.playback.devices.missingOnNodes", {

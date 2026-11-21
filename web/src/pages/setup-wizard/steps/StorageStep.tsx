@@ -510,6 +510,7 @@ export function StorageStep() {
             label={t("web.setup.storage.localPathLabel")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="/var/lib/silo/artwork"
+            dir="ltr"
             value={form.getValue("artwork.local_path")}
             onChange={(value) => form.setValue("artwork.local_path", value)}
             disabled={locationStatusUnavailable || artworkLocked}
