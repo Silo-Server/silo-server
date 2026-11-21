@@ -793,8 +793,14 @@ export default function AISettings() {
   }
 
   async function save() {
+    // With no settings loaded there is nothing to save over, and the form's
+    // own save says to reload; checking the fields first would hide that.
+    if (!form.loaded) {
+      await form.save();
+      return;
+    }
     // Only a value this save sends is checked: an untouched field holds what
-    // the server has, and with no settings loaded the save itself says so.
+    // the server has.
     const invalidCount = (key: string, min: number, max = Number.MAX_SAFE_INTEGER) => {
       if (!form.isDirty(key)) return false;
       const parsed = parseStrictInteger(value(key));
