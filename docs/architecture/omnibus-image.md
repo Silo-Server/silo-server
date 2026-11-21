@@ -278,7 +278,9 @@ the node's own state.
 
 With `MODE=transcode`, Silo branches before it loads the bootstrap: the node
 needs only `SILO_CORE_URL`, the main server's URL, and `SILO_NODE_KEY`, the key
-an administrator issued it, and Silo refuses to start without a well-formed
+an administrator issued it or the main server's `SILO_TRANSCODE_NODES` declares
+for it ([declared nodes](transcode-nodes.md#declared-nodes)), and Silo refuses
+to start without a well-formed
 key. It opens no database or Redis and holds no `SECRET_KEY`: it reads its
 configuration from the main server and ignores `DATABASE_URL`, `REDIS_URL`,
 `SECRET_KEY`, `NODE_URL` and `NODE_NAME` with one warning, so a `.env` copied
