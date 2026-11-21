@@ -224,14 +224,16 @@ func TestAdminLogsSocketV2RefusesProfileLessAdminOnHouseholdRequiringProfile(t *
 	_ = resp.Body.Close()
 }
 
-// A live audit event carries the bare client address, and a client_ip filter
-// written as a single-host prefix matches it, as the inet comparison does for
-// stored rows.
-func TestAuditSocketClientIPFilterMatchesBareAddress(t *testing.T) {
+// A client_ip filter matches a live audit event whenever the inet comparison
+// would match the stored row: whatever the filter's text form, and for events
+// from older servers that still carry the /32 or /128 suffix.
+func TestAuditSocketClientIPFilterMatchesLikeHistory(t *testing.T) {
 	for _, tc := range []struct{ filter, entry string }{
 		{"192.0.2.10", "192.0.2.10"},
 		{"192.0.2.10/32", "192.0.2.10"},
 		{"2001:db8::7348/128", "2001:db8::7348"},
+		{"2001:DB8:0:0:0:0:0:7348", "2001:db8::7348"},
+		{"192.0.2.10", "192.0.2.10/32"},
 	} {
 		opts, err := parseAuditLogOptionsFromRequest(httptest.NewRequest("GET", "/api/v2/admin/logs/ws?client_ip="+url.QueryEscape(tc.filter), nil))
 		if err != nil {

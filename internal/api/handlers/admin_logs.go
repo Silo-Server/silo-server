@@ -68,22 +68,35 @@ func parseOperationalLogOptionsFromRequest(r *http.Request) (opslog.ListOptions,
 	return opts, nil
 }
 
-// hostAddress turns a single-host prefix (192.0.2.10/32, 2001:db8::1/128) into
-// the bare address that audit rows and live events carry, so a client_ip filter
-// matches live events the same way the inet comparison matches stored rows.
-// Anything else is returned unchanged.
-func hostAddress(value string) string {
-	if prefix, err := netip.ParsePrefix(value); err == nil && prefix.IsSingleIP() {
-		return prefix.Addr().String()
+// sameClientIP reports whether a client_ip filter names the address an audit
+// event carries, the way the inet comparison matches stored rows. Both sides
+// are parsed, so text formatting (case, zero compression) and a single-host
+// prefix (/32, /128, as events from older servers carry) don't matter. Values
+// that are not addresses compare as text.
+func sameClientIP(filter, value string) bool {
+	a, aok := parseHostAddress(filter)
+	b, bok := parseHostAddress(value)
+	if aok && bok {
+		return a == b
 	}
-	return value
+	return filter == value
+}
+
+func parseHostAddress(value string) (netip.Addr, bool) {
+	if addr, err := netip.ParseAddr(value); err == nil {
+		return addr, true
+	}
+	if prefix, err := netip.ParsePrefix(value); err == nil && prefix.IsSingleIP() {
+		return prefix.Addr(), true
+	}
+	return netip.Addr{}, false
 }
 
 func parseAuditLogOptionsFromRequest(r *http.Request) (activitylog.ListOptions, error) {
 	opts := activitylog.ListOptions{
 		Method:            strings.TrimSpace(r.URL.Query().Get("method")),
 		PathPrefix:        strings.TrimSpace(r.URL.Query().Get("path_prefix")),
-		ClientIP:          hostAddress(strings.TrimSpace(r.URL.Query().Get("client_ip"))),
+		ClientIP:          strings.TrimSpace(r.URL.Query().Get("client_ip")),
 		RequestID:         strings.TrimSpace(r.URL.Query().Get("request_id")),
 		SessionID:         strings.TrimSpace(r.URL.Query().Get("session_id")),
 		PlaybackSessionID: strings.TrimSpace(r.URL.Query().Get("playback_session_id")),
@@ -535,7 +548,7 @@ func matchesAuditLog(opts activitylog.ListOptions, entry activitylog.AuditEntry)
 	if opts.PathPrefix != "" && !strings.HasPrefix(entry.Path, opts.PathPrefix) {
 		return false
 	}
-	if opts.ClientIP != "" && entry.ClientIP != opts.ClientIP {
+	if opts.ClientIP != "" && !sameClientIP(opts.ClientIP, entry.ClientIP) {
 		return false
 	}
 	if opts.RequestID != "" && entry.RequestID != opts.RequestID {
