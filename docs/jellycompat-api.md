@@ -464,6 +464,12 @@ to the route's version, and a route version the item no longer has answers
 `404`. The negotiated session keeps the client's id as its route item id, so the
 stream URLs it hands out and later session reports can carry that id.
 
+Media-source ids take Jellyfin's Guid form, 32 lowercase hex digits without
+dashes, like user ids. Infuse cuts a dashed `MediaSourceId` at its first dash
+when it sends it back in a `PlaybackInfo` body, which made that body name no
+version. Every route and body still accepts the dashed form that clients stored
+earlier.
+
 Every compat user is a non-administrator, and only a viewer who may curate
 metadata sees where a file lives or what it is called (see
 [File paths and names](catalog-api.md#file-paths-and-names)). So an item's
