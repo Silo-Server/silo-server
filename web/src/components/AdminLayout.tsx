@@ -100,8 +100,14 @@ function AdminLayoutContent() {
     return () => desktopMedia.removeEventListener("change", closeMobileNavigation);
   }, []);
 
+  // Below lg, `clip` rather than `hidden`: `hidden` makes this wrapper a scroll
+  // container that never scrolls, so the phone header's `sticky top-0` would
+  // stick to it and scroll away with the page. `flow-root` keeps the header's
+  // top margin inside the wrapper, as `hidden` did. From lg, where that header
+  // is hidden, the wrapper keeps `hidden`, and the pages' `lg:sticky` and
+  // `xl:sticky` elements stay inert as they have been.
   return (
-    <div className="bg-background relative min-h-[100dvh] overflow-x-hidden">
+    <div className="bg-background relative flow-root min-h-[100dvh] overflow-x-clip lg:overflow-x-hidden">
       <AdminSectionCommandDialog
         sections={adminSearchSections}
         open={commandOpen}
@@ -120,8 +126,12 @@ function AdminLayoutContent() {
       </div>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        {/* Mobile header */}
-        <div className="glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-3 py-2.5 lg:hidden">
+        {/* Mobile header. Pinned while the page scrolls, so an in-page jump
+            target needs `scroll-mt-24` below lg to land clear of it. */}
+        <div
+          data-sticky-header
+          className="glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-3 py-2.5 lg:hidden"
+        >
           <div className="flex min-w-0 items-center gap-2.5">
             <SheetTrigger asChild>
               <button
@@ -136,7 +146,9 @@ function AdminLayoutContent() {
                 {LOGO_GLYPH}
               </div>
               <div className="min-w-0">
-                <span className="text-muted-foreground block text-[10px] leading-none font-semibold tracking-[0.16em] uppercase">
+                {/* Not `truncate`: it cuts accents and descenders off this tight line box, and
+                    stops CJK labels wrapping. A word too wide for the column ends in "…". */}
+                <span className="text-muted-foreground block overflow-x-clip text-[10px] leading-none font-semibold tracking-[0.16em] text-ellipsis uppercase">
                   {t("web.admin.shell.mobileHeader.eyebrow")}
                 </span>
                 {/* truncate clips to the line box: a tighter leading cuts off descenders and accents. */}
@@ -190,11 +202,13 @@ function AdminLayoutContent() {
           header's right-aligned buttons sit underneath them until the capped
           content column pulls away from the viewport's right edge.
           `--page-gutter` is published so fixed page chrome (the collection
-          editor's save bar) can line up with the content column. */}
+          editor's save bar) can line up with the content column.
+          `scroll-mt-24` keeps Skip to content's jump clear of the phone
+          header. */}
       <main
         id="main-content"
         tabIndex={-1}
-        className={`relative z-10 min-h-screen min-w-0 px-(--page-gutter) py-4 [--page-gutter:1rem] sm:[--page-gutter:1.5rem] lg:ms-[240px] lg:pt-16 lg:pb-8 lg:[--page-gutter:2rem] xl:[--page-gutter:2.5rem] ${
+        className={`relative z-10 min-h-screen min-w-0 scroll-mt-24 px-(--page-gutter) py-4 [--page-gutter:1rem] sm:[--page-gutter:1.5rem] lg:ms-[240px] lg:scroll-mt-0 lg:pt-16 lg:pb-8 lg:[--page-gutter:2rem] xl:[--page-gutter:2.5rem] ${
           hasBackgroundBar ? "pb-32 sm:pb-36" : ""
         }`}
       >

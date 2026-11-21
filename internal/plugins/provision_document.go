@@ -4,26 +4,21 @@ import (
 	"bytes"
 	"encoding/json"
 	"encoding/json/jsontext"
-	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
-	"math"
 	"math/big"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"gopkg.in/yaml.v3"
 
 	provisioningv1 "github.com/Silo-Server/silo-server/contracts/plugins/provisioning/v1"
-	"github.com/Silo-Server/silo-server/internal/envutil"
+	"github.com/Silo-Server/silo-server/internal/provisiondoc"
 )
 
 // ProvisionDocument holds the declaration and a snapshot of its local secret
@@ -62,7 +57,7 @@ func (v *provisionInt) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-const maxProvisionBytes = 1 << 20
+const maxProvisionBytes = provisiondoc.MaxBytes
 
 // ReadProvisionDocument is called by API hosts only. A nil document means
 // that this instance reads the committed deployment state.
@@ -73,7 +68,7 @@ func ReadProvisionDocument() (*ProvisionDocument, error) {
 	case inline != "" && path != "":
 		return nil, errors.New("set only one of SILO_PLUGINS and SILO_PLUGINS_FILE")
 	case path != "":
-		data, err := envutil.ReadRegularFile(path)
+		data, err := provisiondoc.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("SILO_PLUGINS_FILE: %w", err)
 		}
@@ -106,7 +101,7 @@ func parseProvisionDocument(data []byte, allowYAML bool) (*ProvisionDocument, er
 		// A malformed JSON document beginning with an object can still be a
 		// YAML flow mapping. The YAML reader checks duplicates independently.
 		var err error
-		data, err = provisionYAMLToJSON(data, maxProvisionBytes)
+		data, err = provisiondoc.YAMLToJSON(data, maxProvisionBytes, provisionNumberFitsRuntime)
 		if err != nil {
 			return nil, err
 		}
@@ -159,129 +154,6 @@ func parseProvisionDocument(data []byte, allowYAML bool) (*ProvisionDocument, er
 	return &document, nil
 }
 
-func provisionYAMLToJSON(data []byte, limit int) ([]byte, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	var root yaml.Node
-	if err := decoder.Decode(&root); err != nil {
-		return nil, errors.New("invalid provisioning YAML: check syntax and duplicate keys")
-	}
-	if err := decoder.Decode(new(yaml.Node)); !errors.Is(err, io.EOF) {
-		return nil, errors.New("plugin provisioning expects one YAML document")
-	}
-	// yaml.v3 decodes floating point scalars into float64. Check the spelling
-	// before that conversion so a lossy value cannot pass the JSON checks.
-	if _, err := provisionYAMLSize(&root, make(map[*yaml.Node]int), limit); err != nil {
-		return nil, err
-	}
-	var document any
-	if err := root.Decode(&document); err != nil {
-		return nil, errors.New("invalid provisioning YAML: check syntax and duplicate keys")
-	}
-	if !provisionJSONValue(document) {
-		return nil, errors.New("plugin provisioning requires JSON-compatible YAML with string mapping keys")
-	}
-	encoded := provisionJSONBuffer{limit: limit}
-	if err := jsonv2.MarshalWrite(&encoded, document, jsonv2.WithMarshalers(provisionYAMLFloat)); err != nil {
-		if errors.Is(err, errProvisionExpandedSize) {
-			return nil, errProvisionExpandedSize
-		}
-		return nil, errors.New("plugin provisioning requires finite JSON numbers and UTF-8 strings")
-	}
-	return encoded.Bytes(), nil
-}
-
-var errProvisionExpandedSize = errors.New("expanded plugin declaration exceeds 1 MiB")
-
-type provisionJSONBuffer struct {
-	bytes.Buffer
-	limit int
-}
-
-func (b *provisionJSONBuffer) Write(p []byte) (int, error) {
-	if len(p) > b.limit-b.Len() {
-		return 0, errProvisionExpandedSize
-	}
-	return b.Buffer.Write(p)
-}
-
-// The shortest decimal for an integral float can name a different integer
-// that rounds to the same float. Preserve its exact integer through JSON.
-var provisionYAMLFloat = jsonv2.MarshalFunc(func(value float64) ([]byte, error) {
-	if value == math.Trunc(value) && !math.IsInf(value, 0) {
-		return strconv.AppendFloat(nil, value, 'f', 0, 64), nil
-	}
-	return json.Marshal(value)
-})
-
-// Charge each alias for its target before yaml.v3 expands it. Only completed
-// anchors can be referenced, so an alias back to a parent is invalid.
-func provisionYAMLSize(node *yaml.Node, anchors map[*yaml.Node]int, limit int) (int, error) {
-	if node.Kind == yaml.AliasNode {
-		size, ok := anchors[node.Alias]
-		if !ok {
-			return 0, errors.New("recursive or unresolved YAML alias")
-		}
-		return size, nil
-	}
-	if node.Kind == yaml.ScalarNode && node.ShortTag() == "!!float" &&
-		!provisionNumberFitsRuntime(strings.ReplaceAll(node.Value, "_", "")) {
-		return 0, fmt.Errorf("number cannot be represented by the plugin runtime at YAML line %d, column %d", node.Line, node.Column)
-	}
-	size := max(1, len(node.Value))
-	var keys map[string]struct{}
-	if node.Kind == yaml.MappingNode {
-		keys = make(map[string]struct{}, len(node.Content)/2)
-	}
-	for i, child := range node.Content {
-		n, err := provisionYAMLSize(child, anchors, limit)
-		if err != nil {
-			return 0, err
-		}
-		size += n
-		if size > limit {
-			return 0, errProvisionExpandedSize
-		}
-		if keys != nil && i%2 == 0 {
-			key := child
-			if key.Kind == yaml.AliasNode {
-				key = key.Alias
-			}
-			if key.Kind != yaml.ScalarNode || (key.ShortTag() != "!!str" && key.ShortTag() != "!!merge") {
-				return 0, errors.New("plugin provisioning requires string mapping keys")
-			}
-			if _, duplicate := keys[key.Value]; duplicate {
-				return 0, fmt.Errorf("duplicate YAML mapping key at line %d, column %d", child.Line, child.Column)
-			}
-			keys[key.Value] = struct{}{}
-		}
-	}
-	if node.Anchor != "" {
-		anchors[node] = size
-	}
-	return size, nil
-}
-
-func provisionJSONValue(value any) bool {
-	switch value := value.(type) {
-	case map[string]any:
-		for _, item := range value {
-			if !provisionJSONValue(item) {
-				return false
-			}
-		}
-	case []any:
-		for _, item := range value {
-			if !provisionJSONValue(item) {
-				return false
-			}
-		}
-	case nil, string, bool, int, int64, uint64, float64:
-	default:
-		return false
-	}
-	return true
-}
-
 type provisionReference struct {
 	source string
 	name   string
@@ -325,13 +197,10 @@ func (d *ProvisionDocument) captureSecret(ref provisionReference, total *int) er
 	}
 	var secret string
 	if ref.source == "fromFile" {
-		// The same reader as the server's _FILE variables, so a secret file
-		// means the same value wherever it is referenced.
-		value, err := envutil.ReadSecretFile(ref.name)
-		if err != nil {
+		var err error
+		if secret, err = provisiondoc.ReadSecretFile(ref.name); err != nil {
 			return fmt.Errorf("secret file: %w", err)
 		}
-		secret = value
 	} else {
 		secret = os.Getenv(ref.name)
 	}

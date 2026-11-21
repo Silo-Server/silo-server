@@ -21129,6 +21129,20 @@
       "value": "⟦Îñ ţĥé šéŕṽéŕ'š ţîɱé žöñé.~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "⟦Îñ ţĥé šéŕṽéŕ'š ţîɱé žöñé. Ţĥåţ'š "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " ŵĥéŕé ýöû åŕé.~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -22173,20 +22187,80 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "⟦Ĥîđé ţĥé åççöûñţš~~~~~~~⟧"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ĥîđé ţĥé åççöûñţ~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ĥîđé ţĥé åççöûñţš~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "⟦Ĥîđé ţĥé ƒîļéš~~~~~~⟧"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ĥîđé ţĥé ƒîļé~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ĥîđé ţĥé ƒîļéš~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "⟦Ĥîđé ƒîļéš~~~~⟧"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ĥîđé ƒîļé~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ĥîđé ƒîļéš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -22623,8 +22697,28 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "⟦Šĥöŵ ţĥé åççöûñţš~~~~~~~⟧"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šĥöŵ ţĥé åççöûñţ~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šĥöŵ ţĥé åççöûñţš~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -22671,14 +22765,54 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "⟦Šĥöŵ ţĥé ƒîļéš~~~~~~⟧"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šĥöŵ ţĥé ƒîļé~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šĥöŵ ţĥé ƒîļéš~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "⟦Šĥöŵ ƒîļéš~~~~⟧"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šĥöŵ ƒîļé~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šĥöŵ ƒîļéš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -31119,6 +31253,12 @@
     {
       "type": 0,
       "value": "⟦ƒåîļéđ~~~⟧"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "⟦Ţåšķ ƒåîļéđ. Îñšþéçţ åđɱîñîšţŕåţöŕ đîåĝñöšţîçš ƒöŕ đéţåîļš.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -66506,7 +66646,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "⟦Ŕéļöåđ ţö šéé ţĥé çûŕŕéñţ ṽåļûéš. Ýöûŕ éđîţš ţö šéţţîñĝš ţĥåţ çĥåñĝéđ, åñđ ţö šåṽéđ þåššŵöŕđš åñđ ķéýš, åŕé ûñđöñé; ýöûŕ öţĥéŕ éđîţš åŕé ķéþţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ŕéļöåđ ţö šéé ţĥé çûŕŕéñţ ṽåļûéš. Ýöûŕ éđîţš ţö šéţţîñĝš ţĥåţ çĥåñĝéđ, åñđ ţö šåṽéđ þåššŵöŕđš åñđ ķéýš ŵîţĥ ţĥéîŕ ŕéļåţéđ šéţţîñĝš, åŕé ûñđöñé; ýöûŕ öţĥéŕ éđîţš åŕé ķéþţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -83799,10 +83939,60 @@
       "value": "⟦Ŕéçéñţ éŕŕöŕš~~~~~~⟧"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéƒŕéšĥ ƒåîļéđ. Îñšþéçţ åđɱîñîšţŕåţöŕ đîåĝñöšţîçš ƒöŕ đéţåîļš.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "⟦Ŕéṽîéŵ çûŕŕéñţ šçĥéđûļé~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "~⟧"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -84287,6 +84477,18 @@
     {
       "type": 0,
       "value": "⟦Åûţöšçåñ ŵéƀĥööķ ŕéţŕý~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŕé-ŕéåđš ţĥé ĥéåđéŕ öƒ ṀĶṼ ƒîļéš ŵîţĥ ÅŠŠ šûƀţîţļéš šçåññéđ ƀéƒöŕé Šîļö ļéƒţ éɱƀéđđéđ ƒöñţš öûţ öƒ ţĥé ƀîţŕåţé, šö ţĥéý åŕé ñöţ ţŕåñšçöđéđ ƒöŕ å ƀîţŕåţé ţĥéý đö ñöţ šţŕéåɱ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "⟦Çöŕŕéçţ Ɓîţŕåţé öƒ Ƒîļéš ŵîţĥ Éɱƀéđđéđ Ƒöñţš~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -119162,6 +119364,12 @@
       "value": "⟦Šĥöŵš~~⟧"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "⟦Ṁåñåĝéđ ƀý ţĥîš šéŕṽéŕ. Ŵĥåţ îţ šĥöŵš çåñ’ţ ƀé çĥåñĝéđ ĥéŕé; åđđ å ŕöŵ öƒ ýöûŕ öŵñ ţö çĥööšé ŵĥåţ îţ šĥöŵš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -123123,6 +123331,12 @@
     {
       "type": 0,
       "value": "⟦Ĥéŕö ƀåññéŕ · Ŵéƀ öñļý~~~~~~~~~⟧"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "⟦Šéŕṽéŕ~~~⟧"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

@@ -215,7 +215,7 @@ function ServerActivityContent({ hideWhenEmpty = false, className }: ServerActiv
             }`}
           />
           {totalActive > 0 && (
-            <span className="absolute -end-0.5 -top-0.5 flex h-[18px] min-w-[18px] animate-[pulse-opacity_2s_ease-in-out_infinite] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow-sm">
+            <span className="bg-foreground text-background ring-background absolute -end-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold ring-2">
               {totalActiveLabel}
             </span>
           )}

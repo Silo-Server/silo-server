@@ -65,6 +65,13 @@ import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 // The settings layout loads these field styles for its pages; this page is not one of them.
 import "@/styles/admin-settings.css";
 
+/**
+ * A header action on a phone: its own full-width row, with a label too long
+ * for the row wrapping onto a second line instead of running off the screen.
+ */
+const PHONE_HEADER_ACTION =
+  "max-sm:h-auto max-sm:basis-full max-sm:whitespace-normal max-sm:text-center";
+
 /** The current time, refreshed each minute so "today" and "tomorrow" stay right. */
 function useMinuteClock() {
   const [now, setNow] = useState(() => new Date());
@@ -254,8 +261,9 @@ export default function AdminBackups() {
     void queryClient.invalidateQueries({ queryKey: adminKeys.task("backup") });
   };
 
-  const backUpNowButton = (
+  const backUpNowButton = (className?: string) => (
     <Button
+      className={className}
       onClick={backUpNow}
       disabled={blocker !== null || startBackup.isPending || !list}
       aria-describedby={blocker ? blockerId : undefined}
@@ -278,18 +286,27 @@ export default function AdminBackups() {
           subtitle={t("web.admin.backups.header.subtitle")}
           className="mb-4"
           actions={
-            <div className="flex flex-col items-end gap-1">
+            // On a phone the actions start at the left, so each takes its own
+            // row there and the reason "Back up now" can't run sits right under it.
+            <div className="flex flex-col items-end gap-1 max-sm:w-full max-sm:items-stretch">
               <div className="flex flex-wrap justify-end gap-2">
                 {uploadAvailable ? (
-                  <Button variant="outline" onClick={() => setUploading(true)}>
+                  <Button
+                    variant="outline"
+                    className={PHONE_HEADER_ACTION}
+                    onClick={() => setUploading(true)}
+                  >
                     <Upload data-icon="inline-start" aria-hidden="true" />
                     {t("web.admin.backups.header.upload")}
                   </Button>
                 ) : null}
-                {backUpNowButton}
+                {backUpNowButton(PHONE_HEADER_ACTION)}
               </div>
               {blocker ? (
-                <p id={blockerId} className="text-muted-foreground max-w-72 text-end text-xs">
+                <p
+                  id={blockerId}
+                  className="text-muted-foreground max-w-72 text-end text-xs max-sm:max-w-none max-sm:text-start"
+                >
                   {blocker}
                 </p>
               ) : null}
@@ -386,12 +403,21 @@ export default function AdminBackups() {
       ) : items.length === 0 ? (
         <div className="surface-panel space-y-3 rounded-2xl p-6">
           <p className="font-medium">{t("web.admin.backups.list.empty")}</p>
-          <p className="text-muted-foreground text-sm">
-            {configured
-              ? t("web.admin.backups.list.emptyConfigured")
-              : t("web.admin.backups.list.emptyUnconfigured")}
-          </p>
-          {configured ? backUpNowButton : null}
+          {configured ? null : (
+            <p className="text-muted-foreground text-sm">
+              {t("web.admin.backups.list.emptyUnconfigured")}
+            </p>
+          )}
+          {/* While "Back up now" can't run, don't offer it here: the reason
+              shows under the header's button. */}
+          {configured && !blocker ? (
+            <>
+              <p className="text-muted-foreground text-sm">
+                {t("web.admin.backups.list.emptyConfigured")}
+              </p>
+              {backUpNowButton()}
+            </>
+          ) : null}
         </div>
       ) : (
         <section aria-labelledby="saved-backups-heading" className="space-y-6">

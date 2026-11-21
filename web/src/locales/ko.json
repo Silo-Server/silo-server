@@ -17720,6 +17720,20 @@
       "value": "서버의 시간대 기준이에요."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "서버 시간대 기준이에요. 현재 시간대로는 "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "에 해당해요."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -18616,20 +18630,56 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "계정 숨기기"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "계정 숨기기"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "파일 숨기기"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "파일 숨기기"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "파일 숨기기"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "파일 숨기기"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -18894,8 +18944,20 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "계정 보기"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "계정 보기"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -18922,14 +18984,38 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "파일 보기"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "파일 보기"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "파일 보기"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "파일 보기"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -26006,6 +26092,12 @@
     {
       "type": 0,
       "value": "실패"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "작업이 실패했어요. 자세한 내용은 관리자 진단 정보에서 확인하세요."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -54829,7 +54921,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "현재 값을 보려면 새로고침하세요. 변경된 설정과 저장된 비밀번호 및 키에 대한 수정 사항은 취소되고, 나머지 수정 사항은 유지돼요."
+      "value": "현재 값을 보려면 새로고침하세요. 변경된 설정, 저장된 비밀번호와 키 및 관련 설정에 대한 수정 사항은 취소되고, 나머지 수정 사항은 유지돼요."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -70714,10 +70806,44 @@
       "value": "최근 오류"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "새로고침하지 못했어요. 자세한 내용은 관리자 진단 정보에서 확인하세요."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "현재 일정 검토"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -71150,6 +71276,18 @@
     {
       "type": 0,
       "value": "Autoscan 웹훅 재시도"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Silo가 내장 글꼴을 비트레이트에서 제외하기 전에 스캔한, ASS 자막이 있는 MKV 파일의 헤더를 다시 읽어, 실제로 스트리밍하지 않는 비트레이트 때문에 트랜스코딩되지 않게 해요."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "내장 글꼴이 있는 파일의 비트레이트 보정"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -100139,6 +100277,12 @@
       "value": "표시 내용"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "이 서버에서 관리하는 행이에요. 표시할 내용은 여기서 변경할 수 없어요. 표시할 내용을 직접 선택하려면 행을 새로 추가하세요."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -103606,6 +103750,12 @@
     {
       "type": 0,
       "value": "히어로 배너 · 웹 전용"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "서버"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
