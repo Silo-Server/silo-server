@@ -260,13 +260,13 @@ func (s *mediaFileRowScan) apply(f *models.MediaFile) error {
 }
 
 // scanMediaFileRow decodes one full media_files row into a *models.MediaFile.
-// Scan errors are returned unwrapped so callers can map pgx.ErrNoRows and add
-// caller-specific context.
-func scanMediaFileRow(row pgx.Row) (*models.MediaFile, error) {
+// wrapScanErr transforms row.Scan errors (e.g. mapping pgx.ErrNoRows and adding
+// caller-specific context) while JSONB unmarshal errors from apply return as-is.
+func scanMediaFileRow(row pgx.Row, wrapScanErr func(error) error) (*models.MediaFile, error) {
 	var f models.MediaFile
 	var s mediaFileRowScan
 	if err := row.Scan(s.dests(&f)...); err != nil {
-		return nil, err
+		return nil, wrapScanErr(err)
 	}
 	if err := s.apply(&f); err != nil {
 		return nil, err
@@ -276,23 +276,23 @@ func scanMediaFileRow(row pgx.Row) (*models.MediaFile, error) {
 
 // scanMediaFile scans a single row into a *models.MediaFile.
 func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
-	f, err := scanMediaFileRow(row)
-	if err != nil {
+	return scanMediaFileRow(row, func(err error) error {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrFileNotFound
+			return ErrFileNotFound
 		}
-		return nil, fmt.Errorf("scanning media file: %w", err)
-	}
-	return f, nil
+		return fmt.Errorf("scanning media file: %w", err)
+	})
 }
 
 // scanMediaFiles scans multiple rows into a []*models.MediaFile slice.
 func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 	var files []*models.MediaFile
 	for rows.Next() {
-		f, err := scanMediaFileRow(rows)
+		f, err := scanMediaFileRow(rows, func(err error) error {
+			return fmt.Errorf("scanning media file row: %w", err)
+		})
 		if err != nil {
-			return nil, fmt.Errorf("scanning media file row: %w", err)
+			return nil, err
 		}
 		files = append(files, f)
 	}
