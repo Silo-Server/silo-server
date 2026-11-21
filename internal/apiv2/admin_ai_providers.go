@@ -21,13 +21,14 @@ type AdminAIProviderService interface {
 }
 
 type AdminAIProvider struct {
-	ID           string   `json:"id"`
-	Type         string   `json:"type" enum:"openai,gemini,openrouter,groq,ollama,whisper,custom"`
-	Name         string   `json:"name"`
-	BaseURL      string   `json:"base_url" format:"uri"`
-	HasAPIKey    bool     `json:"has_api_key"`
-	Capabilities []string `json:"capabilities" enum:"chat,embeddings,speech" doc:"What the provider serves."`
-	UsedBy       []string `json:"used_by" enum:"text,speech,embeddings" doc:"Jobs currently sending requests to the provider. A provider in use cannot be deleted."`
+	ID              string   `json:"id"`
+	Type            string   `json:"type" enum:"openai,gemini,openrouter,groq,ollama,whisper,custom"`
+	Name            string   `json:"name"`
+	BaseURL         string   `json:"base_url" format:"uri"`
+	HasAPIKey       bool     `json:"has_api_key"`
+	Capabilities    []string `json:"capabilities" enum:"chat,embeddings,speech" doc:"What the provider serves."`
+	UsedBy          []string `json:"used_by" enum:"text,speech,embeddings" doc:"Jobs currently sending requests to the provider. A provider in use cannot be deleted."`
+	ManagedByEnvVar string   `json:"managed_by_env_var,omitempty" doc:"The variable in the server's environment that declares this provider, such as SILO_CONFIG_FILE, when the deployment declares it. Updating or deleting such a provider is 422 validation_failed with code managed_by_environment."`
 }
 
 type AdminAIProviderType struct {
@@ -93,6 +94,7 @@ func adminAIProviderOf(view handlers.AdminAIProviderView) AdminAIProvider {
 	return AdminAIProvider{
 		ID: view.ID, Type: view.Type, Name: view.Name, BaseURL: view.BaseURL, HasAPIKey: view.HasAPIKey,
 		Capabilities: nonNilStrings(view.Capabilities), UsedBy: nonNilStrings(view.UsedBy),
+		ManagedByEnvVar: view.ManagedByEnvVar,
 	}
 }
 
@@ -132,6 +134,8 @@ func adminAIProviderProblem(err error, action string) error {
 		return NewProblem(TypeValidationFailed, detail(handlers.ErrAIProviderInvalid))
 	case errors.Is(err, handlers.ErrAIProviderConflict):
 		return NewProblem(TypeConflict, detail(handlers.ErrAIProviderConflict))
+	case errors.Is(err, handlers.ErrAIProviderManaged):
+		return validationProblem("path.id", codeManagedByEnvironment, detail(handlers.ErrAIProviderManaged))
 	case errors.Is(err, handlers.ErrAdminSettingsUnavailable):
 		return unavailable("AI providers")
 	default:
@@ -186,7 +190,7 @@ func registerAdminAIProviders(reg *Registry) {
 		return &AdminAIProviderOutput{Body: adminAIProviderOf(view)}, nil
 	})
 
-	Register(reg, op("PATCH", "/admin/ai/providers/{id}", "updateAdminAIProvider", "Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request."), func(ctx context.Context, in *AdminAIProviderUpdateInput) (*AdminAIProviderOutput, error) {
+	Register(reg, op("PATCH", "/admin/ai/providers/{id}", "updateAdminAIProvider", "Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request. A provider the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment."), func(ctx context.Context, in *AdminAIProviderUpdateInput) (*AdminAIProviderOutput, error) {
 		svc, err := service()
 		if err != nil {
 			return nil, err
@@ -199,7 +203,7 @@ func registerAdminAIProviders(reg *Registry) {
 		return &AdminAIProviderOutput{Body: adminAIProviderOf(view)}, nil
 	})
 
-	Register(reg, op("DELETE", "/admin/ai/providers/{id}", "deleteAdminAIProvider", "Disconnect a provider and discard its key. A provider a job uses cannot be deleted."), func(ctx context.Context, in *AdminAIProviderIDInput) (*struct{}, error) {
+	Register(reg, op("DELETE", "/admin/ai/providers/{id}", "deleteAdminAIProvider", "Disconnect a provider and discard its key. A provider a job uses cannot be deleted, and one the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment."), func(ctx context.Context, in *AdminAIProviderIDInput) (*struct{}, error) {
 		svc, err := service()
 		if err != nil {
 			return nil, err

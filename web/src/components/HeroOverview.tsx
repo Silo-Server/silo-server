@@ -2,6 +2,7 @@ import { Languages } from "lucide-react";
 import type { SectionItem } from "@/api/types";
 import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
 import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
+import TranslatingStatus from "@/pages/ItemDetail/components/TranslatingStatus";
 import { useT } from "@/i18n";
 import { HeroOverviewText } from "./HeroOverviewText";
 
@@ -37,12 +38,9 @@ export default function HeroOverview({
 
   return (
     <div className="mb-7 max-w-2xl">
-      <HeroOverviewText overview={item.overview} translating={translating} />
+      <HeroOverviewText overview={item.overview} />
       {translating ? (
-        <span className="text-muted-foreground/70 mt-1 inline-flex items-center gap-1.5 text-xs">
-          <Languages className="h-3 w-3 animate-pulse" />
-          {t("web.home.hero.translating")}
-        </span>
+        <TranslatingStatus label={t("web.home.hero.translating")} className="mt-1" />
       ) : (
         (machineTranslated || onTranslate) && (
           <div className="mt-1.5 flex flex-wrap items-center gap-2">

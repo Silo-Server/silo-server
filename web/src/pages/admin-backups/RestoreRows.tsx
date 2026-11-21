@@ -254,7 +254,7 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
       </ul>
     ) : null,
     missingPaths.length > 0 ? (
-      <p key="missing-paths" className="text-xs text-amber-600 dark:text-amber-400">
+      <p key="missing-paths" className="text-xs wrap-anywhere text-amber-600 dark:text-amber-400">
         {t("web.admin.backups.restore.rows.cantOpen", { paths: missingPaths.join(", ") })}
       </p>
     ) : null,

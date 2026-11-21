@@ -328,7 +328,7 @@ function TaskSchedulePanel({
         </div>
       ) : (
         <div className="surface-panel space-y-3 rounded-2xl p-4">
-          <fieldset disabled={update.isPending || busy} className="space-y-3">
+          <fieldset disabled={update.isPending || busy} className="min-w-0 space-y-3">
             {draft.map((trigger, i) => (
               <TriggerFormRow
                 key={draftKeys[i]}
@@ -345,6 +345,7 @@ function TaskSchedulePanel({
             <Button
               variant="outline"
               size="sm"
+              className="h-auto min-h-8 max-w-full py-1 text-start whitespace-normal"
               onClick={() => {
                 setDraft([...draft, { type: "interval", interval_ms: 3_600_000 }]);
                 setDraftKeys([...draftKeys, nextDraftKey.current++]);
