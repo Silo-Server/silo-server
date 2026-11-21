@@ -45,6 +45,12 @@ interface TriggerFormRowProps {
 // browser's default font size, which rem follows.
 const TRIGGER_FIELD_WIDTH = "w-full sm:w-40 sm:min-w-fit";
 
+// In em so the box grows with its own text size. 11.5em holds the widest "None"
+// placeholder measured, Croatian "Bez ograničenja" (167 px at 16 px text and
+// 152 px at 14 px in Firefox), beside the number spinners Firefox and Safari
+// always draw.
+const MAX_RUNTIME_INPUT_WIDTH = "w-full sm:w-[11.5em]";
+
 type IntervalUnit = "seconds" | "minutes" | "hours";
 
 const UNIT_MS: Record<IntervalUnit, number> = {
@@ -191,7 +197,9 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
           </div>
         )}
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        {/* Wraps at large text sizes, so the label, box, and unit stack instead of
+            widening the row past its panel. */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
           <label className="text-muted-foreground text-xs whitespace-nowrap">
             {t("web.admin.tasks.detail.maxRuntimeLabel")}
           </label>
@@ -199,7 +207,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
             type="number"
             min={0}
             step="any"
-            className="w-full sm:w-[100px]"
+            className={MAX_RUNTIME_INPUT_WIDTH}
             placeholder={t("web.admin.tasks.detail.maxRuntimeNone")}
             value={trigger.max_runtime_ms != null ? trigger.max_runtime_ms / 60_000 : ""}
             onChange={(e) => {
