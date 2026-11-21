@@ -537,6 +537,30 @@ export interface RestoreChooseProps {
   onReview: () => void;
 }
 
+/**
+ * A callback ref and whether its box currently scrolls. It watches the box and
+ * its first child, so it measures again when the box resizes or the content
+ * inside a capped box grows. Chromium and Firefox let the keyboard focus a box
+ * that scrolls; WebKit doesn't, so the box asks for focus itself, and only
+ * while it has something to scroll.
+ */
+function useScrolls() {
+  const [scrolls, setScrolls] = useState(false);
+  const ref = useCallback((element: HTMLElement | null) => {
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() =>
+      setScrolls(element.scrollHeight > element.clientHeight),
+    );
+    observer.observe(element);
+    if (element.firstElementChild) observer.observe(element.firstElementChild);
+    return () => {
+      observer.disconnect();
+      setScrolls(false);
+    };
+  }, []);
+  return [ref, scrolls] as const;
+}
+
 /** Step 1: what differs, and what to bring back, with the plan so far beside it. */
 export function RestoreChoose({
   set,
@@ -549,6 +573,7 @@ export function RestoreChoose({
   const t = useT();
   const index = useMemo(() => indexItems(set), [set]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeRef, noticeScrolls] = useScrolls();
   const libraries = useAdminLibraries();
   const names = useMemo(() => libraryNames(set, libraries.data ?? []), [set, libraries.data]);
   const plan = restorePlan(set, selection, dataTypes);
@@ -687,10 +712,13 @@ export function RestoreChoose({
         <div className="lg:border-border/60 space-y-4 lg:flex lg:min-h-0 lg:flex-col lg:border-t lg:pt-4">
           {notice ? (
             <p
+              ref={noticeRef}
               role="status"
-              className="overlay-scroll text-[13px] text-amber-600 lg:max-h-32 lg:min-h-0 lg:overflow-y-auto dark:text-amber-400"
+              tabIndex={noticeScrolls ? 0 : undefined}
+              className="overlay-scroll focus-visible:outline-ring rounded-sm text-[13px] text-amber-600 focus-visible:outline-2 focus-visible:outline-offset-2 lg:max-h-32 lg:min-h-0 lg:overflow-y-auto dark:text-amber-400"
             >
-              {notice}
+              {/* A block child, so useScrolls sees the text grow. */}
+              <span className="block">{notice}</span>
             </p>
           ) : null}
           <Button className="w-full lg:shrink-0" disabled={selection.size === 0} onClick={onReview}>
