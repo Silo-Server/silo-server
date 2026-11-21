@@ -150,9 +150,12 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   `max-w-max` can't stretch, so it can take `dir="auto"` itself unless it also carries
   a logical margin, padding or border (`ms-auto`, `pe-2`, `border-s`): those follow
   the element's own direction, so keep them on the outer element and put the name in
-  a `block` span inside it. `.bidi-text` alone doesn't keep the start: its
-  `unicode-bidi: plaintext` leaves the box in the page's direction, so Firefox drops
-  the "…" and WebKit cuts the start.
+  a `block` span inside it. A name that can also wrap takes `align-with-page`, so its
+  wrapped lines stay on the page's start side in every browser; Chromium otherwise puts
+  them on the name's own start side. A clip, or a measurement of whether the name
+  overflows, goes on the name's own box, since it overflows toward its own end.
+  `.bidi-text` alone doesn't keep the start: its `unicode-bidi: plaintext` leaves the box
+  in the page's direction, so Firefox drops the "…" and WebKit cuts the start.
 - Titles, names, taglines and overviews from metadata use `.bidi-text` (`app.css`).
   Where such text is cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
   stylesheet), it also takes `dir="auto"`. Without it, text that runs the other way
