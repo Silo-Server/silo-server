@@ -135,6 +135,14 @@ function AlertDialogMedia({ className, ...props }: React.ComponentProps<"div">) 
   );
 }
 
+// Below sm, where footers stack their buttons at full width, a label too long
+// for the dialog (a phone with the largest text size) wraps instead of spilling
+// past its button. min-h-9 keeps a one-line button at the default size's
+// height, border included; py-1.5 pads a wrapped one. From sm up the buttons
+// sit in a row and keep their one-line labels.
+const WRAPPING_LABEL =
+  "max-sm:h-auto max-sm:min-h-9 max-sm:py-1.5 max-sm:whitespace-normal max-sm:text-center";
+
 function AlertDialogAction({
   className,
   variant = "default",
@@ -143,7 +151,12 @@ function AlertDialogAction({
 }: React.ComponentProps<typeof AlertDialogPrimitive.Action> &
   Pick<React.ComponentProps<typeof Button>, "variant" | "size">) {
   return (
-    <Button variant={variant} size={size} asChild>
+    <Button
+      variant={variant}
+      size={size}
+      className={size === "default" ? WRAPPING_LABEL : undefined}
+      asChild
+    >
       <AlertDialogPrimitive.Action
         data-slot="alert-dialog-action"
         className={cn(className)}
@@ -161,7 +174,12 @@ function AlertDialogCancel({
 }: React.ComponentProps<typeof AlertDialogPrimitive.Cancel> &
   Pick<React.ComponentProps<typeof Button>, "variant" | "size">) {
   return (
-    <Button variant={variant} size={size} asChild>
+    <Button
+      variant={variant}
+      size={size}
+      className={size === "default" ? WRAPPING_LABEL : undefined}
+      asChild
+    >
       <AlertDialogPrimitive.Cancel
         data-slot="alert-dialog-cancel"
         className={cn(className)}

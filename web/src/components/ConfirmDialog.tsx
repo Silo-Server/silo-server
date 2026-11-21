@@ -118,7 +118,12 @@ export function ConfirmDialog({
             <p id={noteId} className="text-muted-foreground text-sm">
               {t("web.shell.confirmDialog.irreversible")}
             </p>
-            <div className="flex gap-2">{buttons}</div>
+            {/* Below sm the buttons stack at full width, as in the default footer:
+                a centered row wider than the dialog would put Cancel past the
+                start edge, where the dialog can't scroll to it. */}
+            <div className="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row">
+              {buttons}
+            </div>
           </AlertDialogFooter>
         ) : (
           <AlertDialogFooter>{buttons}</AlertDialogFooter>
