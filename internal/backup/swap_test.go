@@ -276,7 +276,7 @@ func (l fakeLoader) FinishPluginProvisionRestore(context.Context, string, string
 func (l fakeLoader) CarryServerSpecificSettings(context.Context, string, string) (int, error) {
 	return 0, nil
 }
-func (l fakeLoader) CarryOutboundSettings(context.Context, string, string) ([]string, []string, error) {
+func (l fakeLoader) CarryOutboundSettings(context.Context, string, string, *secret.Cipher) ([]string, []string, error) {
 	return nil, nil, nil
 }
 func (l fakeLoader) InterruptWork(context.Context, string, string) ([]string, error) { return nil, nil }
