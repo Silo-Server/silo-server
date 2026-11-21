@@ -123,8 +123,7 @@ export default function CatalogFilterSheet({
         />
 
         <PortalContainerContext.Provider value={portalContainer}>
-          {/* pe-4: no close button here to leave room for. */}
-          <SheetHeader className="border-b pe-4 pb-3">
+          <SheetHeader className="border-b pb-3">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <SheetTitle>{t("web.catalog.filters.heading")}</SheetTitle>

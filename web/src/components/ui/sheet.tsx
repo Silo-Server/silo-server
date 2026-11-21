@@ -85,10 +85,13 @@ function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="sheet-header"
-      // pe-12 keeps text clear of SheetContent's close button in the top end
-      // corner. SheetTitle and SheetDescription wrap anywhere, so a long
-      // unbroken name wraps short of it.
-      className={cn("flex flex-col gap-1.5 p-4 pe-12", className)}
+      // A title placed directly in the header keeps clear of SheetContent's
+      // close button in the top end corner, whether or not the sheet shows it.
+      // A header that nests its title in a row of its own leaves room for the
+      // button itself. This rule outranks padding classes on the title, so a
+      // sheet without the button opts out with *:data-[slot=sheet-title]:pe-0
+      // on the header.
+      className={cn("flex flex-col gap-1.5 p-4 *:data-[slot=sheet-title]:pe-8", className)}
       {...props}
     />
   );

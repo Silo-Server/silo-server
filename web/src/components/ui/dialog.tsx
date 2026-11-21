@@ -82,14 +82,16 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
       data-slot="dialog-header"
       className={cn(
         "flex flex-col gap-2 text-center sm:text-start",
-        // DialogContent's close button sits in the header's top end corner, so
-        // the end side keeps text clear of it. Below sm the header is centered,
-        // so the start side matches. The breakpoint sets a variable instead of
-        // the padding, so a className with its own px-* or p-* replaces both
-        // sides at every width. DialogTitle and DialogDescription wrap
-        // anywhere, so a long unbroken name wraps in the narrower header
-        // instead of widening the dialog.
-        "ps-(--dialog-header-ps) pe-6 [--dialog-header-ps:--spacing(6)] sm:[--dialog-header-ps:0px]",
+        // DialogContent's close button sits in its top end corner, level with
+        // the first line of a header at the top of the default p-6 content. A
+        // title placed directly in the header keeps clear of it at the end side,
+        // and below sm, where the header is centered, at the start side too so
+        // it stays centered. Only the title gives up width; the description
+        // below the button keeps the full column. A header that nests its title
+        // in a row of its own leaves room for the button itself. These rules
+        // outrank padding classes on the title, so change a title's padding
+        // with the same *:data-[slot=dialog-title]: prefix on the header.
+        "*:data-[slot=dialog-title]:pe-6 max-sm:*:data-[slot=dialog-title]:ps-6",
         className,
       )}
       {...props}
