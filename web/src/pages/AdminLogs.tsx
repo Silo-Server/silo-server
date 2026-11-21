@@ -344,6 +344,7 @@ function AdminLogsPage() {
             />
             <Input
               placeholder={t("web.admin.logs.filters.clientIp")}
+              dir={clientIP ? "ltr" : undefined}
               value={clientIP}
               onChange={(e) => updateSearchParam("client_ip", e.target.value)}
               className="placeholder:font-ui max-w-xs font-mono"

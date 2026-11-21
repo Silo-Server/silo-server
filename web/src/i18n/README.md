@@ -120,10 +120,12 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   reason; a `dir="ltr"` box keeps flex order and text there left to right. `pre` is
   always left to right; inline `code`, `kbd` and `samp` take their text's direction
   unless they carry a `dir`.
-- An input or read-only field that holds a URL or server path sets `dir="ltr"`
-  (`SettingField` takes a `dir` prop); otherwise trailing `/` or `…` moves to the
-  start. When the field can show a translated placeholder or message instead, set
-  it only while it shows the URL or path (`dir={value ? "ltr" : undefined}`).
+- An input or read-only field that holds a URL, server path, or network address
+  (hostname, IP address, CIDR list) sets `dir="ltr"` (`SettingField` takes a `dir`
+  prop); otherwise trailing `/`, `.` or `…` moves to the start, and a comma-separated
+  list draws in reverse order. When the field can show a translated placeholder or
+  message instead, set it only while it shows the value
+  (`dir={value ? "ltr" : undefined}`).
   `dir="auto"` leaves an empty field's example in the page's direction, and
   `type="url"` rejects addresses without a scheme.
 - A name that can be in either script and is cut with `truncate` (a username, say) takes
