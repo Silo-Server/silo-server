@@ -90,7 +90,7 @@ export function RestoreReview({
           role="alert"
           className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm"
         >
-          <p className="min-w-0 flex-1">
+          <p className="min-w-0 flex-1 basis-64 text-balance">
             {t("web.admin.backups.restore.review.refused", { reason: refusal.message })}
           </p>
           {refusal.runningJobId ? (
@@ -136,21 +136,26 @@ export function RestoreReview({
         </div>
       ) : null}
 
+      {/* The 16rem basis wraps the buttons below the note on a narrow row
+          instead of squeezing the note to a word per line. The buttons stay
+          at the row's end, even when they stack. */}
       <div className="border-border/60 flex flex-wrap items-center gap-3 border-t pt-4">
-        <p className="text-muted-foreground min-w-0 flex-1 text-sm">
+        <p className="text-muted-foreground min-w-0 flex-1 basis-64 text-sm text-balance">
           {t("web.admin.backups.restore.review.duration")}
         </p>
-        <Button variant="outline" onClick={onBack} disabled={pending}>
-          {t("common.back")}
-        </Button>
-        <Button
-          onClick={onRestore}
-          disabled={
-            pending || selection.size === 0 || (!set.authenticated && !acceptUnauthenticated)
-          }
-        >
-          {t("web.admin.backups.restore.review.restore")}
-        </Button>
+        <div className="ms-auto flex flex-wrap justify-end gap-3">
+          <Button variant="outline" onClick={onBack} disabled={pending}>
+            {t("common.back")}
+          </Button>
+          <Button
+            onClick={onRestore}
+            disabled={
+              pending || selection.size === 0 || (!set.authenticated && !acceptUnauthenticated)
+            }
+          >
+            {t("web.admin.backups.restore.review.restore")}
+          </Button>
+        </div>
       </div>
     </div>
   );
