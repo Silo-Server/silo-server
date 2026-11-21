@@ -52,6 +52,8 @@ interface ProviderDraft {
   username: string;
   password: string;
   dirty: boolean;
+  /** The last save failed: the draft stays on screen, locked, until a reload. */
+  saveFailed: boolean;
 }
 
 function draftFor(config: SubtitleProviderConfig): ProviderDraft {
@@ -65,6 +67,7 @@ function draftFor(config: SubtitleProviderConfig): ProviderDraft {
     username: "",
     password: "",
     dirty: false,
+    saveFailed: false,
   };
 }
 
@@ -85,11 +88,13 @@ function ProviderRow({
   config,
   draft,
   onChange,
+  onReload,
   disabled,
 }: {
   config: SubtitleProviderConfig;
   draft: ProviderDraft;
   onChange: (next: ProviderDraft) => void;
+  onReload: () => void;
   disabled: boolean;
 }) {
   const t = useT();
@@ -133,15 +138,22 @@ function ProviderRow({
     );
   }
 
-  const rowDisabled = disabled || draft.loading || draft.loadFailed;
+  const rowDisabled = disabled || draft.loading || draft.loadFailed || draft.saveFailed;
+
+  let description = meta ? t(meta.description) : "";
+  if (draft.saveFailed) {
+    description = draft.loadFailed
+      ? t("web.admin.settings.providers.subtitles.loadFailed")
+      : t("web.admin.settings.providers.subtitles.saveNotConfirmed");
+  } else if (draft.loadFailed) {
+    description = t("web.setup.subtitles.loadFailed");
+  }
 
   return (
     <>
       <SettingFieldRow
         label={displayName}
-        description={
-          draft.loadFailed ? t("web.setup.subtitles.loadFailed") : meta ? t(meta.description) : ""
-        }
+        description={description}
         status={
           hasCredentials && !draft.dirty ? (
             <span className="text-muted-foreground text-xs">
@@ -157,7 +169,7 @@ function ProviderRow({
           onCheckedChange={(v) => onChange({ ...draft, enabled: v, dirty: true })}
         />
       </SettingFieldRow>
-      {draft.enabled && !draft.loadFailed ? (
+      {draft.enabled && (draft.saveFailed || !draft.loadFailed) ? (
         <div className="setup-provider-fields">
           {isOpenSubtitles ? (
             <>
@@ -212,6 +224,19 @@ function ProviderRow({
           </div>
         </div>
       ) : null}
+      {draft.saveFailed ? (
+        <div className="setup-provider-actions pb-3.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onReload}
+            disabled={disabled || draft.loading}
+          >
+            {t("web.admin.settings.providers.subtitles.reload")}
+          </Button>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -232,9 +257,9 @@ export function SubtitlesStep() {
 
   // Editing a provider needs its strong validator, which only the per-provider
   // read returns. Each one is loaded once when the list arrives so the switch
-  // can be flipped straight away, and reloaded after a failed save so a retry
-  // never carries a stale validator. A row whose editor fails to load stays
-  // read-only.
+  // can be flipped straight away, and again after a save or when the admin
+  // reloads a failed one. A load always shows the saved state and drops any
+  // draft. A row whose editor fails to load stays read-only.
   const loadEditor = useCallback(
     (config: SubtitleProviderConfig, isCancelled: () => boolean) => {
       const name = config.provider_name;
@@ -256,18 +281,10 @@ export function SubtitlesStep() {
             loaded.current.delete(name);
             return;
           }
-          setDrafts((prev) => {
-            const current = prev[name] ?? draftFor(config);
-            return {
-              ...prev,
-              [name]: {
-                ...current,
-                editor,
-                loading: false,
-                enabled: current.dirty ? current.enabled : editor.body.enabled,
-              },
-            };
-          });
+          setDrafts((prev) => ({
+            ...prev,
+            [name]: { ...draftFor(editor.body), editor, loading: false },
+          }));
         })
         .catch(() => {
           if (isCancelled()) {
@@ -322,8 +339,9 @@ export function SubtitlesStep() {
     }
     setSubmitting(true);
     // Each provider is its own resource with its own validator, so the saves
-    // are independent and run together. A failed one keeps its draft but
-    // reloads its validator, so the retry cannot send a stale If-Match.
+    // are independent and run together. A failed one may still have been
+    // written, or lost to another admin's save, so its draft is never sent
+    // again: the row locks until the admin reloads it and sees what is saved.
     const results = await Promise.allSettled(
       changed.map(async (config) => {
         const name = config.provider_name;
@@ -362,15 +380,21 @@ export function SubtitlesStep() {
         ...prev,
         [failure.config.provider_name]: {
           ...prev[failure.config.provider_name]!,
-          editor: null,
-          loading: true,
-          loadFailed: false,
+          saveFailed: true,
         },
       }));
-      loadEditor(failure.config, () => false);
     }
     const reason = failures[0]!.reason;
     toast.error(reason instanceof Error ? reason.message : t("web.setup.subtitles.saveFailed"));
+  }
+
+  function reloadEditor(config: SubtitleProviderConfig) {
+    const name = config.provider_name;
+    setDrafts((prev) => ({
+      ...prev,
+      [name]: { ...prev[name]!, loading: true, loadFailed: false },
+    }));
+    loadEditor(config, () => false);
   }
 
   if (providers.isLoading) return <StepSkeleton rows={3} />;
@@ -381,6 +405,9 @@ export function SubtitlesStep() {
       lede={t("web.setup.subtitles.lede")}
       onSubmit={handleSubmit}
       busy={submitting}
+      // A failed save must be reloaded first, so the step never finishes with
+      // that change unsaved. Skip still leaves without saving.
+      disabled={providerList.some((p) => drafts[p.provider_name]?.saveFailed)}
       onSkip={() => markDone("subtitles")}
       footnote={t("web.setup.subtitles.footnote")}
     >
@@ -412,6 +439,7 @@ export function SubtitlesStep() {
               config={config}
               draft={drafts[config.provider_name] ?? draftFor(config)}
               onChange={(next) => setDrafts((prev) => ({ ...prev, [config.provider_name]: next }))}
+              onReload={() => reloadEditor(config)}
               disabled={submitting}
             />
           ))
