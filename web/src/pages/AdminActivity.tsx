@@ -663,10 +663,11 @@ export default function AdminActivity() {
           </div>
 
           {/* Rows. A control focused while under the pinned header (Shift+Tab
-              back up the table) scrolls to clear it. A root scroll-padding
+              back up the table) scrolls to 4rem, clear of the header and of
+              the shell's activity control beside it. A root scroll-padding
               would also scroll the page when the header's own buttons take
               focus. */}
-          <div className="lg:[&_:is(a,button,[tabindex])]:scroll-mt-12">
+          <div className="lg:[&_:is(a,button,[tabindex])]:scroll-mt-16">
             {filtered.map((session) => (
               <StreamRow
                 key={session.session_id}
