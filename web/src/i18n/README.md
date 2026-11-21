@@ -137,9 +137,9 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   can't be sized that way: keep `flex-1` on a wrapper and put the name in a
   `block w-fit max-w-full` span inside it. A `flex-1` item capped at its text with
   `max-w-max` can't stretch, so it can take `dir="auto"` itself unless it also carries
-  logical spacing or alignment (`ms-auto`, `pe-2`, `border-s`, `text-start`): those
-  follow the element's own direction, so keep them on the outer element and put the
-  name in a `block` span inside it. Don't use `.bidi-text` for this: its
+  a logical margin, padding or border (`ms-auto`, `pe-2`, `border-s`): those follow
+  the element's own direction, so keep them on the outer element and put the name in
+  a `block` span inside it. Don't use `.bidi-text` for this: its
   `unicode-bidi: plaintext` drops the "…" in Firefox and cuts the start in WebKit.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
