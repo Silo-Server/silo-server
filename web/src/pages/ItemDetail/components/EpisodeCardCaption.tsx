@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { EpisodeListItem } from "@/api/types";
-import { useClampCut } from "@/hooks/useOverflowsInline";
+import { useClampCut } from "@/hooks/useClampCut";
 import { useAppLanguage } from "@/i18n";
 import { cn } from "@/lib/utils";
 import MachineTranslatedLabel from "./MachineTranslatedLabel";
@@ -40,7 +40,7 @@ export default function EpisodeCardCaption({
   const overview = hideOverview ? "" : (episode.overview?.trim() ?? "");
   const showsTranslationLabel =
     overview !== "" && hasMachineTranslation(episode.machine_translated_fields);
-  const [overviewRef, overviewCut] = useClampCut<HTMLParagraphElement>(overview);
+  const overviewRef = useClampCut<HTMLParagraphElement>(overview);
 
   return (
     <div className="mt-2 space-y-1">
@@ -86,7 +86,6 @@ export default function EpisodeCardCaption({
         <p
           ref={overviewRef}
           dir="auto"
-          data-clamp-cut={overviewCut || undefined}
           className="bidi-text text-muted-foreground line-clamp-3 min-h-[3lh] text-xs leading-relaxed"
         >
           {overview}
