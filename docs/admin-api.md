@@ -382,8 +382,8 @@ configuration, last health result, and last stored hardware inventory. See
 `hw_accel_override` and `hw_device_override` override the cluster-wide
 `playback.hw_accel` and `playback.hw_device` settings for one node.
 `hw_accel_override` takes the same values as the cluster setting — `auto`,
-`qsv`, `vaapi`, `nvenc`, `none`. Absent means inherit; there is no separate
-"inherit" value to set.
+`qsv`, `vaapi`, `nvenc`, `videotoolbox`, `none`. Absent means inherit; there
+is no separate "inherit" value to set.
 
 They exist for a heterogeneous deployment: one CPU-only node in a QSV cluster
 sets `none` for itself instead of forcing every node onto the lowest common
@@ -839,11 +839,11 @@ indistinguishable from omission.
 
 `200 OK` with the updated node, `404 Not Found` for an unknown id,
 `422 validation_failed` when `hw_accel_override` is not one of `auto`, `qsv`,
-`vaapi`, `nvenc`, `none` (matched case-insensitively and stored lowercase, as
-`playback.hw_accel` is). The node pools are reloaded afterwards, so remote
-dispatch honors a new override immediately; the target node itself picks it up
-on its next config reload — see "Acceleration overrides" above for what waits
-for a restart.
+`vaapi`, `nvenc`, `videotoolbox`, `none` (matched case-insensitively and
+stored lowercase, as `playback.hw_accel` is). The node pools are reloaded
+afterwards, so remote dispatch honors a new override immediately; the target
+node itself picks it up on its next config reload — see "Acceleration
+overrides" above for what waits for a restart.
 
 `download_artifact_dir_override` (an absolute path; `null` or empty restores the
 inherited directory) and `download_artifact_max_bytes_override` (bytes, `0` for no
