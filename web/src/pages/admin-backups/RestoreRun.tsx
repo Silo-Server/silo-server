@@ -141,9 +141,9 @@ function AccountReport({
             const outcome = OUTCOME[profile.outcome];
             return (
               <li key={profile.id}>
-                {/* The line is never shorter than the rem-sized icon, so a large browser font
-                    keeps the icon centered on the first line. */}
-                <p className="flex items-start gap-1.5 text-[13px] leading-[max(1.5em,0.875rem)]">
+                {/* rem text with a unitless line height keeps the line taller than the
+                    rem-sized icon at any browser font size, so the icon stays centered on it. */}
+                <p className="flex items-start gap-1.5 text-[0.8125rem] leading-normal">
                   <span className="flex min-h-lh shrink-0 items-center">
                     <outcome.Icon aria-hidden="true" className={cn("size-3.5", outcome.tone)} />
                   </span>
