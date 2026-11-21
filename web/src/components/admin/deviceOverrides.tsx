@@ -329,11 +329,7 @@ export function DeviceOverrideRow({
   return (
     <div
       className={cn(
-        "group/ovr grid gap-3 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-6",
-        // Subtly dim non-overridden rows so the eye lands on real overrides
-        // first. We don't grey out the controls themselves — the admin can
-        // still interact and create a new override.
-        !isOverride && "opacity-70 hover:opacity-100",
+        "grid gap-3 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-6",
         // Anomalies get a destructive left edge so they read as "this is
         // probably the row you came here for" without dominating the UI.
         anomaly && "border-destructive/40 -ms-3 border-s-2 ps-3",
@@ -352,7 +348,7 @@ export function DeviceOverrideRow({
             />
           ) : (
             <span
-              className="text-muted-foreground/60 border-border/50 rounded-full border px-1.5 py-px text-[9.5px] font-medium tracking-[0.05em] uppercase"
+              className="text-muted-foreground border-border/50 rounded-full border px-1.5 py-px text-[9.5px] font-medium tracking-[0.05em] uppercase"
               title={t("web.admin.common.deviceOverrides.override.notSetTitle", {
                 source: inherited
                   ? inheritedSourceText(t, inherited)
@@ -366,7 +362,7 @@ export function DeviceOverrideRow({
           )}
           {anomaly && (
             <span
-              className="text-destructive border-destructive/30 bg-destructive/10 inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[9.5px] font-medium tracking-[0.05em] uppercase"
+              className="text-destructive-label border-destructive/30 bg-destructive/10 inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[9.5px] font-medium tracking-[0.05em] uppercase"
               title={anomaly.reason}
             >
               <AlertTriangle className="h-2.5 w-2.5" />
@@ -389,22 +385,22 @@ export function DeviceOverrideRow({
           {isOverride
             ? !isJsonOnly &&
               definition && (
-                <span className="text-muted-foreground/60">
+                <>
                   {SEPARATOR}
                   {t("web.admin.common.deviceOverrides.value.default", {
                     value: formatSettingValue(setting.key, defaultValueToString(definition)),
                   })}
-                </span>
+                </>
               )
             : inherited && (
-                <span className="text-muted-foreground/60">
+                <>
                   {SEPARATOR}
                   {inheritedSourceText(t, inherited)}
-                </span>
+                </>
               )}
         </div>
         {anomaly && (
-          <div className="text-destructive/85 flex items-start gap-1.5 pt-1.5 text-[11.5px] leading-relaxed">
+          <div className="text-destructive-label flex items-start gap-1.5 pt-1.5 text-[11.5px] leading-relaxed">
             <AlertTriangle className="mt-[1px] h-3 w-3 shrink-0" />
             <span>{anomaly.reason}</span>
           </div>
@@ -436,7 +432,7 @@ export function DeviceOverrideRow({
             {t("web.admin.common.deviceOverrides.reset")}
           </button>
         ) : (
-          <span className="text-muted-foreground/60 self-end text-[11px] italic">
+          <span className="text-muted-foreground self-end text-[11px] italic">
             {t("web.admin.common.deviceOverrides.changeToOverride")}
           </span>
         )}
@@ -690,7 +686,7 @@ export function DeviceProfileTabs({
               >
                 {initial}
               </span>
-              <span className="max-w-[120px] truncate text-[12.5px] font-medium">
+              <span dir="auto" className="max-w-[120px] truncate text-[12.5px] font-medium">
                 {profile.profileName || t("web.admin.common.deviceOverrides.tabs.unnamed")}
               </span>
               <span
@@ -737,20 +733,20 @@ export function DeviceProfileTabs({
               b: (chunks) => <span className="text-foreground/80 font-medium">{chunks}</span>,
             })}
             {showAllSettings && rows.length > overrideCount && (
-              <span className="text-muted-foreground/60">
+              <>
                 {SEPARATOR}
                 {t("web.admin.common.deviceOverrides.summary.inherited", {
                   count: rows.length - overrideCount,
                   count_text: rows.length - overrideCount,
                 })}
-              </span>
+              </>
             )}
           </span>
           {anomalyCountInProfile > 0 && (
             <>
               <span className="text-muted-foreground/40">{DOT}</span>
               <span
-                className="text-destructive bg-destructive/10 inline-flex items-center gap-1 rounded px-1.5 py-px text-[10px] font-medium tracking-[0.04em] uppercase"
+                className="text-destructive-label bg-destructive/10 inline-flex items-center gap-1 rounded px-1.5 py-px text-[10px] font-medium tracking-[0.04em] uppercase"
                 title={t("web.admin.common.deviceOverrides.summary.suspectTitle")}
               >
                 <AlertTriangle className="h-2.5 w-2.5" />

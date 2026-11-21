@@ -153,10 +153,14 @@ export default function AdminSubtitlesTable({
                   </div>
                 </TableCell>
                 <TableCell
-                  className="text-muted-foreground max-w-[180px] truncate font-mono text-xs"
+                  className="text-muted-foreground max-w-[180px] font-mono text-xs"
                   title={subtitle.file_path}
                 >
-                  {basenameFromPath(subtitle.file_path)}
+                  {/* A file name takes its direction from its own text, so a cut one
+                      keeps its start; w-fit keeps it on the column's start side. */}
+                  <span dir="auto" className="block w-fit max-w-full truncate">
+                    {basenameFromPath(subtitle.file_path)}
+                  </span>
                 </TableCell>
                 <TableCell>
                   <span

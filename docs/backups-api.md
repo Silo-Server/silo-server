@@ -84,7 +84,9 @@ go there) and the user store is PostgreSQL (a restore's own backup needs it).
 - `destination` (`default` or `s3`) and `destination_available`, false when
   the destination is missing, not set up, or cannot be reached. `items` lists
   only the current destination's backups; copies at a previous destination
-  stay there.
+  stay there. While `destination_available` is false, `items` is empty because
+  the server could not read the destination, not because it holds no backups;
+  a `destination_unavailable` warning says why.
 - `encrypted`: whether new backups are encrypted: `true` for `s3`, and for
   `default` when it is the private bucket. Clients should offer the key
   confirmation whenever `encrypted` is `true` and `key_confirmed` is not,
@@ -374,7 +376,8 @@ Kind-specific details:
   creates an administrator), `match` (`account_id`, `restored`,
   `username_email`, or `new`), `target` (what the request sends back: the
   local account id, or `new`), `local_id` and `local_username` of a matched
-  account, `group` (the backup's group name, which a new account joins here),
+  account (its username, or its email when it has none), `group` (the
+  backup's group name, which a new account joins here),
   `policy_differences` (`{field, backup, here}` for each policy field this
   server would grant a new account more of), `libraries_left_out` (library
   entries with no library here, dropped), `profile_room` (how many new

@@ -88,13 +88,21 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
         ? t("web.admin.backups.restore.run.restart")
         : null,
   ].filter((detail): detail is string => Boolean(detail));
+  const label = displayLabel(item);
   return (
     <li className="border-border/60 flex items-start gap-3 border-b py-3 last:border-b-0">
       <outcome.Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", outcome.tone)} />
-      <div className="min-w-0 flex-1">
+      {/* Part of a name that can't wrap, such as one long run of joined emoji, is clipped
+          sideways at the row's edge, in the item's line and in its profiles' lines; the words
+          around it still wrap. The 0.25em of padding, offset by a negative margin, keeps
+          letters whole whose ink reaches past their edge. */}
+      <div className="-mx-[0.25em] min-w-0 flex-1 overflow-x-clip px-[0.25em]">
         <p className="text-sm wrap-anywhere">
           {t("web.admin.backups.restore.run.itemLine", {
-            label: displayLabel(item),
+            // <bdi>, not the isolate characters a string value gets in right-to-left languages:
+            // the line could break after the opening isolate, before a name that can't wrap,
+            // and leave the first line empty.
+            label: <bdi>{label}</bdi>,
             section: t(SECTION_TITLES[item.section]),
             // The status stays whole: no break at its spaces or between its Chinese, Japanese,
             // or Korean characters. One wider than the line still breaks, through
@@ -102,7 +110,11 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
             // the message's "·" at the end of a line.) <bdi> keeps the direction isolation a
             // string value gets in right-to-left languages.
             outcome: <bdi className="break-keep">{nonBreaking(t(outcome.label))}</bdi>,
-            b: (chunks) => <span className="font-medium">{chunks}</span>,
+            b: (chunks) => (
+              <span title={label} className="font-medium">
+                {chunks}
+              </span>
+            ),
             muted: (chunks) => (
               <span className="text-muted-foreground">{keepSeparatorsWithNext(chunks)}</span>
             ),
@@ -172,7 +184,7 @@ function AccountReport({
                     <span className="me-1.5 font-medium">
                       {/* <bdi> isolates the name's direction. It sits inside the span, so the
                           margin follows the page's direction, not the name's. */}
-                      <bdi>{profile.label}</bdi>
+                      <bdi title={profile.label}>{profile.label}</bdi>
                     </span>
                     <wbr />
                     <span className="text-muted-foreground inline-block">

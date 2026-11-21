@@ -127,8 +127,11 @@ expand into a whole-history read. Live last-execution summaries have no saved ID
 persisted history entries have opaque string IDs.
 
 `GET /api/v2/admin/tasks/refresh_metadata/metrics` returns typed queue counters
-and at most ten entries per sample list. Other tasks return 404. Raw diagnostic
-errors are replaced with safe failure summaries. Task history does not expose
+and at most ten entries per sample list. Other tasks return 404. A sample's
+`title` is its target's own title as stored; a season or episode that still
+exists also carries `series_title`, `season_number` and, for an episode,
+`episode_number`, so a client names it in its own language. Raw diagnostic errors are replaced with
+safe failure summaries. Task history does not expose
 arbitrary internal result JSON; marker contribution counts have a typed result.
 Detailed operational diagnostics remain available through their existing surface.
 
