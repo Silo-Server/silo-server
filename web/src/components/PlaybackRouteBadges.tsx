@@ -114,7 +114,7 @@ export function PlaybackRouteBadges({
                 <span aria-hidden="true">{SEPARATOR}</span>
               </>
             ) : null}
-            <span className="truncate">
+            <span dir="auto" className="truncate">
               {node.kind === "server" ? t("web.player.routeBadge.apiServer") : node.name}
             </span>
           </span>

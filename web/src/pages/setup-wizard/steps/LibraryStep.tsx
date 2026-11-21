@@ -142,7 +142,9 @@ export function LibraryStep() {
               >
                 <Icon className="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{library.name}</p>
+                  <p dir="auto" className="w-fit max-w-full truncate text-sm font-medium">
+                    {library.name}
+                  </p>
                   <p className="text-muted-foreground truncate text-xs">
                     {t("web.setup.library.rowDetail", {
                       type: meta.label,

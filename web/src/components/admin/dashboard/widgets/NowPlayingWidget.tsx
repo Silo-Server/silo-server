@@ -342,7 +342,9 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
               title={session.client_user_agent || clientLabel}
               className="border-border/60 bg-muted/30 text-muted-foreground inline-flex max-w-[9rem] rounded border px-1.5 py-0.5 text-[9px] font-semibold"
             >
-              <span className="truncate">{clientLabel}</span>
+              <span dir="auto" className="truncate">
+                {clientLabel}
+              </span>
             </span>
           ) : null}
           <PlaybackRouteBadges session={session} />

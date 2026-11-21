@@ -222,7 +222,9 @@ function NodeFilterMenu({
         {selectedNode ? (
           <>
             <span className="text-muted-foreground">{selectedNode.label}</span>
-            <span className="truncate">{selectedNode.name}</span>
+            <span dir="auto" className="truncate">
+              {selectedNode.name}
+            </span>
           </>
         ) : (
           t("web.admin.activity.route.node")
@@ -231,8 +233,11 @@ function NodeFilterMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
+        // The cap and the padding keep a long node name's menu inside the screen with even
+        // margins, so the name is cut instead of pushing the menu past the edge.
+        collisionPadding={16}
         aria-label={t("web.admin.activity.summary.byNode")}
-        className="min-w-56"
+        className="max-w-[calc(100vw-2rem)] min-w-56"
       >
         {groups.map((group, index) => (
           <div key={group[0]!.kind} role="group" aria-label={group[0]!.label}>
@@ -247,7 +252,9 @@ function NodeFilterMenu({
                 onCheckedChange={(checked) => onSelect(checked ? node.key : null)}
                 className="text-[13px]"
               >
-                <span className="truncate">{node.name}</span>
+                <span dir="auto" className="truncate">
+                  {node.name}
+                </span>
                 <span className="text-muted-foreground ms-auto ps-4 tabular-nums">
                   {numberText(node.count)}
                 </span>
@@ -914,7 +921,9 @@ function StreamRow({
                     <span aria-hidden="true" className="shrink-0">
                       {MIDDLE_DOT}
                     </span>
-                    <span className="truncate">{getSessionClientLabel(session)}</span>
+                    <span dir="auto" className="truncate">
+                      {getSessionClientLabel(session)}
+                    </span>
                   </>
                 ) : null}
               </div>
@@ -1102,7 +1111,7 @@ function ViewerCell({
       <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[12px]">
         <JellyfinSessionPill session={session} />
         {clientLabel ? (
-          <span title={clientTitle} className="truncate">
+          <span title={clientTitle} dir="auto" className="truncate">
             {clientLabel}
           </span>
         ) : null}

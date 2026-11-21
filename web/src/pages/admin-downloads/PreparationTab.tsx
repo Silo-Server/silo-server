@@ -266,7 +266,9 @@ export default function PreparationTab() {
                     )}
                   >
                     <span className="text-muted-foreground me-1">{worker.label}</span>
-                    {worker.name}
+                    {/* Isolated, so a count after a left-to-right name doesn't join its
+                        run in a right-to-left language ("gpu-01" and "3" as "gpu-013"). */}
+                    <bdi>{worker.name}</bdi>
                     <span className="text-muted-foreground ms-1.5 tabular-nums">
                       {worker.count}
                     </span>
@@ -728,7 +730,9 @@ function WorkerBadge({ prep }: { prep: AdminDownloadPreparation }) {
       <span className="text-foreground/75 [html[data-high-contrast=true]_&]:text-muted-foreground font-(--font-weight-ui)">
         {worker.label}
       </span>
-      <span className="truncate">{worker.name}</span>
+      <span dir="auto" className="truncate">
+        {worker.name}
+      </span>
     </span>
   );
 }

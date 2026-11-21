@@ -275,7 +275,10 @@ function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () =
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h2 className="truncate text-base font-semibold tracking-tight max-lg:line-clamp-2 max-lg:whitespace-normal">
+            <h2
+              dir="auto"
+              className="align-with-page truncate text-base font-semibold tracking-tight max-lg:line-clamp-2 max-lg:whitespace-normal"
+            >
               {group.name}
             </h2>
             {group.is_default && (
