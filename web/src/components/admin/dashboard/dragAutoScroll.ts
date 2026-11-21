@@ -115,69 +115,70 @@ function pause(state: AutoScrollState) {
   }
 }
 
+/** What the auto-scroll follows: a native HTML5 drag, or a pointer-captured gesture. */
+export type AutoScrollGesture = "drag" | "pointer";
+
 /**
- * The stateful half. While `active` (a widget is being dragged or resized),
- * the RAF loop runs whenever the pointer sits in an edge zone and pauses when
- * it leaves them; when `active` turns false, by whatever path the gesture
- * ended, the loop stops.
+ * The stateful half. While `gesture` is set (a widget is being dragged or
+ * resized), the RAF loop runs whenever the pointer sits in an edge zone and
+ * pauses when it leaves them; when `gesture` clears, by whatever path the
+ * gesture ended, the loop stops.
  *
  * A drag reports the pointer from the window: drag events over anything
  * outside the grid (the pinned phone header, the gutters, the sidebar, the
  * Add widget sheet the drag started from) never reach the grid's handlers. A
- * pointer resize, which fires no drag events, calls `update(clientY)` on every
- * pointermove instead.
+ * pointer gesture (resize), which fires no drag events, calls
+ * `update(clientY)` on every pointermove instead.
  *
  * Scrolling happens in the loop, not in the event handler — dragover fires
  * continuously and only the latest `clientY` matters. `onScrolled` reports
  * each frame's actual scroll delta so a pointer-anchored session (resize) can
  * compensate for the content moving under a stationary pointer.
  */
-export function useDragAutoScroll(anchorRef: RefObject<HTMLElement | null>, active: boolean) {
+export function useDragAutoScroll(
+  anchorRef: RefObject<HTMLElement | null>,
+  gesture: AutoScrollGesture | null,
+) {
   const stateRef = useRef<AutoScrollState>({
     raf: null,
     clientY: null,
     onScrolled: null,
   });
 
-  /** Starts the loop when it is idle and the pointer is inside an edge zone. */
-  const start = useCallback(() => {
-    const state = stateRef.current;
-    if (state.raf !== null || state.clientY === null) return;
-    const container = findScrollContainer(anchorRef.current);
-    if (!container) return;
-    const { top, bottom } = scrollViewportBounds(container);
-    if (edgeScrollSpeed(state.clientY, top, bottom) === 0) return;
-
-    const step = () => {
-      const bounds = scrollViewportBounds(container);
-      const speed =
-        state.clientY === null ? 0 : edgeScrollSpeed(state.clientY, bounds.top, bounds.bottom);
-      if (speed === 0) {
-        pause(state);
-        return;
-      }
-      const before = container.scrollTop;
-      container.scrollTop = before + speed;
-      const dy = container.scrollTop - before;
-      if (dy !== 0) state.onScrolled?.(dy);
-      state.raf = requestAnimationFrame(step);
-    };
-    state.raf = requestAnimationFrame(step);
-  }, [anchorRef]);
-
   const update = useCallback(
     (clientY: number, onScrolled?: (dy: number) => void) => {
       const state = stateRef.current;
       state.clientY = clientY;
       state.onScrolled = onScrolled ?? null;
-      start();
+      if (state.raf !== null) return;
+      const container = findScrollContainer(anchorRef.current);
+      if (!container) return;
+      const { top, bottom } = scrollViewportBounds(container);
+      if (edgeScrollSpeed(clientY, top, bottom) === 0) return;
+
+      const step = () => {
+        const bounds = scrollViewportBounds(container);
+        const speed =
+          state.clientY === null ? 0 : edgeScrollSpeed(state.clientY, bounds.top, bounds.bottom);
+        if (speed === 0) {
+          pause(state);
+          return;
+        }
+        const before = container.scrollTop;
+        container.scrollTop = before + speed;
+        const dy = container.scrollTop - before;
+        if (dy !== 0) state.onScrolled?.(dy);
+        state.raf = requestAnimationFrame(step);
+      };
+      state.raf = requestAnimationFrame(step);
     },
-    [start],
+    [anchorRef],
   );
 
   useEffect(() => {
-    if (!active) return;
+    if (gesture === null) return;
     const state = stateRef.current;
+    if (gesture === "pointer") return () => pause(state);
     const follow = (event: DragEvent) => update(event.clientY);
     // A drag that leaves the window fires a last dragleave and then no more
     // dragover, which would leave the loop scrolling on the last position.
@@ -196,10 +197,8 @@ export function useDragAutoScroll(anchorRef: RefObject<HTMLElement | null>, acti
       window.removeEventListener("dragover", follow, true);
       window.removeEventListener("dragleave", leave, true);
       pause(state);
-      state.clientY = null;
-      state.onScrolled = null;
     };
-  }, [active, update]);
+  }, [gesture, update]);
 
   return { update };
 }
