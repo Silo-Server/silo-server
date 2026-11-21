@@ -29,10 +29,10 @@ export function ClaimLinkBox({
     <div className="min-w-0 space-y-4">
       <div className="bg-muted min-w-0 overflow-hidden rounded-md p-2.5">
         {/* A URL reads left to right in any language, so a cut one keeps its
-            start and its "…"; w-fit keeps it on the page's start side. */}
+            start and its "…", and its wrapped lines line up with the page. */}
         <code
           dir="ltr"
-          className="block w-fit max-w-full truncate text-xs max-lg:break-all max-lg:whitespace-normal"
+          className="align-with-page block truncate text-xs max-lg:break-all max-lg:whitespace-normal"
         >
           {claimUrl}
         </code>
