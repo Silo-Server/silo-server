@@ -419,7 +419,7 @@ function SectionBlock({
     ) : null;
 
   return (
-    <div id={sectionAnchor(section.id)} className="scroll-mt-6">
+    <div id={sectionAnchor(section.id)} className="scroll-mt-24 lg:scroll-mt-6">
       <SettingsGroup
         title={t(SECTION_TITLES[section.id])}
         description={

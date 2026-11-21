@@ -186,7 +186,9 @@ async function serverAudioCodec(track: InputAudioTrack): Promise<string> {
 async function open(spec: EngineSourceSpec): Promise<void> {
   source = spec;
   const options = {
-    requestInit: { headers: spec.headers },
+    // Mediabunny keeps its own read cache, and each play gets a new stream
+    // URL, so the HTTP cache cannot serve a later play.
+    requestInit: { headers: spec.headers, cache: "no-store" as const },
     maxCacheSize: URL_CACHE_BYTES,
     getRetryDelay: (attempts: number) => {
       // A failed read is the transport failing; the page treats it as an

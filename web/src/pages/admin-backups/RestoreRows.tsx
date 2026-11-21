@@ -92,11 +92,13 @@ function settingValues(t: Translate, setting: RestoreSetting): { now: string; ba
 }
 
 /**
- * A setting key that may break after its dots and underscores, so a narrow
- * column wraps "playback.watched_threshold" between words, not inside one.
+ * A setting key or dotted name that may break after its dots and underscores,
+ * so a narrow column wraps "playback.watched_threshold" or "silo.tmdb 1.2.3"
+ * between words, not inside one. A dot before a digit stays, keeping a version
+ * number whole.
  */
-function BreakableKey({ value }: { value: string }) {
-  const parts = value.replace(/([._])/g, "$1\u0000").split("\u0000");
+export function BreakableKey({ value }: { value: string }) {
+  const parts = value.replace(/(_|\.(?=\D))/g, "$1\u0000").split("\u0000");
   return (
     <>
       {parts.map((part, position) => (
@@ -201,7 +203,9 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
       </SettingFieldStatus>
     ) : null,
     paths.length > 0 ? (
-      <ul key="paths" className="text-muted-foreground font-mono text-xs break-all">
+      // Paths read left to right in any language; w-fit keeps the list on the
+      // page's start side.
+      <ul key="paths" dir="ltr" className="text-muted-foreground w-fit font-mono text-xs break-all">
         {paths.map((path) => (
           <li key={path}>{path}</li>
         ))}
@@ -268,8 +272,11 @@ export const ItemRow = memo(function ItemRow({
   const details = open ? itemDetails(t, item) : null;
   const hasDetails = hasItemDetails(item);
   const label = displayLabel(item);
+  // The row is its own container, since its width depends on the admin sidebar and
+  // restore summary as much as on the viewport. A narrow row wraps the whole name
+  // above the muted detail, so names that differ only at the end stay apart.
   return (
-    <li className="border-border/60 border-b last:border-b-0">
+    <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
         <Checkbox
           id={controlId}
@@ -277,19 +284,27 @@ export const ItemRow = memo(function ItemRow({
           disabled={!item.selectable}
           onCheckedChange={(value) => onToggle(toggleKeys(sectionId, item), value === true)}
         />
-        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
+          {/* block: Label is a flex box, which would clip the name without an ellipsis.
+              Chromium breaks at <wbr> even under nowrap, so a one-line row hides them. */}
           <Label
             htmlFor={controlId}
             title={label}
             className={cn(
-              "max-w-[60%] shrink-0 truncate text-sm font-medium",
+              "block shrink-0 text-sm font-medium @max-2xl:wrap-anywhere @2xl:max-w-[60%] @2xl:truncate @2xl:[&_wbr]:hidden",
               !item.selectable && "text-muted-foreground",
             )}
           >
-            {label}
+            <BreakableKey value={label} />
           </Label>
           {secondary ? (
-            <span title={secondary} className="text-muted-foreground min-w-0 truncate text-xs">
+            // A library's line is its folder paths, which read left to right in any
+            // language, so they keep their start when cut short.
+            <span
+              title={secondary}
+              dir={item.kind === "library" ? "ltr" : undefined}
+              className="text-muted-foreground min-w-0 truncate text-xs"
+            >
               {secondary}
             </span>
           ) : null}
