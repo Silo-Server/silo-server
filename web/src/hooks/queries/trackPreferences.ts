@@ -34,7 +34,7 @@ export function invalidateItemDetails(queryClient: QueryClient): Promise<unknown
  * one that sticks. The profile is captured now: a write that waits in line
  * still goes out for the profile that made the choice.
  *
- * The hooks below refuse a choice made offline before it gets here
+ * The hooks that call this refuse a choice made offline before it gets here
  * (settingWriteOptions) rather than let it wait in line: an earlier request
  * can stay pending until the browser reconnects, and the choice would then
  * replace a newer one made in another browser.

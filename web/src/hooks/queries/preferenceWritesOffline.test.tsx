@@ -67,7 +67,7 @@ it.each([
   row(useDeleteAudioPreference, (h) => h.mutate("series-a")),
 ])("$name refuses an offline write unsent instead of holding it", async ({ useHook, send }) => {
   onlineManager.setOnline(false);
-  const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+  const fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
   const { result } = renderHook(useHook, { wrapper: harness() });
   act(() => send(result.current));
@@ -92,6 +92,7 @@ it("fails an offline track choice instead of queueing it behind a pending one", 
   onlineManager.setOnline(false);
   act(() => result.current.reset.mutate("series-a"));
   await waitFor(() => expect(result.current.reset.isError).toBe(true));
+  expect(result.current.reset.error).toBeInstanceOf(SettingWriteOfflineError);
 
   onlineManager.setOnline(true);
   release(new Response(null, { status: 204 }));
