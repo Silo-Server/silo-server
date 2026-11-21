@@ -101,7 +101,38 @@ export function initPointerCapability(deps?: Partial<PointerCapabilityDeps>): ()
   // to the screen, so by the time it touches down this is normally known.
   let penHovers = false;
 
+  // A hidden `.pointer-reveal` control still takes hits. On a hybrid last used
+  // with a mouse, a touch on one clears the flag below, which reveals it before
+  // the tap's click arrives, so the click would run an action the user never
+  // saw. Note a press that starts on a hidden control, before the flag
+  // changes, and drop the click it produces; the control now shows, so the
+  // next tap works. A mouse has to hover a row to reach its control, which
+  // reveals it, and keyboard clicks (detail 0) pass.
+  const view = doc.defaultView;
+  let hiddenPress: Element | null = null;
+  const notePress = (event: PointerEvent) => {
+    const control =
+      event.pointerType !== "mouse" && event.target instanceof Element
+        ? event.target.closest(".pointer-reveal")
+        : null;
+    hiddenPress = control && view?.getComputedStyle(control).opacity === "0" ? control : null;
+  };
+  const onClick = (event: MouseEvent) => {
+    const control = hiddenPress;
+    hiddenPress = null;
+    if (
+      control &&
+      event.detail > 0 &&
+      event.target instanceof Node &&
+      control.contains(event.target)
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+
   const onPointer = (event: PointerEvent) => {
+    if (event.type === "pointerdown") notePress(event);
     if (event.pointerType === "mouse") {
       observedPointer = true;
       set(true);
@@ -124,47 +155,12 @@ export function initPointerCapability(deps?: Partial<PointerCapabilityDeps>): ()
   const opts = { passive: true, capture: true } as const;
   doc.addEventListener("pointermove", onPointer, opts);
   doc.addEventListener("pointerdown", onPointer, opts);
-
-  // A hidden `.pointer-reveal` control still takes hits. On a hybrid last used
-  // with a mouse, a touch on one clears the flag above, which reveals it before
-  // the tap's click arrives, so the click would run an action the user never
-  // saw. Note a press that starts on a hidden control and drop the click it
-  // produces; the control now shows, so the next tap works. Keyboard clicks
-  // (detail 0) pass. The window's capture listener runs before the document's,
-  // so it still sees the control as it was when the press began.
-  const view = doc.defaultView;
-  let hiddenPress: Element | null = null;
-  const onPressStart = (event: PointerEvent) => {
-    // A mouse has to hover a row to reach its control, which reveals it.
-    if (event.pointerType === "mouse") {
-      hiddenPress = null;
-      return;
-    }
-    const control =
-      event.target instanceof Element ? event.target.closest(".pointer-reveal") : null;
-    hiddenPress = control && view?.getComputedStyle(control).opacity === "0" ? control : null;
-  };
-  const onClick = (event: MouseEvent) => {
-    const control = hiddenPress;
-    hiddenPress = null;
-    if (
-      control &&
-      event.detail > 0 &&
-      event.target instanceof Node &&
-      control.contains(event.target)
-    ) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
-  };
-  view?.addEventListener("pointerdown", onPressStart, opts);
-  view?.addEventListener("click", onClick, { capture: true });
+  doc.addEventListener("click", onClick, { capture: true });
 
   return () => {
     query?.removeEventListener?.("change", onQueryChange);
     doc.removeEventListener("pointermove", onPointer, opts);
     doc.removeEventListener("pointerdown", onPointer, opts);
-    view?.removeEventListener("pointerdown", onPressStart, opts);
-    view?.removeEventListener("click", onClick, { capture: true });
+    doc.removeEventListener("click", onClick, { capture: true });
   };
 }
