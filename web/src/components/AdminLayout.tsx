@@ -136,7 +136,9 @@ function AdminLayoutContent() {
                 {LOGO_GLYPH}
               </div>
               <div className="min-w-0">
-                <span className="text-muted-foreground block text-[10px] leading-none font-semibold tracking-[0.16em] uppercase">
+                {/* Not `truncate`: it cuts accents and descenders off this tight line box, and
+                    stops CJK labels wrapping. A word too wide for the column ends in "…". */}
+                <span className="text-muted-foreground block overflow-x-clip text-[10px] leading-none font-semibold tracking-[0.16em] text-ellipsis uppercase">
                   {t("web.admin.shell.mobileHeader.eyebrow")}
                 </span>
                 {/* truncate clips to the line box: a tighter leading cuts off descenders and accents. */}
