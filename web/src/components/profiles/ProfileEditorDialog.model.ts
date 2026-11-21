@@ -59,6 +59,9 @@ export interface ValidationErrors {
 export const ANY_CONTENT_RATING_VALUE = "__any_content__";
 export const NO_ADVISORY_AGE_VALUE = "__no_advisory_limit__";
 
+/** A switch row's text column: it shrinks and breaks long words so the switch stays in the row. */
+export const SWITCH_ROW_TEXT = "min-w-0 space-y-0.5 wrap-anywhere";
+
 export function sortLibraryIDs(ids: number[]) {
   return [...new Set(ids)].sort((left, right) => left - right);
 }

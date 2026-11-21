@@ -4,6 +4,7 @@ import type { UserLibrary } from "@/api/types";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useT } from "@/i18n";
+import { SWITCH_ROW_TEXT } from "./ProfileEditorDialog.model";
 
 /**
  * The profile editor's library access: a library limit for any profile but
@@ -44,7 +45,7 @@ export function ProfileLibraryAccess({
   return (
     <div className="border-border space-y-3 rounded-md border p-3">
       <div className="flex items-center justify-between gap-4">
-        <div className="space-y-0.5">
+        <div className={SWITCH_ROW_TEXT}>
           <Label htmlFor={restrictLibrariesId}>{t("web.profiles.editor.restrictLibraries")}</Label>
           <p className="text-muted-foreground text-xs">
             {t("web.profiles.editor.restrictLibrariesHint")}

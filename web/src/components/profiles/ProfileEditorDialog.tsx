@@ -61,6 +61,7 @@ import {
   ANY_CONTENT_RATING_VALUE,
   NO_ADVISORY_AGE_VALUE,
   sortLibraryIDs,
+  SWITCH_ROW_TEXT,
   type ProfileEditorDialogProps,
   type ProfileEditorSave,
   type ValidationErrors,
@@ -68,6 +69,11 @@ import {
 import { getInitial } from "@/lib/text";
 
 export type { ProfileEditorSave } from "./ProfileEditorDialog.model";
+
+/** A full-width select whose chosen value wraps instead of being cut on a narrow phone.
+    One line keeps the default 36px height; a wrapped value grows it. */
+const WRAPPING_SELECT_TRIGGER =
+  "w-full py-1.5 text-start whitespace-normal data-[size=default]:h-auto data-[size=default]:min-h-9 *:data-[slot=select-value]:line-clamp-none";
 
 export function ProfileEditorDialog({
   open,
@@ -521,10 +527,13 @@ function ProfileEditorForm({
                   "",
               })}
             </p>
+            {/* max-w-full and whitespace-normal let a long label wrap inside the
+                row once the button has its own line. */}
             <Button
               type="button"
               variant="outline"
               size="sm"
+              className="h-auto min-h-8 max-w-full py-1 text-start whitespace-normal"
               onClick={() => setPresetBatch((current) => current + 1)}
             >
               <RefreshCw className="h-4 w-4" />
@@ -602,8 +611,8 @@ function ProfileEditorForm({
           </p>
         </div>
 
-        <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
-          <div className="space-y-0.5">
+        <div className="border-border flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+          <div className={SWITCH_ROW_TEXT}>
             <Label htmlFor="profile-is-child">{t("web.profiles.editor.kids")}</Label>
             <p className="text-muted-foreground text-xs">{t("web.profiles.editor.kidsHint")}</p>
           </div>
@@ -626,11 +635,7 @@ function ProfileEditorForm({
                 updateDraft("maxContentRating", value === ANY_CONTENT_RATING_VALUE ? "" : value);
               }}
             >
-              {/* The chosen value wraps instead of being cut on a narrow phone. */}
-              <SelectTrigger
-                id={contentRatingId}
-                className="w-full text-start whitespace-normal data-[size=default]:h-auto *:data-[slot=select-value]:line-clamp-none"
-              >
+              <SelectTrigger id={contentRatingId} className={WRAPPING_SELECT_TRIGGER}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -664,7 +669,7 @@ function ProfileEditorForm({
               >
                 <SelectTrigger
                   id={advisoryAgeId}
-                  className="w-full"
+                  className={WRAPPING_SELECT_TRIGGER}
                   aria-describedby={advisoryAgeHelpId}
                 >
                   <SelectValue />
@@ -689,7 +694,7 @@ function ProfileEditorForm({
               </p>
               {requireAdvisoryAgeSupported && draft.maxAdvisoryAge !== null ? (
                 <div className="flex items-start justify-between gap-3 pt-1">
-                  <div className="space-y-0.5">
+                  <div className={SWITCH_ROW_TEXT}>
                     <Label htmlFor={requireAdvisoryAgeId}>
                       {t("web.profiles.editor.hideWithoutAge")}
                     </Label>
@@ -716,10 +721,7 @@ function ProfileEditorForm({
                 updateDraft("maxPlaybackQuality", value as PlaybackQualityPreset)
               }
             >
-              <SelectTrigger
-                id={playbackQualityId}
-                className="w-full text-start whitespace-normal data-[size=default]:h-auto *:data-[slot=select-value]:line-clamp-none"
-              >
+              <SelectTrigger id={playbackQualityId} className={WRAPPING_SELECT_TRIGGER}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -749,7 +751,7 @@ function ProfileEditorForm({
 
         {requestsAllowedSupported ? (
           <div className="border-border flex items-center justify-between gap-4 rounded-md border px-3 py-2">
-            <div className="space-y-0.5">
+            <div className={SWITCH_ROW_TEXT}>
               <Label htmlFor={requestsAllowedId}>{t("web.profiles.editor.requestsAllowed")}</Label>
               <p id={requestsAllowedHelpId} className="text-muted-foreground text-xs">
                 {t("web.profiles.editor.requestsAllowedHint")}
