@@ -117,7 +117,8 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   `env(safe-area-inset-*)` edges. Those files are in `PHYSICAL_DIRECTION` in
   `web/eslint.config.js`; a single line takes an `eslint-disable-next-line` with its
   reason; a `dir="ltr"` box keeps flex order and text there left to right. `pre` is
-  always left to right; inline `code`, `kbd` and `samp` take their text's direction.
+  always left to right; inline `code`, `kbd` and `samp` take their text's direction
+  unless they carry a `dir`.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also
