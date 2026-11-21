@@ -393,7 +393,7 @@ function ProfileEditorForm({
                 />
               ) : null}
               <AvatarFallback className="bg-surface text-primary text-3xl font-bold">
-                {getInitial(draft.name || profile?.name || "?")}
+                {getInitial(draft.name.trim() || profile?.name || "?")}
               </AvatarFallback>
             </Avatar>
             <div className="text-center">
