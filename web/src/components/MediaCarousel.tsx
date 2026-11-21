@@ -225,7 +225,7 @@ export default function MediaCarousel({
 }: MediaCarouselProps) {
   const t = useT();
   const viewAllClass =
-    "text-muted-foreground hover:text-primary text-[0.75rem] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
+    "text-muted-foreground hover:text-primary shrink-0 text-[0.75rem] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
   const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
     useCarouselEmbla();
   useEffect(() => {
@@ -308,7 +308,7 @@ export default function MediaCarousel({
           <Link
             to={viewAllHref}
             aria-label={t("web.catalog.carousel.exploreAllLabel", { title })}
-            className={`${viewAllClass} shrink-0`}
+            className={viewAllClass}
           >
             {t("web.catalog.carousel.exploreAll")}
           </Link>
