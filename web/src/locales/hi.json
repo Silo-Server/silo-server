@@ -20391,20 +20391,80 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "खाते छिपाएँ"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खाता छिपाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खाते छिपाएँ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "फ़ाइलें छिपाएँ"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइल छिपाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें छिपाएँ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "फ़ाइलें छिपाएँ"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइल छिपाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें छिपाएँ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -20785,8 +20845,28 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "खाते दिखाएँ"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खाता दिखाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खाते दिखाएँ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -20833,14 +20913,54 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "फ़ाइलें दिखाएँ"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइल दिखाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें दिखाएँ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "फ़ाइलें दिखाएँ"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइल दिखाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें दिखाएँ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -28565,6 +28685,12 @@
     {
       "type": 0,
       "value": "विफल रहा"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "टास्क विफल रहा। जानकारी के लिए एडमिन डायग्नोस्टिक्स देखें।"
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -60716,7 +60842,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "मौजूदा वैल्यू देखने के लिए फिर से लोड करें। जो सेटिंग बदल गई हैं उनमें, और सेव किए गए पासवर्ड और कुंजियों के साथ उनसे जुड़ी सेटिंग में किए गए आपके बदलाव वापस ले लिए गए हैं; आपके बाकी बदलाव बने हुए हैं।"
+      "value": "मौजूदा वैल्यू देखने के लिए फिर से लोड करें। अगर आपका कोई बदलाव किसी ऐसी सेटिंग में है जो बदल गई है, या किसी सेव किए गए पासवर्ड या कुंजी में है, तो आपके सभी बदलाव वापस ले लिए जाएँगे; नहीं तो वे बने रहेंगे।"
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -76893,10 +77019,44 @@
       "value": "हाल की गड़बड़ियाँ"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "रीफ़्रेश विफल रहा। जानकारी के लिए एडमिन डायग्नोस्टिक्स देखें।"
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "मौजूदा शेड्यूल देखें"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -108980,6 +109140,12 @@
       "value": "पंक्ति का प्रकार"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "इस पंक्ति को यह सर्वर मैनेज करता है। इसमें क्या दिखता है, यह यहाँ नहीं बदला जा सकता; क्या दिखे, यह चुनने के लिए अपनी खुद की एक पंक्ति जोड़ें।"
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -112673,6 +112839,12 @@
     {
       "type": 0,
       "value": "हीरो बैनर · सिर्फ़ वेब"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "सर्वर"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

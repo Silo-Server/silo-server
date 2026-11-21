@@ -24225,20 +24225,212 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Skrij račune"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " račun"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " računa"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " račune"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " računov"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Skrij datoteke"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datoteko"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datoteki"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datoteke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datotek"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Skrij datoteke"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datoteko"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datoteki"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datoteke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datotek"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -24823,8 +25015,72 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Prikaži račune"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " račun"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " računa"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " račune"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " računov"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -24903,14 +25159,142 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Prikaži datoteke"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datoteko"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datoteki"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datoteke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datotek"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Prikaži datoteke"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datoteko"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datoteki"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datoteke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " datotek"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -34511,6 +34895,12 @@
     {
       "type": 0,
       "value": "neuspešno"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Opravilo ni uspelo. Podrobnosti preverite v skrbniški diagnostiki."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -74407,7 +74797,7 @@
   "web.admin.settings.hooks.settings.conflict.description": [
     {
       "type": 0,
-      "value": "Znova naložite, da vidite trenutne vrednosti. Vaše spremembe nastavitev, ki so se medtem spremenile, ter spremembe shranjenih gesel in ključev skupaj z njihovimi povezanimi nastavitvami so razveljavljene; druge spremembe so ohranjene."
+      "value": "Znova naložite, da vidite trenutne vrednosti. Če se katera od vaših sprememb nanaša na nastavitev, ki se je medtem spremenila, ali na shranjeno geslo ali ključ, bodo razveljavljene vse vaše spremembe; sicer bodo ohranjene."
     }
   ],
   "web.admin.settings.hooks.settings.conflict.reload": [
@@ -91236,10 +91626,44 @@
       "value": "Nedavne napake"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Osvežitev ni uspela. Podrobnosti preverite v skrbniški diagnostiki."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Preglej trenutni urnik"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -129836,6 +130260,12 @@
       "value": "Prikazuje"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "To vrstico upravlja ta strežnik. Tega, kaj prikazuje, tukaj ni mogoče spremeniti; če želite sami izbrati, kaj se prikazuje, dodajte svojo vrstico."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -134045,6 +134475,12 @@
     {
       "type": 0,
       "value": "Glavna pasica · Samo splet"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Strežnik"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
