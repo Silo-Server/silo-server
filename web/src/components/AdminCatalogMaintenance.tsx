@@ -762,10 +762,11 @@ function describeExportJob(t: Translate, job: AdminJob) {
 
 function describeImportJob(t: Translate, job: AdminJob): ReactNode {
   const label = (job.request_payload as { source_label?: string }).source_label;
-  // The server's label is the remote URL, a file name, or "Export job <id>": untranslated text
-  // that reads left to right in every language. bdi, not isolate characters, keeps copies clean.
+  // The server's label is the remote URL, a file name, or "Export job <id>", untranslated. dir="auto"
+  // keeps a URL or Latin file name left to right in a right-to-left page and an Arabic or Hebrew
+  // file name in its own order; bdi, not isolate characters, keeps copied text clean.
   return label ? (
-    <bdi dir="ltr">{label}</bdi>
+    <bdi dir="auto">{label}</bdi>
   ) : (
     t("web.admin.catalogMaintenance.imports.seedFallback")
   );

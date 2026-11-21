@@ -80,10 +80,10 @@ function jobDescription(job: AdminJob, t: Translate) {
       return t("web.admin.common.jobHistory.target.allLibraries");
     }
     case "catalog_import": {
-      // A URL, file name, or "Export job <id>" from the server: left to right in every language.
+      // A URL, file name, or "Export job <id>" from the server, laid out in its own direction.
       const label = payload.source_label as string | undefined;
       return label ? (
-        <bdi dir="ltr">{label}</bdi>
+        <bdi dir="auto">{label}</bdi>
       ) : (
         t("web.admin.common.jobHistory.target.catalogSeed")
       );
