@@ -63,8 +63,9 @@ export default function CrewList({ crew, jobs = DISPLAY_JOBS }: CrewListProps) {
           <div key={job} className="contents">
             <dt className="text-muted-foreground text-[0.8125rem] font-medium">{job}</dt>
             {/* The list runs in the page's direction and is cut at its end;
-                each name reads in its own direction, so a left-to-right name
-                in Arabic keeps its start and the names keep their order. */}
+                each name reads in its own direction, so the names keep their
+                order and every name before the cut is whole. The name the cut
+                falls in can still lose its start. */}
             <dd className="text-foreground/85 truncate">
               {people.map((p, i) => (
                 <span key={p.name}>
