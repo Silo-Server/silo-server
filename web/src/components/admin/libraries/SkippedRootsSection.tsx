@@ -249,7 +249,7 @@ function skippedRootKey(root: LibrarySkippedRoot): string {
 function SkippedRootDetails({ root }: { root: LibrarySkippedRoot }) {
   const t = useT();
   return (
-    <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs">
       <span className="text-muted-foreground font-medium">
         {t("web.admin.libraries.skippedRoots.rootPath")}
       </span>
