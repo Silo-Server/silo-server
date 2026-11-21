@@ -248,7 +248,7 @@ function LibraryGroupRows({
             is an inline block, so it moves to the next line whole. */}
         <span className="wrap-anywhere">
           {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
-          <span className="bidi-text">{name}</span>{" "}
+          <span className="bidi-text me-1">{name}</span>{" "}
           <span className="text-muted-foreground inline-block max-w-full font-normal tabular-nums">
             {stateCountsText(countStates(items))}
           </span>
