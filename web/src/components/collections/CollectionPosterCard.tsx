@@ -49,8 +49,14 @@ export function CollectionPosterCard({
   let subline: ReactNode = null;
   if (ownerName) {
     subline = (
-      <div className="text-muted-foreground truncate text-xs">
-        {t("web.collections.posterCard.byOwner", { owner: ownerName })}
+      <div className="text-muted-foreground flex overflow-hidden text-xs whitespace-pre">
+        {t("web.collections.posterCard.byOwner", {
+          owner: (
+            <span dir="auto" className="truncate">
+              {ownerName}
+            </span>
+          ),
+        })}
       </div>
     );
   } else if (meta === undefined && isUserCollection) {

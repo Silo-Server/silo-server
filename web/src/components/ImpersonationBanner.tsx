@@ -1,8 +1,30 @@
-import { useState } from "react";
+import { Children, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 import { useRootHeightProperty } from "@/hooks/useRootHeightProperty";
 import { useT } from "@/i18n";
+
+/** A message part split into its edge spaces and the words between them. */
+const EDGE_SPACES = /^(\s*)([\s\S]*?)(\s*)$/;
+
+/**
+ * A narrow banner squeezes the "authorized by" sentence. Its words give up space
+ * only once the name is down to a letter and "…", and are then cut with "…" too.
+ * The spaces at their edges stay, so a cut word never runs into the name.
+ */
+function wordsYieldLast(message: ReactNode): ReactNode {
+  return Children.map(message, (part) => {
+    if (typeof part !== "string") return part;
+    const [, before = "", words = "", after = ""] = EDGE_SPACES.exec(part) ?? [];
+    return (
+      <>
+        {before ? <span className="shrink-0 whitespace-pre">{before}</span> : null}
+        <span className="min-w-0 overflow-hidden text-ellipsis whitespace-pre">{words}</span>
+        {after ? <span className="shrink-0 whitespace-pre">{after}</span> : null}
+      </>
+    );
+  });
+}
 
 interface ImpersonationBannerProps {
   userName: string;
@@ -63,13 +85,23 @@ export default function ImpersonationBanner({
           </span>
         </div>
 
-        <span className="text-muted-foreground hidden truncate text-xs sm:inline">
+        <span className="text-muted-foreground hidden overflow-hidden text-xs whitespace-pre sm:flex">
           {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- decorative separator */}
           <span className="text-muted-foreground/60 me-2">·</span>
-          {t("web.shell.impersonation.authorizedBy", {
-            name: impersonatorName,
-            strong: (chunks) => <span className="text-foreground/80 font-medium">{chunks}</span>,
-          })}
+          {wordsYieldLast(
+            t("web.shell.impersonation.authorizedBy", {
+              name: (
+                <span dir="auto" className="truncate">
+                  {impersonatorName}
+                </span>
+              ),
+              strong: (chunks) => (
+                <span className="text-foreground/80 flex max-w-max min-w-[2em] grow basis-0 overflow-hidden font-medium">
+                  {chunks}
+                </span>
+              ),
+            }),
+          )}
         </span>
 
         <button

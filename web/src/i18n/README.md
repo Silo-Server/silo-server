@@ -149,6 +149,19 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   a `block` span inside it. `.bidi-text` alone doesn't keep the start: its
   `unicode-bidi: plaintext` leaves the box in the page's direction, so Firefox drops
   the "…" and WebKit cuts the start.
+- A name inside a longer line (a name and "(you)", a sentence that names someone, a
+  name and a device) takes `dir="auto"` on its own element, never on the line, where
+  the name's script would set the direction of the translated words too. Pass that
+  element to `t()` as the value
+  (`t(id, { name: <span dir="auto" className="truncate">{name}</span> })`). When the
+  words must stay and the name is cut, make the line a
+  `flex overflow-hidden whitespace-pre` box: the words become flex items that keep the
+  page's direction and don't shrink, and `whitespace-pre` keeps the spaces at their
+  edges. Where the row can squeeze the line narrower than its words (the impersonation
+  banner), the words shrink too, but only once the name is down to a letter and "…"
+  (`wordsYieldLast` in `ImpersonationBanner.tsx`). When the text after the name is cut
+  first, keep the line's `truncate` and make the name an
+  `inline-block max-w-full truncate align-bottom` span.
 - Titles, names, taglines and overviews from metadata use `.bidi-text` (`app.css`).
   Where such text is cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
   stylesheet), it also takes `dir="auto"`. Without it, text that runs the other way

@@ -73,6 +73,7 @@ import {
 import { formatLocale } from "@/lib/appLocale";
 
 const K = "web.admin.downloads.preparation";
+const SEPARATOR = " · ";
 // Product and stream names, not translated.
 const FFMPEG = "FFmpeg";
 const STDERR = "stderr";
@@ -855,12 +856,34 @@ function ProgressCell({ prep }: { prep: AdminDownloadPreparation }) {
   }
 }
 
-function requesterSummary(t: Translate, prep: AdminDownloadPreparation): string {
+/** The first requester's device, and how many others asked ("Alex's iPhone · +2 more"). */
+function requesterDevices(
+  t: Translate,
+  first: AdminDownloadPreparation["requesters"][number],
+  others: number,
+): string {
+  const device = requesterDevice(first);
+  return others > 0
+    ? t(`${K}.requesters.deviceMore`, { count: others, count_text: others, device })
+    : device;
+}
+
+/**
+ * The phone row's requester line. The name reads in its own direction and is
+ * cut only when it alone fills the line; the devices after it are cut first.
+ */
+function requesterSummary(t: Translate, prep: AdminDownloadPreparation): ReactNode {
   const [first, ...rest] = prep.requesters;
   if (!first) return t(`${K}.requesters.none`);
-  return [requesterName(first), requesterDevice(first), rest.length > 0 ? `+${rest.length}` : ""]
-    .filter(Boolean)
-    .join(" · ");
+  return (
+    <>
+      <span dir="auto" className="inline-block max-w-full truncate align-bottom">
+        {requesterName(first)}
+      </span>
+      {SEPARATOR}
+      {requesterDevices(t, first, rest.length)}
+    </>
+  );
 }
 
 function Requesters({ prep }: { prep: AdminDownloadPreparation }) {
@@ -889,13 +912,7 @@ function Requesters({ prep }: { prep: AdminDownloadPreparation }) {
         )}
       </div>
       <div className="text-muted-foreground truncate text-[10px]">
-        {rest.length > 0
-          ? t(`${K}.requesters.deviceMore`, {
-              count: rest.length,
-              count_text: rest.length,
-              device: requesterDevice(first),
-            })
-          : requesterDevice(first)}
+        {requesterDevices(t, first, rest.length)}
       </div>
     </div>
   );
