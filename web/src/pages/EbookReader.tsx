@@ -695,10 +695,7 @@ export default function EbookReader() {
   }
 
   return (
-    // The impersonation banner sits above this page in normal flow, so the page
-    // takes its height off the viewport; otherwise the page scrolls by that
-    // much and the pinned header covers the top of the reading surface.
-    <div className="bg-background min-h-[calc(100vh-var(--impersonation-banner-height))]">
+    <div className="bg-background">
       <header className="border-border/70 bg-background/95 sticky top-(--impersonation-banner-height) z-20 border-b backdrop-blur">
         <div className="flex h-14 items-center gap-3 px-4">
           <Button asChild variant="ghost" size="icon" aria-label={t("web.reader.toolbar.back")}>
