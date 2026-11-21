@@ -19,7 +19,7 @@ import {
 } from "@/components/admin/libraries/DiagnosticsListParts";
 import {
   pathLeaf,
-  useLibrariesTableLayout,
+  useWideDiagnosticsTableLayout,
   usePagination,
 } from "@/components/admin/libraries/diagnosticsListState";
 import { Badge } from "@/components/ui/badge";
@@ -78,7 +78,7 @@ function rootRowModel(t: Translate, root: LibraryRoot) {
  */
 export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
   const t = useT();
-  const showTable = useLibrariesTableLayout();
+  const showTable = useWideDiagnosticsTableLayout();
   const [open, setOpen] = useState(false);
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | undefined>(libraries[0]?.id);
   const [search, setSearch] = useState("");

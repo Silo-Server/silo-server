@@ -16,7 +16,7 @@ import {
   TOUCH_CONTROL_CLASS,
 } from "@/components/admin/libraries/DiagnosticsListParts";
 import {
-  useLibrariesTableLayout,
+  useWideDiagnosticsTableLayout,
   usePagination,
 } from "@/components/admin/libraries/diagnosticsListState";
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +37,7 @@ import { cn } from "@/lib/utils";
 
 export function StaleIDsSection() {
   const t = useT();
-  const showTable = useLibrariesTableLayout();
+  const showTable = useWideDiagnosticsTableLayout();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
@@ -108,7 +108,11 @@ export function StaleIDsSection() {
             <TableBody>
               {pag.rows.map((s) => (
                 <TableRow key={staleIDKey(s)}>
-                  <TableCell className="font-medium">{s.title}</TableCell>
+                  {/* The title takes the width the other columns leave and truncates,
+                      so a long title can't push the table past its section. */}
+                  <TableCell className="w-full max-w-0 truncate font-medium" title={s.title}>
+                    {s.title}
+                  </TableCell>
                   <TableCell className="tabular-nums">{numberText(s.year)}</TableCell>
                   <TableCell className="text-sm">{s.library_name}</TableCell>
                   <TableCell>

@@ -17,7 +17,7 @@ import {
 } from "@/components/admin/libraries/DiagnosticsListParts";
 import {
   pathLeaf,
-  useLibrariesTableLayout,
+  useWideDiagnosticsTableLayout,
   usePagination,
   useSort,
 } from "@/components/admin/libraries/diagnosticsListState";
@@ -47,7 +47,7 @@ const REASON_BADGE_CLASS = "border-warning/30 bg-warning/5 text-warning";
 /** The "Troubleshooting" section: roots the scanner skipped, and why. */
 export function SkippedRootsSection() {
   const t = useT();
-  const showTable = useLibrariesTableLayout();
+  const showTable = useWideDiagnosticsTableLayout();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
