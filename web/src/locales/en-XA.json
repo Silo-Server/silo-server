@@ -50592,6 +50592,24 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîĝĥ~~⟧"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "⟦Ļöŵ~~⟧"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "⟦Ṁéđîûɱ~~~⟧"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -52364,6 +52382,24 @@
     {
       "type": 0,
       "value": "⟦Šéåŕçĥ îĝñöŕéđ îţéɱš ƀý ţîţļé, ļîƀŕåŕý, öŕ ţýþé...~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "⟦Åɱƀîĝûöûš~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "⟦Þéñđîñĝ~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "⟦Ûñɱåţçĥéđ~~~~⟧"
     }
   ],
   "web.admin.libraries.unmatched.title": [

@@ -48964,6 +48964,24 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHigh\u202C"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELow\u202C"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMedium\u202C"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -50688,6 +50706,24 @@
     {
       "type": 0,
       "value": "\u200F\u202ESearch ignored items by title, library, or type...\u202C"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAmbiguous\u202C"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPending\u202C"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUnmatched\u202C"
     }
   ],
   "web.admin.libraries.unmatched.title": [
