@@ -85,13 +85,18 @@ const KEYS: string[] = Array.from(
   ]),
 );
 
-/** The text provider select's value for the ChatGPT plan. */
-const CHATGPT_PROVIDER = "chatgpt";
+/**
+ * The text provider select's value for the ChatGPT plan. Like NO_PROVIDER it
+ * holds an underscore, so a provider a deployment declares as "chatgpt" stays
+ * an ordinary choice.
+ */
+const CHATGPT_PROVIDER = "__chatgpt__";
 /**
  * A provider select's value for no provider. Choosing it releases the
- * provider, so it can be removed once no job uses it.
+ * provider, so it can be removed once no job uses it. No provider id can
+ * contain an underscore, so a deployment's chosen ids never collide with it.
  */
-const NO_PROVIDER = "none";
+const NO_PROVIDER = "__none__";
 
 /** Example model ids for the text model field; they read the same in every language. */
 const TEXT_MODEL_PLACEHOLDER = "gpt-6-luna, gemini-2.5-flash, llama3.1";
@@ -296,7 +301,7 @@ function TextModelTile({
       : ready
         ? "connected"
         : "not_connected";
-  const chatGPT = authMode === CHATGPT_PROVIDER;
+  const chatGPT = authMode === "chatgpt";
   const provider = providers.find((candidate) => candidate.id === providerID);
   const selected = chatGPT ? CHATGPT_PROVIDER : providerID;
   const supportsServiceTier = !chatGPT && provider?.type === "openai" && serviceTiers.length > 0;
