@@ -100,7 +100,10 @@ export function UsersWidget() {
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="truncate text-[13px] font-semibold">{u.username}</span>
+                          {/* A cut username keeps its start in either script. */}
+                          <span dir="auto" className="truncate text-[13px] font-semibold">
+                            {u.username}
+                          </span>
                           {u.role === "admin" && (
                             <Badge variant="default" className="px-1.5 py-0 text-[9px]">
                               {accountRoleLabel(u)}
