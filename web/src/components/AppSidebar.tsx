@@ -784,7 +784,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                           label: pin.label,
                                         })
                                       }
-                                      className="pointer-reveal text-muted-foreground hover:text-destructive absolute end-1 rounded p-1.5"
+                                      className="pointer-reveal text-muted-foreground hover:text-destructive absolute end-1 rounded p-1.5 transition-none"
                                       title={t("web.shell.sidebar.unpin")}
                                       aria-label={t("web.shell.sidebar.unpin")}
                                       aria-describedby={pinLabelId}
