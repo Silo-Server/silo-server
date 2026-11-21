@@ -63,10 +63,7 @@ function keepSeparatorsWithNext(node: ReactNode): ReactNode {
   return Array.isArray(node) ? node.map(keepSeparatorsWithNext) : node;
 }
 
-/**
- * Keeps a short status ("Left out") on one line. One wider than the line still breaks,
- * through the line's `wrap-anywhere`.
- */
+/** Joins a short status's words ("Left out") with no-break spaces. */
 function nonBreaking(text: string): string {
   return text.replace(/ /g, "\u00a0");
 }
@@ -99,7 +96,12 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
           {t("web.admin.backups.restore.run.itemLine", {
             label: displayLabel(item),
             section: t(SECTION_TITLES[item.section]),
-            outcome: nonBreaking(t(outcome.label)),
+            // The status stays whole: no break at its spaces or between its Chinese, Japanese,
+            // or Korean characters. One wider than the line still breaks, through
+            // `wrap-anywhere`. (An inline block would let the line break before it, leaving
+            // the message's "·" at the end of a line.) <bdi> keeps the direction isolation a
+            // string value gets in right-to-left languages.
+            outcome: <bdi className="break-keep">{nonBreaking(t(outcome.label))}</bdi>,
             b: (chunks) => <span className="font-medium">{chunks}</span>,
             muted: (chunks) => (
               <span className="text-muted-foreground">{keepSeparatorsWithNext(chunks)}</span>
