@@ -56,7 +56,7 @@ import {
   useUpsertLibraryRootOverride,
 } from "@/hooks/queries/admin/libraries";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 // Not translated: a sample year.
@@ -237,7 +237,7 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                         <Badge variant="secondary">{root.type_confidence}</Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-end text-xs tabular-nums">
-                        {root.observed_file_count}
+                        {numberText(root.observed_file_count)}
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1">
@@ -279,7 +279,7 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                     </Badge>
                   </CardField>
                   <CardField label={t("web.admin.libraries.column.files")}>
-                    <span className="tabular-nums">{root.observed_file_count}</span>
+                    <span className="tabular-nums">{numberText(root.observed_file_count)}</span>
                   </CardField>
                 </CardFields>
                 {row.evidence ? (

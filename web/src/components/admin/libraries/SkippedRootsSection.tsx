@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/table";
 import { useSkippedLibraryRoots } from "@/hooks/queries/admin/libraries";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 import { formatDateTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 
@@ -157,7 +157,7 @@ export function SkippedRootsSection() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-end text-xs tabular-nums">
-                        {root.file_count}
+                        {numberText(root.file_count)}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-xs tabular-nums">
                         {formatDateTime(root.first_seen_at)}
@@ -261,7 +261,7 @@ function SkippedRootDetails({ root }: { root: LibrarySkippedRoot }) {
       <span className="text-muted-foreground font-medium">
         {t("web.admin.libraries.skippedRoots.filesAffected")}
       </span>
-      <span>{root.file_count}</span>
+      <span>{numberText(root.file_count)}</span>
     </div>
   );
 }
