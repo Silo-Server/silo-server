@@ -105,6 +105,11 @@ export function ListRow({
   highlighted,
 }: ListRowProps) {
   const lead = Boolean(selection || handleProps);
+  // A collapsed row's text and icon, a step below its /80 name. Not
+  // text-muted-foreground: high contrast pins that brighter than the name.
+  // While dragged the row sits on the raised surface, where /65 drops under
+  // 4.5:1 in high contrast.
+  const quiet = dragging ? "text-foreground/75" : "text-foreground/65";
   return (
     <li
       ref={ref}
@@ -138,11 +143,7 @@ export function ListRow({
         <Grip title={title} collapsed={collapsed} handleProps={handleProps} />
       ) : null}
       {collapsed ? (
-        <div
-          aria-hidden
-          // The same tone as the collapsed text beside it.
-          className="text-foreground/65 grid h-[30px] w-12 place-items-center sm:w-[74px]"
-        >
+        <div aria-hidden className={cn(quiet, "grid h-[30px] w-12 place-items-center sm:w-[74px]")}>
           <EyeOff className="size-[17px]" />
         </div>
       ) : (
@@ -150,8 +151,7 @@ export function ListRow({
       )}
       <div className={cn("min-w-0", onOpen && "cursor-pointer")} onClick={onOpen}>
         {collapsed ? (
-          // Not text-muted-foreground: high contrast pins that brighter than the /80 name.
-          <p className="text-foreground/65 truncate text-[13.5px]">
+          <p className={cn(quiet, "truncate text-[13.5px]")}>
             <b className="text-foreground/80 font-semibold">{title}</b>
             {collapsedText}
           </p>
