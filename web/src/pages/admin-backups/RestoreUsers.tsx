@@ -5,6 +5,7 @@ import type { RestoreDataTypeId, RestoreItem, RestoreProfile } from "@/api/v2/ad
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { useT, type Translate } from "@/i18n";
+import { emailDir } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 import { DATA_TYPE_IDS, DATA_TYPE_LABELS, pendingSummary } from "@/lib/profileDataTypes";
 import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
@@ -21,6 +22,8 @@ import {
   toggleKeys,
 } from "./restoreModel";
 import { useOverflowsInline } from "./useOverflowsInline";
+
+const MIDDLE_DOT = "·";
 
 function droppedLibraries(t: Translate, count: number): string {
   return t("web.admin.backups.restore.users.droppedLibraries", {
@@ -207,13 +210,8 @@ export const AccountRow = memo(function AccountRow({
       : null;
   // The label can already be the email: an invited account's username is its address,
   // and an account with no username is labeled by its email.
-  const contact = [
-    pending,
-    account.username !== item.label ? account.username : null,
-    account.email !== item.label ? account.email : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const email = account.email && account.email !== item.label ? account.email : null;
+  const hasContact = Boolean(pending || email);
   // With no username on either side, the name is the email the row is labelled with.
   const destination = account.local_username || account.username || item.label;
   const status = !item.selectable
@@ -252,7 +250,7 @@ export const AccountRow = memo(function AccountRow({
             title={item.label}
             className={cn(
               "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
-              contact && "@2xl:max-w-max @2xl:min-w-0 @2xl:flex-9",
+              hasContact && "@2xl:max-w-max @2xl:min-w-0 @2xl:flex-9",
               !item.selectable && "text-muted-foreground",
             )}
           >
@@ -261,26 +259,42 @@ export const AccountRow = memo(function AccountRow({
               dir={nameDir(item)}
               className={cn(
                 "align-with-page block w-fit max-w-full",
-                contact && "@2xl:truncate @2xl:[&_wbr]:hidden",
-                nameOverflows && (contact ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
+                hasContact && "@2xl:truncate @2xl:[&_wbr]:hidden",
+                nameOverflows && (hasContact ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
               )}
             >
               <BreakableKey value={item.label} />
             </span>
           </Label>
-          {contact ? (
-            // Without the pending summary the line is the email (the label is the
-            // username), which reads left to right in any language and so keeps its
-            // start when cut short. With the summary first, the line follows the page.
-            // In a narrow row, w-fit keeps a short line under the name, on the page's
-            // start side; max-w-full stops a long one at the column's width so it is
-            // still cut short.
-            <span
-              title={contact}
-              dir={pending ? undefined : "ltr"}
-              className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs @2xl:max-w-max @2xl:flex-11"
-            >
-              {contact}
+          {hasContact ? (
+            // The summary follows the page and the email takes its own direction, each cut
+            // at its own end, so both keep their start: one cut line would lose the start
+            // of whichever part sits at its end. Each part's tooltip is on the part, so it
+            // reads in that part's direction too. When both don't fit on one line, the
+            // email moves to its own, so neither is cut short unless it is wider than the
+            // line on its own. As in UserDetailHeader, the separator sits before the email,
+            // pulled back over the gap, so when the email opens a line the separator falls
+            // past the clipped start edge. In a narrow row, w-fit keeps a short line under
+            // the name, on the page's start side; max-w-full stops a long one at the
+            // column's width.
+            <span className="text-muted-foreground flex w-fit max-w-full min-w-0 flex-wrap gap-x-(--sep) overflow-x-clip text-xs [--sep:0.65em] @2xl:max-w-max @2xl:flex-11">
+              {pending ? (
+                <span title={pending} className="min-w-0 truncate">
+                  {pending}
+                </span>
+              ) : null}
+              {email ? (
+                <span className={cn("flex min-w-0", pending && "-ms-(--sep)")}>
+                  {pending ? (
+                    <span aria-hidden="true" className="w-(--sep) shrink-0 text-center">
+                      {MIDDLE_DOT}
+                    </span>
+                  ) : null}
+                  <span dir={emailDir(email)} title={email} className="min-w-0 truncate">
+                    {email}
+                  </span>
+                </span>
+              ) : null}
             </span>
           ) : null}
         </div>
