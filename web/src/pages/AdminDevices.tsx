@@ -489,7 +489,7 @@ export default function AdminDevices() {
                     count: filteredDevices.length,
                     count_text: filteredDevices.length,
                     total: devices.length,
-                    muted: (chunks) => <span className="text-muted-foreground/60">{chunks}</span>,
+                    muted: (chunks) => <span className="text-muted-foreground/80">{chunks}</span>,
                   })
                 : t("web.admin.devices.list.count", {
                     count: filteredDevices.length,
@@ -1074,7 +1074,7 @@ function SavedViewRow({
       <span
         className={cn(
           "font-mono text-[10.5px] tabular-nums",
-          active ? "text-foreground/80" : "text-muted-foreground/60",
+          active ? "text-foreground" : "text-muted-foreground",
         )}
       >
         {numberText(count)}
@@ -1115,7 +1115,7 @@ function FacetCheckbox({
       <span
         className={cn(
           "font-mono text-[10.5px] tabular-nums",
-          checked ? "text-foreground/80" : "text-muted-foreground/60",
+          checked ? "text-foreground" : "text-muted-foreground",
         )}
       >
         {numberText(count)}
@@ -1277,7 +1277,7 @@ function DeviceGroup({
               {groupAnomalies}
             </span>
           )}
-          <span className="text-muted-foreground/70 font-mono text-[10.5px] tabular-nums">
+          <span className="text-muted-foreground font-mono text-[10.5px] tabular-nums">
             {t("web.admin.devices.group.meta", {
               devices: group.meta.devices,
               profiles: group.meta.profiles,
@@ -1353,13 +1353,7 @@ function DeviceRow({
         <div className="text-muted-foreground/80 mt-0.5 flex items-center gap-1.5 truncate text-[11px]">
           <span className="truncate">{platformLabel(device.device_platform)}</span>
           <span className="text-muted-foreground/40">{t("web.admin.devices.separator")}</span>
-          <span
-            className={cn(
-              "tabular-nums",
-              recency === "<24h" && "text-success/80",
-              recency === ">30d" && "text-muted-foreground/60",
-            )}
-          >
+          <span className={cn("tabular-nums", recency === "<24h" && "text-success/80")}>
             {formatRelative(device.last_updated)}
           </span>
         </div>
@@ -1389,11 +1383,7 @@ function OverrideGauge({ count, active }: { count: number; active: boolean }) {
       <span
         className={cn(
           "min-w-[14px] text-end font-mono text-[11px] tabular-nums",
-          active
-            ? "text-foreground"
-            : count === 0
-              ? "text-muted-foreground/50"
-              : "text-muted-foreground/85",
+          active ? "text-foreground" : "text-muted-foreground/85",
         )}
       >
         {numberText(count)}
