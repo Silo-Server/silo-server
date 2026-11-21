@@ -185,6 +185,7 @@ func TestTextAICheckNamesProviderFailure(t *testing.T) {
 		{name: "rejected key", err: &llm.HTTPError{StatusCode: 401}, wantKey: "textAIUnauthorized"},
 		{name: "rejected request", err: &llm.HTTPError{StatusCode: 400, Code: "SYNTHETIC_PROVIDER_DETAIL"}, wantKey: "textAIRejected", wantArgs: map[string]string{"status": "400"}},
 		{name: "unknown model", err: &llm.HTTPError{StatusCode: 404}, wantKey: "textAINotFound"},
+		{name: "key echoed in error fields", err: &llm.HTTPError{StatusCode: 400, Code: "bad_key_SYNTHETIC_KEY", Param: "SYNTHETIC_KEY"}, wantKey: "textAIRejected", wantArgs: map[string]string{"status": "400"}},
 		{name: "unclassified", err: errors.New("SYNTHETIC_PROVIDER_DETAIL"), wantKey: "textAIFailed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

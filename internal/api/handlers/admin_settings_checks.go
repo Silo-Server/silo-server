@@ -226,19 +226,22 @@ func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, con
 // textCheckFailed explains a failed text model check in authored words and
 // logs the provider's error, which can carry response bodies, for the
 // administrator to read in the server log. A provider that echoes the API key
-// in its error body does not get it into the log.
+// in its error body, code or parameter does not get it into the log.
 func textCheckFailed(ctx context.Context, err error, apiKey string) connectionCheckResponse {
-	detail := err.Error()
-	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
-		detail = strings.ReplaceAll(detail, apiKey, "[redacted]")
+	apiKey = strings.TrimSpace(apiKey)
+	redact := func(text string) string {
+		if apiKey != "" {
+			text = strings.ReplaceAll(text, apiKey, "[redacted]")
+		}
+		return logredact.SanitizeText(text)
 	}
 	// A streamed ChatGPT or Responses API failure carries its cause only in
 	// the provider's error code, not in the error text.
 	var status, code, param any
 	if httpErr, ok := errors.AsType[*llm.HTTPError](err); ok {
-		status, code, param = httpErr.StatusCode, logredact.SanitizeText(httpErr.Code), logredact.SanitizeText(httpErr.Param)
+		status, code, param = httpErr.StatusCode, redact(httpErr.Code), redact(httpErr.Param)
 	}
-	slog.WarnContext(ctx, "text AI connection check failed", logComponentKey, "api", "error", logredact.SanitizeText(detail),
+	slog.WarnContext(ctx, "text AI connection check failed", logComponentKey, "api", "error", redact(err.Error()),
 		"status", status, "provider_code", code, "provider_param", param)
 	return checkFailed(textCheckFailureMessage(err))
 }
