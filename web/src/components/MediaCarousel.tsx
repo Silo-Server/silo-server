@@ -246,7 +246,9 @@ export default function MediaCarousel({
   const viewportPadX = edgePadding ? " pe-4 sm:pe-6 lg:pe-10 xl:pe-12" : "";
   const containerPadX = edgePadding ? " ps-4 sm:ps-6 lg:ps-10 xl:ps-12" : "";
   const titleSize = compact ? "text-[0.6875rem]" : "text-xl";
-  const titleClass = `inline font-semibold ${headerActions ? "me-2" : ""} ${
+  // With actions, the heading stacks above them so the pin's enlarged tap area
+  // can't take taps on heading text when the pin starts the next line.
+  const titleClass = `inline font-semibold ${headerActions ? "relative z-10 me-2" : ""} ${
     compact ? "text-muted-foreground tracking-[0.18em] uppercase" : "text-foreground tracking-tight"
   }`;
   const hasExploreAll = Boolean(viewAllHref || onViewAll);
@@ -315,7 +317,9 @@ export default function MediaCarousel({
             <h2 className={titleClass}>{title}</h2>
           )}
           {headerActions ? (
-            <span className="inline-flex min-h-lh items-center gap-2 align-top">{headerActions}</span>
+            <span className="inline-flex min-h-lh items-center gap-2 align-top">
+              {headerActions}
+            </span>
           ) : null}
         </div>
         {viewAllHref ? (
