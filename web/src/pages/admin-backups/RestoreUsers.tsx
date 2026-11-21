@@ -87,11 +87,17 @@ function ProfileRow({
       />
       <div className="min-w-0 flex-1">
         {/* When the name and detail don't fit on one line, the detail moves under the
-            name, and a name wider than the row wraps. */}
+            name, and a name wider than the row wraps. Part of a name that can't wrap,
+            such as one long run of joined emoji, is clipped sideways at the row's edge:
+            block makes the words around it wrap at the row's width, and px-px -mx-px
+            leave room for letters that reach past their edge, such as a final "f". */}
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <Label
             htmlFor={controlId}
-            className={cn("text-sm wrap-anywhere", !selectable && "text-muted-foreground")}
+            className={cn(
+              "-mx-px block min-w-0 overflow-x-clip px-px text-sm wrap-anywhere",
+              !selectable && "text-muted-foreground",
+            )}
           >
             {profile.name}
           </Label>
