@@ -19,6 +19,21 @@ const (
 	nodeWriteBurst int        = 60
 )
 
+// Per-node budget for registration on one API replica, far below the
+// background budget. A node registers once when it starts and, against a core
+// that would not take it, every thirty seconds. A changed declaration commits
+// a configuration revision and makes every API server reload its node pools,
+// so a node that kept changing one must not be able to do that twenty times a
+// second. The burst covers a node restarting several times in a row.
+const (
+	nodeRegistrationBurst int = 6
+	// maxRegistrationBodyBytes bounds a registration: a dozen short fields.
+	maxRegistrationBodyBytes = 16 << 10
+)
+
+// nodeRegistrationRate refills one registration every ten seconds.
+var nodeRegistrationRate = rate.Every(10 * time.Second)
+
 // Per-node request budget for the calls on a viewer's path (resolve and
 // sources/open) on one API replica, separate from the background budget so a
 // burst of either never refuses the other.
@@ -90,6 +105,12 @@ func (s *Server) LimitNode(next http.Handler) http.Handler {
 // other answer it can retry: a 503 to the relay, a retried renewal.
 func (s *Server) LimitNodePlayback(next http.Handler) http.Handler {
 	return limitWith(s.playbackLimiter, next)
+}
+
+// LimitNodeRegistration answers 429 to a node that spends its registration
+// budget on this replica. The node retries a 429 with its usual backoff.
+func (s *Server) LimitNodeRegistration(next http.Handler) http.Handler {
+	return limitWith(s.registrationLimiter, next)
 }
 
 func limitWith(limiter *nodeLimiter, next http.Handler) http.Handler {

@@ -1,5 +1,5 @@
 {
-  "revision": "ee19cf0de47c46f496b48f60009d241538ffd664eaab50325577f56efbaba69e",
+  "revision": "cc1cf04941b02c58aba398ddd26d8fda26885717096aea668c767ed629d9af4d",
   "state": "available",
   "allowed": true,
   "in_app": {
@@ -41,5 +41,9 @@
     "available": true,
     "mute": true,
     "bulk_mute": true
+  },
+  "plugin_destinations": {
+    "available": false,
+    "max_per_profile": 0
   }
 }

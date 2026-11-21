@@ -125,8 +125,6 @@ func (f *fakeServiceHost) Stop(installationID int) error {
 	return nil
 }
 
-func (f *fakeServiceHost) NextStartSeq() uint64 { return 0 }
-
 func (f *fakeServiceHost) Shutdown(context.Context) error {
 	return nil
 }
@@ -190,6 +188,10 @@ func (f *fakePluginClient) NetworkAccessProvider(string) (*pluginhost.NetworkAcc
 	return nil, nil
 }
 
+func (f *fakePluginClient) NotificationChannel(string) (*pluginhost.NotificationChannelClient, error) {
+	return nil, nil
+}
+
 type fakeServiceInstallationStore struct {
 	byID map[int]*Installation
 	// mu guards every field: the resident supervisor reads the store from
@@ -203,6 +205,9 @@ type fakeServiceInstallationStore struct {
 	saveArchiveIDs   []int
 	saveArchiveErr   error
 	listCapabilities []*Capability
+	// capabilitiesByID, when set, gives each installation its own
+	// capabilities in place of listCapabilities.
+	capabilitiesByID map[int][]*Capability
 	events           *[]string
 	// archives, when set, backs GetArchive for the archive cache; unset ids
 	// report ErrArchiveNotFound.
@@ -277,10 +282,11 @@ func (s *fakeServiceInstallationStore) Update(_ context.Context, id int, input U
 	if input.InstallPath != nil {
 		installation.InstallPath = *input.InstallPath
 	}
+	enablementChanged := input.Enabled != nil && *input.Enabled != installation.Enabled
 	if input.Enabled != nil {
 		installation.Enabled = *input.Enabled
 	}
-	if input.Restart {
+	if input.Restart || enablementChanged {
 		installation.RuntimeGeneration++
 	}
 	return nil
@@ -344,15 +350,26 @@ func (s *fakeServiceInstallationStore) ListByPluginID(_ context.Context, pluginI
 	return result, nil
 }
 
-func (s *fakeServiceInstallationStore) ListCapabilities(context.Context, int) ([]*Capability, error) {
+func (s *fakeServiceInstallationStore) ListCapabilities(_ context.Context, id int) ([]*Capability, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.capabilitiesByID != nil {
+		return s.capabilitiesByID[id], nil
+	}
 	return s.listCapabilities, nil
 }
 
 // ListEnabledWithCapabilityTypes mirrors ListCapabilities, whose fixed
 // capability list applies to every installation in the fake.
 func (s *fakeServiceInstallationStore) ListEnabledWithCapabilityTypes(ctx context.Context, capabilityTypes []string) ([]*Installation, error) {
+	if s.capabilitiesByID != nil {
+		enabled, err := s.ListEnabled(ctx)
+		return slices.DeleteFunc(enabled, func(installation *Installation) bool {
+			return !slices.ContainsFunc(s.capabilitiesByID[installation.ID], func(record *Capability) bool {
+				return slices.Contains(capabilityTypes, record.Type)
+			})
+		}), err
+	}
 	matches := false
 	for _, record := range s.listCapabilities {
 		if record == nil {

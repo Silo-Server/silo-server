@@ -145,6 +145,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # .env also carries the server settings an operator sets from the
+    # environment (SILO_PUBLIC_URL, SILO_SMTP_HOST, ...); .env.example lists them.
     env_file:
       - path: .env
         required: false

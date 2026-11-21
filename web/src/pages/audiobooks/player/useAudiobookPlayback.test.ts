@@ -110,7 +110,7 @@ const playerConfig: PlayerConfig = {
   apiBaseUrl: "/api/v1",
   getAccessToken: () => "token",
   getProfileId: () => "profile-1",
-  getDeviceId: () => "test-device",
+  getDeviceHeaders: () => ({ "X-Silo-Device-Id": "test-device" }),
   getProfileToken: () => null,
 };
 

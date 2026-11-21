@@ -105,58 +105,65 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("takes the TV's code as grouped digits and looks it up", async () => {
+it("takes the device's code as grouped digits and looks it up", async () => {
   mount("/activate");
-  const input = screen.getByLabelText("Enter the code on your TV or app");
+  const input = screen.getByLabelText("Enter the code shown on your device");
   expect(input.getAttribute("inputmode")).toBe("numeric");
   fireEvent.change(input, { target: { value: "48217730" } });
   expect((input as HTMLInputElement).value).toBe("4821 7730");
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-  await screen.findByText("Sign in Living room TV?");
+  await screen.findByText("Allow Living room TV to sign in?");
   expect(vi.mocked(v2)).toHaveBeenCalledWith("GET /api/v2/auth/device", {
     query: { code: "48217730" },
   });
 });
 
-it("shows what the approver is approving and signs the TV in", async () => {
+it("shows what the approver is approving and signs the device in", async () => {
   lookups = [pending, { ...pending, status: "consumed" }];
   mount("/activate?code=48217730");
-  await screen.findByText("Sign in Living room TV?");
+  await screen.findByText("Allow Living room TV to sign in?");
   expect(screen.getByText("Apple TV · requested just now")).toBeTruthy();
   expect(screen.getByText(window.location.host)).toBeTruthy();
   // The code is read digit by digit; the visual grouping is hidden.
   expect(screen.getByText("4821 7730").getAttribute("aria-hidden")).toBe("true");
   expect(screen.getByText("4 8 2 1 7 7 3 0")).toBeTruthy();
-  // TV apps released before user codes show only the match words.
-  expect(screen.getByText("Older TV apps show WARM PONY instead.")).toBeTruthy();
+  expect(screen.queryByText(/WARM PONY/)).toBeNull();
   expect(screen.getByText(/sign it in to Media Room as/)).toBeTruthy();
-  expect(screen.getByText("Only approve a TV that's in front of you right now.")).toBeTruthy();
+  expect(screen.getByText("Only approve this if you started the sign-in yourself.")).toBeTruthy();
   // The result region is mounted, empty, before any decision.
   expect(screen.getByRole("status").textContent).toBe("");
 
-  fireEvent.click(screen.getByRole("button", { name: "Sign in TV" }));
-  const result = await screen.findByText("Your TV is signed in.");
+  fireEvent.click(screen.getByRole("button", { name: "Approve sign-in" }));
+  const result = await screen.findByText("Living room TV is signed in.");
   expect(result.getAttribute("role")).toBe("status");
   await waitFor(() => expect(document.activeElement).toBe(result));
   // A finished request no longer asks for a comparison.
-  expect(screen.queryByText("Check that your TV shows")).toBeNull();
+  expect(screen.queryByText("Make sure this code matches")).toBeNull();
   expect(decisions).toEqual([
     { op: "POST /api/v2/auth/device/approve", body: { code: "48217730" } },
   ]);
+});
+
+it("omits a platform label that duplicates the device name", async () => {
+  lookups = [{ ...pending, device_name: "Tracearr", device_platform: "Tracearr" }];
+  mount("/activate?code=48217730");
+  await screen.findByText("Allow Tracearr to sign in?");
+  expect(screen.getByText("Requested just now")).toBeTruthy();
+  expect(screen.queryByText(/Tracearr ·/)).toBeNull();
 });
 
 it("follows an approval whose reload failed", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   lookups = [pending, new Error("offline") as never, { ...pending, status: "consumed" }];
   mount("/activate?code=48217730");
-  await screen.findByText("Sign in Living room TV?");
-  fireEvent.click(screen.getByRole("button", { name: "Sign in TV" }));
-  await screen.findByText("Done. Your TV is signing in.");
-  expect(screen.queryByRole("button", { name: "Sign in TV" })).toBeNull();
+  await screen.findByText("Allow Living room TV to sign in?");
+  fireEvent.click(screen.getByRole("button", { name: "Approve sign-in" }));
+  await screen.findByText("Done. Living room TV is signing in.");
+  expect(screen.queryByRole("button", { name: "Approve sign-in" })).toBeNull();
   await act(async () => {
     await vi.advanceTimersByTimeAsync(3000);
   });
-  await screen.findByText("Your TV is signed in.");
+  await screen.findByText("Living room TV is signed in.");
 });
 
 it.each(["success", "failure"])(
@@ -188,20 +195,22 @@ it.each(["success", "failure"])(
     }) as never);
 
     mount("/activate?code=48217730");
-    await screen.findByText("Sign in Living room TV?");
-    fireEvent.click(screen.getByRole("button", { name: "Sign in TV" }));
+    await screen.findByText("Allow Living room TV to sign in?");
+    fireEvent.click(screen.getByRole("button", { name: "Approve sign-in" }));
     fireEvent.click(screen.getByRole("button", { name: "Enter another code" }));
-    const input = await screen.findByLabelText("Enter the code on your TV or app");
+    const input = await screen.findByLabelText("Enter the code shown on your device");
     fireEvent.change(input, { target: { value: "91536204" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    await screen.findByText("Sign in Bedroom TV?");
+    await screen.findByText("Allow Bedroom TV to sign in?");
 
     await act(async () => finishApproval());
     expect(screen.getByText("9153 6204")).toBeTruthy();
-    expect(screen.getByText("Sign in Bedroom TV?")).toBeTruthy();
-    expect(screen.queryByText("Done. Your TV is signing in.")).toBeNull();
-    expect(screen.queryByText("Couldn't sign in the TV. Try again.")).toBeNull();
-    expect(screen.getByRole("button", { name: "Sign in TV" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByText("Allow Bedroom TV to sign in?")).toBeTruthy();
+    expect(screen.queryByText("Done. Living room TV is signing in.")).toBeNull();
+    expect(screen.queryByText("Couldn't approve sign-in. Try again.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Approve sign-in" }).hasAttribute("disabled")).toBe(
+      false,
+    );
     expect(decisions).toEqual([
       { op: "POST /api/v2/auth/device/approve", body: { code: "48217730" } },
     ]);
@@ -212,7 +221,7 @@ it("keeps watching past the first minutes and through a failed lookup", async ()
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const approved = { ...pending, status: "approved" };
   // Initial lookup, the reload after approving, then 40 fast watch lookups
-  // (two minutes), one that fails, and the TV collecting on a slow one.
+  // (two minutes), one that fails, and the device collecting on a slow one.
   lookups = [
     pending,
     approved,
@@ -222,9 +231,9 @@ it("keeps watching past the first minutes and through a failed lookup", async ()
     { ...pending, status: "consumed" },
   ];
   mount("/activate?code=48217730");
-  await screen.findByText("Sign in Living room TV?");
-  fireEvent.click(screen.getByRole("button", { name: "Sign in TV" }));
-  await screen.findByText("Done. Your TV is signing in.");
+  await screen.findByText("Allow Living room TV to sign in?");
+  fireEvent.click(screen.getByRole("button", { name: "Approve sign-in" }));
+  await screen.findByText("Done. Living room TV is signing in.");
   for (let i = 0; i < 40; i++) {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
@@ -241,21 +250,21 @@ it("keeps watching past the first minutes and through a failed lookup", async ()
   });
   expect(vi.mocked(v2).mock.calls.length).toBe(before + 1);
   // That lookup failed: the card stays instead of a lookup error.
-  expect(screen.getByText("Done. Your TV is signing in.")).toBeTruthy();
+  expect(screen.getByText("Done. Living room TV is signing in.")).toBeTruthy();
   expect(screen.queryByText("Couldn't look up this code. Try again.")).toBeNull();
   for (let i = 0; i < 2; i++) {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(15000);
     });
   }
-  await screen.findByText("Your TV is signed in.");
+  await screen.findByText("Living room TV is signed in.");
 });
 
-it("declines with Not now", async () => {
+it("declines with Decline", async () => {
   lookups = [pending, { ...pending, status: "denied" }];
   mount("/activate?code=48217730");
-  await screen.findByText("Sign in Living room TV?");
-  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  await screen.findByText("Allow Living room TV to sign in?");
+  fireEvent.click(screen.getByRole("button", { name: "Decline" }));
   await screen.findByText("This sign-in was declined.");
   expect(decisions).toEqual([{ op: "POST /api/v2/auth/device/deny", body: { code: "48217730" } }]);
 });
@@ -267,7 +276,7 @@ it("asks a signed-out approver to sign in and keeps the code", async () => {
   const link = await screen.findByRole("link", { name: "Sign in to approve" });
   expect(screen.queryByRole("link", { name: "Open in the Silo app" })).toBeNull();
   expect(link.getAttribute("href")).toBe("/login?redirect=%2Factivate%3Fcode%3D48217730");
-  expect(screen.queryByRole("button", { name: "Sign in TV" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Approve sign-in" })).toBeNull();
 });
 
 it("offers a phone the Silo app for a signed-out approval", async () => {
@@ -287,8 +296,8 @@ it("offers a phone the Silo app for a signed-out approval", async () => {
 it("tells an admin viewing as someone to stop before approving", async () => {
   auth.isImpersonating = true;
   mount("/activate?code=48217730");
-  expect(await screen.findByText(/Stop viewing as laura to approve a TV/)).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Sign in TV" })).toBeNull();
+  expect(await screen.findByText(/Stop viewing as laura to approve this sign-in/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Approve sign-in" })).toBeNull();
 });
 
 it("explains the server refusing an impersonation session instead of offering a retry", async () => {
@@ -304,9 +313,9 @@ it("explains the server refusing an impersonation session instead of offering a 
     );
   }) as never);
   mount("/activate?code=48217730");
-  fireEvent.click(await screen.findByRole("button", { name: "Sign in TV" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Approve sign-in" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Stop viewing as laura to approve a TV.",
+    "Stop viewing as laura to approve this sign-in.",
   );
   expect(screen.queryByText(/Try again/)).toBeNull();
 });
@@ -353,7 +362,7 @@ function recordQuickConnectDecisions() {
 it("asks a signed-out person to sign in before looking up a Quick Connect code", async () => {
   auth.user = null;
   mount("/activate");
-  const input = screen.getByLabelText("Enter the code on your TV or app");
+  const input = screen.getByLabelText("Enter the code shown on your device");
   fireEvent.change(input, { target: { value: "482177" } });
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   await screen.findByText(/to approve code 482177 from your Jellyfin app/);
@@ -375,19 +384,19 @@ it("approves a Quick Connect request for the chosen profile with its PIN", async
   profiles.verify.mockResolvedValue({ valid: true, profile_token: "kids-token" });
   const recorded = recordQuickConnectDecisions();
   mount("/activate?code=482177");
-  await screen.findByText("Sign in Firefox?");
-  expect(screen.getByText("Check that your app shows")).toBeTruthy();
+  await screen.findByText("Allow Firefox to sign in?");
+  expect(screen.getByText("Make sure this code matches")).toBeTruthy();
   expect(screen.getByText("482177")).toBeTruthy();
   expect(screen.queryByText(/Older TV apps show/)).toBeNull();
-  expect(screen.getByText("Only approve a device that's in front of you right now.")).toBeTruthy();
+  expect(screen.getByText("Only approve this if you started the sign-in yourself.")).toBeTruthy();
 
   fireEvent.click(screen.getByRole("radio", { name: /Kids/ }));
   const pin = await screen.findByLabelText("Kids PIN");
-  expect((screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement).disabled).toBe(
-    true,
-  );
+  expect(
+    (screen.getByRole("button", { name: "Approve sign-in" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
   fireEvent.change(pin, { target: { value: "1234" } });
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  fireEvent.click(screen.getByRole("button", { name: "Approve sign-in" }));
 
   await screen.findByText("Done. Firefox is signing in as Kids.");
   expect(profiles.verify).toHaveBeenCalledWith("p-kids", "1234");
@@ -406,9 +415,9 @@ it("approves a Quick Connect request for an unlocked profile without a PIN", asy
   profiles.list = [{ id: "p-laura", name: "Laura", has_pin: false }];
   const recorded = recordQuickConnectDecisions();
   mount("/activate?code=482177");
-  await screen.findByText("Sign in Firefox?");
+  await screen.findByText("Allow Firefox to sign in?");
   expect(screen.queryByLabelText(/PIN/)).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  fireEvent.click(screen.getByRole("button", { name: "Approve sign-in" }));
   await screen.findByText("Done. Firefox is signing in as Laura.");
   expect(profiles.verify).not.toHaveBeenCalled();
   expect(recorded.calls[0]?.profileContext).toEqual(
@@ -422,7 +431,7 @@ it("keeps a Quick Connect request pending when the PIN is wrong", async () => {
   const recorded = recordQuickConnectDecisions();
   mount("/activate?code=482177");
   fireEvent.change(await screen.findByLabelText("Kids PIN"), { target: { value: "0000" } });
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  fireEvent.click(screen.getByRole("button", { name: "Approve sign-in" }));
   await screen.findByText("That PIN isn't right.");
   expect(recorded.calls).toEqual([]);
 });
@@ -443,8 +452,8 @@ it("declines a Quick Connect request without looking it up again", async () => {
   profiles.list = [{ id: "p-laura", name: "Laura", has_pin: false }];
   const recorded = recordQuickConnectDecisions();
   mount("/activate?code=482177");
-  await screen.findByText("Sign in Firefox?");
-  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  await screen.findByText("Allow Firefox to sign in?");
+  fireEvent.click(screen.getByRole("button", { name: "Decline" }));
   await screen.findByText("This sign-in was declined.");
   expect(recorded.calls.map((c) => c.op)).toEqual(["POST /api/v2/auth/device/deny"]);
   expect(recorded.lookups()).toBe(1);
@@ -460,7 +469,7 @@ it("explains that an admin viewing as someone can't look up a Quick Connect code
       ),
     )) as never);
   mount("/activate?code=482177");
-  await screen.findByText(/Stop viewing as laura to approve a TV/);
+  await screen.findByText(/Stop viewing as laura to approve this sign-in/);
 });
 
 it("reloads a Quick Connect request that moved on before it was declined", async () => {
@@ -478,8 +487,8 @@ it("reloads a Quick Connect request that moved on before it was declined", async
     );
   }) as never);
   mount("/activate?code=482177");
-  await screen.findByText("Sign in Firefox?");
-  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  await screen.findByText("Allow Firefox to sign in?");
+  fireEvent.click(screen.getByRole("button", { name: "Decline" }));
   await screen.findByText("This code expired. Start Quick Connect again in the app.");
   expect(lookupCount).toBe(2);
 });
@@ -491,9 +500,13 @@ it("reports an approval the server refuses while the request stays pending", asy
     );
   }) as never);
   mount("/activate?code=48217730");
-  fireEvent.click(await screen.findByRole("button", { name: "Sign in TV" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't sign in the TV. Try again.");
-  expect(screen.getByRole("button", { name: "Sign in TV" }).hasAttribute("disabled")).toBe(false);
+  fireEvent.click(await screen.findByRole("button", { name: "Approve sign-in" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Couldn't approve sign-in. Try again.",
+  );
+  expect(screen.getByRole("button", { name: "Approve sign-in" }).hasAttribute("disabled")).toBe(
+    false,
+  );
 });
 
 it("shows no error when a refused approval's request has moved on", async () => {
@@ -505,8 +518,8 @@ it("shows no error when a refused approval's request has moved on", async () => 
     return Promise.reject(v2Problem(409, "conflict", "Device login request was canceled"));
   }) as never);
   mount("/activate?code=48217730");
-  fireEvent.click(await screen.findByRole("button", { name: "Sign in TV" }));
-  await screen.findByText("This TV stopped waiting. Start again on the TV.");
+  fireEvent.click(await screen.findByRole("button", { name: "Approve sign-in" }));
+  await screen.findByText("This device stopped waiting. Start sign-in again on it.");
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
@@ -520,11 +533,13 @@ it("reports a refused approval when the reload after it fails", async () => {
     return Promise.reject(v2Problem(409, "conflict", "Device login request was canceled"));
   }) as never);
   mount("/activate?code=48217730");
-  fireEvent.click(await screen.findByRole("button", { name: "Sign in TV" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Approve sign-in" }));
   // Without the reload there is no way to tell whether the request moved on.
-  expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't sign in the TV. Try again.");
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Couldn't approve sign-in. Try again.",
+  );
   expect(lookupCount).toBe(2);
-  expect(screen.getByText("Sign in Living room TV?")).toBeTruthy();
+  expect(screen.getByText("Allow Living room TV to sign in?")).toBeTruthy();
 });
 
 const remotePlayback = { ...pending, client_purpose: "remote_playback", temporary: true };
@@ -536,10 +551,10 @@ it("sends a remote-playback request back to the app and can decline it", async (
   expect(
     screen.getByText(/This request comes from the Silo app that sent playback to this TV/),
   ).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Sign in TV" })).toBeNull();
-  expect(screen.queryByText(/Anyone using this TV can pick from your profiles/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "Approve sign-in" })).toBeNull();
+  expect(screen.queryByText(/This gives it access to your profiles/)).toBeNull();
 
-  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  fireEvent.click(screen.getByRole("button", { name: "Decline" }));
   await screen.findByText("This request was declined.");
   expect(decisions).toEqual([{ op: "POST /api/v2/auth/device/deny", body: { code: "48217730" } }]);
 });
@@ -549,12 +564,12 @@ it("follows a pending remote-playback request until the app approves it", async 
   lookups = [remotePlayback, { ...remotePlayback, status: "approved" }];
   mount("/activate?code=48217730");
   await screen.findByText("Play on Living room TV?");
-  expect(screen.getByRole("button", { name: "Not now" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Decline" })).toBeTruthy();
   await act(async () => {
     await vi.advanceTimersByTimeAsync(3000);
   });
   await screen.findByText("This request was approved in the Silo app.");
-  expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Decline" })).toBeNull();
 });
 
 it("keeps a decline when a slower watch lookup answers after it", async () => {
@@ -571,11 +586,11 @@ it("keeps a decline when a slower watch lookup answers after it", async () => {
   }) as never);
   mount("/activate?code=48217730");
   await screen.findByText("Play on Living room TV?");
-  // The watch lookup goes out and is still unanswered when Not now is clicked.
+  // The watch lookup goes out and is still unanswered when Decline is clicked.
   await act(async () => {
     await vi.advanceTimersByTimeAsync(3000);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  fireEvent.click(screen.getByRole("button", { name: "Decline" }));
   await screen.findByText("This request was declined.");
   await act(async () => answerWatch());
   expect(screen.getByText("This request was declined.")).toBeTruthy();
@@ -593,7 +608,7 @@ it("doesn't send a phone to sign in, here or in the app, for a remote-playback r
   await screen.findByText("Play on Living room TV?");
   expect(screen.queryByRole("link", { name: "Open in the Silo app" })).toBeNull();
   expect(screen.queryByRole("link", { name: "Sign in to approve" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Decline" })).toBeNull();
 });
 
 it.each(["approved", "consumed"])(

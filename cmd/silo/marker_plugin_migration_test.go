@@ -54,14 +54,14 @@ func (r *unusedMarkerPluginResolver) RefreshMarkerRuntime(id int) error {
 	return nil
 }
 
-func (f *fakeMarkerRuntimeConfigs) PutGlobalConfig(_ context.Context, installationID int, key string, value map[string]any) error {
+func (f *fakeMarkerRuntimeConfigs) CompareAndSwapGlobalConfig(_ context.Context, installationID int, key string, value map[string]any, _ *time.Time) (bool, error) {
 	f.puts = append(f.puts, plugins.RuntimeConfig{InstallationID: installationID, Key: key, Value: value})
 	f.configs[installationID] = append(f.configs[installationID], &plugins.RuntimeConfig{
 		InstallationID: installationID,
 		Key:            key,
 		Value:          value,
 	})
-	return nil
+	return true, nil
 }
 
 type fakeMarkerLegacySettings map[string]string
@@ -364,6 +364,7 @@ func TestStopDefaultMarkerSharingInTxDB(t *testing.T) {
 		installation, err := installations.Create(ctx, plugins.CreateInstallationInput{
 			PluginID: "test.markers." + name + "." + suffix, Version: "1.0.0", InstallPath: t.TempDir(), Enabled: enabled,
 			Capabilities: []plugins.Capability{{Type: sdkcapability.MarkerProvider, ID: "markers", Metadata: metadata}},
+			Archive:      plugins.ArchiveInput{ManifestJSON: []byte("{}"), Checksum: "test", Bytes: []byte("archive")},
 		})
 		if err != nil {
 			t.Fatalf("install %s: %v", name, err)

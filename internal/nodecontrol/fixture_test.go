@@ -194,6 +194,7 @@ func newControlFixture(t *testing.T) *controlFixture {
 func mountForTest(server *Server, keys KeySource) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET "+PathConfig, server.LimitNode(http.HandlerFunc(server.HandleConfig)))
+	mux.Handle("PUT "+PathRegistration, server.LimitNodeRegistration(http.HandlerFunc(server.HandleRegistration)))
 	mux.Handle("POST "+PathReport, server.LimitNode(http.HandlerFunc(server.HandleReport)))
 	mux.Handle("POST "+PathLogs, server.LimitNode(http.HandlerFunc(server.HandleLogs)))
 	mux.Handle("POST "+PathHealthChanged, server.LimitNode(http.HandlerFunc(server.HandleHealthChanged)))

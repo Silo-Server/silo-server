@@ -234,14 +234,7 @@ export default function SecurityAccessSettings() {
       ip_requests_per_minute:
         serverConfig.ip_requests_per_minute ?? DEFAULT_CONFIG.ip_requests_per_minute,
       ip_burst: serverConfig.ip_burst ?? DEFAULT_CONFIG.ip_burst,
-      auth_endpoints: Object.fromEntries(
-        Object.keys(AUTH_ENDPOINT_LABELS).map((endpoint) => [
-          endpoint,
-          serverConfig.auth_endpoints?.[endpoint] ??
-            DEFAULT_CONFIG.auth_endpoints[endpoint] ??
-            DEFAULT_AUTH_ENDPOINT,
-        ]),
-      ),
+      auth_endpoints: { ...DEFAULT_CONFIG.auth_endpoints, ...serverConfig.auth_endpoints },
       session_quota: serverConfig.session_quota ?? DEFAULT_SESSION_QUOTA,
     };
   }, [serverConfig]);
@@ -344,6 +337,28 @@ export default function SecurityAccessSettings() {
   function handleDiscard() {
     setConfigState({ key: hydratedKey, config: hydratedConfig });
     form.discard();
+  }
+
+  function endpointRateRow(endpoint: string, label: MessageKey) {
+    const budget = config.auth_endpoints[endpoint];
+    if (!budget) return null;
+    return (
+      <RateTriadRow
+        key={endpoint}
+        label={t(label)}
+        disabled={updateConfig.isPending}
+        perMinute={{
+          value: budget.requests_per_minute,
+          onChange: setNumber((num) =>
+            handleAuthEndpointChange(endpoint, "requests_per_minute", num),
+          ),
+        }}
+        burst={{
+          value: budget.burst,
+          onChange: setNumber((num) => handleAuthEndpointChange(endpoint, "burst", num)),
+        }}
+      />
+    );
   }
 
   if (form.isLoading || rateLimitsLoading)
@@ -496,6 +511,8 @@ export default function SecurityAccessSettings() {
             }}
           />
 
+          {endpointRateRow("item_poster", "web.admin.settings.security.endpoint.itemPoster")}
+
           <SettingsSubheading>
             {t("web.admin.settings.security.session.heading")}
           </SettingsSubheading>
@@ -579,26 +596,9 @@ export default function SecurityAccessSettings() {
           <SettingsSubheading>
             {t("web.admin.settings.security.endpoints.heading")}
           </SettingsSubheading>
-          {Object.keys(AUTH_ENDPOINT_LABELS).map((endpoint) => {
-            const epConfig = config.auth_endpoints[endpoint] ?? DEFAULT_AUTH_ENDPOINT;
-            return (
-              <RateTriadRow
-                key={endpoint}
-                label={t(AUTH_ENDPOINT_LABELS[endpoint]!)}
-                disabled={savingRateLimits}
-                perMinute={{
-                  value: epConfig.requests_per_minute,
-                  onChange: setNumber((num) =>
-                    handleAuthEndpointChange(endpoint, "requests_per_minute", num),
-                  ),
-                }}
-                burst={{
-                  value: epConfig.burst,
-                  onChange: setNumber((num) => handleAuthEndpointChange(endpoint, "burst", num)),
-                }}
-              />
-            );
-          })}
+          {Object.entries(AUTH_ENDPOINT_LABELS).map(([endpoint, label]) =>
+            endpointRateRow(endpoint, label),
+          )}
         </FieldGroup>
       </div>
 

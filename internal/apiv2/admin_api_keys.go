@@ -124,6 +124,8 @@ func adminAPIKeyProblem(ctx context.Context, err error) *Problem {
 	switch {
 	case errors.Is(err, auth.ErrAPIKeyNotFound):
 		return NewProblem(TypeNotFound, "API key not found.")
+	case errors.Is(err, auth.ErrSessionRevoked):
+		return NewProblem(TypeAuthenticationRequired, "The session or API key this request used was revoked. Sign in again.")
 	case errors.Is(err, auth.ErrInvalidAPIKeyTier), errors.Is(err, handlers.ErrInvalidAPIKeyCreation):
 		return NewProblem(TypeValidationFailed, "Invalid API key configuration.")
 	default:

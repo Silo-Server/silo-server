@@ -59,13 +59,6 @@ export function QualityMenu({
     [onSelect],
   );
 
-  // Close when focus leaves the menu and its trigger.
-  const handleBlur = useCallback((e: React.FocusEvent) => {
-    if (!menuRef.current?.contains(e.relatedTarget as Node)) {
-      setOpen(false);
-    }
-  }, []);
-
   const showVersions = !versionLocked && versions && versions.length > 1 && onSwitchVersion;
   const showQuality = options.length > 1;
   const showSpeed = onPlaybackSpeedChange !== undefined;
@@ -109,7 +102,7 @@ export function QualityMenu({
   }
 
   return (
-    <div ref={menuRef} className="relative" onBlur={handleBlur}>
+    <div ref={menuRef} className="relative">
       <button
         type="button"
         className="hud-icon-btn hud-icon-btn--labeled"

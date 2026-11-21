@@ -235,6 +235,9 @@ function ChannelFormDialog({
             </Label>
             <Input
               id="server-channel-url"
+              // The URL and the example URL read left to right; the translated placeholder shown
+              // while editing keeps the page's direction.
+              dir={url || !editing ? "ltr" : undefined}
               value={url}
               placeholder={
                 editing

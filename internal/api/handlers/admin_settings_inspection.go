@@ -33,6 +33,9 @@ func (h *AdminHandler) InspectAdminSettings(ctx context.Context, effective bool)
 type AdminSensitiveSettingsStatus struct {
 	Configured   []string
 	ManagedByEnv []string
+	// ManagedByEnvVars names the environment variable that sets each key in
+	// ManagedByEnv.
+	ManagedByEnvVars map[string]string
 }
 
 func (h *AdminHandler) InspectAdminSensitiveSettings(ctx context.Context) (AdminSensitiveSettingsStatus, error) {
@@ -56,13 +59,16 @@ func (h *AdminHandler) adminSensitiveSettingsStatus(all map[string]string) Admin
 			configured[key] = struct{}{}
 		}
 	}
-	out := AdminSensitiveSettingsStatus{Configured: slices.Sorted(maps.Keys(configured)), ManagedByEnv: []string{}}
+	out := AdminSensitiveSettingsStatus{Configured: slices.Sorted(maps.Keys(configured)), ManagedByEnv: []string{}, ManagedByEnvVars: map[string]string{}}
 	if out.Configured == nil {
 		out.Configured = []string{}
 	}
 	for key, present := range h.BootstrapSensitiveConfigured {
 		if present {
 			out.ManagedByEnv = append(out.ManagedByEnv, key)
+			if name := h.BootstrapEnvVars[key]; name != "" {
+				out.ManagedByEnvVars[key] = name
+			}
 		}
 	}
 	slices.Sort(out.ManagedByEnv)

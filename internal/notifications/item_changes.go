@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -25,12 +26,36 @@ const (
 	itemChangeRetention = 24 * time.Hour
 )
 
-// itemChangePayload is the data of a catalog.item.changed event, the same
-// shape as the metadata_updated one.
-type itemChangePayload struct {
-	LibraryID int    `json:"library_id"`
+// CatalogItemChange is the data of a catalog.item.changed event. LibraryID
+// is the library's v2 string ID, absent when the change names no library.
+type CatalogItemChange struct {
+	LibraryID string `json:"library_id,omitempty"`
 	ContentID string `json:"content_id"`
 	Change    string `json:"change"`
+}
+
+// NewCatalogItemChange builds a catalog.item.changed payload; a libraryID of
+// 0 or less names no library.
+func NewCatalogItemChange(libraryID int, contentID, change string) CatalogItemChange {
+	return CatalogItemChange{LibraryID: eventLibraryID(libraryID), ContentID: contentID, Change: change}
+}
+
+// eventLibraryID is a catalog event's library_id: the string form v2
+// identifiers take, or "" (left out) when the event names no library.
+func eventLibraryID(id int) string {
+	if id <= 0 {
+		return ""
+	}
+	return strconv.Itoa(id)
+}
+
+// withLibraryID adds library_id to a catalog event's fields when it names a
+// library.
+func withLibraryID(fields map[string]any, id int) map[string]any {
+	if libraryID := eventLibraryID(id); libraryID != "" {
+		fields["library_id"] = libraryID
+	}
+	return fields
 }
 
 // ItemChangeOutbox is the slice of *catalog.ItemChangeOutbox the publisher
@@ -68,7 +93,7 @@ func (h *Hub) RunItemChangePublisher(ctx context.Context, outbox ItemChangeOutbo
 		var failed int
 		var publishErr error
 		for _, change := range changes {
-			payload := itemChangePayload{LibraryID: change.LibraryID, ContentID: change.ContentID, Change: change.Change}
+			payload := NewCatalogItemChange(change.LibraryID, change.ContentID, change.Change)
 			if err := h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeCatalogItemChanged), payload,
 				evt.PublishOptions{AdminOnly: true, V2Only: true}); err != nil {
 				failed++

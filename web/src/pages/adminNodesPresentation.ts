@@ -8,6 +8,7 @@ import type {
   ReprobeNodeResult,
   StreamNode,
   SystemResources,
+  UpdateNodeRequest,
 } from "@/api/types";
 import { t, type MessageKey } from "@/i18n";
 import { parseHWDeviceList } from "@/lib/hwDevices";
@@ -105,8 +106,8 @@ export interface NodeGPULiveDevice {
 }
 
 const BACKEND_BADGE_CLASS: Record<NodeGPUBackendState, string> = {
-  verified: "bg-success/10 text-success border-success/15",
-  failed: "bg-warning/10 text-warning border-warning/15",
+  verified: "bg-success/10 text-success-label border-success/15",
+  failed: "bg-warning/10 text-warning-label border-warning/15",
   unverified: "bg-surface text-muted-foreground border-border",
   none: "bg-surface text-muted-foreground border-border",
 };
@@ -674,6 +675,7 @@ export const HW_ACCEL_INHERIT = "inherit";
 const QSV_LABEL = "Intel Quick Sync (QSV)";
 const VAAPI_LABEL = "VA-API";
 const NVENC_LABEL = "NVIDIA NVENC";
+const VIDEOTOOLBOX_LABEL = "VideoToolbox";
 
 /**
  * The acceleration choices a node may be pinned to, inherit first. The backend
@@ -688,6 +690,7 @@ export function hwAccelOverrideOptions(): { value: string; label: string }[] {
     { value: "qsv", label: QSV_LABEL },
     { value: "vaapi", label: VAAPI_LABEL },
     { value: "nvenc", label: NVENC_LABEL },
+    { value: "videotoolbox", label: VIDEOTOOLBOX_LABEL },
     { value: "none", label: t("web.admin.nodes.hwAccel.software") },
   ];
 }
@@ -722,20 +725,44 @@ export function nodeUsesCUDADevices(
   override: string | null | undefined,
   clusterHWAccel?: string | null,
 ): boolean {
+  return nodeBackend(node, override, clusterHWAccel) === "nvenc";
+}
+
+/**
+ * The backend this node will run under the editor's selection: an explicit
+ * backend, the cluster's backend while inheriting one, and otherwise what the
+ * node resolves to itself (an explicit `auto`, or inheriting an `auto`
+ * cluster). See nodeUsesCUDADevices for why inheritance follows the cluster.
+ */
+function nodeBackend(
+  node: StreamNode | null | undefined,
+  override: string | null | undefined,
+  clusterHWAccel?: string | null,
+): string {
   const selected = override?.trim().toLowerCase() ?? "";
-  if (selected === "nvenc") {
-    return true;
-  }
   if (selected !== "" && selected !== HW_ACCEL_INHERIT && selected !== "auto") {
-    return false;
+    return selected;
   }
   if (selected === "" || selected === HW_ACCEL_INHERIT) {
     const cluster = clusterHWAccel?.trim().toLowerCase() ?? "";
     if (cluster !== "" && cluster !== "auto") {
-      return cluster === "nvenc";
+      return cluster;
     }
   }
-  return node?.capabilities?.resolved?.trim().toLowerCase() === "nvenc";
+  return node?.capabilities?.resolved?.trim().toLowerCase() ?? "";
+}
+
+/**
+ * Whether this node will run VideoToolbox, which takes no device: its FFmpeg
+ * arguments name none, so the device control has nothing to set. A Mac node on
+ * the cluster default or Auto resolves VideoToolbox itself.
+ */
+export function nodeUsesVideoToolbox(
+  node: StreamNode | null | undefined,
+  override: string | null | undefined,
+  clusterHWAccel?: string | null,
+): boolean {
+  return nodeBackend(node, override, clusterHWAccel) === "videotoolbox";
 }
 
 /**
@@ -1683,4 +1710,38 @@ function finiteNumber(value: number | null | undefined): number | null {
 
 function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+/**
+ * Puts the stored value back into every field of an edit the node declares
+ * from its own environment (`env_managed`). The server refuses a change to
+ * such a field and accepts one that restates it, so a full-form save sends
+ * the stored values for them, whatever the form state holds. Only keys the
+ * body already carries are restated, so a field the form leaves out for this
+ * node type stays out.
+ */
+export function restoreEnvManagedFields(
+  body: UpdateNodeRequest,
+  node: StreamNode,
+): UpdateNodeRequest {
+  const locked = new Set(node.env_managed ?? []);
+  const out: UpdateNodeRequest = { ...body };
+  const restate = <K extends keyof UpdateNodeRequest>(key: K, value: UpdateNodeRequest[K]) => {
+    if (locked.has(key) && key in out) out[key] = value;
+  };
+  restate("name", node.name);
+  restate("url", node.url);
+  restate("public_url", node.public_url ?? null);
+  restate("group", node.group ?? "");
+  restate("max_jobs", node.max_jobs ?? 0);
+  restate("max_bandwidth_kbps", node.max_bandwidth_kbps ?? 0);
+  restate("hw_accel_override", node.hw_accel_override ?? null);
+  restate("hw_device_override", node.hw_device_override ?? null);
+  restate("download_artifact_dir_override", node.download_artifact_dir_override ?? null);
+  restate(
+    "download_artifact_max_bytes_override",
+    node.download_artifact_max_bytes_override ?? null,
+  );
+  if (node.source_access) restate("source_access", node.source_access);
+  return out;
 }

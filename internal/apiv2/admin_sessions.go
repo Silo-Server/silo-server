@@ -18,79 +18,79 @@ type AdminPlaybackSessionService interface {
 
 // AdminPlaybackSession is an observation, not a sequenced control receipt.
 type AdminPlaybackSession struct {
-	SessionID                string   `json:"session_id"`
-	UserID                   ID       `json:"user_id"`
-	Username                 string   `json:"username"`
-	ProfileID                string   `json:"profile_id"`
-	ProfileName              string   `json:"profile_name,omitempty"`
-	MediaFileID              ID       `json:"media_file_id"`
-	RequestedMediaFileID     ID       `json:"requested_media_file_id"`
-	ContentID                string   `json:"content_id,omitempty"`
-	MediaTitle               string   `json:"media_title"`
-	MediaType                string   `json:"media_type"`
-	SeriesName               string   `json:"series_name,omitempty"`
-	EpisodeName              string   `json:"episode_name,omitempty"`
-	SeasonNumber             *int     `json:"season_number,omitempty"`
-	EpisodeNumber            *int     `json:"episode_number,omitempty"`
-	PosterURL                string   `json:"poster_url,omitempty" format:"uri-reference"`
-	PlayMethod               string   `json:"play_method"`
-	ReportingNode            string   `json:"reporting_node"`
-	NodeDisplayName          string   `json:"node_display_name,omitempty"`
-	FileDuration             *int     `json:"file_duration" doc:"Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown"`
-	StartedAt                Instant  `json:"started_at"`
-	UpdatedAt                Instant  `json:"updated_at"`
-	PositionSeconds          float64  `json:"position_seconds"`
-	IsPaused                 bool     `json:"is_paused"`
-	HasPlaybackControl       bool     `json:"has_playback_control"`
-	ClientIP                 string   `json:"client_ip,omitempty"`
-	StreamLocation           string   `json:"stream_location" enum:"local,remote" doc:"Local or remote classification used by the server bitrate policy."`
-	ClientName               string   `json:"client_name,omitempty"`
-	ClientVersion            string   `json:"client_version,omitempty"`
-	ClientBuild              string   `json:"client_build,omitempty"`
-	ClientChannel            string   `json:"client_channel,omitempty"`
-	ClientLabel              string   `json:"client_label,omitempty"`
-	ClientLabelFull          string   `json:"client_label_full,omitempty"`
-	ClientUserAgent          string   `json:"client_user_agent,omitempty"`
-	DeviceID                 string   `json:"device_id,omitempty" doc:"Device the client declared in X-Silo-Device-Id when playback started, the profile device registry's identity; a Jellyfin play carries the DeviceId of its MediaBrowser authorization. Absent when none was declared."`
-	DevicePlatform           string   `json:"device_platform,omitempty" doc:"Platform the client declared in X-Silo-Device-Platform when playback started; never derived from the user agent. Absent when none was declared, and always for a Jellyfin play."`
-	AudioTrackIndex          int      `json:"audio_track_index"`
-	TranscodeAudio           bool     `json:"transcode_audio"`
-	StreamBitrateKbps        *int     `json:"stream_bitrate_kbps"`
-	TargetResolution         string   `json:"target_resolution,omitempty"`
-	TargetVideoCodec         string   `json:"target_video_codec,omitempty"`
-	TargetAudioCodec         string   `json:"target_audio_codec,omitempty"`
-	TargetAudioChannels      *int     `json:"target_audio_channels,omitempty"`
-	TargetBitrateKbps        *int     `json:"target_bitrate_kbps"`
-	TranscodeHWAccel         string   `json:"transcode_hw_accel,omitempty"`
-	ToneMapMode              string   `json:"tone_map_mode,omitempty"`
-	OutputContainer          string   `json:"output_container,omitempty" doc:"Container the serving transport produces: fmp4, mpegts, or the source container for direct play. Absent when the node did not report it; clients must not infer it from play_method or the source."`
-	OutputProtocol           string   `json:"output_protocol,omitempty" doc:"Delivery protocol, hls or http, independent of the container. Absent when the node did not report it."`
-	SourceContainer          string   `json:"source_container,omitempty"`
-	SourceBitrateKbps        *int     `json:"source_bitrate_kbps"`
-	SourceVideoCodec         string   `json:"source_video_codec,omitempty"`
-	SourceVideoResolution    string   `json:"source_video_resolution,omitempty"`
-	SourceVideoHeight        int      `json:"source_video_height,omitempty" doc:"Pixel height of the source's primary video track, so a client can tell a full-resolution transcode from a downscale even when source_video_resolution names a size class (a 3840x1600 file is 2160p). Absent when unknown."`
-	SourceAudioCodec         string   `json:"source_audio_codec,omitempty"`
-	SourceAudioChannels      *int     `json:"source_audio_channels"`
-	SourceAudioLanguage      string   `json:"source_audio_language,omitempty" doc:"Language of the source audio track as the file tags it (BCP 47; older scans may carry an ISO 639-2 code or the raw tag); empty when unknown"`
-	SourceAudioTitle         string   `json:"source_audio_title,omitempty"`
-	SourceAudioLayout        string   `json:"source_audio_layout,omitempty"`
-	RequestedVideoCodec      string   `json:"requested_video_codec,omitempty"`
-	RequestedVideoResolution string   `json:"requested_video_resolution,omitempty"`
-	VideoDecision            string   `json:"video_decision,omitempty"`
-	AudioDecision            string   `json:"audio_decision,omitempty"`
-	EffectivePlayMethod      string   `json:"effective_play_method,omitempty" doc:"Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown"`
-	AdaptationReasons        []string `json:"adaptation_reasons,omitempty" doc:"Why the route changes the file instead of playing it as it is, video causes first, from the vocabulary in the capabilities' adaptation_reason_values. Absent for direct play, for a session planned before the server recorded reasons, and for Jellyfin-protocol sessions. Clients ignore values they do not know."`
-	IsJellyfinClient         bool     `json:"is_jellyfin_client,omitzero"`
-	RoutingNetworkProvider   *string  `json:"routing_network_provider,omitempty" doc:"Access network selected for playback: empty means default; absent means unknown; otherwise the validated provider identifier."`
-	RoutingWorkload          string   `json:"routing_workload,omitempty"`
-	RoutingExecution         string   `json:"routing_execution,omitempty"`
-	RoutingExecutionNodeID   *ID      `json:"routing_execution_node_id,omitempty"`
-	RoutingExecutionNodeName string   `json:"routing_execution_node_name,omitempty"`
-	RoutingEgress            string   `json:"routing_egress,omitempty"`
-	RoutingEgressNodeID      *ID      `json:"routing_egress_node_id,omitempty"`
-	RoutingEgressNodeName    string   `json:"routing_egress_node_name,omitempty"`
-	LifecycleSeq             *int64   `json:"lifecycle_seq,omitempty" doc:"Sequence number of the session's last lifecycle transition (start, pause, resume) on the sessions channel. A row and a session.* event with the same number carry the same is_paused; the higher number is the newer. Absent for a session that started before the server recorded lifecycle transitions."`
+	SessionID                string                                  `json:"session_id"`
+	UserID                   ID                                      `json:"user_id"`
+	Username                 string                                  `json:"username"`
+	ProfileID                string                                  `json:"profile_id"`
+	ProfileName              string                                  `json:"profile_name,omitempty"`
+	MediaFileID              ID                                      `json:"media_file_id"`
+	RequestedMediaFileID     ID                                      `json:"requested_media_file_id"`
+	MediaItemID              string                                  `json:"media_item_id,omitempty" doc:"Catalog content id of what is playing: the episode for an episode, as admin playback history's media_item_id. Absent when unknown"`
+	MediaTitle               string                                  `json:"media_title" doc:"Episode or item title, as admin playback history names it; empty when the item is no longer in the catalog"`
+	MediaType                string                                  `json:"media_type" doc:"episode, or the catalog item type; empty when unknown"`
+	SeriesTitle              string                                  `json:"series_title,omitempty" doc:"Series title for an episode; absent otherwise"`
+	SeasonNumber             *int                                    `json:"season_number,omitempty" doc:"Episode season; absent when not an episode"`
+	EpisodeNumber            *int                                    `json:"episode_number,omitempty" doc:"Episode number; absent when not an episode"`
+	PosterURL                string                                  `json:"poster_url,omitempty" format:"uri-reference" doc:"Card-size poster of the title (an episode's series poster) as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent when there is no poster, and for art that is not cached yet on a server that cannot issue poster links (the catalog capabilities then report item_posters false)"`
+	PlayMethod               string                                  `json:"play_method"`
+	ReportingNode            string                                  `json:"reporting_node"`
+	NodeDisplayName          string                                  `json:"node_display_name,omitempty"`
+	FileDuration             *int                                    `json:"file_duration" doc:"Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown"`
+	StartedAt                Instant                                 `json:"started_at"`
+	UpdatedAt                Instant                                 `json:"updated_at"`
+	PositionSeconds          float64                                 `json:"position_seconds"`
+	IsPaused                 bool                                    `json:"is_paused"`
+	HasPlaybackControl       bool                                    `json:"has_playback_control"`
+	ClientIP                 string                                  `json:"client_ip,omitempty"`
+	StreamLocation           string                                  `json:"stream_location" enum:"local,remote" doc:"Local or remote classification used by the server bitrate policy."`
+	ClientName               string                                  `json:"client_name,omitempty"`
+	ClientVersion            string                                  `json:"client_version,omitempty"`
+	ClientBuild              string                                  `json:"client_build,omitempty"`
+	ClientChannel            string                                  `json:"client_channel,omitempty"`
+	ClientLabel              string                                  `json:"client_label,omitempty"`
+	ClientLabelFull          string                                  `json:"client_label_full,omitempty"`
+	ClientUserAgent          string                                  `json:"client_user_agent,omitempty"`
+	DeviceID                 string                                  `json:"device_id,omitempty" doc:"Device the client declared in X-Silo-Device-Id when playback started, the profile device registry's identity; a Jellyfin play carries the DeviceId of its MediaBrowser authorization. Absent when none was declared."`
+	DevicePlatform           string                                  `json:"device_platform,omitempty" doc:"Platform the client declared in X-Silo-Device-Platform when playback started; never derived from the user agent. Absent when none was declared, and always for a Jellyfin play."`
+	AudioTrackIndex          int                                     `json:"audio_track_index"`
+	TranscodeAudio           bool                                    `json:"transcode_audio"`
+	StreamBitrateKbps        *int                                    `json:"stream_bitrate_kbps"`
+	TargetResolution         string                                  `json:"target_resolution,omitempty"`
+	TargetVideoCodec         string                                  `json:"target_video_codec,omitempty"`
+	TargetAudioCodec         string                                  `json:"target_audio_codec,omitempty"`
+	TargetAudioChannels      *int                                    `json:"target_audio_channels,omitempty"`
+	TargetBitrateKbps        *int                                    `json:"target_bitrate_kbps"`
+	TranscodeHWAccel         string                                  `json:"transcode_hw_accel,omitempty"`
+	ToneMapMode              string                                  `json:"tone_map_mode,omitempty"`
+	OutputContainer          string                                  `json:"output_container,omitempty" doc:"Container the serving transport produces: fmp4, mpegts, or the source container for direct play. Absent when the node did not report it; clients must not infer it from play_method or the source."`
+	OutputProtocol           string                                  `json:"output_protocol,omitempty" doc:"Delivery protocol, hls or http, independent of the container. Absent when the node did not report it."`
+	SourceContainer          string                                  `json:"source_container,omitempty"`
+	SourceBitrateKbps        *int                                    `json:"source_bitrate_kbps"`
+	SourceVideoCodec         string                                  `json:"source_video_codec,omitempty"`
+	SourceVideoResolution    string                                  `json:"source_video_resolution,omitempty"`
+	SourceVideoHeight        int                                     `json:"source_video_height,omitempty" doc:"Pixel height of the source's primary video track, so a client can tell a full-resolution transcode from a downscale even when source_video_resolution names a size class (a 3840x1600 file is 2160p). Absent when unknown."`
+	SourceAudioCodec         string                                  `json:"source_audio_codec,omitempty"`
+	SourceAudioChannels      *int                                    `json:"source_audio_channels"`
+	SourceAudioLanguage      string                                  `json:"source_audio_language,omitempty" doc:"Language of the source audio track as the file tags it (BCP 47; older scans may carry an ISO 639-2 code or the raw tag); empty when unknown"`
+	SourceAudioTitle         string                                  `json:"source_audio_title,omitempty"`
+	SourceAudioLayout        string                                  `json:"source_audio_layout,omitempty"`
+	RequestedVideoCodec      string                                  `json:"requested_video_codec,omitempty"`
+	RequestedVideoResolution string                                  `json:"requested_video_resolution,omitempty"`
+	VideoDecision            string                                  `json:"video_decision,omitempty"`
+	AudioDecision            string                                  `json:"audio_decision,omitempty"`
+	EffectivePlayMethod      string                                  `json:"effective_play_method,omitempty" doc:"Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown"`
+	AdaptationReasons        []string                                `json:"adaptation_reasons,omitempty" doc:"Why the route changes the file instead of playing it as it is, video causes first, from the vocabulary in the capabilities' adaptation_reason_values. Absent for direct play, for a session planned before the server recorded reasons, and for Jellyfin-protocol sessions. Clients ignore values they do not know."`
+	IsJellyfinClient         bool                                    `json:"is_jellyfin_client,omitzero"`
+	RoutingNetworkProvider   *string                                 `json:"routing_network_provider,omitempty" doc:"Access network selected for playback: empty means default; absent means unknown; otherwise the validated provider identifier."`
+	RoutingWorkload          string                                  `json:"routing_workload,omitempty"`
+	RoutingExecution         string                                  `json:"routing_execution,omitempty"`
+	RoutingExecutionNodeID   *ID                                     `json:"routing_execution_node_id,omitempty"`
+	RoutingExecutionNodeName string                                  `json:"routing_execution_node_name,omitempty"`
+	RoutingEgress            string                                  `json:"routing_egress,omitempty"`
+	RoutingEgressNodeID      *ID                                     `json:"routing_egress_node_id,omitempty"`
+	RoutingEgressNodeName    string                                  `json:"routing_egress_node_name,omitempty"`
+	Subtitle                 NullableObject[PlaybackSessionSubtitle] `json:"subtitle" doc:"The subtitle the session's current plan delivers, following each replan (a subtitle switch the client reports, a recovery); null when it shows none, for a session planned before the server recorded it, and for Jellyfin-protocol and Audiobookshelf sessions. A client that turns an already delivered sidecar on or off without a replan is not seen."`
+	LifecycleSeq             *int64                                  `json:"lifecycle_seq,omitempty" doc:"Sequence number of the session's last lifecycle transition (start, pause, resume) on the sessions channel. A row and a session.* event with the same number carry the same is_paused; the higher number is the newer. Absent for a session that started before the server recorded lifecycle transitions."`
 }
 
 // directStreamPlayMethod is the native bucket for copied video with converted
@@ -127,11 +127,10 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		ProfileName:              v.ProfileName,
 		MediaFileID:              IDFromInt(int64(v.MediaFileID)),
 		RequestedMediaFileID:     IDFromInt(int64(v.RequestedMediaFileID)),
-		ContentID:                v.ContentID,
+		MediaItemID:              v.MediaItemID,
 		MediaTitle:               v.MediaTitle,
 		MediaType:                v.MediaType,
-		SeriesName:               v.SeriesName,
-		EpisodeName:              v.EpisodeName,
+		SeriesTitle:              v.SeriesTitle,
 		SeasonNumber:             v.SeasonNumber,
 		EpisodeNumber:            v.EpisodeNumber,
 		PosterURL:                v.PosterURL,
@@ -192,6 +191,7 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		RoutingEgress:            v.RoutingEgress,
 		RoutingEgressNodeID:      adminSessionNodeID(v.RoutingEgressNodeID),
 		RoutingEgressNodeName:    v.RoutingEgressNodeName,
+		Subtitle:                 playbackSessionSubtitleOf(v.Subtitle),
 		LifecycleSeq:             v.LifecycleSeq,
 	}
 }
@@ -234,6 +234,7 @@ type AdminPlaybackSessionCapabilitiesOutputBody struct {
 	DeviceIdentity            bool     `json:"device_identity" doc:"Rows may carry device_id and device_platform"`
 	LifecycleEvents           bool     `json:"lifecycle_events" doc:"The admin sessions channel carries session.started, session.paused, session.resumed and session.stopped, and rows may carry lifecycle_seq"`
 	AdaptationReasons         bool     `json:"adaptation_reasons" doc:"Rows may carry adaptation_reasons"`
+	Subtitle                  bool     `json:"subtitle" doc:"Rows and admin playback history entries carry subtitle"`
 	AdaptationReasonValues    []string `json:"adaptation_reason_values" doc:"Every adaptation_reasons value this server emits, in the order it reports them. A later server may add values."`
 }
 
@@ -270,6 +271,7 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		out.Body.SourceVideoHeight = true
 		out.Body.DeviceIdentity = true
 		out.Body.AdaptationReasons = true
+		out.Body.Subtitle = true
 		out.Body.AdaptationReasonValues = slices.Clone(playback.AdaptationReasons)
 		out.Body.LifecycleEvents = out.Body.Available && reg.deps.PlaybackLifecycleEvents
 		return out, nil
@@ -333,7 +335,7 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		for _, row := range rows {
 			out.Body.Items = append(out.Body.Items, AdminPlaybackSummaryItem{
 				UserID: IDFromInt(int64(row.UserID)), MediaTitle: row.MediaTitle, MediaType: row.MediaType,
-				SeriesName: row.SeriesName, EpisodeName: row.EpisodeName, SeasonNumber: row.SeasonNumber,
+				SeriesTitle: row.SeriesTitle, SeasonNumber: row.SeasonNumber,
 				EpisodeNumber: row.EpisodeNumber, IsPaused: row.IsPaused,
 			})
 		}
@@ -344,10 +346,9 @@ func registerAdminPlaybackSessions(reg *Registry) {
 // A fixed projection keeps diagnostic identifiers and network details out of summary credentials.
 type AdminPlaybackSummaryItem struct {
 	UserID        ID     `json:"user_id"`
-	MediaTitle    string `json:"media_title"`
-	MediaType     string `json:"media_type"`
-	SeriesName    string `json:"series_name,omitempty"`
-	EpisodeName   string `json:"episode_name,omitempty"`
+	MediaTitle    string `json:"media_title" doc:"Episode or item title, as the session row names it"`
+	MediaType     string `json:"media_type" doc:"episode, or the catalog item type; empty when unknown"`
+	SeriesTitle   string `json:"series_title,omitempty" doc:"Series title for an episode; absent otherwise"`
 	SeasonNumber  *int   `json:"season_number,omitempty"`
 	EpisodeNumber *int   `json:"episode_number,omitempty"`
 	IsPaused      bool   `json:"is_paused"`

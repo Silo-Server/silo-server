@@ -42,10 +42,14 @@ export function ConnectionCheckAction({
           : (label ?? t("web.admin.common.connectionCheck.check"))}
       </Button>
       {result ? (
+        // A message can hold a word with no break point, such as the URL in a
+        // failed plugin check's error. `wrap-anywhere`, unlike `break-words`,
+        // lets the span (a flex item) shrink below that word, so it breaks
+        // inside the panel.
         <span
           role="status"
           aria-live="polite"
-          className={`text-sm ${result.success ? "text-green-600" : "text-red-600"}`}
+          className={`text-sm wrap-anywhere ${result.success ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
         >
           {result.message}
         </span>
