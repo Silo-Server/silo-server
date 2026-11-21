@@ -359,7 +359,12 @@ export default function AdminBackupRestore() {
               }),
           })
         }
-        onChooseAgain={() => setParams({})}
+        onChooseAgain={() => {
+          // A refused start can open a running restore while Review is still
+          // open, and its refusal stored after that; Choose again starts over.
+          leaveReview();
+          setParams({});
+        }}
       />
     );
   } else if (preview.isPending) {
