@@ -63,7 +63,8 @@ export function readingArrowKey(event: { key: string; currentTarget: Element }):
   return event.key === "ArrowLeft" ? "ArrowRight" : "ArrowLeft";
 }
 
-const ARABIC_SCRIPT = /\p{Script=Arabic}/u;
+// A letter, not a digit: Arabic-Indic digits are in the Arabic script too.
+const ARABIC_SCRIPT_LETTER = /(?=\p{L})\p{Script=Arabic}/u;
 
 /**
  * Whether text has any Arabic-script letter (Arabic, Persian, Urdu and others),
@@ -72,5 +73,5 @@ const ARABIC_SCRIPT = /\p{Script=Arabic}/u;
  * this to clear it (app.css). Mixed text loses the spacing on all of it.
  */
 export function hasArabicScript(text: string): boolean {
-  return ARABIC_SCRIPT.test(text);
+  return ARABIC_SCRIPT_LETTER.test(text);
 }

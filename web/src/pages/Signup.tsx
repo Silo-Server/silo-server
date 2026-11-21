@@ -94,7 +94,10 @@ export default function Signup() {
       <div className="auth-shell">
         <Card className="auth-card glass panel-border w-full max-w-sm border-0">
           <CardHeader>
-            <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">
+            <CardTitle
+              className="text-3xl font-extrabold tracking-[-0.04em]"
+              data-cursive={hasArabicScript(serverName) || undefined}
+            >
               {serverName}
             </CardTitle>
             <CardDescription className="mt-2 text-sm leading-6">
