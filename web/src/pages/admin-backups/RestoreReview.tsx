@@ -33,9 +33,11 @@ export interface RestoreReviewProps {
 /**
  * A refusal's action is never wider than the alert: a label too long for the
  * alert wraps inside the button, in lines of even length, instead of running
- * past the alert's edge.
+ * past the alert's edge. A word longer than a line (a long compound under a
+ * large browser font size) breaks too.
  */
-const REFUSAL_ACTION = "h-auto min-h-8 max-w-full py-1 text-balance whitespace-normal";
+const REFUSAL_ACTION =
+  "h-auto min-h-8 max-w-full py-1 text-balance wrap-anywhere whitespace-normal";
 
 /** Step 2: the whole plan in sentences, what it leaves out, and the button. */
 export function RestoreReview({
