@@ -727,7 +727,7 @@ function WorkerBadge({ prep }: { prep: AdminDownloadPreparation }) {
   return (
     <span className="border-primary/20 bg-primary/10 text-primary inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold">
       {/* Same label treatment as the playback route badges (PlaybackRouteBadges). */}
-      <span className="text-foreground/75 [html[data-high-contrast=true]_&]:text-muted-foreground font-(--font-weight-ui)">
+      <span className="text-foreground/75 [html[data-high-contrast=true]_&]:text-muted-foreground font-normal">
         {worker.label}
       </span>
       <span dir="auto" className="truncate">
