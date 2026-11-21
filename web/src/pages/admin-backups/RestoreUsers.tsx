@@ -220,13 +220,15 @@ export const AccountRow = memo(function AccountRow({
       : t("web.admin.backups.restore.users.newAccount");
   const administrator = t("web.admin.backups.restore.users.administrator");
   // Laid out like ItemRow (RestoreRows.tsx): a narrow row wraps the name above the
-  // contact line. The admin badge, profile count and merge status would leave a 42rem
-  // row's name and contact about 220 px, so below 52rem the row shows only the badge's
-  // icon, and the merge status only when it names another account; the details show
-  // the admin role and the status. The badge can cut a long merge destination short,
-  // so the details show a merge in full at every width. As in ItemRow, a name clips
-  // sideways only while part of it can't wrap to fit: in the label, and in the merge
-  // status, which names the account it merges into.
+  // contact line, and a one-line row shares its width 9:11 between them, so the name
+  // stops at 45% only when both are longer than their shares. The admin badge, profile
+  // count and merge status would leave a 42rem row's name and contact about 220 px, so
+  // below 52rem the row shows only the badge's icon, and the merge status only when it
+  // names another account; the details show the admin role and the status. The badge
+  // can cut a long merge destination short, so the details show a merge in full at
+  // every width. As in ItemRow, a name clips sideways only while part of it can't wrap
+  // to fit: in the label, and in the merge status, which names the account it merges
+  // into.
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
@@ -245,7 +247,7 @@ export const AccountRow = memo(function AccountRow({
             title={item.label}
             className={cn(
               "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
-              contact && "@2xl:max-w-[45%] @2xl:truncate @2xl:[&_wbr]:hidden",
+              contact && "@2xl:max-w-max @2xl:flex-9 @2xl:truncate @2xl:[&_wbr]:hidden",
               nameOverflows && (contact ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
               !item.selectable && "text-muted-foreground",
             )}
@@ -260,12 +262,13 @@ export const AccountRow = memo(function AccountRow({
             // Without the pending summary the line is the email (the label is the
             // username), which reads left to right in any language and so keeps its
             // start when cut short. With the summary first, the line follows the page.
-            // w-fit keeps a short line under the name, on the page's start side;
-            // max-w-full stops a long one at the column's width so it is still cut short.
+            // In a narrow row, w-fit keeps a short line under the name, on the page's
+            // start side; max-w-full stops a long one at the column's width so it is
+            // still cut short.
             <span
               title={contact}
               dir={pending ? undefined : "ltr"}
-              className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs"
+              className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs @2xl:max-w-max @2xl:flex-11"
             >
               {contact}
             </span>

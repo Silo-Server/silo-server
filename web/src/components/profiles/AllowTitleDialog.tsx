@@ -85,7 +85,11 @@ export default function AllowTitleDialog({
                       <AvatarFallback>{row.name.slice(0, 1).toUpperCase()}</AvatarFallback>
                     </Avatar>
                     <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate text-sm font-medium">{row.name}</span>
+                      {/* A cut name keeps its start in either script; w-fit keeps a
+                          short one on the page's start side. */}
+                      <span dir="auto" className="w-fit max-w-full truncate text-sm font-medium">
+                        {row.name}
+                      </span>
                       <span className="text-muted-foreground text-xs">
                         {[limit && t("web.profiles.allow.limit", { limit }), note]
                           .filter(Boolean)
