@@ -116,6 +116,31 @@ export function BreakableKey({ value }: { value: string }) {
   );
 }
 
+const PATH_SEPARATOR = ", ";
+/** Keeps a path's own spaces, so a copied path names the folder. */
+const KEEP_SPACES = "[white-space-collapse:preserve]";
+
+/**
+ * Folder paths, each in its own `dir="ltr"` span, so two folders with Arabic
+ * names keep their order beside each other. The spans isolate each path in the
+ * layout, not with Unicode marks, and keep its spaces, so a copied path is the
+ * folder's own path.
+ */
+function FolderPaths({ paths }: { paths: readonly string[] }) {
+  return (
+    <>
+      {paths.map((path, position) => (
+        <Fragment key={position}>
+          {position > 0 ? PATH_SEPARATOR : null}
+          <span dir="ltr" className={KEEP_SPACES}>
+            {path}
+          </span>
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
 /** Below `sm` each setting stacks: its key, then Now and In backup, each labelled. */
 const PHONE_CELL = "max-sm:block max-sm:p-0";
 
@@ -247,15 +272,26 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
     paths.length > 0 ? (
       // Paths read left to right in any language; w-fit keeps the list on the
       // page's start side.
-      <ul key="paths" dir="ltr" className="text-muted-foreground w-fit font-mono text-xs break-all">
+      <ul
+        key="paths"
+        dir="ltr"
+        className={cn("text-muted-foreground w-fit font-mono text-xs break-all", KEEP_SPACES)}
+      >
         {paths.map((path) => (
           <li key={path}>{path}</li>
         ))}
       </ul>
     ) : null,
     missingPaths.length > 0 ? (
+      // The list reads left to right inside the sentence, as on the row above.
       <p key="missing-paths" className="text-xs wrap-anywhere text-amber-600 dark:text-amber-400">
-        {t("web.admin.backups.restore.rows.cantOpen", { paths: missingPaths.join(", ") })}
+        {t("web.admin.backups.restore.rows.cantOpen", {
+          paths: (
+            <span dir="ltr">
+              <FolderPaths paths={missingPaths} />
+            </span>
+          ),
+        })}
       </p>
     ) : null,
     item.missing_blobs.length > 0 ? (
@@ -316,6 +352,7 @@ export const ItemRow = memo(function ItemRow({
   const details = open ? itemDetails(t, item) : null;
   const hasDetails = hasItemDetails(item);
   const label = displayLabel(item);
+  const paths = item.kind === "library" ? item.library?.paths : undefined;
   // The row is its own container, since its width depends on the admin sidebar and
   // restore summary as much as on the viewport. A narrow row wraps the whole name
   // above the muted detail, so names that differ only at the end stay apart.
@@ -353,10 +390,10 @@ export const ItemRow = memo(function ItemRow({
             // one at the column's width so it is still cut short.
             <span
               title={secondary}
-              dir={item.kind === "library" ? "ltr" : undefined}
+              dir={paths ? "ltr" : undefined}
               className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs"
             >
-              {secondary}
+              {paths ? <FolderPaths paths={paths} /> : secondary}
             </span>
           ) : null}
         </div>
