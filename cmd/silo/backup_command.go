@@ -21,12 +21,12 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/backup"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/database"
 	"github.com/Silo-Server/silo-server/internal/envutil"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/migrations"
 )
 
@@ -729,7 +729,7 @@ func liveConfigFromDatabase(ctx context.Context, dbURL string, cipher *secret.Ci
 		return nil, err
 	}
 	defer database.ClosePool(pool)
-	settings, err := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher).GetAll(ctx)
+	settings, err := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), cipher).GetAll(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reading the settings: %w", err)
 	}
@@ -783,7 +783,7 @@ func plainSettings(ctx context.Context, dbURL string) (map[string]string, error)
 		return nil, err
 	}
 	defer database.ClosePool(pool)
-	return catalog.NewServerSettingsRepo(pool).GetAll(ctx)
+	return serversettings.NewServerSettingsRepo(pool).GetAll(ctx)
 }
 
 // runSecretCommand runs `silo secret check`: it reads a SECRET_KEY and prints
