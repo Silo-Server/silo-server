@@ -1,6 +1,8 @@
 package playback
 
 import (
+	"errors"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,9 +14,9 @@ import (
 // removeStaleSiblings deletes committed entries for the same source+track
 // with a different mtime/size suffix — the source was replaced, so those can
 // never be served again.
-func (c *SubtitleCache) removeStaleSiblings(dir, inputPath string, trackIndex int, keepKey string) {
+func (c *SubtitleCache) removeStaleSiblings(root *os.Root, inputPath string, trackIndex int, keepKey string) {
 	prefix := subtitleCacheKeyPrefix(inputPath, trackIndex)
-	entries, err := os.ReadDir(dir)
+	entries, err := fs.ReadDir(root.FS(), ".")
 	if err != nil {
 		return
 	}
@@ -23,7 +25,7 @@ func (c *SubtitleCache) removeStaleSiblings(dir, inputPath string, trackIndex in
 		if name == keepKey || !strings.HasPrefix(name, prefix) || filepath.Ext(name) != filepath.Ext(keepKey) {
 			continue
 		}
-		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
+		if err := root.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			slog.Warn("subtitle cache stale entry remove failed", "name", name, "error", err)
 		}
 	}
@@ -34,13 +36,13 @@ func (c *SubtitleCache) removeStaleSiblings(dir, inputPath string, trackIndex in
 // It also sweeps orphaned .part temp files older than stalePartMaxAge
 // (crash leftovers). No background daemon — commits are rare enough that a
 // directory scan per commit is cheap.
-func (c *SubtitleCache) evict(dir string) {
-	entries, err := os.ReadDir(dir)
+func (c *SubtitleCache) evict(root *os.Root) {
+	entries, err := fs.ReadDir(root.FS(), ".")
 	if err != nil {
 		return
 	}
 	type cacheEnt struct {
-		path  string
+		name  string
 		size  int64
 		mtime time.Time
 	}
@@ -50,21 +52,20 @@ func (c *SubtitleCache) evict(dir string) {
 	)
 	now := time.Now()
 	for _, e := range entries {
-		info, err := e.Info()
+		info, err := root.Lstat(e.Name())
 		if err != nil {
 			continue
 		}
-		path := filepath.Join(dir, e.Name())
 		if strings.Contains(e.Name(), ".part-") {
 			if now.Sub(info.ModTime()) > stalePartMaxAge {
-				_ = os.Remove(path)
+				_ = root.Remove(e.Name())
 			}
 			continue
 		}
 		if !slices.Contains([]string{SubtitleExtPGSV3, SubtitleExtVTTV3, SubtitleExtASSV3, SubtitleExtSRTV3}, filepath.Ext(e.Name())) {
 			continue
 		}
-		ents = append(ents, cacheEnt{path: path, size: info.Size(), mtime: info.ModTime()})
+		ents = append(ents, cacheEnt{name: e.Name(), size: info.Size(), mtime: info.ModTime()})
 		total += info.Size()
 	}
 	if total <= c.maxBytes {
@@ -75,13 +76,14 @@ func (c *SubtitleCache) evict(dir string) {
 		if total <= c.maxBytes {
 			break
 		}
-		if err := os.Remove(e.path); err != nil {
-			if !os.IsNotExist(err) {
-				slog.Warn("subtitle cache eviction remove failed", "path", e.path, "error", err)
+		path := filepath.Join(root.Name(), e.name)
+		if err := root.Remove(e.name); err != nil {
+			if !errors.Is(err, fs.ErrNotExist) {
+				slog.Warn("subtitle cache eviction remove failed", "path", path, "error", err)
 			}
 			continue
 		}
-		slog.Info("evicted cached subtitle track (LRU)", "path", e.path, "bytes", e.size)
+		slog.Info("evicted cached subtitle track (LRU)", "path", path, "bytes", e.size)
 		total -= e.size
 	}
 }

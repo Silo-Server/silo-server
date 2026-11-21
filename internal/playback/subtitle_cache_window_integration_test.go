@@ -31,7 +31,8 @@ func TestStreamExtractArgs_CachedSupWindowsRealFFmpeg(t *testing.T) {
 		cues = append(cues, at)
 	}
 	cached := filepath.Join(t.TempDir(), "track.sup")
-	if err := os.WriteFile(cached, testSupStream(cues, 0), 0o600); err != nil {
+	stream := testSupStream(cues, 0)
+	if err := os.WriteFile(cached, stream, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -50,7 +51,7 @@ func TestStreamExtractArgs_CachedSupWindowsRealFFmpeg(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 			defer cancel()
-			firstCue, err := readSupFirstCue(cached)
+			firstCue, err := readSupFirstCue(bytes.NewReader(stream))
 			if err != nil {
 				t.Fatal(err)
 			}
