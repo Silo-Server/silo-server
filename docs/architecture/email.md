@@ -48,7 +48,8 @@ HTML emails wrap their content with `mail.RenderLayout`, which draws the shared
 dark shell. Its header follows the web sidebar: the server's uploaded wordmark,
 else the Silo wordmark, with the server name as alt text. When
 `branding.accent_color` is set, `mail.EmailButton` uses it for the primary
-action and picks a dark or white label for contrast.
+action as stored and picks a dark or white label for contrast, or black on a
+mid-tone accent where neither reaches 4.5:1.
 
 The logo is embedded in each message as an inline PNG, not linked. Remote images
 are often blocked, the recipient may not reach the server, and uploaded logos
