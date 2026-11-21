@@ -114,7 +114,8 @@ export function PillSwitcher({
         {edges.right ? <PageButton side="right" onClick={() => page("right")} /> : null}
       </div>
       {summary ? (
-        <p className="text-muted-foreground shrink-0 text-[13px] whitespace-nowrap">{summary}</p>
+        // Not text-muted-foreground: high contrast pins that brighter than the /80 pill labels.
+        <p className="text-foreground/65 shrink-0 text-[13px] whitespace-nowrap">{summary}</p>
       ) : null}
     </div>
   );
