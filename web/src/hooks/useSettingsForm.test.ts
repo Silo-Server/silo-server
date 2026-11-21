@@ -7,8 +7,10 @@ import { useHasUnsavedChanges } from "./useUnsavedChanges";
 import { useSettingsForm } from "./useSettingsForm";
 import { useStepSubmit } from "@/pages/setup-wizard/useStep";
 
-const { mutateAsync, markDone, snapshot, authority } = vi.hoisted(() => ({
+const { mutateAsync, markDone, snapshot, authority, saveBaseline } = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
+  // The snapshot the next save is guarded against.
+  saveBaseline: { current: undefined as Record<string, string> | undefined },
   markDone: vi.fn(),
   snapshot: { loaded: true, values: undefined as Record<string, string> | undefined },
   authority: { profileId: "profile-a" },
@@ -37,7 +39,10 @@ vi.mock("@/hooks/queries/admin/settings", () => ({
     isLoading: false,
   }),
   useAdminSensitiveStatus: () => ({ data: sensitiveData }),
-  useUpdateServerSettings: () => ({ mutateAsync, isPending: false }),
+  useUpdateServerSettings: (baseline: Record<string, string> | undefined) => {
+    saveBaseline.current = baseline;
+    return { mutateAsync, isPending: false };
+  },
 }));
 
 afterEach(() => {
@@ -338,6 +343,30 @@ describe("useSettingsForm unsaved-changes guard", () => {
       form.result.current.discard();
     });
     expect(registry.result.current).toBe(false);
+  });
+
+  it("guards the next save with the current snapshot after an edit is undone in place", () => {
+    const before = { "branding.server_name": "Silo" };
+    snapshot.values = before;
+    const form = renderHook(() =>
+      useSettingsForm({ keys: ["branding.server_name", "branding.accent_color"] }),
+    );
+
+    // The Default accent with none saved: nothing to stage.
+    act(() => {
+      form.result.current.setValue("branding.accent_color", "");
+    });
+    expect(form.result.current.dirtyCount).toBe(0);
+
+    // Another write (a branding upload) moves the settings on.
+    const after = { "branding.server_name": "Silo", "branding.logo_ref": "logo" };
+    snapshot.values = after;
+    form.rerender();
+    act(() => {
+      form.result.current.setValue("branding.server_name", "Casa");
+    });
+
+    expect(saveBaseline.current).toBe(after);
   });
 
   it("releases an edit changed back to its saved value, but not a staged secret clear", () => {

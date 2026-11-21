@@ -92,7 +92,8 @@ export default function GeneralSettings() {
   function handleDiscard() {
     if (saveInProgressRef.current) return;
     form.discard();
-    setSavesAndDiscards((count) => count + 1);
+    // Discard clears nothing until the settings have loaded.
+    if (form.loaded) setSavesAndDiscards((count) => count + 1);
   }
 
   // Redis reads whether a URL is saved from the protected-credential status,

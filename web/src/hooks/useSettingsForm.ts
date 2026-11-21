@@ -164,9 +164,12 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   );
 
   const dirtyCount = dirty.size;
+  // With nothing staged, the next edit starts its own baseline. This runs on
+  // every change of the set, so an edit undone in place (an emptied setting
+  // with nothing saved) doesn't leave the baseline on the snapshot it began on.
   useEffect(() => {
-    if (dirtyCount === 0) editBaseline.current = undefined;
-  }, [dirtyCount]);
+    if (dirty.size === 0) editBaseline.current = undefined;
+  }, [dirty]);
   const dirtyKeys = useMemo(() => Array.from(dirty), [dirty]);
 
   // The shared registry guards tab close and reload. `UnsavedChangesGuard`
