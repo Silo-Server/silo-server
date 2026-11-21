@@ -426,7 +426,7 @@ function SectionBlock({
     ) : null;
 
   return (
-    <div id={sectionAnchor(section.id)} className="scroll-mt-24 lg:scroll-mt-6">
+    <div id={sectionAnchor(section.id)} className="scroll-mt-24 lg:scroll-mt-16">
       <SettingsGroup
         title={t(SECTION_TITLES[section.id])}
         description={
@@ -639,40 +639,54 @@ export function RestoreChoose({
         ))}
       </div>
 
+      {/* Pinned below the admin shell's activity control. The height cap
+          leaves room for any background playback bar and for the 6rem of page
+          padding below this grid: without it, the end of the page pushes the
+          panel back up under the control. A longer summary scrolls on its own,
+          above Review. */}
       <aside
         aria-labelledby="restore-summary-heading"
-        className="surface-panel-subtle h-fit space-y-4 rounded-xl p-5 lg:sticky lg:top-6"
+        className="surface-panel-subtle h-fit space-y-4 rounded-xl p-5 lg:sticky lg:top-16 lg:flex lg:max-h-[calc(100dvh-10rem-var(--playback-bar-clearance,0px))] lg:flex-col"
       >
-        <SectionIndex sections={set.sections} selection={selection} variant="list" />
-        <h2 id="restore-summary-heading" className="text-[15px] font-semibold tracking-tight">
-          {t("web.admin.backups.restore.choose.summaryHeading")}
-        </h2>
-        {plan.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            {t("web.admin.backups.restore.choose.nothingChosen")}
+        {/* The 4px inset keeps the section buttons' focus rings clear of this
+            box's clipping edge. The fade covers only the box's bottom padding,
+            so it shows just while more of the summary scrolls on below. */}
+        <div className="overlay-scroll space-y-4 lg:-mx-1 lg:-mt-1 lg:mb-0 lg:min-h-0 lg:overflow-y-auto lg:[mask-image:linear-gradient(to_bottom,black_calc(100%_-_1rem),transparent)] lg:px-1 lg:pt-1 lg:pb-4">
+          <SectionIndex sections={set.sections} selection={selection} variant="list" />
+          <h2 id="restore-summary-heading" className="text-[15px] font-semibold tracking-tight">
+            {t("web.admin.backups.restore.choose.summaryHeading")}
+          </h2>
+          {plan.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              {t("web.admin.backups.restore.choose.nothingChosen")}
+            </p>
+          ) : (
+            <ul className="list-disc space-y-1.5 ps-5 text-sm">
+              {plan.flatMap((group) =>
+                group.sentences.map((sentence, position) => (
+                  <li key={`${group.section}-${position}`}>
+                    {t("web.admin.backups.restore.plan.sentence", { sentence })}
+                  </li>
+                )),
+              )}
+            </ul>
+          )}
+          <p className="text-muted-foreground text-[13px] leading-relaxed">
+            {t("web.admin.backups.restore.choose.recoveryPoint")}
           </p>
-        ) : (
-          <ul className="list-disc space-y-1.5 ps-5 text-sm">
-            {plan.flatMap((group) =>
-              group.sentences.map((sentence, position) => (
-                <li key={`${group.section}-${position}`}>
-                  {t("web.admin.backups.restore.plan.sentence", { sentence })}
-                </li>
-              )),
-            )}
-          </ul>
-        )}
-        {notice ? (
-          <p role="status" className="text-[13px] text-amber-600 dark:text-amber-400">
-            {notice}
-          </p>
-        ) : null}
-        <p className="text-muted-foreground text-[13px] leading-relaxed">
-          {t("web.admin.backups.restore.choose.recoveryPoint")}
-        </p>
-        <Button className="w-full" disabled={selection.size === 0} onClick={onReview}>
-          {t("web.admin.backups.restore.choose.review")}
-        </Button>
+        </div>
+        {/* Outside the scrolling box, so the notice shows beside Review however
+            far the summary is scrolled. The rule marks where the summary ends. */}
+        <div className="lg:border-border/60 shrink-0 space-y-4 lg:border-t lg:pt-4">
+          {notice ? (
+            <p role="status" className="text-[13px] text-amber-600 dark:text-amber-400">
+              {notice}
+            </p>
+          ) : null}
+          <Button className="w-full" disabled={selection.size === 0} onClick={onReview}>
+            {t("web.admin.backups.restore.choose.review")}
+          </Button>
+        </div>
       </aside>
     </div>
   );
