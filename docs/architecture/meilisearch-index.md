@@ -97,9 +97,10 @@ episode, 0 for every other type. The `type_rank:asc` rule sits after
 `attributeRank` and `sort` and before `wordPosition`, `exactness`, and
 `popularity:desc`:
 
-- Among hits that match equally well in the same attribute, a movie or series
-  ranks ahead of an episode, so "pilot" lists the film Bush Pilot ahead of the
-  episodes titled "Pilot".
+- Among hits that match in the same attribute with the same words, typos, and
+  proximity, a movie or series ranks ahead of an episode, even one whose match
+  is more exact: "pilot" lists the film Bush Pilot ahead of the episodes titled
+  "Pilot".
 - A title match still ranks ahead of a match on genres or keywords, because
   `attributeRank` comes first. So does an episode's `title` match ahead of a
   movie that matches only through `original_title`, `sort_title`, or

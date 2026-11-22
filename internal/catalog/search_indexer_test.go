@@ -114,10 +114,9 @@ func TestMeilisearchRankingRulesLeadWithWordsTypoProximity(t *testing.T) {
 // episode titled exactly that).
 func TestMeilisearchRankingRulesRankEpisodesAfterMediaInOneAttribute(t *testing.T) {
 	rules, _ := catalogSearchMeilisearchSettings(DefaultMeilisearchEmbedder, false, false)["rankingRules"].([]string)
-	at := slices.Index(rules, "type_rank:asc")
-	if at < 0 || at < slices.Index(rules, "attributeRank") || at < slices.Index(rules, "sort") ||
-		at > slices.Index(rules, "wordPosition") || at > slices.Index(rules, "exactness") || at > slices.Index(rules, "popularity:desc") {
-		t.Fatalf("rankingRules = %v, want type_rank:asc after attributeRank and sort, before wordPosition, exactness and popularity:desc", rules)
+	want := []string{"attributeRank", "sort", "type_rank:asc", "wordPosition", "exactness", "popularity:desc"}
+	if len(rules) < len(want) || !slices.Equal(rules[len(rules)-len(want):], want) {
+		t.Fatalf("rankingRules = %v, want them to end with %v", rules, want)
 	}
 }
 
