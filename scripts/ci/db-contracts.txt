@@ -320,6 +320,7 @@
 ./internal/jellycompat TestDurableCompatPlaybackStoreRetireLeavesMovedPlay
 ./internal/jellycompat TestDurableCompatPlaybackStoreRetryAfterFailedStatement
 ./internal/jellycompat TestDurableCompatPlaybackStoreRetireHidesCopyWhenReplayFails
+./internal/jellycompat TestDurablePutNegotiatedReplacesRowStoredWithDashedRouteID
 ./internal/jellycompat TestPseudoUserOwnerAcrossReplicasPostgres
 ./internal/invitations TestLinkInvitationLifecycleDB
 ./internal/invitations TestEmailedInvitationLinkReplacementDB
