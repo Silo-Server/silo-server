@@ -24,11 +24,14 @@ describe("NodeName", () => {
   });
 
   it("doesn't cut a name where its pieces would read in a different order", () => {
-    // Brackets pair across the whole name, a mark sets the direction of the text
-    // after it, and a Syriac first letter makes the name right to left.
+    // Brackets pair across the whole name (a stray closing one changes nothing),
+    // a mark or an override sets the direction of the text after it, and a Syriac
+    // first letter makes the name right to left.
     for (const name of [
       "ܬܪܢܣܟܘܕ-worker-east-01",
       "gpu אבג(דהו abc12345678)",
+      "gpu אבג(דהו] abc12345678)",
+      "gpu-\u202eabc\u202c transcode-worker-07",
       "\u200fgpu-transcode-frankfurt-east-rack-07",
     ]) {
       expect(pieces(name)).toEqual({ dir: "auto", texts: [name] });
@@ -37,6 +40,9 @@ describe("NodeName", () => {
 
   it("doesn't start the end piece with a zero-width joiner", () => {
     const name = "render-node-\u{1f468}\u200d\u{1f469}\u200d\u{1f467}-family-box";
-    expect(pieces(name).texts.at(-1)?.startsWith("\u200d")).toBe(false);
+    expect(pieces(name)).toEqual({
+      dir: "ltr",
+      texts: ["render-node-\u{1f468}\u200d\u{1f469}\u200d\u{1f467}", "-family-box"],
+    });
   });
 });

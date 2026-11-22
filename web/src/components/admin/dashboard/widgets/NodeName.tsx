@@ -23,14 +23,28 @@ const BIDI_CONTROL = /[\u202a-\u202e\u2066-\u2069]/u;
 // What sets a name's direction for dir="auto": its first letter or directional mark.
 const FIRST_STRONG = /[\p{L}\u200e\u200f\u061c]/u;
 
-/** Whether a bracket opened in `head` is still open at its end. */
+// The opening bracket each closing bracket pairs with.
+const OPENING: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
+const OPENS = /^\p{Ps}$/u;
+const CLOSES = /^\p{Pe}$/u;
+// Format characters, such as a directional mark, which letters join across.
+const ENDS_FORMAT = /\p{Cf}+$/u;
+
+/**
+ * Whether a bracket opened in `head` is still open at its end, pairing brackets
+ * as the bidi algorithm does: a closing bracket closes the nearest matching
+ * opening one and anything opened after it, and one with no match is ignored.
+ */
 function leavesBracketOpen(head: string) {
-  let open = 0;
+  const open: string[] = [];
   for (const char of head) {
-    if (/\p{Ps}/u.test(char)) open++;
-    else if (open > 0 && /\p{Pe}/u.test(char)) open--;
+    if (OPENS.test(char)) open.push(char);
+    else if (CLOSES.test(char)) {
+      const at = open.lastIndexOf(OPENING[char]);
+      if (at >= 0) open.length = at;
+    }
   }
-  return open > 0;
+  return open.length > 0;
 }
 
 /**
@@ -70,7 +84,7 @@ function nodeNameCut(name: string, rightToLeft: boolean) {
       leftToRightOnly ||
       (STARTS_WITH_LETTER.test(tail) &&
         STARTS_RIGHT_TO_LEFT.test(tail) === rightToLeft &&
-        !ENDS_RIGHT_TO_LEFT.test(head) &&
+        !ENDS_RIGHT_TO_LEFT.test(head.replace(ENDS_FORMAT, "")) &&
         !leavesBracketOpen(head))
     ) {
       return { head, tail };
@@ -85,7 +99,7 @@ function nodeNameCut(name: string, rightToLeft: boolean) {
  * A cut name keeps its own direction, so on a page in the other direction its
  * pieces stay in reading order. One with no safe cut is cut at its end, in the
  * direction the browser gives it. The end piece is never wider than the box, so
- * it can't run under the icons beside it.
+ * it can't run under the icons beside it; past that it loses its start.
  */
 export function NodeName({ name }: { name: string }) {
   const rightToLeft = startsRightToLeft(name);
@@ -99,8 +113,9 @@ export function NodeName({ name }: { name: string }) {
       {cut ? (
         <>
           <span className="min-w-0 overflow-hidden text-ellipsis whitespace-pre">{cut.head}</span>
-          <span className="max-w-full flex-shrink-0 overflow-hidden text-ellipsis whitespace-pre">
-            {cut.tail}
+          {/* Wider than the box, the end piece loses its start, not the worker's number. */}
+          <span className="flex max-w-full flex-shrink-0 justify-end overflow-hidden">
+            <span className="whitespace-pre">{cut.tail}</span>
           </span>
         </>
       ) : (
