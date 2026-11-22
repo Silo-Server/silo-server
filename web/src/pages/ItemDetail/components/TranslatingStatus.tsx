@@ -9,7 +9,9 @@ import { Languages } from "lucide-react";
  * out of the layout so it adds no gap.
  *
  * Only the icon pulses: the description it refers to stays at full strength,
- * because faded body text falls below WCAG AA contrast.
+ * because faded body text falls below WCAG AA contrast. The label takes the
+ * Translate button's height (a transparent border and the same vertical
+ * padding), so swapping one for the other doesn't move the content below.
  */
 export default function TranslatingStatus({
   translating,
@@ -25,7 +27,7 @@ export default function TranslatingStatus({
   return (
     <span role="status" className={`inline-flex empty:absolute ${className}`}>
       {translating ? (
-        <span className="text-foreground/80 inline-flex items-center gap-1.5 text-xs">
+        <span className="text-foreground/80 inline-flex items-center gap-1.5 border-y border-transparent py-0.5 text-xs">
           <Languages className="h-3 w-3 motion-safe:animate-pulse" aria-hidden="true" />
           {label}
         </span>

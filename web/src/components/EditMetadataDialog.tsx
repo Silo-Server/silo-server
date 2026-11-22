@@ -281,8 +281,10 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
           showCloseButton
         >
           {/* Header */}
-          <DialogHeader className="border-border/10 shrink-0 flex-row items-center justify-between border-b px-5 py-4 pe-12">
-            <div className="flex items-center gap-2.5">
+          {/* The chip and lock count wrap to their own lines on a narrow phone, so
+              the title keeps its whole words instead of breaking mid-word. */}
+          <DialogHeader className="border-border/10 shrink-0 flex-row flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-b px-5 py-4 pe-12">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
               <DialogTitle className="text-[15px] font-semibold">
                 {t("web.item.dialog.editMetadataTitle")}
               </DialogTitle>

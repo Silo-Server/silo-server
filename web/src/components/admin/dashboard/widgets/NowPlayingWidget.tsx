@@ -20,6 +20,7 @@ import { SectionError } from "../feedback";
 import { useReportCollapsed } from "../widgetChrome";
 import { SessionProfilePill } from "./SessionProfilePill";
 import { useT } from "@/i18n";
+import { getInitial } from "@/lib/text";
 
 /**
  * Most cards the widget mounts at once. The widget shows only what fits, and a
@@ -264,11 +265,13 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
         ) : (
           <Play className={`text-primary/40 h-5 w-5 ${session.is_paused ? "opacity-45" : ""}`} />
         )}
+        {/* Icon only: the poster is 58px inside, narrower than the word in
+            most languages, so the word is left to screen readers. */}
         {session.is_paused ? (
           <div className="absolute inset-0 flex items-center justify-center bg-black/35">
-            <div className="border-border/40 bg-background/90 text-foreground inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold shadow-sm backdrop-blur">
-              <Pause className="h-3 w-3" />
-              {t("web.admin.dashboard.widgets.nowPlaying.paused")}
+            <div className="border-border/40 bg-background/90 text-foreground flex h-6 w-6 items-center justify-center rounded-full border shadow-sm backdrop-blur">
+              <Pause className="h-3 w-3 fill-current" aria-hidden="true" />
+              <span className="sr-only">{t("web.admin.dashboard.widgets.nowPlaying.paused")}</span>
             </div>
           </div>
         ) : null}
@@ -281,12 +284,15 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             {session.media_item_id ? (
               <Link
                 to={`/item/${session.media_item_id}`}
-                className="hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
+                dir="auto"
+                className="bidi-text hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
               >
                 {title}
               </Link>
             ) : (
-              <div className="truncate text-sm font-bold">{title}</div>
+              <div dir="auto" className="bidi-text truncate text-sm font-bold">
+                {title}
+              </div>
             )}
             {/* Same episode line as the Activity page's Stream column. */}
             <div className="text-muted-foreground mb-1.5 truncate text-xs">
@@ -298,12 +304,15 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             {session.media_item_id ? (
               <Link
                 to={`/item/${session.media_item_id}`}
-                className="hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
+                dir="auto"
+                className="bidi-text hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
               >
                 {title}
               </Link>
             ) : (
-              <div className="truncate text-sm font-bold">{title}</div>
+              <div dir="auto" className="bidi-text truncate text-sm font-bold">
+                {title}
+              </div>
             )}
             {session.media_type && (
               <div className="text-muted-foreground mb-1.5 truncate text-xs">
@@ -333,7 +342,9 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
               title={session.client_user_agent || clientLabel}
               className="border-border/60 bg-muted/30 text-muted-foreground inline-flex max-w-[9rem] rounded border px-1.5 py-0.5 text-[9px] font-semibold"
             >
-              <span className="truncate">{clientLabel}</span>
+              <span dir="auto" className="truncate">
+                {clientLabel}
+              </span>
             </span>
           ) : null}
           <PlaybackRouteBadges session={session} />
@@ -349,7 +360,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             className="text-primary-foreground flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
             style={{ background: `var(--primary)` }}
           >
-            {username.charAt(0).toUpperCase()}
+            {getInitial(username)}
           </div>
           <span dir="auto" className="min-w-0 truncate text-xs font-medium">
             {username}

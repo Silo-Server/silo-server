@@ -25,7 +25,7 @@ func TestNodeDeclarationsLockFieldsDB(t *testing.T) {
 		return revision, generation
 	}
 
-	group, jobs, accel := "rack-a", 0, "vaapi"
+	group, jobs, accel := "rack-a", 0, "videotoolbox"
 	declared, _, err := store.Declare(ctx, node.ID, UpdateNodeInput{Group: &group, MaxJobs: &jobs, HWAccelOverride: &accel})
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +38,7 @@ func TestNodeDeclarationsLockFieldsDB(t *testing.T) {
 	// Restating a declared value, in the spelling a full-form save sends,
 	// goes through; changing one is refused and changes nothing.
 	restated, zero := "rack-a", 0
-	if _, _, err := store.Update(ctx, node.ID, UpdateNodeInput{Group: &restated, MaxJobs: &zero}, accept); err != nil {
+	if _, _, err := store.Update(ctx, node.ID, UpdateNodeInput{Group: &restated, MaxJobs: &zero, HWAccelOverride: &accel}, accept); err != nil {
 		t.Fatalf("restating declared values: %v", err)
 	}
 	other, name := "rack-b", "renamed"

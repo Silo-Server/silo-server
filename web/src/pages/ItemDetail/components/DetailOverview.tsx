@@ -52,12 +52,34 @@ export default function DetailOverview({
   useLayoutEffect(() => {
     const text = textRef.current;
     if (!clamp || expanded || !text) return;
-    const measure = () => setOverflowing(text.scrollHeight > text.clientHeight + 1);
+    let active = true;
+    const measure = () => {
+      if (active) setOverflowing(text.scrollHeight > text.clientHeight + 1);
+    };
     measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(text);
-    return () => observer.disconnect();
+    // A web font that loads after the first measure can change the line count
+    // while the clamped box keeps its height, so the resize observer never
+    // fires. `ready` covers a load already under way (WebKit fires no
+    // "loadingdone"); the event covers later ones.
+    const fonts = "fonts" in document ? document.fonts : undefined;
+    void fonts?.ready.then(measure);
+    fonts?.addEventListener("loadingdone", measure);
+    // So do the text weight preference and the interface language, which
+    // changes how text such as Japanese breaks into lines (DetailTitle watches
+    // both too).
+    const typography = new MutationObserver(measure);
+    typography.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-text-weight", "lang"],
+    });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(text);
+    return () => {
+      active = false;
+      observer?.disconnect();
+      typography.disconnect();
+      fonts?.removeEventListener("loadingdone", measure);
+    };
   }, [clamp, clampLines, expanded, overview, hidden]);
 
   if (hidden) {
@@ -101,14 +123,20 @@ export default function DetailOverview({
             {expanded ? t("web.detail.overview.less") : t("web.detail.overview.more")}
           </button>
         )}
+        {/* The status and the label take the Translate button's height, so
+            the row keeps its height when one replaces another. */}
         <TranslatingStatus
           translating={translating}
           label={t("web.detail.translation.translating")}
-          className="mt-1"
+          className="mt-1.5"
         >
-          {sawTranslation && machineTranslated && <MachineTranslatedLabel />}
+          {sawTranslation && machineTranslated && (
+            <MachineTranslatedLabel className="border-y border-transparent py-0.5" />
+          )}
         </TranslatingStatus>
-        {!sawTranslation && machineTranslated && <MachineTranslatedLabel className="mt-1" />}
+        {!sawTranslation && machineTranslated && (
+          <MachineTranslatedLabel className="mt-1.5 border-y border-transparent py-0.5" />
+        )}
         {!translating && onTranslate && (
           <button
             type="button"

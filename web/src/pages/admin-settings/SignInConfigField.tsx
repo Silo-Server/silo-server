@@ -2,7 +2,12 @@ import { useId } from "react";
 import { Direction } from "radix-ui";
 
 import type { PluginAdminFormField } from "@/api/types";
-import { effectiveValue, textDirection } from "@/components/admin/plugins/schemaFormUtils";
+import {
+  effectiveValue,
+  isSecretField,
+  rendersMultiline,
+  textDirection,
+} from "@/components/admin/plugins/schemaFormUtils";
 import { useT } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,7 +72,7 @@ export function SignInConfigField({
   const descriptionId = useId();
   const value = effectiveValue(field, values);
   const text = String(value ?? "");
-  const secret = field.secret || field.control === "PASSWORD";
+  const secret = isSecretField(field);
   const hint = description ?? field.description;
   const noteId = useId();
   const describedBy =
@@ -108,7 +113,7 @@ export function SignInConfigField({
         </SelectContent>
       </Select>
     );
-  } else if (field.control === "TEXTAREA" || field.multiline) {
+  } else if (rendersMultiline(field)) {
     control = (
       <textarea
         id={id}

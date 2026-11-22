@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -27,6 +28,9 @@ import { storage } from "@/utils/storage";
 import type { AudiobookPlayerControls, AudiobookPlayerStatus } from "./AudiobookPlayer";
 
 const AudiobookPlayer = lazy(() => import("./AudiobookPlayer"));
+
+/** The root property MiniBar publishes its height on, and the provider clears. */
+export const AUDIOBOOK_BAR_HEIGHT_PROPERTY = "--audiobook-bar-height";
 
 export interface AudiobookPlaybackStartInput {
   contentId: string;
@@ -130,6 +134,14 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
       stopPlayback();
     }
   }, [activeRequest, profileId, stopPlayback]);
+
+  // MiniBar leaves its height on the root while Now Listening covers it; drop
+  // it once nothing is playing. Switching books keeps it until the next bar
+  // measures its own.
+  useLayoutEffect(() => {
+    if (activeRequest) return;
+    document.documentElement.style.removeProperty(AUDIOBOOK_BAR_HEIGHT_PROPERTY);
+  }, [activeRequest]);
 
   const toggleActivePlayback = useCallback(() => {
     controls?.togglePlay();

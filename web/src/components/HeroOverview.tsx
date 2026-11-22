@@ -40,15 +40,20 @@ export default function HeroOverview({
     <div className="mb-7 max-w-2xl">
       <HeroOverviewText overview={item.overview} />
       {/* Mounted while idle too, so its live region exists before a
-        translation starts. */}
-      <TranslatingStatus
-        translating={translating}
-        label={t("web.home.hero.translating")}
-        className="mt-1"
-      />
+        translation starts. The flex row keeps the status at the Translate
+        button's height instead of the paragraph's taller line. */}
+      <div className="flex">
+        <TranslatingStatus
+          translating={translating}
+          label={t("web.home.hero.translating")}
+          className="mt-1.5"
+        />
+      </div>
       {!translating && (machineTranslated || onTranslate) && (
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
-          {machineTranslated && <MachineTranslatedLabel />}
+          {machineTranslated && (
+            <MachineTranslatedLabel className="border-y border-transparent py-0.5" />
+          )}
           {onTranslate && (
             <button
               type="button"
