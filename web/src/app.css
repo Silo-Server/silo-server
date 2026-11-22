@@ -477,7 +477,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .sidebar-inner,
   .sidebar-fade,
   .sidebar-main-stage,
-  .impersonation-banner {
+  .impersonation-banner,
+  .follows-sidebar-collapse {
     transition: none;
   }
   .player-breathe {
@@ -769,10 +770,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
       text-align: match-parent;
     }
   }
-  /* Left-to-right text in a block, such as a path, whose lines line up the way
-     the text around it does: at the right on a right-to-left page. An inherited
-     `start` would resolve against the block's own `dir="ltr"` instead. Not named
-     `text-*`, which `cn()` would take for a text color and drop the real one. */
+  /* Text with a direction of its own in a block, such as a path or a name, whose
+     lines line up the way the text around it does: at the right on a right-to-left
+     page. An inherited `start` would resolve against the block's own `dir` instead.
+     Not named `text-*`, which `cn()` would take for a text color and drop the real
+     one. */
   .align-with-page {
     text-align: -webkit-match-parent;
   }
@@ -887,6 +889,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   html[data-high-contrast="true"] .border-border\/70,
   html[data-high-contrast="true"] .border-border\/80 {
     border-color: var(--border) !important;
+  }
+  html[data-text-weight="strong"] .font-normal {
+    font-weight: var(--font-weight-ui, 520) !important;
   }
   html[data-text-weight="strong"] .font-medium {
     font-weight: var(--font-weight-medium-ui, 600) !important;
@@ -1726,6 +1731,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     overflow: hidden;
     border-radius: var(--radius-xl);
     background-color: var(--surface);
+    /* A thumbhash placeholder is set inline with background-size: cover; a
+       repeating one tiles its opposite edge into the translucent border. */
+    background-repeat: no-repeat;
     border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.05),
@@ -2163,10 +2171,14 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .library-marquee-header.is-overlay .marquee-tab-trigger {
     color: color-mix(in srgb, #fff 68%, transparent);
   }
-  .marquee-tab-trigger:hover {
+  /* Mouse only, like the `hover:` variant: a tap leaves :hover stuck on touch,
+     and a stuck tab reads as selected once the selection moves on. */
+  :where(:root[data-fine-pointer="true"]) .marquee-tab-trigger:hover {
     color: var(--foreground);
   }
-  .library-marquee-header.is-overlay .marquee-tab-trigger:hover {
+  :where(:root[data-fine-pointer="true"])
+    .library-marquee-header.is-overlay
+    .marquee-tab-trigger:hover {
     color: #fff;
   }
   .marquee-tab-trigger[data-state="active"] {
@@ -2629,7 +2641,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     /* How far fixed chrome at the foot of a page rises, and how much the admin
        shell pads the end of its pages, to clear whichever background playback
        bar shows. useRootHeightProperty measures each bar, bottom inset
-       included, on the root while it shows. */
+       included, on the root while it shows. The audiobook bar's height stays
+       while Now Listening covers it, until playback ends. */
     --playback-bar-clearance: max(var(--watch-bar-height, 0px), var(--audiobook-bar-height, 0px));
     /* The impersonation banner pins to the top of the viewport above every
        route, and ImpersonationBanner measures its height here while it shows.
@@ -2693,30 +2706,39 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      compensation must follow whichever query actually changes the margin it is
      compensating for. `html[data-text-scale]` does not move it; rem in a media
      query resolves against the browser's default font size, not the root
-     element's. */
+     element's.
+
+     `.follows-sidebar-collapse` gives the same hold to other chrome mounted
+     above the routes that is placed from `--app-sidebar-offset`, such as the
+     background watch bar. The hold is the distance the element itself moves
+     when the offset snaps: the sidebar's full 196px for chrome pinned to its
+     edge, as the banner is. Chrome centred between the sidebar and the far
+     edge moves half that, so it sets `--sidebar-follow-shift: 98px`. */
   /* While the banner holds its previous offset it is translated right, so its
      right edge sits briefly past the viewport. Layout already clips its own
      subtree this way; the banner is mounted above it, so the app root needs the
      same treatment or that overhang becomes a document-level horizontal scroll
      for the length of the transition. `clip` rather than `hidden` so this never
      becomes a scroll container and the banner's `position: sticky` keeps
-     resolving against the viewport. */
+     resolving against the viewport. A fixed element's overhang never scrolls,
+     so `.follows-sidebar-collapse` needs no such clip. */
   #root {
     overflow-x: clip;
   }
 
   @media (min-width: 64rem) {
-    .impersonation-banner {
+    .impersonation-banner,
+    .follows-sidebar-collapse {
       transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
     }
     :root[data-sidebar-collapsed="true"]:not([data-sidebar-visual-collapsed="true"])
-      .impersonation-banner {
-      transform: translateX(calc(196px * var(--dir-sign)));
+      :is(.impersonation-banner, .follows-sidebar-collapse) {
+      transform: translateX(calc(var(--sidebar-follow-shift, 196px) * var(--dir-sign)));
       transition: none;
     }
     :root:not([data-sidebar-collapsed="true"])[data-sidebar-visual-collapsed="true"]
-      .impersonation-banner {
-      transform: translateX(calc(-196px * var(--dir-sign)));
+      :is(.impersonation-banner, .follows-sidebar-collapse) {
+      transform: translateX(calc(var(--sidebar-follow-shift, 196px) * -1 * var(--dir-sign)));
       transition: none;
     }
   }
@@ -2814,5 +2836,20 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 @media (min-width: 64rem) {
   .settings-section {
     padding-block: 1.75rem;
+  }
+}
+
+/* Arabic letters join, and letter-spacing pulls them apart. CSS Text 3 says not
+   to space cursive scripts: Chromium and Firefox skip it, Safari doesn't. Clear
+   it wherever the language is Arabic, which in the Arabic interface is the whole
+   page (<html lang>). Names and titles keep the interface language, so a tracked
+   element that shows them sets `data-cursive` when they hold Arabic-script text
+   (hasArabicScript in lib/direction). !important in @layer base outranks every
+   other letter-spacing: later layers' !important (Tailwind's `tracking-*!`),
+   unlayered rules such as setup-wizard.css, and inline styles. */
+@layer base {
+  :lang(ar),
+  [data-cursive] {
+    letter-spacing: normal !important;
   }
 }

@@ -223,6 +223,16 @@ export function codeNumber(value: number, width = 0): string {
   return String(value).padStart(width, "0");
 }
 
+/**
+ * The `{amount}` of a web message that refers to its items as "it" or "them".
+ * CLDR's `one` also covers 21 or 101 in some languages, so such a message
+ * selects on the exact amount instead of a plural (docs/architecture/i18n.md).
+ */
+export function exactAmount(count: number): "exactlyOne" | "exactlyTwo" | "other" {
+  if (count === 1) return "exactlyOne";
+  return count === 2 ? "exactlyTwo" : "other";
+}
+
 /** A bare number ("01"), which takes its direction from the letters around it. */
 const DIGITS = /^\p{Nd}+$/u;
 

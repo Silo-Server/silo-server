@@ -74,7 +74,9 @@ export function CollectionsRowEditor({
 
   return (
     <div className="grid gap-4">
-      <div className="grid gap-2">
+      {/* grid-cols-1 holds the column to the editor's width. An implicit auto
+          column grows to fit the longest name instead of cutting it. */}
+      <div className="grid grid-cols-1 gap-2">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
           <span id={chosenId} className="text-sm font-medium">
             {t("web.home.addRow.collections.chosenLabel")}
@@ -282,16 +284,19 @@ function ChosenItem({ id, line, children }: { id: string; line: ChosenLine; chil
       )}
       <span className="min-w-0 flex-1">
         {line.title ? (
+          // A cut name keeps its start in either script; w-fit keeps a short
+          // one on the page's start side.
           <span
+            dir="auto"
             className={cn(
-              "block truncate text-sm font-semibold",
+              "block w-fit max-w-full truncate text-sm font-semibold",
               line.missing && "text-warning font-medium",
             )}
           >
             {line.title}
           </span>
         ) : (
-          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-4 w-32 max-w-full" />
         )}
         {line.meta ? (
           <span className="text-muted-foreground block truncate text-[13px]">{line.meta}</span>

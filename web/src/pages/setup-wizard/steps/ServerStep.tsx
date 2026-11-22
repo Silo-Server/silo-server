@@ -83,6 +83,7 @@ export function ServerStep() {
             description={t("web.setup.server.trustedProxiesDescription")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="172.16.0.0/12, 203.0.113.7/32"
+            dir="ltr"
             value={form.getValue("clientip.trusted_proxies")}
             onChange={(v) => form.setValue("clientip.trusted_proxies", v)}
             managedByEnv={form.envVar("clientip.trusted_proxies")}

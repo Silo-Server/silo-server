@@ -37,6 +37,14 @@ frontend:
 build: frontend
 	go build -ldflags "$(GO_LDFLAGS)" -o silo ./cmd/silo/
 
+# Cross-build the macOS transcode node as the image's node_darwin stage does.
+# Without cgo, a new cgo import or an imageutil function missing from its node
+# stub fails here before the image build does.
+.PHONY: build-node-darwin
+NODE_DARWIN_OUT ?= silo-darwin-arm64
+build-node-darwin: embed-stub
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags silo_node -trimpath -ldflags "-s -w $(GO_LDFLAGS)" -o "$(NODE_DARWIN_OUT)" ./cmd/silo/
+
 # Run frontend dev server (proxies API to localhost:8080)
 dev-frontend:
 	cd web && pnpm run dev

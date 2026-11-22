@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
+import { hasArabicScript } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 
 /** Keep mobile titles readable; fit desktop titles into a bounded line budget. */
@@ -78,11 +79,13 @@ export default function DetailTitle({
       scheduleFit();
     });
     observer.observe(heading);
-    // Theme preferences can change the rem-based font without changing width.
+    // Theme preferences can change the rem-based font, and the interface
+    // language the letter-spacing (`:lang(ar)` in app.css), without changing
+    // the width.
     const typographyObserver = new MutationObserver(scheduleFit);
     typographyObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-text-scale", "data-text-weight"],
+      attributeFilter: ["data-text-scale", "data-text-weight", "lang"],
     });
     window.addEventListener("resize", scheduleFit);
     document.fonts?.addEventListener("loadingdone", scheduleFit);
@@ -105,6 +108,7 @@ export default function DetailTitle({
     <h1
       ref={titleRef}
       dir="auto"
+      data-cursive={hasArabicScript(title) || undefined}
       title={bounded ? title : undefined}
       className={cn("bidi-text", className)}
     >

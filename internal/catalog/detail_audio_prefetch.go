@@ -9,8 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/ctxerr"
+	"github.com/Silo-Server/silo-server/internal/mediatrack"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -159,7 +159,7 @@ func (s *DetailService) prefetchMoviePlaybackDefaults(
 	if audio, subtitle, read := s.readPlaybackPreferences(ctx, r.store, filter.ProfileID, item.ContentID); read {
 		r.audioDone = true
 		if audio != nil {
-			r.audioPref = &playback.AudioTrackPreference{
+			r.audioPref = &mediatrack.AudioTrackPreference{
 				AudioTrackIndex: audio.AudioTrackIndex,
 				AudioLanguage:   audio.AudioLanguage,
 				TrackSignature:  audio.TrackSignature,
@@ -226,7 +226,7 @@ func prefillAudioPreferences(ctx context.Context, store userstore.UserStore, pro
 	for id, r := range resolvers {
 		r.audioDone = true
 		if pref := prefs[id]; pref != nil {
-			r.audioPref = &playback.AudioTrackPreference{
+			r.audioPref = &mediatrack.AudioTrackPreference{
 				AudioTrackIndex: pref.AudioTrackIndex,
 				AudioLanguage:   pref.AudioLanguage,
 				TrackSignature:  pref.TrackSignature,

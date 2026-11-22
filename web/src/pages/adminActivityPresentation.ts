@@ -288,15 +288,16 @@ export function formatToneMapSummary(session: AdminSession): ToneMapSummary | nu
   }
 }
 
-// Bitrate units (Mbps, kbps) are written the same way in every language.
+// Bitrate units (Mbps, kbps) are written the same way in every language. A
+// no-break space keeps the unit on its number's line when a narrow cell wraps.
 export function formatSessionBitrate(kbps?: number | null): string | null {
   if (!kbps || kbps <= 0) {
     return null;
   }
   if (kbps >= 1000) {
-    return `${formatDecimal(kbps / 1000, 1)} Mbps`;
+    return `${formatDecimal(kbps / 1000, 1)}\u00a0Mbps`;
   }
-  return `${Math.round(kbps)} kbps`;
+  return `${Math.round(kbps)}\u00a0kbps`;
 }
 
 export interface SessionBitrate {

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import type { AdminDownloadStorageLocation } from "@/api/v2/adminDownloadStorage";
 import { V2ProblemError } from "@/api/v2/request";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { PathCode } from "@/components/PathText";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -204,7 +205,9 @@ export default function StorageTab({
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* grid-cols-1, not the implicit column: a long location name is cut instead of
+          widening the column past the screen. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {data.locations.map((location) => (
           <LocationCard
             key={location.key}
@@ -364,7 +367,9 @@ function LocationCard({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <h2 className="truncate text-base font-semibold">{location.name}</h2>
+          <h2 dir="auto" className="truncate text-base font-semibold">
+            {location.name}
+          </h2>
           <StatusPill location={location} />
         </div>
         <Button variant="ghost" size="sm" onClick={onCleanUp} disabled={cleanUpBusy || offline}>
@@ -399,7 +404,7 @@ function LocationCard({
           {t("web.admin.downloads.storage.card.pendingDir", {
             dir: location.pending_dir,
             name: location.name,
-            code: (chunks) => <code className="font-mono break-all">{chunks}</code>,
+            code: (chunks) => <PathCode className="font-mono wrap-anywhere">{chunks}</PathCode>,
           })}
         </p>
       ) : null}

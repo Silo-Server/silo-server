@@ -197,11 +197,9 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 	}
 
 	delay, more := webPushRetryDelay(attemptNumber)
-	if retryAfter > 0 {
-		delay = retryAfter
-	}
 	if more && (sendErr != nil || retryableHTTPStatus(status)) {
-		nextRetry := time.Now().Add(delay)
+		// Retry-After can lengthen the wait but never shorten the schedule.
+		nextRetry := time.Now().Add(max(delay, retryAfter))
 		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeRetrying,
 			attemptNumber, statusPtr, message_, &nextRetry)
 		return
