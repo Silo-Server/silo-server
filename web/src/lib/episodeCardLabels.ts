@@ -1,6 +1,6 @@
 import { codeNumber, t } from "@/i18n";
 
-import { formatDate } from "@/lib/datetime";
+import { formatDate, parseCalendarDate } from "@/lib/datetime";
 
 interface EpisodeCardLabelItem {
   type?: string;
@@ -76,7 +76,8 @@ export function airDateWithTitle(airDateLabel: string, title?: string | null): s
 
 /**
  * A short episode subtitle for pickers and sheets: "S1 E2", or the air date
- * when the series is labeled by date.
+ * ("Nov 20, 2026") when the series is labeled by date. Watch Together sends it
+ * to the party, so it is data and stays English in every app language.
  */
 export function episodeSubtitle(
   episodeLabels: string | undefined,
@@ -84,7 +85,12 @@ export function episodeSubtitle(
   seasonNumber: number,
   episodeNumber: number,
 ): string {
-  return episodeAirDateLabel(episodeLabels, airDate) ?? `S${seasonNumber} E${episodeNumber}`;
+  const date = labelsEpisodesByAirDate(episodeLabels)
+    ? parseCalendarDate(airDate)
+    : null;
+  return date
+    ? date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : `S${seasonNumber} E${episodeNumber}`;
 }
 
 export function buildEpisodeCardLabels(item: EpisodeCardLabelItem): EpisodeCardLabels | null {

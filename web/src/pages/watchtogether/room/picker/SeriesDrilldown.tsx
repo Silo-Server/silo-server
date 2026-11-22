@@ -370,8 +370,18 @@ export function SeriesDrilldown({
                   const isNext = nextUp?.episode.content_id === episode.content_id;
                   const isPicked = picked?.episode.content_id === episode.content_id;
                   const unwatched = isEpisodeUnwatched(episode.user_data);
+                  // The fetched detail carries the series' episode labels when
+                  // the card it was opened from does not, so the staged pick
+                  // keeps naming a date-labeled game by its date.
                   const pick = () =>
-                    onPick({ episode, series, seasonNumber: season ?? episode.season_number });
+                    onPick({
+                      episode,
+                      series: {
+                        ...series,
+                        episode_labels: series.episode_labels ?? detail.data?.episode_labels,
+                      },
+                      seasonNumber: season ?? episode.season_number,
+                    });
                   return (
                     <li
                       key={episode.content_id}

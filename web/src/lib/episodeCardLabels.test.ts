@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { buildEpisodeCardLabels } from "./episodeCardLabels";
+import { afterEach, describe, expect, it } from "vitest";
+import { getDateTimeFormatPreferences, setDateTimeFormatPreferences } from "./datetime";
+import { buildEpisodeCardLabels, episodeSubtitle } from "./episodeCardLabels";
 
 const game = {
   type: "episode",
@@ -29,5 +30,17 @@ describe("buildEpisodeCardLabels", () => {
     expect(buildEpisodeCardLabels({ ...game, episode_labels: "air_date" })?.episodeCode).toBe(
       "S2026E296",
     );
+  });
+});
+
+describe("episodeSubtitle", () => {
+  const preferences = getDateTimeFormatPreferences();
+  afterEach(() => setDateTimeFormatPreferences(preferences));
+
+  // The subtitle is sent to a Watch Together party, so it is data and stays
+  // English (web/src/i18n/README.md) whatever this viewer's date format is.
+  it("writes a date-labeled episode's air date in English for the party", () => {
+    setDateTimeFormatPreferences({ ...preferences, dateFormat: "DD/MM/YYYY" });
+    expect(episodeSubtitle("air_date", "2026-11-20", 2026, 296)).toBe("Nov 20, 2026");
   });
 });

@@ -37,25 +37,49 @@ func NewEpisodeLabelReader(pool *pgxpool.Pool) *EpisodeLabelReader {
 	return &EpisodeLabelReader{pool: pool}
 }
 
+// episodeLabelsBatchSize bounds how many content IDs one lookup query sends.
+const episodeLabelsBatchSize = 500
+
 // EpisodeLabels returns the episode labels of date-labeled series and of their
-// episodes, keyed by content ID. IDs with no entry show numbers.
+// episodes, keyed by content ID. IDs with no entry show numbers. The IDs are
+// deduplicated and looked up in batches of episodeLabelsBatchSize.
 func (r *EpisodeLabelReader) EpisodeLabels(ctx context.Context, ids []string) (map[string]EpisodeLabel, error) {
 	labels := make(map[string]EpisodeLabel)
 	if r == nil || r.pool == nil || len(ids) == 0 {
 		return labels, nil
 	}
+	unique := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	for start := 0; start < len(unique); start += episodeLabelsBatchSize {
+		end := min(start+episodeLabelsBatchSize, len(unique))
+		if err := r.readEpisodeLabels(ctx, unique[start:end], labels); err != nil {
+			return nil, err
+		}
+	}
+	return labels, nil
+}
+
+// readEpisodeLabels runs one bounded lookup and adds its rows to labels.
+func (r *EpisodeLabelReader) readEpisodeLabels(ctx context.Context, ids []string, labels map[string]EpisodeLabel) error {
 	rows, err := r.pool.Query(ctx, episodeLabelsQuery, ids)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id string
 		var label EpisodeLabel
 		if err := rows.Scan(&id, &label.Labels, &label.AirDate); err != nil {
-			return nil, err
+			return err
 		}
 		labels[id] = label
 	}
-	return labels, rows.Err()
+	return rows.Err()
 }
