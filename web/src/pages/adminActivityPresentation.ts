@@ -718,9 +718,6 @@ export function getPlaybackSessionSubtitle(session: AdminSession): string | null
       series: session.series_title,
     });
   }
-  if (session.media_type === "movie") {
-    return t("web.common.activity.subtitle.movie");
-  }
   if (session.media_type === "series" || session.media_type === "episode") {
     return t("web.common.activity.subtitle.series");
   }

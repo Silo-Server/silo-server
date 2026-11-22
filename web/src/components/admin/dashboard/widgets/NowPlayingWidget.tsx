@@ -237,6 +237,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
       t("web.admin.dashboard.widgets.nowPlaying.fileFallback", {
         id: session.media_file_id,
       });
+  const subtitle = getPlaybackSessionSubtitle(session);
   const username =
     session.username ||
     t("web.admin.dashboard.widgets.nowPlaying.userFallback", { id: session.user_id });
@@ -279,50 +280,24 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
 
       {/* Info */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {isEpisode ? (
-          <>
-            {session.media_item_id ? (
-              <Link
-                to={`/item/${session.media_item_id}`}
-                dir="auto"
-                className="bidi-text hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
-              >
-                {title}
-              </Link>
-            ) : (
-              <div dir="auto" className="bidi-text truncate text-sm font-bold">
-                {title}
-              </div>
-            )}
-            {/* Same episode line as the Activity page's Stream column. */}
-            <div className="text-muted-foreground mb-1.5 truncate text-xs">
-              {getPlaybackSessionSubtitle(session)}
+        <div className="mb-1.5 flex min-w-0 flex-col">
+          {session.media_item_id ? (
+            <Link
+              to={`/item/${session.media_item_id}`}
+              dir="auto"
+              className="bidi-text hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
+            >
+              {title}
+            </Link>
+          ) : (
+            <div dir="auto" className="bidi-text truncate text-sm font-bold">
+              {title}
             </div>
-          </>
-        ) : (
-          <>
-            {session.media_item_id ? (
-              <Link
-                to={`/item/${session.media_item_id}`}
-                dir="auto"
-                className="bidi-text hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
-              >
-                {title}
-              </Link>
-            ) : (
-              <div dir="auto" className="bidi-text truncate text-sm font-bold">
-                {title}
-              </div>
-            )}
-            {session.media_type && (
-              <div className="text-muted-foreground mb-1.5 truncate text-xs">
-                {session.media_type === "movie"
-                  ? t("web.admin.dashboard.widgets.nowPlaying.movie")
-                  : t("web.admin.dashboard.widgets.nowPlaying.series")}
-              </div>
-            )}
-          </>
-        )}
+          )}
+          {subtitle ? (
+            <div className="text-muted-foreground truncate text-xs">{subtitle}</div>
+          ) : null}
+        </div>
 
         {/* Tags. Capped at one line so every card has the same height and
             the widget's rows stay even: tags that would wrap are clipped
