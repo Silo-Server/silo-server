@@ -465,6 +465,8 @@ jobs:
 
       - name: Check Go module tidiness without rewriting
         run: go mod tidy -diff
+      - name: Check fork pins against shunpike
+        run: make verify-fork-pins
       # - name: Check dependency edges with depaware
       #   run: depaware ./...
       # Not measured; needs a prototype with reviewed edge allowances.
