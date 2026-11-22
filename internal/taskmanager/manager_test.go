@@ -799,3 +799,37 @@ func TestStartSchedulesFromTheOldestInterruptedRunWhenNoneFinished(t *testing.T)
 		t.Fatalf("next run = %v, want %v (an hour after the oldest interrupted run started)", tasks[0].NextRunAt, want)
 	}
 }
+
+// ownErrorOnCancelTask returns its own error, not the context's, once canceled.
+type ownErrorOnCancelTask struct {
+	stubTask
+	entered chan struct{}
+}
+
+func (t ownErrorOnCancelTask) Execute(ctx context.Context, _ taskmanager.ProgressReporter) error {
+	t.entered <- struct{}{}
+	<-ctx.Done()
+	return errors.New("flushing the index failed")
+}
+
+// A task that fails with its own error while the server stops keeps that
+// error; only a run that ends on the cancellation itself is interrupted.
+func TestStopKeepsATaskOwnError(t *testing.T) {
+	history := &recordingExecutionRepository{}
+	manager := taskmanager.New(&fakeTriggerRepository{}, history, newFakeTrigger, slog.New(slog.DiscardHandler))
+	task := ownErrorOnCancelTask{stubTask: stubTask{key: "index"}, entered: make(chan struct{}, 1)}
+	manager.Register(task)
+	manager.Start(context.Background())
+	if _, err := manager.StartTask(task.Key()); err != nil {
+		t.Fatalf("StartTask() error = %v", err)
+	}
+	<-task.entered
+
+	manager.Stop()
+
+	history.mu.Lock()
+	defer history.mu.Unlock()
+	if len(history.inserts) != 1 || history.inserts[0].ErrorMessage != "flushing the index failed" {
+		t.Fatalf("recorded runs = %#v, want one keeping the task's error", history.inserts)
+	}
+}

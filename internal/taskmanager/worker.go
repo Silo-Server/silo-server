@@ -296,6 +296,10 @@ func (w *taskWorker) executeReserved(execCtx context.Context, cancel context.Can
 		// The run is recorded as stopped at its limit; keep the task's own error.
 		slog.WarnContext(execCtx, "task returned an error after reaching its max runtime", "task", w.task.Key(), "error", err)
 	}
+	// A run that ends because the server is stopping is interrupted, not a
+	// failure of the task; a task that returns its own error keeps it.
+	// Checked before w.mu: shuttingDown takes the manager's lock.
+	interrupted := err != nil && errors.Is(err, context.Canceled) && w.manager.shuttingDown()
 	w.mu.Lock()
 	switch {
 	case limitReached:
@@ -307,6 +311,9 @@ func (w *taskWorker) executeReserved(execCtx context.Context, cancel context.Can
 	case w.state == TaskStateCancelling:
 		result.Status = "cancelled"
 		metricOutcome = "canceled"
+	case interrupted:
+		result.Status = ExecutionStatusFailed
+		result.ErrorMessage = InterruptedExecutionMessage
 	case err != nil:
 		result.Status = "failed"
 		result.ErrorMessage = err.Error()
