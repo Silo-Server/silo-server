@@ -1624,22 +1624,90 @@ func TestRealtimeConfirmedStopNotifiesProvidersOnce(t *testing.T) {
 
 // TestRealtimeConfirmedStopCreditsPlayAfterTheLastReport covers an
 // administrator's stop the player confirms between progress reports. The
-// player kept playing from its last report until the stop reached it, so the
-// play is recorded up to when the stop was sent, within one report interval
-// plus slack: not cut back to the last report, and not credited while paused.
+// player kept playing from where the session last saw it until the stop
+// reached it, so the play is recorded up to when the stop was sent: not cut
+// back to the last report, not credited while paused, and not credited at all
+// once the player has missed a report.
 func TestRealtimeConfirmedStopCreditsPlayAfterTheLastReport(t *testing.T) {
+	// confirm has the player confirm an administrator's pause or resume.
+	confirm := func(t *testing.T, f *playbackServiceFixture, id string, name playback.CommandName) {
+		t.Helper()
+		f.handler.rememberRealtimeCommand(id, f.session.ID, name)
+		if err := f.handler.handleRealtimeClientMessage(f.session.ID, realtimeResultMessage(t, f.session.ID, id, playback.RealtimeResultStatusCompleted)); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+	}
 	for _, tc := range []struct {
 		name string
-		// paused: the last report was paused. sinceReport: how long the stop
-		// was sent after the last report.
+		// paused: the last report was paused. between runs after the report,
+		// and the stop is sent sinceReport after it.
 		paused      bool
+		between     func(t *testing.T, f *playbackServiceFixture)
 		sinceReport time.Duration
 		// played and end are the recorded watch time and end position.
 		played, end float64
 	}{
 		{name: "playing", sinceReport: 7 * time.Second, played: 7, end: 907},
 		{name: "paused", paused: true, sinceReport: 7 * time.Second, played: 0, end: 900},
-		{name: "reports stopped long before", sinceReport: time.Minute, played: 12, end: 912},
+		{name: "reports stopped long before", sinceReport: time.Minute, played: 0, end: 900},
+		{
+			// The resume is the session's latest sight of the player, at the
+			// position the pause held it: only the play since then is added.
+			name: "paused and resumed by an administrator",
+			between: func(t *testing.T, f *playbackServiceFixture) {
+				time.Sleep(3 * time.Second) //nolint:forbidigo // advances the synctest clock to the pause
+				confirm(t, f, "cmd-pause", playback.CommandPause)
+				time.Sleep(time.Second) //nolint:forbidigo // advances the synctest clock to the resume
+				confirm(t, f, "cmd-resume", playback.CommandUnpause)
+			},
+			sinceReport: 7 * time.Second, played: 3, end: 903,
+		},
+		{
+			// A resume confirmed after a paused report: the play since it
+			// counts, though the report itself was paused.
+			name: "resumed by an administrator after a paused report", paused: true,
+			between: func(t *testing.T, f *playbackServiceFixture) {
+				time.Sleep(2 * time.Second) //nolint:forbidigo // advances the synctest clock to the resume
+				confirm(t, f, "cmd-resume", playback.CommandUnpause)
+			},
+			sinceReport: 7 * time.Second, played: 5, end: 905,
+		},
+		{
+			name: "paused by an administrator",
+			between: func(t *testing.T, f *playbackServiceFixture) {
+				time.Sleep(3 * time.Second) //nolint:forbidigo // advances the synctest clock to the pause
+				confirm(t, f, "cmd-pause", playback.CommandPause)
+			},
+			sinceReport: 7 * time.Second, played: 0, end: 900,
+		},
+		{
+			// A seek back replans the session from its target before the
+			// next report: the play is measured on from there.
+			name: "seek replan after the report",
+			between: func(t *testing.T, f *playbackServiceFixture) {
+				time.Sleep(time.Second) //nolint:forbidigo // advances the synctest clock to the seek
+				target := 895.0
+				if _, err := f.manager.ApplyReplacement(f.session.ID, playback.SessionReplacement{EffectiveMediaFileID: 100, PositionSeconds: &target, PositionSequence: 1}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			sinceReport: 9 * time.Second, played: 8, end: 903,
+		},
+		{
+			// Another replica accepted the next report, after a seek this
+			// session's copy never saw. It is measured as that report, so the
+			// seek is not played time and the play after it still is.
+			name: "next report accepted elsewhere",
+			between: func(t *testing.T, f *playbackServiceFixture) {
+				time.Sleep(10 * time.Second) //nolint:forbidigo // advances the synctest clock to the next report
+				store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+				if _, err := store.ApplyProgress(f.ctx, f.session.ID, playback.ProgressSampleV3{Sequence: 2, Position: 934}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			sinceReport: 17 * time.Second, played: 7, end: 941,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -1647,10 +1715,14 @@ func TestRealtimeConfirmedStopCreditsPlayAfterTheLastReport(t *testing.T) {
 				admin := &recordingPlaybackAdminStore{}
 				f.handler.AdminStore = admin
 				f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+				reported := time.Now()
 				if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 900, IsPaused: tc.paused}); err != nil {
 					t.Fatal(err)
 				}
-				time.Sleep(tc.sinceReport) //nolint:forbidigo // advances the synctest clock from the report to the stop
+				if tc.between != nil {
+					tc.between(t, f)
+				}
+				time.Sleep(time.Until(reported.Add(tc.sinceReport))) //nolint:forbidigo // advances the synctest clock from the report to the stop
 				f.handler.rememberRealtimeCommand("cmd-stop", f.session.ID, playback.CommandStop)
 				// The player's confirmation arrives after the stop reached it.
 				time.Sleep(200 * time.Millisecond) //nolint:forbidigo // advances the synctest clock to the confirmation
@@ -1668,6 +1740,42 @@ func TestRealtimeConfirmedStopCreditsPlayAfterTheLastReport(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestRealtimeConfirmedStopAfterAPendingPauseAddsNothing covers a stop the
+// player confirms while its confirmation of an administrator's pause is still
+// being applied: the stop's snapshot doesn't show the pause, so nothing past
+// the last report is credited.
+func TestRealtimeConfirmedStopAfterAPendingPauseAddsNothing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newPlaybackServiceFixture(t)
+		admin := &recordingPlaybackAdminStore{}
+		f.handler.AdminStore = admin
+		f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+		if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 900}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(7 * time.Second) //nolint:forbidigo // advances the synctest clock from the report to the pause and stop
+		// Hold the pause's worker before it applies the pause.
+		unlock := f.handler.progressSideEffectLock(f.session.ID)
+		for _, command := range []struct {
+			id   string
+			name playback.CommandName
+		}{{"cmd-pause", playback.CommandPause}, {"cmd-stop", playback.CommandStop}} {
+			f.handler.rememberRealtimeCommand(command.id, f.session.ID, command.name)
+			if err := f.handler.handleRealtimeClientMessage(f.session.ID, realtimeResultMessage(t, f.session.ID, command.id, playback.RealtimeResultStatusCompleted)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		unlock()
+		synctest.Wait()
+		if len(admin.history) != 1 {
+			t.Fatalf("admin history = %+v, want one row", admin.history)
+		}
+		if row := admin.history[0]; row.Watch.PlayedSeconds != 0 || row.EndPositionSeconds != 900 {
+			t.Fatalf("played %v s ending at %v, want 0 s ending at 900", row.Watch.PlayedSeconds, row.EndPositionSeconds)
+		}
+	})
 }
 
 // claimRacePlanStoreV3 runs race just before the first finalization claim,

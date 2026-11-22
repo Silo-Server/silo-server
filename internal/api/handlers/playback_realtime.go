@@ -131,7 +131,9 @@ func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID
 // client's HTTP stop for a player-confirmed administrator stop or terminate.
 // Authority is already removed, so the client may have finalized from the
 // attempt row while this provider work was queued. sentAt is when the stop
-// was sent to the player, which played on until it arrived.
+// was sent to the player, which played on until it arrived; zero when the
+// session can't tell how the player ended, so nothing is added past what it
+// last saw.
 func (h *PlaybackHandler) recordRealtimeStoppedSession(ctx context.Context, session *playback.Session, sentAt time.Time) {
 	outcome := h.realtimeStopHistory(ctx, session, sentAt)
 	if outcome.adminLog {
@@ -168,6 +170,11 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	if !ok {
 		return unarbitratedRealtimeStop(h.persistStopAndHistory(parent, session))
 	}
+	// The file only bounds the final sample and fills the result. Its own
+	// budget keeps a slow catalog read from spending the stop write's.
+	fileCtx, cancelFile := context.WithTimeout(parent, stopFinalizationLease)
+	file, fileErr := h.loadFileByPreferredID(fileCtx, requestedMediaFileID(session), session.MediaFileID)
+	cancelFile()
 	ctx, cancel := context.WithTimeout(parent, stopFinalizationLease)
 	defer cancel()
 	// This queued worker is the stop's only finalizer, so transient store
@@ -180,16 +187,16 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	if record == nil {
 		return unarbitratedRealtimeStop(h.persistStopAndHistory(ctx, session)) // Unsequenced bridge play.
 	}
-	file, fileErr := h.loadFileByPreferredID(ctx, requestedMediaFileID(session), session.MediaFileID)
+	adoptUnseenReport(session, record)
 	var final *playback.ProgressSampleV3
 	if record.LastSample == nil && session.Position > 0 {
 		// A bridge progress report may have updated the live session without
 		// a sequenced native sample. Preserve its final resume position.
 		final = &playback.ProgressSampleV3{Sequence: record.LastSequence + 1, Position: session.Position, IsPaused: session.IsPaused}
-	} else if fileErr == nil && file != nil {
-		duration := float64(file.Duration)
-		if session.TimelineDuration > 0 {
-			duration = session.TimelineDuration
+	} else {
+		duration := session.TimelineDuration
+		if duration <= 0 && fileErr == nil && file != nil {
+			duration = float64(file.Duration)
 		}
 		final = playedSinceLastReport(record, session, sentAt, duration)
 	}
@@ -249,26 +256,46 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 }
 
 // maxPlayedSinceLastReport bounds the play credited after the last progress
-// report: players report every 10 seconds, plus reporting slack.
+// report: players report every 10 seconds, plus reporting slack. A player
+// whose last report is older than that missed one, so it is not known to have
+// been playing.
 const maxPlayedSinceLastReport = 12 * time.Second
+
+// adoptUnseenReport brings the removed live copy up to the attempt's latest
+// report when the copy never saw it: any replica accepts progress, and only
+// the replica holding the copy applies it there. The copy's own observations
+// since (a confirmed pause or resume, a seek replan) are newer and stay.
+func adoptUnseenReport(session *playback.Session, record *playback.AttemptRecordV3) {
+	last := record.LastSample
+	if last == nil || record.SampleAcceptedAt.IsZero() ||
+		(session.Watch.Measured && !record.SampleAcceptedAt.After(session.Watch.Until)) {
+		return
+	}
+	session.Position, session.IsPaused = last.Position, last.IsPaused
+	session.Watch.Observe(last.Position, last.IsPaused, record.SampleAcceptedAt)
+}
 
 // playedSinceLastReport is the final sample of a player that confirmed an
 // administrator's stop: the reply carries no position, and the player kept
-// playing from its last report until the stop reached it. It advances the
-// last report by the time from when the attempt accepted it to when the stop
-// was sent, at most maxPlayedSinceLastReport and the rest of the file. A
-// paused player, or one with nothing to add, gets none.
+// playing from where the session last saw it until the stop reached it. That
+// is the latest observation of the session's measurement: a progress report,
+// a confirmed resume, or a seek replan. It advances that position by the time
+// from the observation to when the stop was sent, up to the rest of the file.
+// A paused player, one last seen more than maxPlayedSinceLastReport before
+// the stop, or one with nothing to add gets none.
 func playedSinceLastReport(record *playback.AttemptRecordV3, session *playback.Session, sentAt time.Time, duration float64) *playback.ProgressSampleV3 {
-	last := record.LastSample
-	if last == nil || last.IsPaused || session.IsPaused || record.SampleAcceptedAt.IsZero() {
+	if sentAt.IsZero() || record.LastSample == nil || session.IsPaused || !session.Watch.Measured {
 		return nil
 	}
-	played := min(sentAt.Sub(record.SampleAcceptedAt), maxPlayedSinceLastReport).Seconds()
-	position := last.Position + played
+	played := sentAt.Sub(session.Watch.Until)
+	if played <= 0 || played > maxPlayedSinceLastReport {
+		return nil
+	}
+	position := session.Position + played.Seconds()
 	if duration > 0 {
 		position = min(position, duration)
 	}
-	if position <= last.Position {
+	if position <= session.Position {
 		return nil
 	}
 	return &playback.ProgressSampleV3{Sequence: record.LastSequence + 1, Position: position}
@@ -440,6 +467,14 @@ type realtimeResultQueue struct {
 	pending        []func()
 	done           chan struct{}
 	terminalQueued bool
+}
+
+// realtimeResultPending reports whether a result for the session is still
+// queued or running on its worker.
+func (h *PlaybackHandler) realtimeResultPending(sessionID string) bool {
+	h.realtimeResultMu.Lock()
+	defer h.realtimeResultMu.Unlock()
+	return h.realtimeResultQueues[sessionID] != nil
 }
 
 // runRealtimeResult orders results through one worker per session. When a
