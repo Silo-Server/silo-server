@@ -82,7 +82,12 @@ func registerDirectConnections(reg *Registry) {
 		}
 		status, err := reg.deps.DirectConnections.Status(ctx, in.Refresh)
 		if err != nil {
-			return nil, serviceProblem(err)
+			if ctx.Err() != nil {
+				return nil, serviceProblem(err)
+			}
+			// The service fails only when it cannot read settings in time, or while
+			// it shuts down: a temporary dependency failure.
+			return nil, unavailable("direct connections")
 		}
 		features := make([]DirectConnectionsFeature, len(status.Features))
 		for i, f := range status.Features {

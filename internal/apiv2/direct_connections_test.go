@@ -1,9 +1,13 @@
 package apiv2
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/directconn"
 )
 
 func TestAdminDirectConnectionsCapabilities(t *testing.T) {
@@ -49,5 +53,22 @@ func TestAdminDirectConnectionsStatus(t *testing.T) {
 	rec := do(t, h, http.MethodGet, Prefix+"/admin/direct-connections/status", "", actingRequestAdmin)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
+	}
+}
+
+type failingDirectConnections struct{}
+
+func (failingDirectConnections) Status(context.Context, bool) (directconn.Status, error) {
+	return directconn.Status{}, errors.New("settings read: connection refused")
+}
+
+// A failed settings read is a temporary dependency failure, not an internal error.
+func TestAdminDirectConnectionsStatusSettingsFailure(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	deps.DirectConnections = failingDirectConnections{}
+	rec := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/admin/direct-connections/status", "", actingRequestAdmin)
+	requireProblem(t, rec, TypeDependencyUnavailable)
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("503 without Retry-After: %v", rec.Header())
 	}
 }
