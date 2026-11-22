@@ -506,6 +506,19 @@ function describePlaybackSessionError(
  *    answers with a whole new plan, never a patch.
  * 3. On unmount: DELETE `/playback/{session_id}` with a keepalive fallback.
  */
+type RetireOnRefusalPolicy = boolean | (() => boolean);
+
+function mergeRetireOnRefusal(
+  existing: RetireOnRefusalPolicy,
+  incoming: RetireOnRefusalPolicy,
+): RetireOnRefusalPolicy {
+  if (existing === true || incoming === true) return true;
+  if (typeof existing === "function" && typeof incoming === "function") {
+    return () => existing() || incoming();
+  }
+  return existing || incoming;
+}
+
 export function usePlaybackSession(
   requestKey: string,
   versions: PlayerFileVersion[],
@@ -1660,7 +1673,10 @@ export function usePlaybackSession(
             // postpone retirement.
             pendingReplanRef.current = {
               ...pending,
-              retireSessionOnRefusal,
+              retireSessionOnRefusal: mergeRetireOnRefusal(
+                pending.retireSessionOnRefusal,
+                retireSessionOnRefusal,
+              ),
             };
           } else {
             retireActiveSession(sessionId);

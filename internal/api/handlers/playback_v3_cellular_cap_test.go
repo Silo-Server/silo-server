@@ -137,6 +137,58 @@ func TestReplanQualityChangeWithChangedBandwidthCapReconsidersRequestedVersion(t
 	}
 }
 
+func TestReplanQualityChangeWithEqualCapAndClearedEstimateReselectsRequestedVersion(t *testing.T) {
+	handler, source, alternate, startRequest := cellularMultiVersionFixtureV3(t)
+	startRequest.QualityPreference = playback.QualityAutoV3
+	// Both cellular and Wi-Fi use the same 80 Mbps cap, so the 64 Mbps 4K
+	// source fits the cap, while a 12 Mbps cellular estimate drops start onto
+	// the 8 Mbps 1080p sibling.
+	startRequest.BandwidthCapKbps = new(80_000)
+	startRequest.BandwidthEstimateKbps = new(12_000)
+
+	ctx := newAuthorizedPlaybackContext()
+	caller := PlaybackCaller{UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation}
+	started, err := handler.StartPlaybackV2(ctx, caller, startRequest)
+	if err != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start with cellular estimate: err=%v response=%#v", err, started)
+	}
+	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
+	if started.PlaybackPlan.EffectiveMediaFileID != alternate.ID {
+		t.Fatalf("start effective file = %d, want 8 Mbps sibling %d", started.PlaybackPlan.EffectiveMediaFileID, alternate.ID)
+	}
+
+	// Switching to Wi-Fi clears the cellular estimate while keeping the same
+	// 80 Mbps cap; quality_change must reconsider the 64 Mbps requested source.
+	replanReq := playback.ReplanRequestV3{
+		ProtocolVersion:       playback.ProtocolV3,
+		Operation:             playback.ReplanOperationQualityChangeV3,
+		PlaybackAttemptID:     startRequest.PlaybackAttemptID,
+		ReplanRequestID:       "equal-cap-clear-estimate-0001",
+		FailedPlanID:          started.PlaybackPlan.PlanID,
+		PlanAttemptID:         "equal-cap-attempt-0001",
+		PlanAttemptKey:        started.PlaybackPlan.PlanAttemptKey,
+		AttemptCount:          1,
+		PositionSeconds:       30,
+		QualityPreference:     playback.QualityAutoV3,
+		BandwidthCapKbps:      new(80_000),
+		SelectedTracks:        started.PlaybackPlan.SelectedTracks,
+		ClientFeatures:        startRequest.ClientFeatures,
+		Capabilities:          startRequest.Capabilities,
+		ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	}
+	resp, err := handler.ReplanPlaybackV2(ctx, caller, started.SessionID, PlaybackReplanCommand{
+		Request: replanReq,
+		Digest:  "equal-cap-clear-estimate-digest",
+	})
+	if err != nil || resp.PlaybackPlan == nil {
+		t.Fatalf("replan with equal cap and cleared estimate: err=%v response=%#v", err, resp)
+	}
+	if resp.PlaybackPlan.EffectiveMediaFileID != source.ID || resp.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 {
+		t.Fatalf("equal-cap Wi-Fi replan played file %d via %s, want 4K source %d via direct play",
+			resp.PlaybackPlan.EffectiveMediaFileID, resp.PlaybackPlan.Delivery, source.ID)
+	}
+}
+
 func TestMarkLearnedLimitUnderAutoWithBandwidthCap(t *testing.T) {
 	source := &models.MediaFile{ID: 42, Bitrate: 25_000}
 	limit := &playback.BandwidthLimitV3{Kbps: 5_000}
