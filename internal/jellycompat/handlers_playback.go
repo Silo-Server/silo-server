@@ -2529,7 +2529,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "PlaybackUnavailable", "Item does not have playable media")
 		return
 	}
-	req.episode = detail.Type == "episode"
+	req.episode = detail.Type == compatEpisodeType
 
 	routeItemID := h.codec.EncodeStringID(EncodedIDItem, detail.ContentID)
 	if pathMediaSourceID != "" {

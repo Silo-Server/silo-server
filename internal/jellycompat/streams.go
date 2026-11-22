@@ -3984,7 +3984,7 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 		if sourceFromRoute && int64(version.FileID) != routeFileID {
 			continue
 		}
-		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps, streamLocation: string(streamlocation.FromContext(ctx)), episode: detail.Type == "episode"}, allow4KTranscode)
+		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps, streamLocation: string(streamlocation.FromContext(ctx)), episode: detail.Type == compatEpisodeType}, allow4KTranscode)
 		sources = append(sources, source)
 	}
 
