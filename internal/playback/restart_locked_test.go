@@ -275,12 +275,16 @@ func TestRestartSessionLocked_SupersededWhenReplaced(t *testing.T) {
 func TestLocalExitMonitorRestartsFilterReinitFailureOnCPUDecode(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
+		stderr         string
 		ffmpegMissing  bool
 		wantTornDown   bool
 		wantRegistered bool
 	}{
 		{name: "restart starts", wantRegistered: true},
 		{name: "restart cannot start", ffmpegMissing: true, wantTornDown: true},
+		// FFmpeg was stopped at its AV1 decoder's first rejection (#4279).
+		{name: "AV1 decoder without a GPU", wantRegistered: true,
+			stderr: "[av1 @ 0x1] Your platform doesn't support hardware accelerated AV1 decoding.\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resetDeviceLoad(t)
@@ -301,7 +305,10 @@ func TestLocalExitMonitorRestartsFilterReinitFailureOnCPUDecode(t *testing.T) {
 				exited := make(chan struct{})
 				close(exited)
 				stderr := newBoundedTailBuffer(0)
-				_, _ = stderr.Write([]byte("[vf#0:0 @ 0x5ad071e0c0c0] Error reinitializing filters!\n"))
+				if tc.stderr == "" {
+					tc.stderr = "[vf#0:0 @ 0x5ad071e0c0c0] Error reinitializing filters!\n"
+				}
+				_, _ = stderr.Write([]byte(tc.stderr))
 				s := &TranscodeSession{
 					outputDir: dir, done: exited, waitErr: errors.New("exit status 187"), stderr: stderr,
 					lastRequestedSegment: 312,

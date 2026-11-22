@@ -766,7 +766,9 @@ func RequiresSoftwareVideoDecode(codec, profile string, bitDepth int) bool {
 // QSV, CUDA or VideoToolbox decoder for them, so -hwaccel decodes them on the
 // CPU anyway and hands system-memory frames to a graph that expects hardware
 // frames, which fails before the first segment. WMV3 (Windows Media Video 9)
-// is VC-1, which those GPUs do decode, so it is not listed.
+// is VC-1, which NVIDIA and most Intel GPUs decode, so it is not listed; a GPU
+// that lacks it fails with a hardwareDecodeUnsupportedMarkers line and takes
+// the CPU-decode retry.
 func hasNoHardwareVideoDecoder(codec string) bool {
 	switch strings.ToLower(strings.TrimSpace(codec)) {
 	case "wmv1", "wmv2", "msmpeg4v1", "msmpeg4v2", "msmpeg4v3", "msmpeg4":
@@ -4002,8 +4004,10 @@ const ffmpegFilterSetupFailure = "Error reinitializing filters!"
 // decoder replaces its frames context mid-stream: the rebuilt graph cannot
 // feed hardware frames to the encoder that is already open, and it fails at
 // the same frame on every restart. CPU-decoded frames reach the same graph
-// through an upload, so the restart takes that route once. The caller holds
-// s.mu.
+// through an upload, so the restart takes that route once. The same goes for
+// a generation stopped at FFmpeg's AV1 decoder rejection
+// (ffmpegAV1HardwareDecodeUnavailable): the same command would be stopped
+// again. The caller holds s.mu.
 //
 // The line also follows unrelated graph failures. Those sessions were failing
 // anyway and lose only GPU decode. NVENC is left out: with CPU decode an
@@ -4015,7 +4019,9 @@ func (s *TranscodeSession) gpuDecodeFailedFilterSetupLocked() bool {
 	if s.opts.HWAccel != transcodeHWQSV && s.opts.HWAccel != transcodeHWVAAPI {
 		return false
 	}
-	return strings.Contains(s.stderr.String(), ffmpegFilterSetupFailure)
+	stderr := s.stderr.String()
+	return strings.Contains(stderr, ffmpegFilterSetupFailure) ||
+		strings.Contains(stderr, ffmpegAV1HardwareDecodeUnavailable)
 }
 
 // crashState reports, in one read, whether FFmpeg exited with an error and has
@@ -4942,11 +4948,11 @@ func (w *ffmpegStderrWriter) Write(p []byte) (int, error) {
 
 // stopOnHardwareDecodeUnavailable kills FFmpeg when line says its AV1
 // decoder has no hardware to run on (see ffmpegAV1HardwareDecodeUnavailable).
-// It runs on the stderr copy, before Wait returns, as procgroup.Kill requires.
-// No frame can follow, and the process would otherwise read the whole input
+// It runs on the stderr copy. No frame can follow, and the process would otherwise read the whole input
 // first. The retained stderr already holds the line (the session's tail
 // buffer is written before this writer), so the exit classifies as
-// ErrHardwareDecodeUnsupported and startup walks CPU decoding at once.
+// ErrHardwareDecodeUnsupported and startup, or download preparation, walks
+// CPU decoding at once. A writer without a session only does this stop.
 //
 // Only the decoder's own line counts, on a command that asked for GPU
 // decoding: FFmpeg echoes input paths in other lines, and a file named after
@@ -4959,7 +4965,14 @@ func (w *ffmpegStderrWriter) stopOnHardwareDecodeUnavailable(line string) {
 		return
 	}
 	w.stopped = true
-	slog.WarnContext(w.ctx, "ffmpeg has no hardware AV1 decoder; stopping it so startup can decode on the CPU",
+	// Wait reaps FFmpeg before it finishes copying stderr, so this line can
+	// arrive after FFmpeg exited on its own. Its group id may then belong to
+	// another process, which procgroup.Kill must not signal. The process
+	// handle knows whether it was reaped.
+	if errors.Is(w.cmd.Process.Signal(syscall.Signal(0)), os.ErrProcessDone) {
+		return
+	}
+	slog.WarnContext(w.ctx, "ffmpeg has no hardware AV1 decoder for this source; stopping it",
 		"component", "playback",
 		"playback_session_id", w.sessionID,
 	)
