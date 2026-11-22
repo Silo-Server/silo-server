@@ -614,9 +614,13 @@ func TestReplayDuringTheWaitReportsThePlayersAnswer(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 	answerAsPlayer(t, control, playback.RealtimeResultStatusCompleted)(env)
-	for name, out := range map[string]chan AdminPlaybackCommandView{"first": first, "replay": replay} {
-		if view := <-out; view.Delivery != deliveryAcknowledged {
-			t.Fatalf("%s = %+v", name, view)
-		}
+	if view := <-first; view.Outcome != AdminPlaybackCommandApplied || view.Delivery != deliveryAcknowledged {
+		t.Fatalf("first = %+v", view)
+	}
+	if view := <-replay; view.Outcome != AdminPlaybackCommandReplayed || view.Delivery != deliveryAcknowledged {
+		t.Fatalf("replay = %+v", view)
+	}
+	if len(conn.messages) != 1 {
+		t.Fatalf("the player got %d frames, want the message once", len(conn.messages))
 	}
 }

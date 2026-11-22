@@ -64,8 +64,8 @@ const (
 
 	// adminPlaybackMessageResultWait bounds how long a message waits for the
 	// player's result after the write. A connected player answers in
-	// milliseconds; the relay's reply timeout (controlRelayReplyTimeout)
-	// covers the owner's socket write plus this wait.
+	// milliseconds. A relayed message adds this wait to the relay's reply
+	// timeout (ControlRelay.ForwardWaiting, admin_playback_relay.go).
 	adminPlaybackMessageResultWait = 3 * time.Second
 
 	// adminPlaybackCommandLedgerLimit bounds the receipts remembered per
