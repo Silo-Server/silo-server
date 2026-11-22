@@ -3503,6 +3503,12 @@ func writePlaybackSegmentError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusPreconditionFailed, "stale_generation", "Segment generation is stale")
 	case errors.Is(err, playback.ErrManifestNotReady):
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Transcode session is temporarily unavailable")
+	case errors.Is(err, playback.ErrSegmentIncomplete):
+		// The bytes exist but are not a whole segment: the writer is still
+		// filling the name. Tell the client to come back rather than hand it a
+		// body it cannot decode.
+		w.Header().Set("Retry-After", strconv.Itoa(playback.SegmentIncompleteRetryAfterSeconds))
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Segment is not complete yet")
 	case errors.Is(err, playback.ErrSourceDecodeRejected):
 		// A revoked generation cannot produce a playable segment. The manifest
 		// path and the remote node already answer the permanent decode verdict,
@@ -3706,6 +3712,13 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 		}
 	} else {
 		segmentLease, err = transcodeSession.OpenSegmentForGeneration(segmentName, requestedGeneration)
+	}
+	// A name the writer has opened but not finished is not a segment yet. Wait
+	// for it within the same budget a missing segment gets; a writer that never
+	// completes answers the retryable verdict below instead of a 404 or a
+	// restart, because a restart would not make the bytes arrive.
+	if err != nil && errors.Is(err, playback.ErrSegmentIncomplete) {
+		segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, transcodeSession.SegmentCompletionBudget())
 	}
 	if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && requestedGeneration == "" {
 		// Switchover overlap: a same-session replan publishes its successor
@@ -3928,10 +3941,12 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 	w.Header().Set("Cache-Control", "no-store, max-age=0")
 	w.Header().Set("Pragma", "no-cache")
 	defer func() { _ = segmentLease.Close() }()
-	sw := httpstream.NewRollingDeadlineWriter(w)
-	http.ServeContent(sw, r, segmentLease.Info.Name(), segmentLease.Info.ModTime(), segmentLease.File)
-	if r.Method == http.MethodGet &&
-		sw.CompletedFullResponse(segmentLease.Info.Size()) {
+	complete, serveErr := playback.ServeSegmentLease(w, r, segmentLease)
+	if serveErr != nil {
+		writePlaybackSegmentError(w, serveErr)
+		return
+	}
+	if r.Method == http.MethodGet && complete {
 		if segNum, parseErr := playback.ParseSegmentNumber(segmentName); parseErr == nil {
 			servedSession.ReportSegmentDownloadedForGeneration(segNum, segmentLease.Generation)
 		}

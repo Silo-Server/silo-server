@@ -59,7 +59,7 @@ func writePlaybackTestFFmpegRejectAfterManifest(t *testing.T) string {
 		"for arg in \"$@\"; do last=\"$arg\"; done\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
-		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
+		"printf '\\000\\000\\000\\010ftyp\\000\\000\\000\\010moov' > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
 		"printf x > \"$out/seg_1.m4s\"; printf x > \"$out/seg_2.m4s\"; " +
 		"printf '#EXTM3U\\n#EXT-X-VERSION:7\\n#EXT-X-TARGETDURATION:2\\n" +
 		"#EXT-X-MEDIA-SEQUENCE:0\\n#EXT-X-MAP:URI=\"init.mp4\"\\n" +
@@ -795,7 +795,7 @@ func writePlaybackTestFFmpegDelayedDecodeFailure(t *testing.T) string {
 		"for arg in \"$@\"; do last=\"$arg\"; done\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
-		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
+		"printf '\\000\\000\\000\\010ftyp\\000\\000\\000\\010moov' > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
 		"printf x > \"$out/seg_1.m4s\"; printf x > \"$out/seg_2.m4s\"; " +
 		"printf '#EXTM3U\\n#EXT-X-VERSION:7\\n#EXT-X-TARGETDURATION:2\\n" +
 		"#EXT-X-MEDIA-SEQUENCE:0\\n#EXT-X-MAP:URI=\"init.mp4\"\\n" +

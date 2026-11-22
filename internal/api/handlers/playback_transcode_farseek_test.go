@@ -28,7 +28,7 @@ func writePlaybackTestFFmpegFarSeek(t *testing.T) string {
 		"case \" $* \" in *\" -bsfs \"*|*\" -encoders \"*|*\" -f null - \"*) exit 0 ;; esac\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; echo \"start=$start\" >> \"$out/.invocations\"; " +
-		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
+		"printf '\\000\\000\\000\\010ftyp\\000\\000\\000\\010moov' > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
 		"printf x > \"$out/seg_1.m4s\"; printf x > \"$out/seg_2.m4s\"; " +
 		"printf x > \"$out/seg_0.ts\"; printf x > \"$out/seg_1.ts\"; printf x > \"$out/seg_2.ts\"; " +
 		"printf x > \"$out/seg_00000.ts\"; printf x > \"$out/seg_00001.ts\"; printf x > \"$out/seg_00002.ts\"; " +
@@ -388,7 +388,7 @@ func writePlaybackTestFFmpegFarSeekDemux(t *testing.T) string {
 		"case \" $* \" in *\" -bsfs \"*|*\" -encoders \"*|*\" -f null - \"*) exit 0 ;; esac\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
-		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
+		"printf '\\000\\000\\000\\010ftyp\\000\\000\\000\\010moov' > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
 		"printf x > \"$out/seg_1.m4s\"; printf x > \"$out/seg_2.m4s\"; " +
 		"printf x > \"$out/seg_0.ts\"; printf x > \"$out/seg_1.ts\"; printf x > \"$out/seg_2.ts\"; " +
 		"printf x > \"$out/seg_00000.ts\"; printf x > \"$out/seg_00001.ts\"; printf x > \"$out/seg_00002.ts\"; " +
@@ -472,7 +472,7 @@ func writePlaybackTestFFmpegTwoRotation(t *testing.T) string {
 		"case \" $* \" in *\" -bsfs \"*|*\" -encoders \"*|*\" -f null - \"*) exit 0 ;; esac\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
-		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
+		"printf '\\000\\000\\000\\010ftyp\\000\\000\\000\\010moov' > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
 		"printf x > \"$out/seg_1.m4s\"; printf x > \"$out/seg_2.m4s\"; " +
 		"printf x > \"$out/seg_0.ts\"; printf x > \"$out/seg_1.ts\"; printf x > \"$out/seg_2.ts\"; " +
 		"printf x > \"$out/seg_00000.ts\"; printf x > \"$out/seg_00001.ts\"; printf x > \"$out/seg_00002.ts\"; " +

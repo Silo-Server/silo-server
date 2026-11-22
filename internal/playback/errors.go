@@ -2,6 +2,12 @@ package playback
 
 import "errors"
 
+// ErrSegmentIncomplete means a segment name exists with bytes but they are not
+// (yet) a whole segment: a writer is still filling it, or truncated it and has
+// not finished rewriting it. It is transient and retryable, and it must never
+// reach a client as a 200 body.
+var ErrSegmentIncomplete = errors.New("segment is not complete yet")
+
 // Sentinel errors for playback operations.
 var (
 	ErrSessionNotFound          = errors.New("playback session not found")
