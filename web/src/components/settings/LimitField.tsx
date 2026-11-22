@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 
 import { Input } from "@/components/ui/input";
 import { useT } from "@/i18n";
+import { cn } from "@/lib/utils";
 import { SETTINGS_NUMBER_WIDTH, SettingFieldRow } from "@/pages/admin-settings/SettingField";
 
 export interface LimitFieldProps {
@@ -26,6 +27,8 @@ export interface LimitFieldProps {
   min?: number;
   disabled?: boolean;
   restartRequired?: boolean;
+  /** The variable that sets this limit from the server's environment; disables the control. */
+  managedByEnv?: string;
 }
 
 /**
@@ -69,9 +72,11 @@ export function LimitField({
   scale = 1,
   hint,
   min = 0,
-  disabled = false,
+  disabled: disabledProp = false,
   restartRequired = false,
+  managedByEnv,
 }: LimitFieldProps) {
+  const disabled = disabledProp || managedByEnv != null;
   const t = useT();
   const unlimitedLabel = unlimitedLabelProp ?? t("web.settings.limitField.unlimited");
   const controlId = useId();
@@ -110,13 +115,20 @@ export function LimitField({
       descriptionId={hintId}
       restartRequired={restartRequired}
       unit={unit}
+      managedByEnv={managedByEnv}
     >
       <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
         {/* Ahead of the input, not after it: the row's unit slot sits to the
             right of the control edge, so anything between the input and that
             edge would knock this field's box out of line with the plain number
             fields it is stacked against. */}
-        <label htmlFor={checkboxId} className="flex shrink-0 items-center gap-2 text-sm">
+        <label
+          htmlFor={checkboxId}
+          className={cn(
+            "flex shrink-0 items-center gap-2 text-sm",
+            disabled && "text-muted-foreground cursor-not-allowed",
+          )}
+        >
           <input
             id={checkboxId}
             type="checkbox"

@@ -43,7 +43,9 @@ func (f *fakeAdminTasks) StartTask(key string) (taskmanager.TaskInfo, error) {
 	info.State = taskmanager.TaskStateRunning
 	return info, nil
 }
-func (f *fakeAdminTasks) CancelTask(string) error { return nil }
+func (f *fakeAdminTasks) CancelTask(key string) (taskmanager.TaskInfo, error) {
+	return f.GetTaskInfo(key), nil
+}
 func (f *fakeAdminTasks) GetSchedule(context.Context, string) (taskmanager.Schedule, error) {
 	f.reads++
 	return f.schedule, nil

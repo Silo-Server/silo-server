@@ -33,13 +33,6 @@ func (h *hostAdapter) Shutdown(ctx context.Context) error {
 	return h.host.Shutdown(ctx)
 }
 
-// NextStartSeq forwards the host's start counter so the resident
-// supervisor can tell a launch it issued from one it joined through the
-// singleflight (see ResidentSupervisor.runStart).
-func (h *hostAdapter) NextStartSeq() uint64 {
-	return h.host.NextStartSeq()
-}
-
 func (h *hostAdapter) Running(installationID int) bool {
 	return h.host.Running(installationID)
 }

@@ -179,6 +179,16 @@ func TMDBCollectionSourceUnset(sourceConfig json.RawMessage) bool {
 	return json.Unmarshal(sourceConfig, &cfg) != nil || cfg.CollectionID <= 0
 }
 
+// TMDBCollectionSourceID is the TMDB collection a collection syncs from, or
+// false when its source is not a TMDB collection.
+func TMDBCollectionSourceID(sourceConfig json.RawMessage) (int64, bool) {
+	var cfg libraryCollectionSourceConfig
+	if json.Unmarshal(sourceConfig, &cfg) != nil || cfg.Mode != "tmdb_collection" || cfg.CollectionID <= 0 {
+		return 0, false
+	}
+	return int64(cfg.CollectionID), true
+}
+
 // libraryCollectionDiscoverConfig persists TMDB /discover filters in the
 // collection's source_config JSON. Field names follow the TMDBDiscoverSpec
 // JSON contract so the on-disk shape matches the template spec.

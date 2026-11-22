@@ -215,7 +215,7 @@ func TestNVENCSDRBaseGraphsDownloadBeforeSubtitleComposition(t *testing.T) {
 			convert := strings.Index(graph, "zscale=p=bt709")
 			compose := strings.Index(graph, "subtitles=")
 			if codec == "hdmv_pgs_subtitle" {
-				compose = strings.Index(graph, "overlay=eof_action=pass")
+				compose = strings.Index(graph, "split[bsmain][bsref]")
 			}
 			upload := strings.LastIndex(graph, "hwupload_cuda")
 			if download < 0 || convert <= download || compose <= convert || upload <= compose {
@@ -445,6 +445,43 @@ var videoToolboxToneMapSubtitleBase = TranscodeOpts{
 	SubtitleBurnIn:       true, SubtitleTrackIndex: 0,
 }
 
+// pgsComposite is the PGS composite on [vmain] that fits subtitle track index
+// to the frame.
+func pgsComposite(index int) string {
+	return fmt.Sprintf("[vmain]split[bsmain][bsref];[0:s:%d]premultiply=inplace=1[bspre];"+
+		"[bspre][bsref]scale=w='min(rw,iw*rw/(ih*rdar))':h='min(rh,ih*rdar*rh/iw)':eval=frame[bsub];"+
+		"[bsmain][bsub]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:eof_action=pass:alpha=premultiplied", index)
+}
+
+// TestPGSBurnInWithoutScaleReferenceKeepsPlainOverlay verifies that an FFmpeg
+// older than 7.1 gets the VobSub graph for PGS, which it can parse.
+func TestPGSBurnInWithoutScaleReferenceKeepsPlainOverlay(t *testing.T) {
+	previous := scaleReferenceSupported
+	t.Cleanup(func() { scaleReferenceSupported = previous })
+	var probed []string
+	scaleReferenceSupported = func(bin string) bool {
+		probed = append(probed, bin)
+		return false
+	}
+
+	opts := TranscodeOpts{
+		InputPath: "/media/movie.mkv", OutputDir: "/tmp/out", SessionID: "session-pgs-old-ffmpeg", SourceVideoCodec: "h264",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "none", TargetResolution: "1080p",
+		SubtitleTrackIndex: 2, SubtitleBurnIn: true, SubtitleCodec: "hdmv_pgs_subtitle", FFmpegPath: "/opt/old/ffmpeg",
+	}
+	joined := strings.Join(buildFFmpegArgs(opts), " ")
+	want := "-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]null[vmain];[vmain][0:s:2]overlay=eof_action=pass,scale=-2:1080[vout]"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("args missing plain overlay graph %q:\n%s", want, joined)
+	}
+	if strings.Contains(joined, "split[bsmain]") {
+		t.Fatalf("args fit PGS without scale reference support:\n%s", joined)
+	}
+	if len(probed) == 0 || slices.ContainsFunc(probed, func(bin string) bool { return bin != "/opt/old/ffmpeg" }) {
+		t.Fatalf("probed %q, want only the configured /opt/old/ffmpeg", probed)
+	}
+}
+
 func withSubtitle(opts TranscodeOpts, codec string) TranscodeOpts {
 	opts.SubtitleCodec = codec
 	return opts
@@ -662,12 +699,12 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 			SoftwareVideoDecode: true, TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "qsv",
 			TargetResolution: "720p", SubtitleTrackIndex: 2, SubtitleBurnIn: true, SubtitleCodec: "hdmv_pgs_subtitle",
 		},
-		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]format=yuv420p[vmain];[vmain][0:s:2]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv[vout]"},
+		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]format=yuv420p,scale=-2:720[vmain];" + pgsComposite(2) + ",format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv[vout]"},
 		forbid: []string{"overlay_vaapi", "hwdownload", "-hwaccel vaapi"},
 	},
 	{
-		// Overlay runs at native resolution first, then scales. The graph
-		// output replaces the raw video mapping, and -vf alongside
+		// PGS scales to the target first, then fits its canvas to the frame.
+		// The graph output replaces the raw video mapping, and -vf alongside
 		// -filter_complex on one stream is an FFmpeg error.
 		name: "bitmap burn-in CPU uses overlay filter_complex",
 		opts: TranscodeOpts{
@@ -675,8 +712,40 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "none", TargetResolution: "1080p",
 			SubtitleTrackIndex: 2, SubtitleBurnIn: true, SubtitleCodec: "hdmv_pgs_subtitle",
 		},
-		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint][0:s:2]overlay=eof_action=pass,scale=-2:1080[vout]", "-map [vout]", "-c:v libx264"},
+		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]scale=-2:1080[vmain];" + pgsComposite(2) + "[vout]", "-map [vout]", "-c:v libx264"},
 		forbid: []string{"-map 0:v:0", "-vf ", "subtitles="},
+	},
+	{
+		// With no target scale the composite reads the deinterlaced frames
+		// through a null filter.
+		name: "bitmap burn-in CPU fits PGS at the source size",
+		opts: TranscodeOpts{
+			InputPath: "/media/movie.mkv", OutputDir: "/tmp/out", SessionID: "session-pgs-source", SourceVideoCodec: "h264",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "none",
+			SubtitleTrackIndex: 2, SubtitleBurnIn: true, SubtitleCodec: "hdmv_pgs_subtitle",
+		},
+		want: []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]null[vmain];" + pgsComposite(2) + "[vout]"},
+	},
+	{
+		// VobSub keeps the plain overlay at the source size, then scales.
+		name: "bitmap burn-in CPU overlays VobSub at 0,0",
+		opts: TranscodeOpts{
+			InputPath: "/media/movie.mkv", OutputDir: "/tmp/out", SessionID: "session-vobsub", SourceVideoCodec: "h264",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "none", TargetResolution: "1080p",
+			SubtitleTrackIndex: 2, SubtitleBurnIn: true, SubtitleCodec: "dvd_subtitle",
+		},
+		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]null[vmain];[vmain][0:s:2]overlay=eof_action=pass,scale=-2:1080[vout]"},
+		forbid: []string{"split[bsmain]"},
+	},
+	{
+		name: "bitmap burn-in CPU overlays DVB at 0,0",
+		opts: TranscodeOpts{
+			InputPath: "/media/movie.mkv", OutputDir: "/tmp/out", SessionID: "session-dvbsub", SourceVideoCodec: "h264",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "none", TargetResolution: "720p",
+			SubtitleTrackIndex: 1, SubtitleBurnIn: true, SubtitleCodec: "dvb_subtitle",
+		},
+		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]null[vmain];[vmain][0:s:1]overlay=eof_action=pass,scale=-2:720[vout]"},
+		forbid: []string{"split[bsmain]"},
 	},
 	{
 		// Only the subtitle bitmap is uploaded; the video stays on the VAAPI
@@ -714,7 +783,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 			SourceVideoProfile: "main10", SourceVideoBitDepth: 10, TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
 			HWAccel: "nvenc", TargetResolution: "720p", SubtitleTrackIndex: 0, SubtitleBurnIn: true, SubtitleCodec: "hdmv_pgs_subtitle",
 		},
-		want:   []string{"-filter_complex [0:v:0]hwdownload,format=p010le,format=yuv420p[vmain];[vmain][0:s:0]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload_cuda[vout]"},
+		want:   []string{"-filter_complex [0:v:0]hwdownload,format=p010le,format=yuv420p,scale=-2:720[vmain];" + pgsComposite(0) + ",format=nv12,hwupload_cuda[vout]"},
 		forbid: []string{"hwdownload,format=yuv420p"},
 	},
 	textBurnInDepth("NVENC8Bit", "nvenc", 8, "hwdownload,format=nv12,format=yuv420p,scale=-2:720,subtitles="),
@@ -751,7 +820,8 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 	{
 		name:  "tone map orders bitmap subtitles after color conversion",
 		opts:  withSubtitle(toneMapSubtitleBase, "hdmv_pgs_subtitle"),
-		order: []string{"tonemapx=tonemap=bt2390", "overlay=eof_action=pass", "scale=-2:1080"},
+		want:  []string{"scale=-2:1080[vmain];" + pgsComposite(0) + "[vout]"},
+		order: []string{"tonemapx=tonemap=bt2390", "scale=-2:1080", "split[bsmain][bsref]"},
 	},
 	{
 		// VideoToolbox decode outputs software frames and takes no x264 preset.
@@ -823,7 +893,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 		name:         "VideoToolbox tone map downloads before bitmap subtitles",
 		opts:         withSubtitle(videoToolboxToneMapSubtitleBase, "hdmv_pgs_subtitle"),
 		videoToolbox: true,
-		order:        []string{"scale_vt=w=-2:h=1080", "hwdownload,format=p010le,format=nv12", "overlay=eof_action=pass", "sidedata=mode=delete"},
+		order:        []string{"scale_vt=w=-2:h=1080", "hwdownload,format=p010le,format=nv12[vmain];" + pgsComposite(0), "sidedata=mode=delete"},
 		forbid:       []string{"scale=-2:1080"},
 	},
 	{
@@ -851,7 +921,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 		name:   "NVENC mixed stage bitmap burn-in uploads without download",
 		opts:   nvencMixedOpts("1", "hdmv_pgs_subtitle"),
 		stage:  nvencMixedStageOpts,
-		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]format=yuv420p[vmain];[vmain][0:s:1]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload[vout]", "-init_hw_device cuda=cu:1 -filter_hw_device cu", "-c:v h264_nvenc"},
+		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]format=yuv420p,scale=-2:720[vmain];" + pgsComposite(1) + ",format=nv12,hwupload[vout]", "-init_hw_device cuda=cu:1 -filter_hw_device cu", "-c:v h264_nvenc"},
 		forbid: []string{"hwdownload", "hwupload_cuda"},
 	},
 	{
@@ -968,5 +1038,25 @@ func TestPrepareSubtitleFilterInputLinksDecodedNonUTF8Path(t *testing.T) {
 	}
 	if target != rawInput {
 		t.Fatalf("subtitle filter alias target = %q, want %q", target, rawInput)
+	}
+}
+
+// A probe that can't start FFmpeg isn't a "no": it isn't cached, so a later
+// transcode asks again instead of losing the fit until a restart, but not the
+// very next one, which would pay the probe's timeout again.
+func TestScaleReferenceProbeDoesNotCacheAFailedStart(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "missing-ffmpeg")
+	if supportsScaleReference(bin) {
+		t.Fatal("a missing binary reported support")
+	}
+	scaleReferenceMu.Lock()
+	_, cached := scaleReferenceCache[bin]
+	retry, backingOff := scaleReferenceRetry[bin]
+	scaleReferenceMu.Unlock()
+	if cached {
+		t.Fatal("a probe that could not start was cached")
+	}
+	if !backingOff || !retry.After(time.Now()) {
+		t.Fatal("a probe that could not start is retried on the next transcode; want it to wait")
 	}
 }

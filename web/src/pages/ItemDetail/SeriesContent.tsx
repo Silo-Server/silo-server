@@ -19,6 +19,7 @@ import MatchItemDialog from "@/components/MatchItemDialog";
 import SplitItemDialog from "@/components/SplitItemDialog";
 import PageBack from "@/components/PageBack";
 import RecommendationGrid from "@/components/RecommendationGrid";
+import ItemCollectionsRow from "@/components/collections/ItemCollectionsRow";
 import DetailHero from "./DetailHero";
 import DetailLayout, { DetailSection } from "./DetailLayout";
 import { useDetailWatchTogether } from "@/pages/watchtogether/DetailWatchTogether";
@@ -328,6 +329,8 @@ export default function SeriesContent({
           <CastCarousel cast={item.cast ?? []} crewGroups={crewGroups} limit={12} prefetchPeople />
         </DetailSection>
       )}
+
+      <ItemCollectionsRow contentId={item.content_id} libraryId={libraryId} />
 
       {similarLoading ? (
         <RecommendationGridSkeleton />

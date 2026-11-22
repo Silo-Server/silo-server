@@ -35,7 +35,10 @@ var liveTables = []string{"policy_documents", "policy_document_versions"}
 // unless backup.include_intro_fingerprints (excludedTableData).
 var loggedTables = []string{"activity_log", "operational_logs", "policy_decisions", "catalog_search_index_events", tableIntroFingerprints,
 	// Upload sessions: their parts live outside the backup.
-	"backup_uploads", "backup_upload_parts", "backup_upload_attempts"}
+	"backup_uploads", "backup_upload_parts", "backup_upload_attempts",
+	// Provisioning status and placement from the current deployment must not
+	// be replayed by a restored backup.
+	tablePluginProvisionStatus, "plugin_provision_placement"}
 
 const tableIntroFingerprints = "media_intro_fingerprints"
 
@@ -54,7 +57,7 @@ var restoredDataTables = strings.Fields(`
 	media_file_trickplay media_files media_folder_paths media_folders media_group_locations
 	media_group_overrides media_identity_overrides media_item_aliases media_item_backdrops
 	media_item_groups media_item_libraries media_item_localizations media_item_provider_ids
-	media_item_rating_sources media_item_roots media_item_tmdb_collections media_items
+	media_item_rating_sources media_item_roots media_item_tmdb_collections media_item_work_ids media_items
 	media_request_events media_request_follows media_request_targets media_requests
 	media_root_overrides movie_availability notification_preferences observed_media_locations
 	overlay_images page_sections people plugin_archives plugin_capabilities plugin_installations 
@@ -79,6 +82,7 @@ var serverStateTables = strings.Fields(`
 	audiobook_item_file_stats autoscan_events autoscan_webhook_deliveries blob_gc_queue
 	catalog_item_change_drain catalog_item_change_events catalog_search_index_state
 	dashboard_metric_samples dashboard_node_egress_samples download_artifact_orphans
+	download_change_drain download_change_events
 	download_storage_events download_storage_samples ebook_enrichment_reconcile_cursors
 	goose_db_version hdr10_plus_backfill_no_frame history_import_runs image_ladder_backfill_state intro_season_analysis_state
 	intro_silence_refinement_attempts item_cowatch library_collection_order_revisions
@@ -91,7 +95,7 @@ var serverStateTables = strings.Fields(`
 	notification_content_seed_state notification_deliveries notification_inbox_clocks
 	notification_library_seed_state page_section_revisions page_section_scope_revisions
 	playback_connections playback_route_events playback_session_lifecycle playback_sessions_sync
-	playback_shuffle_items playback_shuffles playback_v3_attempts playback_v3_replans
+	playback_shuffle_items playback_shuffles playback_stop_commits playback_v3_attempts playback_v3_replans
 	plugin_event_deliveries  policy_generation progress_bootstrap_items
 	progress_bootstrap_snapshots push_delivery_attempts recommendation_cache release_events
 	request_discover_layout request_discover_list_snapshots scan_runs seasonal_list_snapshots

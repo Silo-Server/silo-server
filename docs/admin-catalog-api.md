@@ -72,6 +72,13 @@ filters. A movie or series also has `status`, its metadata match state. An
 episode has `series_id`, `series_title`, `season_number` and `episode_number`;
 its `year` is its air-date year.
 
+`poster_url` is the card-size poster of a movie or series, or of an episode's
+series, and is absent only when there is none. It is always a URL this server
+issued, never a metadata provider's, so a tool that cannot reach the
+providers' image hosts can load it; art not cached yet comes through a signed
+`getItemPoster` link (see "Admin poster URLs" in [images-api.md](images-api.md)).
+The URL expires: read it again from a later page rather than storing it.
+
 A movie or series also carries its stored metadata, so a tool can match rules
 across a library without reading each item as a profile: `genres`,
 `content_rating`, `studios`, `networks` (a series' broadcasters), and the four
@@ -147,7 +154,8 @@ carries those changes, `item_match_hints`, true when
 `GET /api/v2/admin/items/{id}/match/hints` is served, `item_metadata`, true
 when items carry the stored metadata above and the listing accepts
 `include_people`, `item_file_paths`, true when this caller may send
-`include_file_paths`, and `item_metadata_reset`, true when
+`include_file_paths`, `item_posters`, true when items carry `poster_url` under
+that rule, and `item_metadata_reset`, true when
 `POST /api/v2/admin/items/{id}/refresh-metadata` accepts `mode: "reset"`. The
 listing and the events have no Apple, Android, or Jellyfin compatibility
 callers; Jellyfin clients read the catalog through their own item queries.
@@ -365,7 +373,10 @@ submission with completion.
 files are matched again. A podcast library keeps its links: the podcast scanner
 finds a show through them and rewrites the show and its episodes from their tags
 on every scan, so clearing them would replace the show and episode IDs that
-favorites and progress refer to.
+favorites and progress refer to. An audiobook or ebook runs `complete` as
+`reset`: the book scanners find a book only through its linked files, so
+clearing them would give the book a new content ID and leave its progress,
+favorites and provider IDs on the old one.
 
 `reset` is Reset to Provider: a quick refresh of the movie, series, season or
 episode that also removes its `locked_fields` and gives every lockable field,

@@ -47,8 +47,10 @@ function alphaOf(hex: string): number {
 // tinted by the accent in presets that fill with it, and a custom text or
 // border colour yields to the accent in presets that paint the accent there.
 // A solid fill without a chosen text colour gets black or white text, since
-// the preset's own colour was picked to read on the artwork. An accent the
-// preset writes as text that would not read on that fill tints it instead.
+// the preset's own colour was picked for its own fill or for the artwork. A
+// see-through fill in a preset that fills with the accent gets white text,
+// since that text sits on the artwork again. An accent the preset writes as
+// text that would not read on a solid fill tints it instead.
 export function applyOverlayStyle(
   preset: OverlayPreset,
   style: OverlayStyle | undefined,
@@ -101,7 +103,10 @@ export function applyOverlayStyle(
           : background;
       }
       if (solidFill) css.textShadow = undefined;
-      const text = textColor ?? (solidFill ? readableTextOn(solidFill) : undefined);
+      const seeThroughAccent = accentFill && background && !solidFill;
+      const text =
+        textColor ??
+        (solidFill ? readableTextOn(solidFill) : seeThroughAccent ? "#ffffff" : undefined);
       if (text && !accentText) css.color = text;
       if (borderColor && !(accent && strategy === "border")) css.borderColor = borderColor;
       if (style.borderWidth !== undefined && style.borderWidth > 0) css.borderStyle = "solid";
@@ -138,9 +143,9 @@ function contrastRatio(a: string, b: string): number {
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
-// Black or white, whichever reads better on a hex fill. Used for the rating
-// source chips the plate preset draws in the accent colour, and for text on
-// a solid style fill.
+// Black or white, whichever reads better on a hex fill, such as an accent or
+// a solid style fill. A colour that isn't hex gets white: both ratios are
+// infinite, so neither wins.
 export function readableTextOn(hex: string): "#000000" | "#ffffff" {
-  return (luminanceOf(hex) ?? 0) > 0.4 ? "#000000" : "#ffffff";
+  return contrastRatio(hex, "#000000") > contrastRatio(hex, "#ffffff") ? "#000000" : "#ffffff";
 }

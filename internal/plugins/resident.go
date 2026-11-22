@@ -148,15 +148,15 @@ func residentBackoff(failures int, minBackoff, maxBackoff time.Duration) time.Du
 	return delay
 }
 
+type residentRuntime struct {
+	installation installationRuntime
+	hostIdentity string
+}
+
 type residentEntry struct {
-	id          int
-	version     string
-	installPath string
-	// hostIdentity is the host identity the running process was launched
-	// under (a proxy's instance-state scope). A change means the process
-	// holds another host's in-memory identity and is replaced.
-	hostIdentity      string
-	runtimeGeneration int64
+	id      int
+	desired residentRuntime
+	active  residentRuntime // last runtime accepted after a successful launch
 
 	state         ResidentState
 	failures      int
@@ -166,6 +166,7 @@ type residentEntry struct {
 	nextRestartAt time.Time
 
 	timer *time.Timer
+	ready <-chan struct{}
 	// gen invalidates an in-flight start or a pending timer when the entry
 	// is reset, halted, or superseded by a newer start.
 	gen uint64
@@ -205,7 +206,7 @@ type ResidentSupervisor struct {
 	// order: an older one resurrecting a resident a newer one just removed,
 	// or starting one after the gate closed. Lifecycle hooks, the proxy's
 	// event follower, and the poll all call Reconcile concurrently.
-	reconcileMu sync.Mutex
+	reconcileMu runtimeMutex
 
 	mu      sync.Mutex
 	armed   bool
@@ -213,6 +214,7 @@ type ResidentSupervisor struct {
 	ctx     context.Context
 	entries map[int]*residentEntry
 	starts  sync.WaitGroup
+	nextGen uint64
 	// gate, when set, decides whether this host may run residents at all. A
 	// proxy whose stream_nodes row is unknown has no instance-state scope to
 	// keep overlay node keys under, so it runs none until the row resolves.
@@ -278,10 +280,11 @@ func (r *ResidentSupervisor) GateError() string {
 
 func newResidentSupervisor(service *Service, opts ResidentOptions) *ResidentSupervisor {
 	return &ResidentSupervisor{
-		service: service,
-		opts:    opts.withDefaults(),
-		ctx:     context.Background(),
-		entries: make(map[int]*residentEntry),
+		service:     service,
+		opts:        opts.withDefaults(),
+		reconcileMu: make(runtimeMutex, 1),
+		ctx:         context.Background(),
+		entries:     make(map[int]*residentEntry),
 	}
 }
 
@@ -308,7 +311,9 @@ func (r *ResidentSupervisor) Reconcile(ctx context.Context) {
 	if r == nil {
 		return
 	}
-	r.reconcileMu.Lock()
+	if err := r.reconcileMu.lockContext(ctx); err != nil {
+		return
+	}
 	defer r.reconcileMu.Unlock()
 	r.mu.Lock()
 	ready := r.armed && !r.halted
@@ -345,14 +350,7 @@ func (r *ResidentSupervisor) Reconcile(ctx context.Context) {
 		}
 	}
 
-	type relaunch struct {
-		id  int
-		gen uint64
-	}
-	var (
-		stop    []int
-		replace []relaunch
-	)
+	var stop []int
 	r.mu.Lock()
 	if r.halted {
 		r.mu.Unlock()
@@ -376,32 +374,22 @@ func (r *ResidentSupervisor) Reconcile(ctx context.Context) {
 		stop = append(stop, id)
 	}
 	for id, installation := range desired {
+		want := residentRuntime{installation: runtimeOf(installation), hostIdentity: hostIdentity}
 		entry, ok := r.entries[id]
 		if !ok {
-			entry = &residentEntry{id: id, version: installation.Version, installPath: installation.InstallPath, hostIdentity: hostIdentity, runtimeGeneration: installation.RuntimeGeneration, state: ResidentStopped}
+			entry = &residentEntry{id: id, desired: want, state: ResidentStopped}
 			r.entries[id] = entry
 			r.startLocked(entry)
 			continue
 		}
-		if entry.hostIdentity != hostIdentity {
+		if entry.desired.hostIdentity != hostIdentity {
 			r.opts.Logger.InfoContext(ctx, "host identity changed; replacing resident plugin process", "component", "plugins",
-				"installation_id", id, "previous_identity", entry.hostIdentity, "identity", hostIdentity)
+				"installation_id", id, "previous_identity", entry.desired.hostIdentity, "identity", hostIdentity)
 		}
-		if entry.version != installation.Version || entry.installPath != installation.InstallPath || entry.hostIdentity != hostIdentity || entry.runtimeGeneration != installation.RuntimeGeneration {
-			// A replaced or auto-updated binary gets a fresh failure budget,
-			// and the process built from the old binary is stopped before
-			// the new one starts. The host that made the change already
-			// stopped its own process; on any other host (a proxy node) it
-			// is still alive, and ensureClient would keep it because the
-			// row and the running manifest agree on nothing it checks.
-			entry.version, entry.installPath, entry.hostIdentity, entry.runtimeGeneration = installation.Version, installation.InstallPath, hostIdentity, installation.RuntimeGeneration
+		if entry.desired != want {
+			entry.desired = want
 			r.resetLocked(entry)
-			entry.state = ResidentStarting
-			entry.gen++
-			// Registered under the lock, like Restart, so Halt always waits
-			// for this launch.
-			r.starts.Add(1)
-			replace = append(replace, relaunch{id: id, gen: entry.gen})
+			r.startLocked(entry)
 			continue
 		}
 		switch entry.state {
@@ -421,14 +409,6 @@ func (r *ResidentSupervisor) Reconcile(ctx context.Context) {
 
 	for _, id := range stop {
 		r.stopProcess(ctx, id)
-	}
-	for _, launch := range replace {
-		r.opts.Logger.InfoContext(ctx, "resident plugin binary changed; replacing its process", "component", "plugins", "installation_id", launch.id)
-		go func(launch relaunch) {
-			defer r.starts.Done()
-			r.stopProcess(ctx, launch.id)
-			r.runStart(context.WithoutCancel(ctx), launch.id, launch.gen)
-		}(launch)
 	}
 }
 
@@ -477,59 +457,62 @@ func (r *ResidentSupervisor) startLocked(entry *residentEntry) {
 	entry.cancelTimer()
 	entry.state = ResidentStarting
 	entry.nextRestartAt = time.Time{}
-	entry.gen++
+	r.nextGen++
+	entry.gen = r.nextGen
 	gen := entry.gen
 	id := entry.id
 	ctx := r.ctx
-	r.starts.Add(1)
-	go func() {
-		defer r.starts.Done()
+	done := make(chan struct{})
+	entry.ready = done
+	r.starts.Go(func() {
+		defer close(done)
 		r.runStart(ctx, id, gen)
-	}()
+	})
 }
 
 // runStart launches the plugin and records the outcome, unless the entry was
-// reset, removed, or superseded while the launch was in flight. ensureClientForStart
-// reuses a process a lazy RPC already started instead of replacing it.
+// reset, removed, or superseded while the launch was in flight. The process
+// lock spans the handshake, registration and any stop of a superseded launch.
 func (r *ResidentSupervisor) runStart(ctx context.Context, id int, gen uint64) {
-	var err error
-	accepted := false
-	for attempt := 0; attempt < 3; attempt++ {
-		floor := r.service.host.NextStartSeq()
-		var client pluginClient
-		client, err = r.service.ensureClientForStart(ctx, id, true)
-		if err != nil {
-			break
-		}
-		// A client at or below the floor came from an older generation via the
-		// singleflight launch join; stop it and let the next attempt relaunch.
-		if c, ok := client.(interface{ StartSeq() uint64 }); ok && c.StartSeq() <= floor {
-			_ = r.service.host.Stop(id)
-			continue
-		}
-		accepted = true
-		break
-	}
-	if err == nil && !accepted {
-		err = fmt.Errorf("superseded launch adopted 3 times")
-	}
+	lock := r.service.runtimeLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+
 	r.mu.Lock()
 	entry := r.entries[id]
 	if entry == nil || entry.gen != gen || r.halted {
-		// A superseded launch's process is stopped only when nothing will
-		// take it over: the entry is gone, halted, or parked (stopped or
-		// failed). While a newer generation is starting, that generation
-		// either adopts this process (start sequence above its floor) or
-		// stops and relaunches it, so stopping here would kill a process
-		// the newer generation may already have accepted.
-		orphaned := err == nil && (entry == nil || r.halted || entry.state == ResidentStopped || entry.state == ResidentFailed)
 		r.mu.Unlock()
-		if orphaned {
-			r.stopProcess(ctx, id)
+		return
+	}
+	desired, active := entry.desired, entry.active
+	r.mu.Unlock()
+
+	var client pluginClient
+	var err error
+	running, recorded := r.service.running.load(id)
+	// The committed change supersedes the process we previously accepted.
+	// Retire it even if the database fails during the replacement launch.
+	// If another path replaced that process, confirm the desired row first.
+	if !recorded || running != active.installation || active == desired {
+		err = r.service.checkStartRuntime(ctx, id, desired.installation)
+	}
+	if err == nil {
+		err = r.service.stopRuntime(id)
+		if err == nil || errors.Is(err, pluginhost.ErrClientNotFound) {
+			client, err = r.service.start(ctx, id, true, &desired.installation)
+		}
+	}
+
+	r.mu.Lock()
+	entry = r.entries[id]
+	if entry == nil || entry.gen != gen || r.halted {
+		r.mu.Unlock()
+		if client != nil {
+			_ = r.service.stopRuntime(id)
 		}
 		return
 	}
-	if err == nil && r.service.host != nil {
+	if err == nil {
 		// The process may have died between the handshake and this point;
 		// HandleExit ignored it because the entry was still starting.
 		if _, clientErr := r.service.host.Client(id); clientErr != nil {
@@ -542,6 +525,7 @@ func (r *ResidentSupervisor) runStart(ctx context.Context, id int, gen uint64) {
 		return
 	}
 	entry.state = ResidentRunning
+	entry.active = desired
 	entry.lastStartedAt = r.opts.now()
 	entry.lastError = ""
 	entry.nextRestartAt = time.Time{}
@@ -621,19 +605,6 @@ func (r *ResidentSupervisor) resetLocked(entry *residentEntry) {
 	entry.state = ResidentStopped
 }
 
-// Reset forgets an entry's failure history, for a reconfigure that should
-// give a failed resident a fresh budget. The following Reconcile starts it.
-func (r *ResidentSupervisor) Reset(installationID int) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if entry := r.entries[installationID]; entry != nil {
-		r.resetLocked(entry)
-	}
-}
-
 // Restart stops the resident's process, clears its failure budget and starts
 // it again, waiting for the launch so the caller's next read sees running or
 // the recorded failure. A launch failure is recorded in the entry (state
@@ -641,50 +612,48 @@ func (r *ResidentSupervisor) Reset(installationID int) {
 // returned for installations the supervisor does not own. A canceled caller
 // stops waiting; the accepted restart still records its eventual result.
 func (r *ResidentSupervisor) Restart(ctx context.Context, installationID int) error {
+	return r.restart(ctx, installationID, nil)
+}
+
+func (r *ResidentSupervisor) restart(ctx context.Context, installationID int, desired *installationRuntime) error {
 	if r == nil {
 		return ErrNotResident
+	}
+	// Apply the explicit restart after any older desired set in flight.
+	if err := r.reconcileMu.lockContext(ctx); err != nil {
+		return err
 	}
 	r.mu.Lock()
 	entry := r.entries[installationID]
 	if entry == nil || r.halted {
 		r.mu.Unlock()
+		r.reconcileMu.Unlock()
 		return ErrNotResident
 	}
-	r.resetLocked(entry)
-	entry.state = ResidentStarting
-	entry.gen++
-	gen := entry.gen
-	// Registered under the lock so Halt, which flips halted under the same
-	// lock before waiting, always sees this launch.
-	r.starts.Add(1)
+	// The follower may already have scheduled the durable restart.
+	if err := ctx.Err(); err != nil {
+		r.mu.Unlock()
+		r.reconcileMu.Unlock()
+		return err
+	}
+	if desired == nil || entry.desired.installation.generation < desired.generation {
+		if desired != nil {
+			entry.desired.installation = *desired
+		}
+		r.resetLocked(entry)
+		r.startLocked(entry)
+	}
+	done := entry.ready
 	r.mu.Unlock()
-	done := make(chan struct{})
-	go func() {
-		defer r.starts.Done()
-		defer close(done)
-		launchCtx := context.WithoutCancel(ctx)
-		r.stopProcess(launchCtx, installationID)
-		r.runStart(launchCtx, installationID, gen)
-	}()
+	r.reconcileMu.Unlock()
+	if done == nil {
+		return nil
+	}
 	select {
 	case <-done:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
-	}
-}
-
-// setRuntimeGeneration records the installation's persisted runtime
-// generation on its entry, for a host that is about to restart the process
-// itself and must not treat the bump it just wrote as someone else's.
-func (r *ResidentSupervisor) setRuntimeGeneration(installationID int, generation int64) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if entry := r.entries[installationID]; entry != nil {
-		entry.runtimeGeneration = generation
 	}
 }
 
@@ -707,11 +676,13 @@ func (r *ResidentSupervisor) Halt(ctx context.Context) error {
 	}
 	r.mu.Unlock()
 
-	for _, id := range ids {
-		r.stopProcess(ctx, id)
-	}
 	done := make(chan struct{})
 	go func() {
+		var stops sync.WaitGroup
+		for _, id := range ids {
+			stops.Go(func() { r.stopProcess(ctx, id) })
+		}
+		stops.Wait()
 		r.starts.Wait()
 		close(done)
 	}()
@@ -742,7 +713,7 @@ func (r *ResidentSupervisor) stopProcess(ctx context.Context, installationID int
 	if r.service == nil || r.service.host == nil {
 		return
 	}
-	if err := r.service.host.Stop(installationID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
+	if err := r.service.Stop(installationID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
 		r.opts.Logger.WarnContext(ctx, "stop resident plugin", "component", "plugins", "installation_id", installationID, "error", err)
 	}
 }
@@ -760,6 +731,7 @@ func (s *Service) StartResidents(ctx context.Context) {
 	if s == nil {
 		return
 	}
+	s.reconcileInstallations(ctx)
 	s.resident.Enable(ctx)
 }
 
@@ -831,31 +803,17 @@ func (s *Service) RestartInstallation(ctx context.Context, installationID int) e
 	// lifecycle subscription missed the event (a proxy with Redis down)
 	// replace its process on the next poll, and clears a failed entry's
 	// budget there the same way the event would.
-	durable := false
-	if s.installations != nil {
-		if err := s.installations.Update(ctx, installationID, UpdateInstallationInput{Restart: true}); err != nil {
-			return fmt.Errorf("record plugin restart: %w", err)
-		}
-		s.InvalidateInstallationCache()
-		if installation, err := s.loadInstallation(ctx, installationID, true); err == nil {
-			// This host restarts synchronously below; record the new
-			// generation on its entry so the next reconcile does not
-			// replace the fresh process a second time.
-			s.resident.setRuntimeGeneration(installationID, installation.RuntimeGeneration)
-			durable = true
-		}
+	if err := s.installations.Update(ctx, installationID, UpdateInstallationInput{Restart: true}); err != nil {
+		return fmt.Errorf("record plugin restart: %w", err)
 	}
-	// Every other host running the resident (proxy nodes) replaces its
-	// process too, so one admin action clears a failed instance everywhere.
-	// With the generation persisted a plain event is enough: the follower's
-	// reconcile sees the new generation and replaces its process once. A
-	// restart event on top of that would make it restart, then reconcile and
-	// replace the fresh process again for the generation it had not
-	// recorded. Without a durable generation the event carries the restart.
-	// Published whether or not this host runs the resident itself: the
-	// restart is recorded regardless of what this host does with it.
-	defer s.publishPluginsChanged(ctx, PluginsChangedEvent{InstallationID: installationID, Restart: !durable})
-	err := s.resident.Restart(ctx, installationID)
+	s.InvalidateInstallationCache()
+	s.publishPluginsChanged(ctx, PluginsChangedEvent{})
+	installation, err := s.installations.GetByID(ctx, installationID)
+	if err != nil {
+		return err
+	}
+	desired := runtimeOf(installation)
+	err = s.resident.restart(ctx, installationID, &desired)
 	if err == nil {
 		return nil
 	}
@@ -865,10 +823,18 @@ func (s *Service) RestartInstallation(ctx context.Context, installationID int) e
 	// Like a resident's fresh failure budget, an administrator restart clears
 	// a lazy plugin's recorded start failure; its next use launches it again.
 	s.lazyStartFailures.clear(installationID)
-	if s.host == nil {
-		return nil
+	lock := s.runtimeLock(installationID)
+	if err := lock.lockContext(ctx); err != nil {
+		return err
 	}
-	if err := s.host.Stop(installationID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
+	defer lock.Unlock()
+	if running, ok := s.running.load(installationID); ok {
+		err := s.checkStartRuntime(ctx, installationID, running)
+		if !errors.Is(err, ErrInstallationChanged) {
+			return err
+		}
+	}
+	if err := s.stopRuntime(installationID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
 		return fmt.Errorf("stop plugin installation %d: %w", installationID, err)
 	}
 	return nil

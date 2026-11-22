@@ -91,6 +91,9 @@ func registerAdminLogsSocket(reg *Registry) {
 		}
 
 		ticket, err := svc.Mint(ctx, identity)
+		if p := socketAuthorityUnavailable(err); p != nil {
+			return nil, p
+		}
 		if err != nil {
 			if errors.Is(err, handlers.ErrAdminLogsSocketForbidden) {
 				return nil, NewProblem(TypePermissionDenied, "Administrator authority is required for the log stream.")

@@ -23,6 +23,8 @@
       "updated_at": "2026-10-08T09:30:00.000Z",
       "completed_at": null,
       "status_event_at": null,
+      "created_client_ip": null,
+      "last_client_ip": null,
       "user_id": "7",
       "username": "maya",
       "device_name": "Pixel 8",

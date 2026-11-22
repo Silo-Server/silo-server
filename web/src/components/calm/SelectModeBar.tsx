@@ -49,10 +49,8 @@ export type SelectModeNoun = keyof typeof SELECT_MODE_TEXT;
  * The floating bar of select mode: how many items are picked and what can be
  * done to them. Actions refuse more than `limit` items at a time.
  *
- * The bar is fixed to the viewport over the content column rather than
- * sticky: AdminLayout clips horizontal overflow, which would hold a sticky bar
- * at the end of the list. The page reserves room at its foot so the last item
- * is never under the bar.
+ * The bar is fixed to the viewport over the content column. The page reserves
+ * room at its foot so the last item is never under the bar.
  */
 export function SelectModeBar({
   count,
@@ -77,7 +75,7 @@ export function SelectModeBar({
   const tooMany = count > limit;
   const disabled = busy || count === 0 || tooMany;
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex flex-col items-center gap-1.5 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:start-[240px]">
+    <div className="pointer-events-none fixed inset-x-0 bottom-(--playback-bar-clearance,0px) z-30 flex flex-col items-center gap-1.5 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:start-[240px]">
       <div
         role="group"
         aria-label={t(text.group)}

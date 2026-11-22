@@ -54,7 +54,7 @@ function SimulateVerdict({ decision }: { decision: unknown }) {
         {t("web.admin.access.policy.outcome.allowed")}
       </span>
     ) : (
-      <span className="bg-destructive/10 text-destructive inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium">
+      <span className="bg-destructive/10 text-destructive-label inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium">
         <span aria-hidden className="bg-destructive size-1.5 rounded-full" />
         {typeof record.reason === "string" && record.reason
           ? t("web.admin.access.policy.simulate.deniedReason", { reason: record.reason })

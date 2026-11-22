@@ -44,6 +44,21 @@ function calendarLabels(t: Translate): Partial<Labels> {
   };
 }
 
+// Weekday headers sit in fixed 2rem day columns. Short names run to eight
+// letters (ar الثلاثاء, lv Ceturtd.) and overlap their neighbours; narrow
+// names ("S M T W T F S") fit in every locale. A few locales' narrow names
+// barely differ (tzm "A A A A A A A"), and their short names are short enough
+// to fit, so those keep them. The header row is hidden from screen readers,
+// which hear each day's full date instead.
+function weekdayNameFormat(): Intl.DateTimeFormat {
+  const narrow = new Intl.DateTimeFormat(formatLocale(), { weekday: "narrow" });
+  // 4 January 2026 is a Sunday: the seven days from it are one of each weekday.
+  const names = new Set(
+    Array.from({ length: 7 }, (_, day) => narrow.format(new Date(2026, 0, 4 + day))),
+  );
+  return names.size < 4 ? new Intl.DateTimeFormat(formatLocale(), { weekday: "short" }) : narrow;
+}
+
 // Month captions, month dropdown entries and weekday headers are shown text:
 // format them in the format locale, not react-day-picker's English default.
 // The grid is Gregorian, so month names are too, even where the locale's own
@@ -57,9 +72,29 @@ const calendarFormatters: Partial<Formatters> = {
     }).format(month),
   formatMonthDropdown: (month) =>
     new Intl.DateTimeFormat(formatLocale(), { month: "long", calendar: "gregory" }).format(month),
-  formatWeekdayName: (weekday) =>
-    new Intl.DateTimeFormat(formatLocale(), { weekday: "short" }).format(weekday),
+  formatWeekdayName: (weekday) => weekdayNameFormat().format(weekday),
 };
+
+// Week data from Intl.Locale: getWeekInfo(), or the weekInfo property some
+// browsers shipped first. TypeScript's lib doesn't declare either yet.
+type LocaleWithWeekInfo = Intl.Locale & {
+  getWeekInfo?: () => { firstDay: number };
+  weekInfo?: { firstDay: number };
+};
+
+type WeekStart = NonNullable<ComponentProps<typeof DayPicker>["weekStartsOn"]>;
+
+// The format locale's first day of the week (Monday in pl, Saturday in ar).
+// firstDay counts 1 (Monday) to 7 (Sunday); DayPicker counts 0 (Sunday) to 6.
+// Without week data, DayPicker keeps its Sunday default. The format locale's
+// own tag keeps any -u-fw- first-day override; resolving drops it.
+function weekStartsOn(): WeekStart | undefined {
+  const locale: LocaleWithWeekInfo = new Intl.Locale(
+    formatLocale() ?? new Intl.DateTimeFormat().resolvedOptions().locale,
+  );
+  const firstDay = (locale.getWeekInfo?.() ?? locale.weekInfo)?.firstDay;
+  return firstDay === undefined ? undefined : ((firstDay % 7) as WeekStart);
+}
 
 function Calendar({
   className,
@@ -77,6 +112,7 @@ function Calendar({
   return (
     <DayPicker
       dir={dir}
+      weekStartsOn={weekStartsOn()}
       showOutsideDays={showOutsideDays}
       labels={translatedLabels}
       formatters={{ ...calendarFormatters, ...formatters }}

@@ -64,7 +64,7 @@ type AdminUserWatchSummary struct {
 	Since          Instant         `json:"since" doc:"Start of the window: now minus days"`
 	Plays          int             `json:"plays" minimum:"0" doc:"Finalized playback attempts that ended in the window"`
 	CompletedPlays int             `json:"completed_plays" minimum:"0"`
-	WatchedSeconds float64         `json:"watched_seconds" minimum:"0"`
+	WatchedSeconds float64         `json:"watched_seconds" minimum:"0" doc:"Seconds watched across the window's plays: each play's measured watch time (playback history played_seconds), excluding pauses, seeks and buffering. A play recorded before measurement existed counts its end position, capped at how long the play lasted"`
 	LastPlayedAt   NullableInstant `json:"last_played_at" doc:"Latest ended_at in the window; null when none"`
 }
 

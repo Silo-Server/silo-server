@@ -194,23 +194,6 @@ export function markerOccurrenceAtTime(
   return occurrence;
 }
 
-/** Only leave the episode once all unmarked scenes have played. */
-export function resolveAutoplayMarker(
-  regions: MarkerRegionView[],
-  duration: number,
-  allowPreview: boolean,
-): PlayerTimeRange | null {
-  if (duration <= 0) return null;
-  let start = duration;
-  for (let index = regions.length - 1; index >= 0; index -= 1) {
-    const region = regions[index]!;
-    if (region.kind !== "credits" && !(allowPreview && region.kind === "preview")) continue;
-    // Allow timestamp rounding at the end, but never span narrative gaps.
-    if (region.end >= start - 1) start = Math.min(start, region.start);
-  }
-  return start < duration ? { start, end: duration } : null;
-}
-
 export function resolveActiveVersionMarkers(
   version: Pick<PlayerFileVersion, "intro" | "credits" | "recap" | "preview"> | null | undefined,
 ): {

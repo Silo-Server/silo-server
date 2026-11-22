@@ -14,14 +14,14 @@ import (
 // downloadInsertArgs order.
 const downloadInsertColumns = `id, user_id, profile_id, device_id, media_file_id, content_id,
 		episode_id, batch_id, kind, status, format, quality, effective_quality, target_bitrate_kbps, revision, artifact_id, file_size, bytes_sent, error_message,
-		created_at, updated_at, completed_at`
+		created_at, updated_at, completed_at, created_client_ip, last_client_ip, last_client_ip_at`
 
 // downloadInsertTypes are the SQL types of downloadInsertColumns. An insert
 // reads its values through a SELECT, which does not take parameter types from
 // the target columns as VALUES does, so each placeholder is cast.
 var downloadInsertTypes = strings.Fields(`text int text text int text
 	text text text text text text text int int text bigint bigint text
-	timestamptz timestamptz timestamptz`)
+	timestamptz timestamptz timestamptz inet inet timestamptz`)
 
 // registrableFile is the condition, on the media_files row mf, under which a
 // download of (content, episode) may name it: the file is present and still
@@ -81,7 +81,7 @@ func downloadInsertArgs(d *Download) []any {
 		d.ID, d.UserID, nilIfEmpty(d.ProfileID), nilIfEmpty(d.DeviceID), d.MediaFileID, d.ContentID,
 		nilIfEmpty(d.EpisodeID), nilIfEmpty(d.BatchID), d.Kind, d.Status, format, quality, effectiveQuality,
 		d.TargetBitrateKbps, revision, nilIfEmpty(d.ArtifactID), d.FileSize, d.BytesSent, d.ErrorMessage,
-		d.CreatedAt, d.UpdatedAt, d.CompletedAt,
+		d.CreatedAt, d.UpdatedAt, d.CompletedAt, nilIfEmpty(d.CreatedClientIP), nilIfEmpty(d.LastClientIP), d.LastClientIPAt,
 	}
 }
 
@@ -89,6 +89,7 @@ func downloadInsertArgs(d *Download) []any {
 // and inserts nothing, unless the file is present and linked to the
 // download's title (see registrableFile).
 func (r *Repository) Create(ctx context.Context, d *Download) error {
+	recordCreatedAddress(ctx, []*Download{d})
 	tag, err := r.pool.Exec(ctx, insertDownloadSQL, downloadInsertArgs(d)...)
 	if err != nil {
 		return fmt.Errorf("inserting download: %w", err)
@@ -103,6 +104,7 @@ func (r *Repository) Create(ctx context.Context, d *Download) error {
 // download whose file fails registrableFile fails the batch with
 // errFileNotRegistrable.
 func (r *Repository) CreateBatch(ctx context.Context, downloads []*Download) error {
+	recordCreatedAddress(ctx, downloads)
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning batch insert: %w", err)
@@ -152,6 +154,7 @@ func (r managedRegistryStore) createManagedEntries(ctx context.Context, ds []*Do
 	if len(ds) == 0 {
 		return nil, nil
 	}
+	recordCreatedAddress(ctx, ds)
 	var values strings.Builder
 	args := make([]any, 0, len(ds)*len(downloadInsertTypes))
 	for i, d := range ds {

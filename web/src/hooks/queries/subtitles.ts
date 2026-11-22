@@ -8,10 +8,6 @@ import {
   StaleApiRequestContextError,
 } from "@/api/client";
 import { v2 } from "@/api/v2/request";
-import {
-  SERIES_SUBTITLE_SETTING_KEYS,
-  seriesSubtitleSettingIdentity,
-} from "@/lib/seriesSubtitleSettings";
 import type { PrePlaySubtitleSelection } from "@/player/types";
 import { derivePersistedSubtitleMode } from "@/player/utils/subtitleMode";
 import type {
@@ -24,7 +20,7 @@ import type {
 } from "@/api/types";
 
 import { settingsKeys, subtitleKeys } from "./keys";
-import { isSettingValueMissing } from "./settingValues";
+import { settingWriteOptions } from "./settingWriteOffline";
 import { invalidateItemDetails, runOrderedPreferenceWrite } from "./trackPreferences";
 import { canonicalLanguageWireValue } from "@/lib/languageNames";
 
@@ -176,42 +172,29 @@ export function useSubtitleProviderStatus() {
  *
  * A manual selection writes two stores: the specialized per-series row holding
  * the concrete track, and the canonical language/mode settings at
- * profile_series. Resetting has to clear both. profile_series is the first
- * scope in the manifest's resolution order for those keys, so leaving the
- * canonical rows behind would keep resolving the abandoned language for every
- * episode of the series with nothing in the UI able to remove it.
+ * profile_series. The server's DELETE clears both in one transaction, so a
+ * reset either fully happens or reports that it did not.
  */
 export function useDeleteSubtitlePreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...settingWriteOptions,
     mutationFn: (prefId: string) =>
-      runOrderedPreferenceWrite("subtitle", prefId, async (profileContext) => {
-        await v2("DELETE /api/v2/subtitle-prefs/{series_id}", {
+      runOrderedPreferenceWrite("subtitle", prefId, (profileContext) =>
+        v2("DELETE /api/v2/subtitle-prefs/{series_id}", {
           path: { series_id: prefId },
           profileContext,
-        });
-        await Promise.all(
-          SERIES_SUBTITLE_SETTING_KEYS.map((key) =>
-            v2("DELETE /api/v2/settings/values/{key}", {
-              path: { key },
-              query: seriesSubtitleSettingIdentity(prefId),
-              profileContext,
-            }).catch((error: unknown) => {
-              // Nothing stored at this scope is the state a reset asks for.
-              if (isSettingValueMissing(error)) return;
-              throw error;
-            }),
-          ),
-        );
-      }),
-    onSuccess: () =>
-      Promise.all([
-        invalidateItemDetails(queryClient),
-        // The player and the settings screens read these keys through the
-        // effective endpoint, so the cleared rows have to leave that cache too.
-        queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
-      ]),
+        }),
+      ),
+    // Not awaited: the write has landed, and a caller waiting on mutateAsync
+    // to learn that should not also wait for these refetches.
+    onSuccess: () => {
+      void invalidateItemDetails(queryClient);
+      // The player and the settings screens read these keys through the
+      // effective endpoint, so the cleared rows have to leave that cache too.
+      void queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+    },
     onError: (err) => {
       toast.error(
         err instanceof Error ? err.message : t("web.common.toast.subtitles.resetPreferenceFailed"),
@@ -236,6 +219,7 @@ export function useSetSubtitlePreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...settingWriteOptions,
     mutationFn: ({ prefId, selection }: SetSubtitlePreferenceInput) =>
       runOrderedPreferenceWrite("subtitle", prefId, (profileContext) =>
         v2("PUT /api/v2/subtitle-prefs/{series_id}", {
@@ -264,7 +248,10 @@ export function useSetSubtitlePreference() {
           },
         }),
       ),
-    onSuccess: () => invalidateItemDetails(queryClient),
+    // Not awaited, as in useDeleteSubtitlePreference.
+    onSuccess: () => {
+      void invalidateItemDetails(queryClient);
+    },
     onError: (err) => {
       toast.error(
         err instanceof Error ? err.message : t("web.common.toast.subtitles.savePreferenceFailed"),

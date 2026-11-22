@@ -233,6 +233,7 @@ export function FeaturesStep() {
           description={t("web.setup.features.recommendationsDescription")}
           value={recsEnabled ? "true" : "false"}
           onChange={(v) => form.setValue("recommendations.enabled", v)}
+          managedByEnv={form.envVar("recommendations.enabled")}
         />
       </StepSection>
 
@@ -241,6 +242,7 @@ export function FeaturesStep() {
           <EmbeddingProviderField
             value={embeddingProviderID}
             onChange={(id) => form.setValue(EMBEDDING_PROVIDER_KEY, id)}
+            managedByEnv={form.envVar(EMBEDDING_PROVIDER_KEY)}
           />
           <ModelField
             label={t("web.setup.features.modelLabel")}
@@ -248,6 +250,7 @@ export function FeaturesStep() {
             kind="embeddings"
             value={form.getValue(EMBEDDING_MODEL_KEY)}
             onChange={(v) => form.setValue(EMBEDDING_MODEL_KEY, v)}
+            managedByEnv={form.envVar(EMBEDDING_MODEL_KEY)}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- example model identifier
             placeholder="gemini-embedding-001"
           />

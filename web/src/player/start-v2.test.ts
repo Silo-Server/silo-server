@@ -20,7 +20,7 @@ const config: PlayerConfig = {
   apiBaseUrl: "/api/v1",
   getAccessToken: () => "token",
   getProfileId: () => "profile",
-  getDeviceId: () => "device",
+  getDeviceHeaders: () => ({ "X-Silo-Device-Id": "device" }),
 };
 const capabilities = {
   installation_id: "7f7d1c6e-3b2f-4b7e-9a3d-2a4c7e1f0b11",

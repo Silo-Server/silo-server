@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { AlertTriangle, FolderOpen, XIcon } from "lucide-react";
 
 import type { Library, LibraryRoot } from "@/api/types";
 import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDiagnosticsSection";
+import { PathCode, PathText } from "@/components/PathText";
 import {
   CARD_ACTION_CLASS,
   CardActions,
@@ -19,7 +20,7 @@ import {
 } from "@/components/admin/libraries/DiagnosticsListParts";
 import {
   pathLeaf,
-  useLibrariesTableLayout,
+  useWideDiagnosticsTableLayout,
   usePagination,
 } from "@/components/admin/libraries/diagnosticsListState";
 import { Badge } from "@/components/ui/badge";
@@ -56,7 +57,8 @@ import {
   useUpsertLibraryRootOverride,
 } from "@/hooks/queries/admin/libraries";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
+import { itemTypeLabel } from "@/lib/itemTypeLabels";
 import { cn } from "@/lib/utils";
 
 // Not translated: a sample year.
@@ -68,18 +70,47 @@ function rootRowModel(t: Translate, root: LibraryRoot) {
     key: `${root.library_id}:${root.root_path}`,
     label: root.title || pathLeaf(root.root_path),
     evidence: root.evidence_json ? buildRootEvidenceSummary(t, root) : null,
-    typeLabel: root.inferred_type || t("web.admin.libraries.ambiguousRoots.unknownType"),
+    typeLabel: root.inferred_type
+      ? itemTypeLabel(t, root.inferred_type)
+      : t("web.admin.libraries.ambiguousRoots.unknownType"),
+    confidenceLabel: confidenceLabel(t, root.type_confidence),
   };
+}
+
+/**
+ * The label for a root's type confidence, which the API sends as English
+ * data. A level the scanner doesn't send shows as sent.
+ */
+function confidenceLabel(t: Translate, confidence: string): string {
+  switch (confidence) {
+    case "low":
+      return t("web.admin.libraries.ambiguousRoots.confidence.low");
+    case "medium":
+      return t("web.admin.libraries.ambiguousRoots.confidence.medium");
+    case "high":
+      return t("web.admin.libraries.ambiguousRoots.confidence.high");
+    default:
+      return confidence;
+  }
 }
 
 /**
  * AmbiguousRootsSection displays scanner roots that require manual resolution,
  * handling loading, confirmed empty, populated warning, and error states.
  */
-export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
+export function AmbiguousRootsSection({
+  libraries,
+  embedded = false,
+  onStatusChange,
+}: {
+  libraries: Library[];
+  embedded?: boolean;
+  onStatusChange?: (status: { count: number | undefined; isError?: boolean }) => void;
+}) {
   const t = useT();
-  const showTable = useLibrariesTableLayout();
+  const showTable = useWideDiagnosticsTableLayout();
   const [open, setOpen] = useState(false);
+  const isOpen = embedded || open;
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | undefined>(libraries[0]?.id);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
@@ -97,7 +128,7 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
     fetchNextPage,
     isFetchingNextPage,
   } = useLibraryRoots(effectiveSelectedLibraryId, "ambiguous", {
-    enabled: open,
+    enabled: isOpen,
     search: debouncedSearch,
   });
   const roots = useMemo(() => flattenLibraryRoots(rootPages), [rootPages]);
@@ -110,10 +141,32 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
   const countUnknown = rootPages === undefined && !isError;
   const isWarning = totalRoots > 0;
 
+  useEffect(() => {
+    if (!onStatusChange) return;
+    if (debouncedSearch.trim() !== "") return;
+    // `useLibraryRoots` queries one library at a time, so only publish a count
+    // to the catalog-wide summary tile when there is a single library.
+    const catalogWideCount = libraries.length === 1 && !countUnknown ? totalRoots : undefined;
+    onStatusChange({ count: catalogWideCount, isError: loadFailed });
+  }, [countUnknown, debouncedSearch, libraries.length, loadFailed, onStatusChange, totalRoots]);
+
   const pag = usePagination(roots);
 
   if (libraries.length === 0) {
-    return null;
+    if (!embedded) return null;
+    return (
+      <section className="surface-panel space-y-3 rounded-2xl border-0 p-4 sm:p-5">
+        <div className="space-y-0.5">
+          <h2 className="text-sm font-semibold">{t("web.admin.libraries.ambiguousRoots.title")}</h2>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.libraries.ambiguousRoots.description")}
+          </p>
+        </div>
+        <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
+          {t("web.admin.libraries.list.empty")}
+        </div>
+      </section>
+    );
   }
 
   // The line shown instead of rows while loading, after a failure, or when empty.
@@ -130,27 +183,8 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
           }
         : null;
 
-  return (
-    <CollapsibleDiagnosticsSection
-      title={t("web.admin.libraries.ambiguousRoots.title")}
-      description={t("web.admin.libraries.ambiguousRoots.description")}
-      count={countUnknown ? undefined : totalRoots}
-      isError={loadFailed}
-      icon={
-        loadFailed ? (
-          <AlertTriangle className="text-destructive h-4 w-4" />
-        ) : (
-          <FolderOpen
-            className={cn("h-4 w-4", isWarning ? "text-amber-500" : "text-muted-foreground")}
-          />
-        )
-      }
-      iconClassName={
-        loadFailed ? "bg-destructive/10" : isWarning ? "bg-amber-500/10" : "bg-muted/50"
-      }
-      open={open}
-      onOpenChange={setOpen}
-    >
+  const body = (
+    <>
       <div className="mb-2 flex flex-col gap-2 sm:flex-row">
         <Select
           value={
@@ -220,8 +254,11 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                       <TableCell className="max-w-[28rem]">
                         <div className="space-y-1">
                           <div className="truncate text-sm font-medium">{row.label}</div>
-                          <code className="text-muted-foreground block truncate text-[11px]">
-                            {root.root_path}
+                          <code
+                            className="text-muted-foreground block w-fit max-w-full truncate text-[11px]"
+                            dir="ltr"
+                          >
+                            <PathText path={root.root_path} />
                           </code>
                           {row.evidence !== null ? (
                             <div className="text-muted-foreground truncate text-[11px]">
@@ -234,10 +271,10 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                         <Badge variant="outline">{row.typeLabel}</Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{root.type_confidence}</Badge>
+                        <Badge variant="secondary">{row.confidenceLabel}</Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-end text-xs tabular-nums">
-                        {root.observed_file_count}
+                        {numberText(root.observed_file_count)}
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1">
@@ -275,11 +312,11 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                   </CardField>
                   <CardField label={t("web.admin.libraries.column.confidence")}>
                     <Badge variant="secondary" className="max-w-full whitespace-normal">
-                      {root.type_confidence}
+                      {row.confidenceLabel}
                     </Badge>
                   </CardField>
                   <CardField label={t("web.admin.libraries.column.files")}>
-                    <span className="tabular-nums">{root.observed_file_count}</span>
+                    <span className="tabular-nums">{numberText(root.observed_file_count)}</span>
                   </CardField>
                 </CardFields>
                 {row.evidence ? (
@@ -332,6 +369,45 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
           }}
         />
       ) : null}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <section className="surface-panel space-y-3 rounded-2xl border-0 p-4 sm:p-5">
+        <div className="space-y-0.5">
+          <h2 className="text-sm font-semibold">{t("web.admin.libraries.ambiguousRoots.title")}</h2>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.libraries.ambiguousRoots.description")}
+          </p>
+        </div>
+        {body}
+      </section>
+    );
+  }
+
+  return (
+    <CollapsibleDiagnosticsSection
+      title={t("web.admin.libraries.ambiguousRoots.title")}
+      description={t("web.admin.libraries.ambiguousRoots.description")}
+      count={countUnknown ? undefined : totalRoots}
+      isError={loadFailed}
+      icon={
+        loadFailed ? (
+          <AlertTriangle className="text-destructive h-4 w-4" />
+        ) : (
+          <FolderOpen
+            className={cn("h-4 w-4", isWarning ? "text-amber-500" : "text-muted-foreground")}
+          />
+        )
+      }
+      iconClassName={
+        loadFailed ? "bg-destructive/10" : isWarning ? "bg-amber-500/10" : "bg-muted/50"
+      }
+      open={open}
+      onOpenChange={setOpen}
+    >
+      {body}
     </CollapsibleDiagnosticsSection>
   );
 }
@@ -467,13 +543,16 @@ function RootOverrideDialog({
         <DialogHeader className="max-sm:border-border max-sm:shrink-0 max-sm:border-b max-sm:ps-4 max-sm:pe-2 max-sm:pt-[calc(0.75rem+env(safe-area-inset-top))] max-sm:pb-3">
           <div className="flex items-start gap-3">
             <div className="flex min-w-0 flex-1 flex-col gap-2 max-sm:text-start">
-              <DialogTitle>{t("web.admin.libraries.rootOverride.title")}</DialogTitle>
+              {/* From sm up the built-in close button shows beside this title. */}
+              <DialogTitle className="sm:pe-6">
+                {t("web.admin.libraries.rootOverride.title")}
+              </DialogTitle>
               {/* The fixed phone header holds the full root path; a long one
                   scrolls here instead of squeezing the form below. */}
               <DialogDescription className="break-words max-sm:max-h-[25dvh] max-sm:overflow-y-auto">
                 {t("web.admin.libraries.rootOverride.description", {
                   path: root.root_path,
-                  code: (chunks) => <code className="break-all">{chunks}</code>,
+                  code: (chunks) => <PathCode className="wrap-anywhere">{chunks}</PathCode>,
                 })}
               </DialogDescription>
             </div>

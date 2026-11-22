@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -392,7 +393,7 @@ func (u *userPlanner) planExisting(ctx context.Context, plan *accountPlan) error
 		return fmt.Errorf("counting profiles: %w", err)
 	}
 	acct := plan.item.Account
-	acct.LocalID, acct.LocalUsername = new(user.ID), user.Username
+	acct.LocalID, acct.LocalUsername = new(user.ID), cmp.Or(user.Username, user.Email)
 	plan.item.Status, plan.item.Selectable = ItemDiffers, true
 	plan.item.Message = "The account is on this server and stays as it is. Restoring adds the profiles it lacks and merges the data you choose."
 	return nil

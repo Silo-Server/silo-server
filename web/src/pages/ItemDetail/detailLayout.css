@@ -275,6 +275,12 @@
       width: 44px;
       padding-inline: 0;
     }
+    /* A play pill showing the resume bar grows with its text (ActionBar), so
+       the label never runs into the bar under it. */
+    [data-compact-mobile] .detail-primary-actions > button:has([data-resume-progress]) {
+      height: auto;
+      min-height: 44px;
+    }
     [data-compact-mobile] .detail-stream-actions {
       gap: 8px;
     }

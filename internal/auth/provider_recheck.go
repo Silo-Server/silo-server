@@ -1104,7 +1104,10 @@ func (r *AccountResolver) loadRefreshState(ctx context.Context, db dbQuerier, id
 // AccountChecker finds the CheckAccount client of an enabled sign-in
 // provider (AccountCheckerSource).
 func (r *PluginProviderRegistry) AccountChecker(ctx context.Context, installationID int) (AccountChecker, error) {
-	for _, registered := range r.Providers() {
+	if r == nil {
+		return nil, ErrProviderNotLoaded
+	}
+	for _, registered := range r.current.Load().enabled {
 		provider, ok := registered.Provider.(*PluginProvider)
 		if !ok || provider == nil || provider.InstallationID() != installationID {
 			continue

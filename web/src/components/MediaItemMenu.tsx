@@ -33,7 +33,7 @@ import { useFinePointer } from "@/hooks/useFinePointer";
 import type { ItemDetail, MediaItemUserState } from "@/api/types";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
-import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { useFreshCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
@@ -449,7 +449,8 @@ function MediaItemActionSheet({
         showCloseButton={false}
         className="max-h-[80svh] gap-0 overflow-y-auto rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)]"
       >
-        <SheetHeader className="px-5 pt-4 pb-2">
+        {/* No close button in this sheet, so the title keeps its full width. */}
+        <SheetHeader className="px-5 pt-4 pb-2 *:data-[slot=sheet-title]:pe-0">
           <SheetTitle className="truncate text-start text-base">
             {title ?? t("web.item.menu.sheetTitle")}
           </SheetTitle>
@@ -796,13 +797,9 @@ export function MetadataActionDialogHost({
   onClose: () => void;
 }) {
   const t = useT();
-  const {
-    data: item,
-    error,
-    isFetching,
-    isLoading,
-    refetch,
-  } = useCatalogItemDetail(contentId, libraryId);
+  // Edit Metadata saves the whole lock list it opens with, so neither dialog
+  // opens on a cached item that could predate a write.
+  const { item, error, retry } = useFreshCatalogItemDetail(contentId, libraryId);
 
   if (item) {
     return (
@@ -850,9 +847,9 @@ export function MetadataActionDialogHost({
     <MetadataActionStatusDialog
       action={action}
       pending="details"
-      loading={isLoading || isFetching}
+      loading={!error}
       error={error}
-      onRetry={() => void refetch()}
+      onRetry={retry}
       onClose={onClose}
     />
   );

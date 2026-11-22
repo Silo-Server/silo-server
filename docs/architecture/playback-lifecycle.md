@@ -120,7 +120,9 @@ The native session list (`ReadAdminPlaybackSessions`) joins the lifecycle row: `
 and `lifecycle_seq` come from it together, ended sessions are excluded, and a native
 session whose attempt is live but that no server has a live row for is listed from its
 start row at the attempt's position. An open Audiobookshelf reported play is listed the
-same way, at its row's position. The frozen v1 snapshot keeps its own query.
+same way, at its row's position. The events socket's `sessions` subscribe snapshot
+and `sessions.replaced` frames carry no rows; monitors re-read this list, as
+[the realtime API](../realtime-api.md) describes.
 
 `worker.SessionSyncRowJSON` renders a session exactly as a sync stores its row, so a
 start event and the start row read through `jsonb_populate_record` match the live list.

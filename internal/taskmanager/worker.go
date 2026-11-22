@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/telemetry"
@@ -26,10 +26,21 @@ type taskWorker struct {
 	lastResult      *ExecutionResult
 	triggers        []Trigger
 	cancel          context.CancelFunc
-	triggerUpdate   chan struct{}
-	triggerChanged  atomic.Bool
-	mu              sync.RWMutex
-	scheduleMu      sync.Mutex
+	// triggerUpdate wakes the trigger loop after setTriggers replaced the
+	// triggers. triggerGen counts those replacements, so the loop can tell a
+	// firing of the triggers it waits on from one of triggers since replaced.
+	triggerUpdate chan struct{}
+	triggerGen    uint64
+	mu            sync.RWMutex
+	scheduleMu    sync.Mutex
+	// schedule is the normalized configs setTriggers last installed,
+	// including any the trigger factory could not build, so ReloadSchedule
+	// can tell whether the saved schedule differs from the one the worker
+	// runs.
+	schedule []TriggerConfig
+	// retired is closed when the task is unregistered; it ends the trigger
+	// loop, setTriggers no longer starts triggers and reserve refuses runs.
+	retired chan struct{}
 }
 
 func newTaskWorker(task Task, manager *TaskManager) *taskWorker {
@@ -38,14 +49,64 @@ func newTaskWorker(task Task, manager *TaskManager) *taskWorker {
 		manager:       manager,
 		state:         TaskStateIdle,
 		triggerUpdate: make(chan struct{}, 1),
+		retired:       make(chan struct{}),
 	}
+}
+
+// isRetired reports whether retire ran.
+func (w *taskWorker) isRetired() bool {
+	select {
+	case <-w.retired:
+		return true
+	default:
+		return false
+	}
+}
+
+// generation returns triggerGen.
+func (w *taskWorker) generation() uint64 {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.triggerGen
+}
+
+// retire stops a worker its manager no longer holds: its triggers stop, its
+// trigger loop ends, and a run in progress is canceled and recorded as such.
+func (w *taskWorker) retire() {
+	w.scheduleMu.Lock()
+	w.mu.Lock()
+	if w.isRetired() {
+		w.mu.Unlock()
+		w.scheduleMu.Unlock()
+		return
+	}
+	close(w.retired)
+	for _, tr := range w.triggers {
+		tr.Stop()
+	}
+	w.triggers = nil
+	cancel := w.cancel
+	if w.state == TaskStateRunning {
+		w.state = TaskStateCancelling
+	}
+	w.mu.Unlock()
+	w.scheduleMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	// Task lists refetch on task.updated, so they drop the task now
+	// rather than at their next refresh.
+	w.notify()
 }
 
 // info returns a snapshot of the worker's current state as a TaskInfo.
 func (w *taskWorker) info() TaskInfo {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
+	return w.infoLocked()
+}
 
+func (w *taskWorker) infoLocked() TaskInfo {
 	info := TaskInfo{
 		Key:             w.task.Key(),
 		Name:            w.task.Name(),
@@ -80,7 +141,8 @@ func (w *taskWorker) info() TaskInfo {
 	return info
 }
 
-// setTriggers replaces active triggers. Stops old triggers, starts new ones.
+// setTriggers replaces active triggers. A running task arms its new triggers
+// when it finishes, so an edit cannot spend a startup firing mid-run.
 // Pass lastResult to resume scheduling from the last execution, or nil to
 // start the interval fresh from now (e.g. when the user edits the schedule).
 func (w *taskWorker) setTriggers(configs []TriggerConfig, factory func(TriggerConfig) Trigger, lastResult *ExecutionResult, notify bool) {
@@ -91,6 +153,12 @@ func (w *taskWorker) setTriggers(configs []TriggerConfig, factory func(TriggerCo
 	}
 
 	w.triggers = nil
+	w.triggerGen++
+	configs = normalizedTriggers(configs)
+	w.schedule = configs
+	if w.isRetired() {
+		configs = nil
+	}
 	spread := startSpread(w.task)
 	for _, cfg := range configs {
 		tr := factory(cfg)
@@ -98,25 +166,21 @@ func (w *taskWorker) setTriggers(configs []TriggerConfig, factory func(TriggerCo
 			if spreadable, ok := tr.(SpreadableTrigger); ok && spread > 0 {
 				spreadable.SetStartSpread(spread)
 			}
-			tr.Start(lastResult)
+			if w.state == TaskStateIdle && !w.manager.stopped.Load() {
+				tr.Start(lastResult)
+			}
 			w.triggers = append(w.triggers, tr)
 		}
 	}
 
 	w.mu.Unlock()
 
-	if !notify {
-		w.notify()
-		return
+	if notify {
+		select {
+		case w.triggerUpdate <- struct{}{}:
+		default:
+		}
 	}
-
-	w.triggerChanged.Store(true)
-	select {
-	case w.triggerUpdate <- struct{}{}:
-	default:
-	}
-
-	w.notify()
 }
 
 // stopTriggers stops all active triggers.
@@ -155,11 +219,35 @@ func (e maxRuntimeError) Error() string {
 	return fmt.Sprintf("Stopped after reaching the max runtime of %s", e.limit)
 }
 
+// runsSchedule reports whether configs is the schedule the worker runs.
+func (w *taskWorker) runsSchedule(configs []TriggerConfig) bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return slices.Equal(w.schedule, normalizedTriggers(configs))
+}
+
+// normalizedTriggers copies configs with each one Normalized, so a schedule
+// read back from the store, which keeps day_of_week only on weekly triggers,
+// compares equal to the one installed from a binding or an edit.
+func normalizedTriggers(configs []TriggerConfig) []TriggerConfig {
+	out := make([]TriggerConfig, len(configs))
+	for i, cfg := range configs {
+		out[i] = cfg.Normalized()
+	}
+	return out
+}
+
 // reserve claims the local worker before an asynchronous caller acknowledges it.
+// The caller holds scheduleMu, fencing schedule changes and retirement.
 // A positive maxRuntime stops the run when it elapses, the way a cancel does.
+// A retired worker answers ErrTaskNotFound: a caller that looked the worker up,
+// or a trigger firing consumed, before Unregister must not start a run after it.
 func (w *taskWorker) reserve(ctx context.Context, maxRuntime time.Duration) (context.Context, context.CancelFunc, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.isRetired() || w.manager.stopped.Load() {
+		return nil, nil, ErrTaskNotFound
+	}
 	if w.state == TaskStateRunning || w.state == TaskStateCancelling {
 		return nil, nil, ErrTaskAlreadyRunning
 	}
@@ -180,7 +268,9 @@ func (w *taskWorker) reserve(ctx context.Context, maxRuntime time.Duration) (con
 
 // run executes the task. Returns ErrTaskAlreadyRunning if already running.
 func (w *taskWorker) run(ctx context.Context, maxRuntime time.Duration) (*ExecutionResult, error) {
+	w.scheduleMu.Lock()
 	execCtx, cancel, err := w.reserve(ctx, maxRuntime)
+	w.scheduleMu.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -241,29 +331,42 @@ func (w *taskWorker) executeReserved(execCtx context.Context, cancel context.Can
 	w.lastResult = result
 	w.progress = 0
 	w.progressMessage = ""
+	w.rearmTriggersLocked(result)
 	w.mu.Unlock()
 	w.notify()
+	w.manager.removeRetiredWorker(w)
 	observation.Finish(metricOutcome)
 
 	return result
 }
 
-// requestCancel sets state to Cancelling and calls the cancel func.
-func (w *taskWorker) requestCancel() error {
+func (w *taskWorker) rearmTriggersLocked(lastResult *ExecutionResult) {
+	if w.manager.stopped.Load() {
+		return
+	}
+	for _, tr := range w.triggers {
+		tr.Stop()
+		tr.Start(lastResult)
+	}
+}
+
+// requestCancel marks the worker as canceling and returns its snapshot.
+func (w *taskWorker) requestCancel() (TaskInfo, error) {
 	w.mu.Lock()
 	if w.state != TaskStateRunning {
 		w.mu.Unlock()
-		return ErrTaskNotRunning
+		return TaskInfo{}, ErrTaskNotRunning
 	}
 	w.state = TaskStateCancelling
 	cancel := w.cancel
+	info := w.infoLocked()
 	w.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 	slog.Info("task cancel requested", "task", w.task.Key())
 	w.notify()
-	return nil
+	return info, nil
 }
 
 func (w *taskWorker) notify() {
