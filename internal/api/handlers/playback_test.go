@@ -852,6 +852,9 @@ func TestPersistStopAndHistory_CreditsFinishTheItem(t *testing.T) {
 		// The session streams another version than the requested file whose
 		// credits these are, so they don't apply to its position.
 		{name: "another version streams", segments: credits(1200, 1410), position: 1220, playingFileID: 43},
+		// A detached stop that only guessed its version leaves the streamed
+		// file unknown.
+		{name: "streamed version unknown", segments: credits(1200, 1410), position: 1220, playingFileID: -1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newPlaybackTestStore(t)
@@ -873,8 +876,8 @@ func TestPersistStopAndHistory_CreditsFinishTheItem(t *testing.T) {
 				MediaFileID: 42,
 				Position:    tc.position,
 			}
-			if tc.playingFileID > 0 {
-				session.RequestedMediaFileID, session.MediaFileID = 42, tc.playingFileID
+			if tc.playingFileID != 0 {
+				session.RequestedMediaFileID, session.MediaFileID = 42, max(tc.playingFileID, 0)
 			}
 			result := handler.persistStopAndHistory(context.Background(), session)
 

@@ -2017,12 +2017,14 @@ func (h *PlaybackHandler) teardownPlaySession(
 }
 
 // compatStopSnapshot returns the native session a stop finishes: the live one,
-// or else a copy of fallbackSession (detached) whose file is the play's best
-// guess, which the detached history write needs.
+// or else a copy of fallbackSession. The copy's MediaFileID is the streamed
+// file only when the play identified it. Otherwise it is 0, and the first
+// listed version goes in RequestedMediaFileID: history still has a file to
+// record, while nothing takes that guess as the streamed version (no credits).
 func (h *PlaybackHandler) compatStopSnapshot(
 	playSession *PlaybackSession,
 	fallbackSession *playback.Session,
-) (upstreamSession *playback.Session, transcodeNodeURL string, detached bool) {
+) (upstreamSession *playback.Session, transcodeNodeURL string) {
 	if h.sessionMgr != nil {
 		if current, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID); err == nil {
 			upstreamSession = current
@@ -2032,13 +2034,14 @@ func (h *PlaybackHandler) compatStopSnapshot(
 	if upstreamSession == nil && fallbackSession != nil {
 		copy := *fallbackSession
 		copy.ID = playSession.UpstreamSessionID
-		if source := compatScrobbleSource(playSession, &copy, nil); source != nil {
-			copy.MediaFileID = source.FileID
+		if copy.MediaFileID <= 0 {
+			if source := compatScrobbleSource(playSession, &copy, nil); source != nil {
+				copy.RequestedMediaFileID = source.FileID
+			}
 		}
 		upstreamSession = &copy
-		detached = true
 	}
-	return upstreamSession, transcodeNodeURL, detached
+	return upstreamSession, transcodeNodeURL
 }
 
 // cleanupPlaySession performs idempotent process/resource cleanup after the
@@ -2196,17 +2199,9 @@ func (h *PlaybackHandler) stageCompatStop(
 	authoritative bool,
 ) (current *PlaybackSession, upstreamSession *playback.Session, transcodeNodeURL string, staged bool) {
 	unlock := h.compatScrobbleLocks.lock(playSession.UpstreamSessionID)
-	upstreamSession, transcodeNodeURL, detached := h.compatStopSnapshot(playSession, fallbackSession)
-	// A detached snapshot's file may be a guess at the first listed version;
-	// the scrobble judges credits only on the file the fallback identified.
-	scrobbleSession := upstreamSession
-	if detached {
-		identified := *upstreamSession
-		identified.MediaFileID = fallbackSession.MediaFileID
-		scrobbleSession = &identified
-	}
+	upstreamSession, transcodeNodeURL = h.compatStopSnapshot(playSession, fallbackSession)
 	event, ok := h.compatScrobbleEvent(
-		ctx, compatScrobbleStop, playSession, scrobbleSession, nil, positionOverride,
+		ctx, compatScrobbleStop, playSession, upstreamSession, nil, positionOverride,
 	)
 	if !ok {
 		current = playSession
