@@ -1380,7 +1380,10 @@ URL to its transport:
   by, and can restart, the session's current transport. A session rebuilt
   after an API restart has no recorded transport until its next replan; a
   replan that reuses the running transport takes it from the URL it
-  republishes.
+  republishes. One exception: a proxy grant that names no transport (written
+  when a proxied session replans away from HLS) refuses every marked HLS
+  request. Grants live outside the API process, so this holds after an API
+  restart too. Unmarked requests are unaffected.
 
 ### 6.1 `plan_invalidated_v1` — the server withdraws a plan
 
