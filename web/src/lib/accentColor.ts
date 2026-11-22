@@ -128,6 +128,23 @@ function accentText(hex: string, surface: string): string {
   );
 }
 
+/** Cinema Dark's page (--background), which the theme's --primary-hover fades the primary toward. */
+const PAGE = "#141417";
+
+/**
+ * The accent's hover fill (--primary-hover): faded a tenth toward the page,
+ * like the theme's, unless that takes `label` below 4.5:1. Only a dark label
+ * can fall below 4.5:1 on that fade, so the accent then lightens a tenth instead,
+ * which can only raise it. The accent always sets the color it checked: the
+ * theme's color-mix keeps fractional channels and can land just under it.
+ */
+function hoverFill(hex: string, label: string): string {
+  const faded = mixToward(hex, PAGE, 0.1);
+  return contrastRatio(faded, label) >= MIN_LABEL_CONTRAST
+    ? faded
+    : mixToward(hex, WHITE_LABEL, 0.1);
+}
+
 /**
  * The CSS custom properties the admin's accent sets, or null when the stored
  * value is not a hex color, which is then ignored as email ignores it. The
@@ -156,5 +173,6 @@ export function accentDeclarations(accent: string): Record<string, string> | nul
     declarations["primary-foreground"] = label;
     declarations["sidebar-primary-foreground"] = label;
   }
+  declarations["primary-hover"] = hoverFill(hex, label);
   return declarations;
 }

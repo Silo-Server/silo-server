@@ -86,7 +86,8 @@ export function CreateUserDialogContent({
     >
       <DialogHeader className="max-sm:border-border max-sm:shrink-0 max-sm:border-b max-sm:ps-4 max-sm:pe-2 max-sm:pt-[calc(0.75rem+env(safe-area-inset-top))] max-sm:pb-3">
         <div className="flex items-center gap-3">
-          <DialogTitle className="min-w-0 flex-1 max-sm:text-start">
+          {/* From sm up the built-in close button shows beside this title. */}
+          <DialogTitle className="min-w-0 flex-1 max-sm:text-start sm:pe-6">
             {t("web.admin.users.list.createDialogTitle")}
           </DialogTitle>
           <DialogClose asChild>

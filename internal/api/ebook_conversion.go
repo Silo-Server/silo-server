@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/ebookconvert"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 // ebookKindleConversionSettingKey is the admin flag that gates Kindle->EPUB
@@ -31,7 +31,7 @@ const ebookKindleConversionSettingKey = "ebook.kindle_conversion_enabled"
 // there is nothing to flush. Memory is bounded per conversion by
 // ebookconvert.DefaultMaxMemoryPages × DefaultConcurrency (see the design doc's
 // resource notes); tune via ebookconvert.Options if the deployment is tight.
-func buildEbookConversion(deps Dependencies, settings catalog.SettingsStore) *handlers.EbookConversion {
+func buildEbookConversion(deps Dependencies, settings serversettings.SettingsStore) *handlers.EbookConversion {
 	if settings == nil {
 		return nil
 	}
@@ -58,7 +58,7 @@ func buildEbookConversion(deps Dependencies, settings catalog.SettingsStore) *ha
 // poll) would otherwise issue a DB query per request; a short TTL collapses
 // bursts to one query while keeping admin toggles effectively instant. On a read
 // error it keeps the last known value rather than flapping the feature off.
-func ebookFlagPredicate(settings catalog.SettingsStore, key string) func(context.Context) bool {
+func ebookFlagPredicate(settings serversettings.SettingsStore, key string) func(context.Context) bool {
 	const ttl = 3 * time.Second
 	var (
 		mu      sync.Mutex

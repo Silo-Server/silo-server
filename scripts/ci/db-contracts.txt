@@ -50,6 +50,7 @@
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
 ./internal/scanner TestScannedGroupForItemDB
+./internal/scanner TestListMarkerEditAuditClientIPHasNoNetmaskDB
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
 ./internal/scanner TestMatroskaTrackBackfillStopsOnIntermittentStalls
@@ -439,6 +440,7 @@
 ./internal/notifications TestWebPushResubscribeRecordsTheNewLoginDB
 ./internal/notifications TestWebPushSweepOfUnboundSubscriptionsDB
 ./internal/notifications TestQueuedWebPushStopsWhenTheRegisteringLoginEndsDB
+./internal/notifications TestWebPushRetryAfterNeverShortensTheScheduleDB
 
 # Session-less Android push retirement is ordered against registration by generation.
 ./internal/notifications TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB
@@ -906,9 +908,9 @@
 ./internal/autoscan TestUpdateConnectionMarkerReset
 
 # ChatGPT credential rotations serialize independently of general settings.
-./internal/catalog TestEncryptedSettingsValueAtomicSerializesWithoutBlockingGeneralSettingsDB
-./internal/catalog TestSettingsValueWaitersPreservePoolCapacityDB
-./internal/catalog TestSelectionUsesOneConnectionAndWaitsBeforeGeneralLockDB
+./internal/serversettings TestEncryptedSettingsValueAtomicSerializesWithoutBlockingGeneralSettingsDB
+./internal/serversettings TestSettingsValueWaitersPreservePoolCapacityDB
+./internal/serversettings TestSelectionUsesOneConnectionAndWaitsBeforeGeneralLockDB
 
 # Marker thumbnails preserve current ranges and provider image inventories.
 ./internal/chapterthumbs TestMarkerOnlyThumbnailsAndStaleEditsDB

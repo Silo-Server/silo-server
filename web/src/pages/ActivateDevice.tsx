@@ -24,6 +24,7 @@ import {
 import { QuickConnectApproval } from "@/components/auth/QuickConnectApproval";
 import { Smartphone } from "lucide-react";
 import { useT } from "@/i18n";
+import { hasArabicScript } from "@/lib/direction";
 
 type DeviceLoginDetails = V2Result<"GET /api/v2/auth/device">;
 
@@ -379,7 +380,12 @@ function ActivateDeviceRequest() {
       <AuthBackground />
       <Card className="auth-card glass panel-border w-full max-w-md border-0">
         <CardHeader>
-          <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">{serverName}</CardTitle>
+          <CardTitle
+            className="text-3xl font-extrabold tracking-[-0.04em]"
+            data-cursive={hasArabicScript(serverName) || undefined}
+          >
+            {serverName}
+          </CardTitle>
           <p className="text-muted-foreground text-xs">{serverHost}</p>
           <CardDescription className="mt-2 text-sm leading-6">
             {t("web.auth.activate.description")}
