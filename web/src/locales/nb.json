@@ -521,6 +521,12 @@
       "value": "Denne avspillingsøkten er avsluttet. Start avspillingen på nytt."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Denne strømmen er erstattet. Avspillingen fortsetter på den gjeldende strømmen."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

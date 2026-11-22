@@ -521,6 +521,12 @@
       "value": "Šī atskaņošanas sesija ir beigusies. Sāciet atskaņošanu no jauna."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Šī straume tika aizstāta. Atskaņošana turpinās pašreizējā straumē."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

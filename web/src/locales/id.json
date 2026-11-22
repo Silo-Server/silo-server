@@ -521,6 +521,12 @@
       "value": "Sesi pemutaran ini telah berakhir. Mulai putar lagi."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Stream ini telah diganti. Pemutaran berlanjut di stream saat ini."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

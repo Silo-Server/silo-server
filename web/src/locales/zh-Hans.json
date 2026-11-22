@@ -521,6 +521,12 @@
       "value": "此播放会话已结束。请重新开始播放。"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "此串流已被替换。播放将在当前串流上继续。"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

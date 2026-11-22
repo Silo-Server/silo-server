@@ -521,6 +521,12 @@
       "value": "\u200F\u202EThis playback session ended. Start playing again.\u202C"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis stream was replaced. Playback continues on the current one.\u202C"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

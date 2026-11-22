@@ -521,6 +521,12 @@
       "value": "סשן ההפעלה הזה הסתיים. יש להתחיל את ההפעלה מחדש."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "ההזרמה הזו הוחלפה. ההפעלה ממשיכה בהזרמה הנוכחית."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

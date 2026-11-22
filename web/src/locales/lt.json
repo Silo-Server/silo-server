@@ -521,6 +521,12 @@
       "value": "Šis atkūrimo seansas baigėsi. Pradėkite leisti iš naujo."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Šis srautas pakeistas kitu. Atkūrimas tęsiamas dabartiniu srautu."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

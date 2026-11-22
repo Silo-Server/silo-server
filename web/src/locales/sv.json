@@ -521,6 +521,12 @@
       "value": "Uppspelningssessionen har avslutats. Starta uppspelningen igen."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Den här streamen har ersatts. Uppspelningen fortsätter på den aktuella."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

@@ -521,6 +521,12 @@
       "value": "この再生セッションは終了しました。もう一度再生してください。"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "このストリームは置き換えられました。現在のストリームで再生を続行しています。"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
