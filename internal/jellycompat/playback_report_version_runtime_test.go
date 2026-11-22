@@ -195,3 +195,36 @@ func TestPlaybackSourceStoresEndCreditsForTheItemKind(t *testing.T) {
 		})
 	}
 }
+
+// A stop handled after the native session was reaped, for a play that never
+// identified its version, judges completion by the percentage alone: the first
+// listed version is only a guess, so its credits don't finish the play. 3100 s
+// is past the theatrical cut's credits but only 86% of it.
+func TestStoppedScrobbleAfterReapIgnoresGuessedVersionCredits(t *testing.T) {
+	theatrical, extended := versionedReportVersions()
+	handler, _, _ := newVersionedReportHandler(t, false, []catalog.FileVersion{theatrical, extended}, 0)
+	if err := handler.playbackStore.Update("play-1", func(play *PlaybackSession) error {
+		play.MediaSources[0].EndCreditsStart = 3000
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	scrobbler := &recordingCompatWatchScrobbler{}
+	handler.WatchScrobbler = scrobbler
+
+	body := fmt.Sprintf(`{"PlaySessionId":"play-1","PositionTicks":%d}`, int64(3100)*10_000_000)
+	req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Stopped", strings.NewReader(body))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey,
+		&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))
+	rec := httptest.NewRecorder()
+	handler.HandleSessionPlayingStopped(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(scrobbler.calls) != 1 || scrobbler.calls[0].action != "stop" {
+		t.Fatalf("scrobble calls = %+v, want one stop", scrobbler.calls)
+	}
+	if event := scrobbler.calls[0].event; event.Completed {
+		t.Fatalf("stop event = %+v, want not completed", event)
+	}
+}

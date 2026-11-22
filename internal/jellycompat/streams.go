@@ -2016,12 +2016,13 @@ func (h *PlaybackHandler) teardownPlaySession(
 	}
 }
 
+// compatStopSnapshot returns the native session a stop finishes: the live one,
+// or else a copy of fallbackSession (detached) whose file is the play's best
+// guess, which the detached history write needs.
 func (h *PlaybackHandler) compatStopSnapshot(
 	playSession *PlaybackSession,
 	fallbackSession *playback.Session,
-) (*playback.Session, string) {
-	transcodeNodeURL := ""
-	var upstreamSession *playback.Session
+) (upstreamSession *playback.Session, transcodeNodeURL string, detached bool) {
 	if h.sessionMgr != nil {
 		if current, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID); err == nil {
 			upstreamSession = current
@@ -2035,8 +2036,9 @@ func (h *PlaybackHandler) compatStopSnapshot(
 			copy.MediaFileID = source.FileID
 		}
 		upstreamSession = &copy
+		detached = true
 	}
-	return upstreamSession, transcodeNodeURL
+	return upstreamSession, transcodeNodeURL, detached
 }
 
 // cleanupPlaySession performs idempotent process/resource cleanup after the
@@ -2194,9 +2196,17 @@ func (h *PlaybackHandler) stageCompatStop(
 	authoritative bool,
 ) (current *PlaybackSession, upstreamSession *playback.Session, transcodeNodeURL string, staged bool) {
 	unlock := h.compatScrobbleLocks.lock(playSession.UpstreamSessionID)
-	upstreamSession, transcodeNodeURL = h.compatStopSnapshot(playSession, fallbackSession)
+	upstreamSession, transcodeNodeURL, detached := h.compatStopSnapshot(playSession, fallbackSession)
+	// A detached snapshot's file may be a guess at the first listed version;
+	// the scrobble judges credits only on the file the fallback identified.
+	scrobbleSession := upstreamSession
+	if detached {
+		identified := *upstreamSession
+		identified.MediaFileID = fallbackSession.MediaFileID
+		scrobbleSession = &identified
+	}
 	event, ok := h.compatScrobbleEvent(
-		ctx, compatScrobbleStop, playSession, upstreamSession, nil, positionOverride,
+		ctx, compatScrobbleStop, playSession, scrobbleSession, nil, positionOverride,
 	)
 	if !ok {
 		current = playSession
