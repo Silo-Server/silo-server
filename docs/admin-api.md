@@ -3638,8 +3638,7 @@ plugin's connection check under a 20 s timeout, and stops the instance. Nothing 
 A plugin whose manifest metadata declares `configuration_check: true` checks itself: the
 server calls its `ConfigurationChecks.TestConfiguration` with every global config entry,
 the staged one in place of its saved value, and shows the plugin's message when it answers
-`ok` false. Its temporary instance starts with no configuration, since the check reads the
-settings from the request. This takes precedence over the built-in probes, whatever the plugin's
+`ok` false. This takes precedence over the built-in probes, whatever the plugin's
 capabilities. Otherwise a metadata provider is checked with a movie search, and a marker
 provider is asked for its account statistics, which need the staged credentials.
 A completed failed check, including a plugin without connection-check support, is a 200

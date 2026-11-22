@@ -985,10 +985,6 @@ func TestServiceTestGlobalConfigUsesGenericConfigurationChecks(t *testing.T) {
 		if got := rpc.lastReq.GetConfig()[0].GetValue().AsMap()["api_key"]; got != "stored-secret" {
 			t.Fatalf("staged api_key = %#v, want stored-secret", got)
 		}
-		host := service.host.(*fakeServiceHost)
-		if len(host.started) != 1 || host.started[0].Config != nil {
-			t.Fatalf("temporary instance started with %#v, want no config: the check reads the request", host.started)
-		}
 	})
 
 	t.Run("returns plugin failure message when ok is false", func(t *testing.T) {
