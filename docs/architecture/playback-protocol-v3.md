@@ -71,24 +71,28 @@ Two consequences worth stating early, because they surprise implementers:
 
 All paths are relative to `/api/v2`; [Playback API](../playback-api.md)
 covers the v2 envelope around these endpoints (installation check, sequenced
-progress and stop, delivery). Every endpoint requires an authenticated
-user. The mutation endpoints additionally require a profile, supplied as the
-`X-Profile-Id` header, and answer `400 bad_request` without it. Before any
-endpoint reads its body, the server resolves the viewer: an `X-Profile-Id` that
-names an unverified profile, such as a PIN-protected one without a valid
-`X-Profile-Token` (API keys skip the PIN check), answers
-`403 profile_unverified`, one that names no profile on the account answers
-`404 not_found`, and `503 service_unavailable` with `Retry-After` means the
-viewer's access could not be resolved yet.
+progress and stop, delivery). Every endpoint requires an authenticated user;
+without one it answers `401` with one of the authentication problem types
+(`authentication_required`, `invalid_token`, `session_expired`,
+`token_refresh_required`). The mutation endpoints additionally require a
+profile, supplied as the `X-Profile-Id` header, and answer
+`422 validation_failed` without it, with an `errors` entry at
+`header.x-profile-id`. Before any endpoint reads its body, the server resolves
+the viewer: an `X-Profile-Id` that names an unverified profile, such as a
+PIN-protected one without a valid `X-Profile-Token` (API keys skip the PIN
+check), answers `403 profile_verification_required`, one that names no profile
+on the account answers `404 not_found`, and `503 dependency_unavailable` with
+`Retry-After` means the viewer's access could not be resolved yet. Every
+mutation body carries the `installation_id` from capabilities; a different one
+answers `409 installation_changed`
+([Playback API](../playback-api.md#capabilities)).
 
 Every non-2xx response body is a problem document
-([API contract](api-contract.md)). The status tables below name the playback
-service's condition code. A `400` or `426` condition answers `422
-validation_failed`; any other condition keeps its status and carries the
-catalog problem type of the same name when one exists, otherwise the default
-type for that status (`409 conflict`, for example), with the condition's
-message as `detail`. `playback_attempt_reused` answers `409
-idempotency_conflict`.
+([API contract](api-contract.md)). The status tables below give the wire
+status and problem type. Several conditions share a type (an ended session and
+an unknown one are both `404 not_found`, for example); the `detail` tells them
+apart for a person reading logs, and a client branches on the status and type
+only.
 
 ### 2.1 `GET /playback/capabilities`
 
@@ -133,7 +137,7 @@ These are the protocol-v3 feature strings this server version advertises:
 | `plan_source_duration_v1` | `source.duration_seconds` is populated when known, so its absence means *unknown* rather than *unsupported* (§5) |
 | `buffering_quality_v1` | An opted-in client may send the optional buffering fields on start and replan, and the server records and applies learned limits for it ([Buffering quality](#buffering-quality-native-v2)) |
 | `playback_plan_summary_v1` | `POST /playback/route-events` accepts the `plan_summary` event (§7.4, [Buffering quality](#buffering-quality-native-v2)) |
-| `marker_thumbnails_v1` | Marker occurrences in watch and marker reads may carry preview image fields, and an attempt that opted in at start receives realtime `marker_thumbnail_ready` events ([markers API](../markers-api.md#marker-preview-images-v2)) |
+| `marker_thumbnails_v1` | Marker occurrences in watch and marker reads may carry preview image fields, and an attempt that opted in at start receives realtime `marker_thumbnail_ready` events ([markers API](../markers-api.md#marker-preview-images)) |
 | `plan_active_quality_v1` | The plan names the `available_qualities` entry it delivers in `active_quality`, so an absent field means no entry rather than an older server (§10) |
 | `subrip_sidecar_v1` | An opted-in client that parses SubRip itself receives external and downloaded SRT tracks as the original `.srt` file instead of the WebVTT conversion (§8) |
 | `hls_subtitle_renditions_v1` | An opted-in client receives a `server_transcode_hls` plan's embedded text subtitle as a WebVTT `SUBTITLES` rendition of the plan's HLS stream (`subtitle.hls_rendition`) instead of a sidecar artifact (§8) |
@@ -144,6 +148,8 @@ These are the protocol-v3 feature strings this server version advertises:
 | `native_embedded_limitations_v1` | The server honors `limitations` on a `native_embedded` entry and keeps the tracks that player would show wrongly off the native route (§8). A client whose native route needs a limitation must not send that entry to a server without this feature: an older server rejects the field or ignores it and plans those tracks native |
 | `hls_subtitle_renditions_all_v1` | Only with `hls_subtitle_renditions_v1` (and `hls_remux_subtitle_renditions_v1` for a remux). Every embedded text track the source's index can read, up to 64, becomes a WebVTT rendition of the HLS plan's stream, read on demand; those inventory rows carry `hls_rendition`, and switching among them keeps the stream (§8) |
 | `progressive_range_refusal_v1` | Sent by the client in `deliveries.progressive.features` rather than `client_features`. The client reopens a progressive remux at its current position when the stream refuses a mid-stream range. Its `server_remux_progressive` URLs then carry `remux_range=refuse`, except one served by a proxy that does not advertise `remux_range_refusal_v1` (§4.1), and a GET whose `Range` starts past byte 0, or is a suffix range, answers `409` before the remux starts instead of streaming from the origin, which a browser would read again from byte zero ([playback API](../playback-api.md#delivery)) |
+| `surround_bitstream_conversion_v1` | Advertised only. A client whose exact audio evidence shows it would decode a surround track to PCM, while its sink validates E-AC-3 or AC-3 5.1 but not the source codec, may receive a copy-video `server_remux_hls` that converts the track to that codec (`decision_reason: surround_bitstream_conversion`, §11) |
+| `parallel_range_origin_v1` | The client sends it in `client_features`; the plan's `stream.parallel_range_url` may then name where to read the file's ranges over several connections (§4.2), unless the client also sends `header_authenticated_media_v1`. The client promises to use that URL exactly as given, adding no account token to it, and to read `stream.url` when the plan has none |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
@@ -172,22 +178,24 @@ Requests a plan. Auth + `X-Profile-Id` required. Request body cap: **256 KiB**.
 Body: `StartRequestV3`
 ([`start-request.schema.json`](../design/schemas/playback-v3/v3/start-request.schema.json)).
 
-| Status | Code | Meaning |
+| Status | Type | Meaning |
 | --- | --- | --- |
 | `201` | — | A decision was made. Body is `DecisionResponseV3`: either `outcome: "playable"` with a `playback_plan`, or `outcome: "adaptation_unavailable"` with a `terminal`. |
-| `400` | `bad_request` | Malformed JSON, failed validation (the `message` is the validator's own text), missing `X-Profile-Id`, or `profile_id` disagreeing with the header |
-| `401` | `unauthorized` | No authenticated user |
+| `400` | `malformed_request` | The body is not JSON, or `bandwidth_estimate_source` is sent without `bandwidth_estimate_kbps` |
+| `401` | authentication types (§2) | No authenticated user |
 | `404` | `not_found` | `file_id` does not exist, is marked missing, or this profile cannot see it |
-| `409` | `playback_attempt_reused` | This `playback_attempt_id` was already used for a *different* request, or a retried start adds `subrip_sidecar_v1` to an attempt negotiated without it |
-| `426` | `client_upgrade_required` | The body does not declare the finalized v3 shape: `protocol_version: 3` plus both capability evidence markers |
+| `409` | `idempotency_conflict` | This `playback_attempt_id` was already used for a *different* request, or a retried start adds `subrip_sidecar_v1` to an attempt negotiated without it |
+| `409` | `installation_changed` | `installation_id` is not this server's (§2) |
+| `422` | `validation_failed` | Failed validation (the `detail` is the validator's own text), a body that does not declare the finalized v3 shape (`protocol_version: 3` plus both capability evidence markers), missing `X-Profile-Id`, or `profile_id` disagreeing with the header |
 | `500` | `internal_error` | Session store failure |
+| `503` | `dependency_unavailable` | The connection reading the start needs could not be loaded |
 
 A file the profile is not allowed to see is `404`, not `403` — parental and
 library restrictions do not confirm that a hidden item exists.
 
-The `426` condition is what a pre-v3 or draft-v3 body gets. There is no
-protocol negotiation and no fallback: the server decodes v3 or it refuses. On
-the wire it is a `422 validation_failed` like any other invalid body.
+A pre-v3 or draft-v3 body is a `422 validation_failed` like any other invalid
+body. There is no protocol negotiation and no fallback: the server decodes v3
+or it refuses.
 
 Note the layering: a request whose *body* is fine but whose *media* cannot be
 played is not an HTTP error. It is a `201` with `outcome:
@@ -197,7 +205,7 @@ endpoint describe the request; the decision lives in the body.
 **Idempotency.** The server stores each `playback_attempt_id` alongside a
 SHA-256 digest of the exact request body. Replaying a byte-identical body
 replays the original response verbatim. Reusing the id with a different body is
-`409 playback_attempt_reused` — the id is a claim about *which* playback attempt
+`409 idempotency_conflict` — the id is a claim about *which* playback attempt
 this is, so reusing it for different intent is a client bug the server refuses to
 paper over. If the attempt is known but its session has since expired, the
 response is a `201` terminal with reason `session_expired` rather than a replay
@@ -244,27 +252,27 @@ the user changed a track or the quality. Auth + `X-Profile-Id` required. Request
 body cap: 256 KiB. Body: `ReplanRequestV3`
 ([`replan-request.schema.json`](../design/schemas/playback-v3/v3/replan-request.schema.json)).
 
-| Status | Code | Meaning |
+| Status | Type | Meaning |
 | --- | --- | --- |
 | `200` | — | `DecisionResponseV3`, plan or terminal |
-| `400` | `bad_request` | Malformed or failed validation, or no `X-Profile-Id` |
-| `401` | `unauthorized` | No authenticated user |
-| `403` | `forbidden` | The session belongs to another user or profile |
-| `404` | `playback_session_not_found` | No such session, or its session has ended |
-| `409` | `stale_playback_plan` | `failed_plan_id` is not the session's current plan, `playback_attempt_id` is not the session's attempt, or a newer replacement is already active |
-| `409` | `idempotency_key_reused` | This `replan_request_id` was used for a different replan |
-| `409` | `replan_in_progress` | An earlier request with this `replan_request_id` left an unexpired lease without finishing, for example because its server stopped mid-replan |
-| `503` | `replan_capacity_exhausted` | The request was cancelled while it waited for a replan slot. Each API process runs at most 8 replans at once (half the plan store's connection pool when that is less than 8) and queues the rest |
-| `503` | `transcode_start_failed` | The server began shutting down before it could publish the replacement transport; the session has ended |
+| `400` | `malformed_request` | The body is not JSON, or `bandwidth_estimate_source` is sent without `bandwidth_estimate_kbps` |
+| `401` | authentication types (§2) | No authenticated user |
+| `403` | `permission_denied` | The session belongs to another user or profile |
+| `404` | `not_found` | No such session, or its session has ended |
+| `409` | `conflict` | `failed_plan_id` is not the session's current plan, `playback_attempt_id` is not the session's attempt, or a newer replacement is already active (`detail` names which); this `replan_request_id` was used for a different replan; or an earlier request with this `replan_request_id` left an unexpired lease without finishing, for example because its server stopped mid-replan |
+| `409` | `installation_changed` | `installation_id` is not this server's (§2) |
+| `410` | `playback_session_ended` | An administrator ended the session ([Playback API](../playback-api.md#progress-and-stop)) |
+| `422` | `validation_failed` | Failed validation, or no `X-Profile-Id` |
 | `500` | `internal_error` | Store outage |
+| `503` | `dependency_unavailable` | The request was cancelled while it waited for a replan slot (each API process runs at most 8 replans at once, half the plan store's connection pool when that is less than 8, and queues the rest), or the server began shutting down before it could publish the replacement transport, which ends the session |
 
 Checks run in this order: auth, viewer access and the `X-Profile-Id` header,
 body decode and validation, concurrency slot, session lock, attempt lookup,
 ownership, `playback_attempt_id` match, validation
 again with the start's attempt-sticky features, live session, lease,
 `failed_plan_id` match.
-A `replan_capacity_exhausted` `503` therefore means nothing was read or written
-for the session, and the identical request can be retried unchanged. Note that the first validation
+A `503` while waiting for a replan slot therefore means nothing was read or
+written for the session, and the identical request can be retried unchanged. Note that the first validation
 comes before every session lookup: a malformed body against a session that does
 not exist answers `422`, not `404`.
 
@@ -272,11 +280,10 @@ not exist answers `422`, not `404`.
 of one session run one at a time under the session lock, so a second request
 carrying the *same* `replan_request_id` waits for the original and then replays
 its response verbatim. Only a lease the original left behind without finishing,
-for example when its server stopped mid-replan, answers `409 replan_in_progress`
-until it expires. This is what makes a client's retry-on-timeout safe.
+for example when its server stopped mid-replan, answers `409 conflict` until it
+expires. This is what makes a client's retry-on-timeout safe.
 
-Note the deliberate asymmetry with start: a store outage during replan is `500`,
-never `404`. Clients tear playback down on session-not-found, so a transient
+A store outage during replan is `500`, never `404`. Clients tear playback down on session-not-found, so a transient
 store failure must read as retryable rather than as the session having vanished.
 
 ### 2.4 `POST /playback/route-events`
@@ -285,14 +292,16 @@ Reports what happened on the device. Auth + `X-Profile-Id` required. Request bod
 cap: **32 KiB**. Body: a single `RouteEventV3`, not a batch
 ([`route-event.schema.json`](../design/schemas/playback-v3/v3/route-event.schema.json)).
 
-| Status | Code | Meaning |
+| Status | Type | Meaning |
 | --- | --- | --- |
 | `202` | — | Accepted. The body is `{event_id, outcome: "accepted"}`. |
-| `400` | `bad_request` | Malformed or failed validation, a `plan_summary` event (§7.4), or no `X-Profile-Id` |
-| `401` | `unauthorized` | No authenticated user |
-| `403` | `forbidden` | The session or attempt belongs to another profile, or the referenced session/attempt does not exist |
-| `429` | `event_rate_limited` | 120 events/attempt/minute or 600/user/minute exceeded |
-| `500` | `internal_error` | Store outage |
+| `400` | `malformed_request` | The body is not JSON |
+| `401` | authentication types (§2) | No authenticated user |
+| `403` | `permission_denied` | The session or attempt belongs to another profile, or the referenced session/attempt does not exist |
+| `409` | `installation_changed` | `installation_id` is not this server's (§2) |
+| `422` | `validation_failed` | Failed validation (including an `event_id` that is not a canonical UUID), or no `X-Profile-Id` |
+| `429` | `rate_limited` | 120 events/attempt/minute or 600/user/minute exceeded |
+| `503` | `dependency_unavailable` | Store outage |
 
 The checks run in that order: auth, then body decode and validation, then the
 rate limit, and only then the session-ownership lookup. The
@@ -303,7 +312,7 @@ ownership.
 Two consequences for clients. A `429` means "drop this event," never "retry it";
 the events are diagnostics and losing one costs nothing. And an unknown session
 is `403`, not `404` — the handler does not distinguish "not yours" from "not
-there." A store outage during that lookup is `500`, so a `403` genuinely means
+there." A store outage during that lookup is `503`, so a `403` genuinely means
 the event will never be accepted and should be dropped rather than retried.
 
 A terminal decision returned by `POST /playback/start` has a durable attempt but
@@ -326,8 +335,9 @@ off, §6.1), or the server decides it was abandoned. The four endpoints above
 are not a heartbeat: a client that calls only those, while its player fetches
 no media from this server, loses its session 90 to 105 seconds after its
 `start` or its last `replan` that returned a playable plan (about five minutes
-when a proxy node serves the media). After that its `replan`, progress, and
-stop calls answer `404 playback_session_not_found`.
+when a proxy node serves the media). After that its `replan` and progress
+calls answer `404 not_found`, and a stop replays the receipt of the server's
+own stop.
 
 Every 15 seconds the server ends each session that has shown no activity for
 **45 seconds**, or for **30 minutes** when the client's latest progress report
@@ -361,7 +371,7 @@ These count as activity:
 | A request to the `stream.url` of `original_http` or `server_remux_progressive` | The session is kept while the request is open; its start and end count. Through a proxy node, see below |
 | A valid `hello`, `ack`, or `result` frame on the control socket (below), and the socket closing after a `hello` | Opening the socket, its pings, and frames that fail validation do not count |
 
-`capability`, `route-events`, `/sync/progress`, subtitle sidecar requests, and a
+`capabilities`, `route-events`, `/sync/progress`, subtitle sidecar requests, and a
 `replan` that is refused, ends in a terminal, or replays an earlier answer do
 not count.
 
@@ -392,63 +402,62 @@ A client therefore:
 
 1. Posts progress every 10 seconds while the session is open, playing or
    paused. That leaves room for several lost reports inside the 45-second
-   window. The web player does the same through the sequenced `/api/v2`
-   progress call ([Playback API](../playback-api.md#progress-and-stop)), where
-   a sample counts only when it is answered `applied` or `replayed`.
+   window. A sample counts only when it is answered `applied` or `replayed`
+   ([Playback API](../playback-api.md#progress-and-stop)).
 2. Stops the session with `DELETE /playback/{session_id}` when playback ends,
    so the server releases its transcode and records the stop at once.
    Otherwise both wait until the session expires: 45 to 60 seconds after its
    last activity but no sooner than 90 seconds after its latest plan, about
    five minutes for proxy-served media, or about 30 minutes if the last
    progress report said paused.
-3. Treats `404 playback_session_not_found` from `replan` or progress as the end
-   of the session and, if the viewer is still watching, starts a new attempt
-   (§6.2). A `404 playback_session_not_found` from `DELETE` means the session
-   had already ended; a `404 not_found` means `X-Profile-Id` is wrong and the
-   stop should be retried with the right one.
+3. Treats `404 not_found` from `replan` or progress as the end of the session
+   and, if the viewer is still watching, starts a new attempt (§6.2). A
+   `410 playback_session_ended` means an administrator ended it, and the
+   client leaves playback instead.
 4. If it opens the control socket, answers every command it receives with a
    `result` before the command's `deadline_ms` (below).
 
-**`POST /playback/{session_id}/progress`.** Auth + `X-Profile-Id` required.
-Body: `{"position": <seconds>, "is_paused": <bool>}`, where `position` is the
-source position: the player position plus `timeline_offset_seconds` (§5). The
-position also feeds resume and history unless the session was started with
-`progress_persistence: "client"` (§2.2) or plays one part of a multipart item.
-Answers `204` with no body.
-
-**`DELETE /playback/{session_id}`.** Auth + `X-Profile-Id` required. No body.
-Answers `204` with no body. A repeated `DELETE` answers `404`.
+**`POST /playback/{session_id}/progress`** and **`DELETE /playback/{session_id}`.**
+Auth + `X-Profile-Id` required. [Playback API](../playback-api.md#progress-and-stop)
+defines their sequenced bodies, their `200` receipts, and their replay rules.
+Progress `position` is the source position: the player position plus
+`timeline_offset_seconds` (§5). The position also feeds resume and history
+unless the session was started with `progress_persistence: "client"` (§2.2) or
+plays one part of a multipart item. Every later `DELETE` for a session answers
+`200` with `outcome: "replayed"` and the stored receipt.
 
 Both can answer these errors:
 
-| Status | Code | Meaning |
+| Status | Type | Meaning |
 | --- | --- | --- |
-| `400` | `bad_request` | Malformed progress body, or no `X-Profile-Id` |
-| `401` | `unauthorized` | No authenticated user |
-| `403` | `forbidden` | The session belongs to another user |
-| `403` | `profile_unverified` | The profile is PIN-protected and `X-Profile-Token` is missing or invalid |
-| `404` | `playback_session_not_found` | No such session, or it has ended |
-| `404` | `not_found` | `X-Profile-Id` names no profile on this account; the session has not ended |
-| `500` | `internal_error` | The server could not load the account or profile, or (stop only) could not stop a remux running on a transcode node |
+| `400` | `malformed_request` | The body is not JSON |
+| `401` | authentication types (§2) | No authenticated user |
+| `403` | `permission_denied` | The session belongs to another user or profile |
+| `403` | `profile_verification_required` | The profile is PIN-protected and `X-Profile-Token` is missing or invalid |
+| `404` | `not_found` | No such session, (progress only) it has ended, or `X-Profile-Id` names no profile on this account |
+| `409` | `progress_conflict` | (progress only) The sequence was already used for a different sample |
+| `409` | `installation_changed` | `installation_id` is not this server's (§2) |
+| `410` | `playback_session_ended` | (progress only) An administrator ended the session |
+| `422` | `validation_failed` | Failed validation (a non-positive sequence, a `stop_id` that is not a canonical UUID or is one the server reserves, a final sample missing `sequence` or `position`), or no `X-Profile-Id` |
+| `503` | `dependency_unavailable` | Store outage |
 
-The session and ownership checks come before the progress body is read, so a
-malformed body for an ended session answers `404`. `replan`, this progress
-call, stop, and the control socket see only the sessions held in memory by the
-API process that answers, for every attempt, so a deployment with several API
-replicas needs session affinity for them; the reconstruction in §4.1 covers
-media requests only. The sequenced `/api/v2` progress call records an
-`applied` or `replayed` sample on any replica, but only the replica that holds
-the session counts it as activity, and that replica still ends the session when
-its own window runs out, so v2 progress needs the same affinity. These bodies,
-and the control socket frames below, have no JSON Schema under
+Progress and stop work on any API replica: both run against the attempt row.
+Only the replica that holds the session in memory counts a progress sample as
+activity, and that replica still ends the session when its own window runs
+out. `replan` and the control socket see only the sessions held in memory by
+the API process that answers, so a deployment with several API replicas needs
+session affinity for them and for progress; the reconstruction in §4.1 covers
+media requests only. The control socket frames below have no JSON Schema under
 `docs/design/schemas/playback-v3/`; this section is their contract.
 
-**Control socket.** `GET /playback/sessions/{session_id}/control/ws` (auth, no
-profile) is optional. It adds to progress reports and does not replace them: it
-carries no position or pause state. It answers `404 playback_session_not_found`
-for an unknown session, and its other errors, such as a `403` for another
-user's session, in plain text. The server treats the socket as connected only
-after the player sends a valid `hello`:
+**Control socket.** `GET /playback/sessions/{session_id}/control/ws` is
+optional. It adds to progress reports and does not replace them: it carries no
+position or pause state. The client first mints a single-use ticket with
+`POST /playback/sessions/{session_id}/control/ws-ticket` and offers it in the
+WebSocket subprotocols; [Realtime API](../realtime-api.md#owner-bound-playback-control-handshake)
+defines the handshake and its problem answers (`404 not_found` for an unknown
+session, `410 playback_session_ended` for a stopped one). The server treats the
+socket as connected only after the player sends a valid `hello`:
 
 ```json
 {"type": "hello", "session_id": "…", "client": {"name": "…", "version": "…"}, "capabilities": {"commands": ["plan_invalidated"]}}
@@ -462,6 +471,23 @@ after the player sends a valid `hello`:
 `set_subtitle_track`, or `plan_invalidated`. Otherwise the server ignores that
 `hello`, and the socket counts as connected only once a valid one arrives. The
 list does not limit what the server sends.
+
+Every command the server sends is one frame:
+
+```json
+{"type": "command", "command_id": "…", "session_id": "…", "name": "terminate", "reason": "…", "issued_by": {"kind": "admin"}, "deadline_ms": 3000, "payload": {}}
+```
+
+`reason`, `issued_by` and `deadline_ms` are optional, and `payload` is
+always an object. `reason` is the one place a command's reason travels. For
+an administrator's `stop` or `terminate` (`issued_by.kind` is `admin`) it is
+the free-form text the administrator typed, and a player that supports it
+shows it with its notice. For an administrator's `server_restarting` it
+defaults to the machine code `server_restart_requested`, and for
+`plan_invalidated` it is a machine code repeated in its payload (§6.1).
+`payload` holds the command's own arguments: `display_message` carries
+`{"message": "…"}` and adds `title` only when the administrator gave one, and
+an administrator's `stop` or `terminate` carries an empty object.
 
 As soon as the socket is open, the player can receive an administrator's
 `stop`, `terminate`, or `display_message`, and the `server_restarting` notice;
@@ -902,7 +928,10 @@ executor adds `-bsf:a aac_adtstoasc` only when that codec is AAC; the filter
 rejects every other codec. The claim is empty when audio is transcoded. A token
 without it, or an executor that predates it, serves the plain copy, so an
 MPEG-TS AAC remux still fails there until both the API and that executor carry
-the claim. The HLS copy path does not apply the filter yet (#2840).
+the claim. HLS applies the same filter when it copies AAC into fragmented MP4
+segments (`HLSCopiesAACIntoFMP4`): MPEG-TS segments carry ADTS as it is, and a
+transcode node must confirm the copied codec for such a run, so an older node
+that ignores it is refused instead of failing after the first segment.
 
 **Theme audio.** Detail-page theme songs use the same routing policy without
 becoming playback sessions (`internal/themedelivery`). Original theme audio
@@ -995,6 +1024,45 @@ parameter, and never carries a parameter across families.
 | Media | `/stream/{session_id}`, `/playback/transcode/{session_id}/master.m3u8` and its segments | `seek` — the progressive-remux start offset in seconds, present only when it is non-zero — `origin` — the plan's `stream_origin_seconds`, alongside `seek` when the plan asked for the resume leading-picture drop (§ resume leading-picture drop) — and `remux_range=refuse` on a progressive remux whose start or replan request listed `progressive_range_refusal_v1` (`seek_reanchor` and `seek_failure_recovery` keep the opt-in of the attempt's stored request; a client that drops the feature on any other replan gets an unmarked URL), plus `silo_rendition=video` or `silo_rendition=subtitles` on the `master.m3u8` URIs that a subtitle rendition's multivariant playlist emits (§8) |
 | Media on a designated origin | `{proxy}/stream/v3/{session_id}`, `{proxy}/stream/v3/{session_id}/master.m3u8` and its `segment/{name}` children (§4.1) | `seek` and `remux_range`, with the same meaning, plus `silo_rendition` on the multivariant playlist's own `master.m3u8` URIs as above; these routes never accept a credential parameter of any kind |
 | Subtitle artifact | `/stream/{session_id}/subtitles/{combined_index}{.ext}`, `/stream/{session_id}/subtitles/{combined_index}/fonts` | `file_id`, always; one identity pin: `embedded_stream_index`, `external_subtitle_key`, or `downloaded_subtitle_id` (§8); `original=1` on an original-SRT `.srt` URL (§8). VTT receivers may explicitly request `timestamp_offset` in seconds |
+
+A plan may also carry `stream.parallel_range_url` beside `stream.url`: a URL
+reference the client may read the file's byte ranges from over several
+connections. The server sets it only on an `original_http` plan, when the start
+or replan request's `client_features` listed `parallel_range_origin_v1`, and
+names one of three:
+
+| The file is served by | `parallel_range_url` |
+|---|---|
+| The API, no media origin | The plan's own stream, relative to the API root: the value of `stream.url` |
+| The API, with a media origin (`server.web_media_url`) | `{web_media_url}/api/v2/stream/{session_id}` plus the same query as `stream.url` (`seek`, `st`) |
+| A proxy node | The node's own direct-play URL: the value of `stream.url` |
+
+The two API forms carry `st`, which authorizes each range of an attempt a login
+session started and no other, so the server sets them only for such an attempt.
+The media origin is named only for a client that arrived by the default access
+path; one that came through a network access provider gets the plan's own stream.
+A node's URL carries its token in the path, signed for that node, on the address
+chosen for the client's access path. A node's header-authorized route
+(`/stream/v3/...`) is never named.
+
+The URL authorizes itself. A client uses it exactly as given and adds no account
+token, header or cookie to it; a client sends its account token to no absolute
+URL. The field is absent when the attempt negotiated
+`header_authenticated_media_v1`, whose URLs carry no credential. The attempt
+keeps `header_authenticated_media_v1` as the start negotiated it, so a replan
+request's own list cannot add or drop it, while `parallel_range_origin_v1`
+follows each start or replan request.
+
+Parallel ranges help only over separate connections, which a browser opens to an
+HTTP/1.1 origin and not to an HTTP/2 or HTTP/3 one. The web player stripes on
+the page's own origin only when the page loaded over HTTP/1.1; it stripes on a
+node's URL and on a media origin as named. The stream answers of the API and of
+a node carry `Timing-Allow-Origin: *`, so the player can read which protocol a
+completed range came over: on HTTP/2 or HTTP/3 it goes back to reading
+`stream.url` over one connection. A browser that does not say leaves it
+striping. A plan without `parallel_range_url`
+is read from `stream.url`. `stream.url` stays valid; a client may also read the
+warm head, overflow ranges, or a natively played file from it.
 
 A media route never carries `file_id` or `downloaded_subtitle_id` — the session
 already names the file it plays, and the media timeline is anchored by `seek`
@@ -1417,7 +1485,19 @@ route, so a direct-play viewer would come back on a transcode. The web player
 (`web/src/player/hooks/usePlaybackSession.ts`) recovers like this instead:
 
 1. Pause, keep the position, and tell the viewer it is reconnecting. Stop
-   reporting route failures for the dead transport.
+   reporting route failures for the dead transport. An HLS stream that has
+   shown a frame and still has segments buffered is not dead yet: after
+   hls.js gives up on the network, the element plays on from its buffer while
+   at least a second of it lies ahead. This step starts when the element
+   still can't play a second after `waiting` with less than that ahead (the
+   buffer ran out), when the playhead stays put through two such checks with
+   media ahead (about two seconds), on a seek to a position that isn't
+   buffered, or on another fatal error. A seek outside the stream's window
+   still asks for a `seek_reanchor` first, because only that moves the
+   window, and reconnects at its target if the reanchor fails and no later
+   seek has replaced it. The cycle below therefore starts after up to a
+   buffer's worth of playback. A paused viewer doesn't reconnect while
+   paused; playing again plays out the rest of the buffer first.
 2. Retry with backoff (1 s doubling to a 15 s cap, about two minutes in total).
    Each attempt is a `track_change` that changes nothing, at the saved
    position. It keeps the current route eligible and returns a fresh plan.
@@ -1429,8 +1509,7 @@ route, so a direct-play viewer would come back on a transcode. The web player
    startup deadline, and the session would loop between the two. Adopting a
    reconnect's plan keeps the attempt's failed plan keys and recovery count, so
    a later `failure_recovery` still excludes the routes that already failed.
-3. A network failure, a 5xx, `408`, `429`, or `replan_in_progress` waits for
-   the next attempt. Any other answer means the session did not survive (a
+3. A network failure, a 5xx, `408`, or `429` waits for the next attempt. Any other answer means the session did not survive (a
    server restart answers 404), and the client starts a new attempt at the
    saved position with the current tracks. That includes `installation_changed`:
    a replan always carries the old session's installation and cannot succeed,
@@ -1440,9 +1519,12 @@ route, so a direct-play viewer would come back on a transcode. The web player
    and sends no subtitle change until it has applied it. A refused burned-in
    subtitle is retried without subtitles, as at an initial start.
 4. The new plan plays only if the viewer was playing. That intent is taken
-   when the recovery is requested, and until the current plan's transport has
-   shown a frame it is the intent the plan was adopted with, so the pause that
-   tearing down a failed transport forces does not count.
+   when the recovery is requested, from the player's own play state rather
+   than the element, which Chromium already reports paused when its `error`
+   event arrives. A pause reported before the current plan's transport has
+   shown a frame doesn't count: it is the element between transports. A route
+   that fails before its first frame, including one a reconnect just adopted,
+   therefore keeps the viewer's intent for the plan that replaces it.
 5. Any adopted plan ends the cycle. When the budget runs out, the client says
    the connection was lost and offers to try again. Leaving the player or
    starting other playback cancels the cycle.
@@ -1482,6 +1564,8 @@ must not branch on an unrecognized value.
 `hls_audio_adaptation`, `hls_packaging_required`, `subtitle_burn_in_required`,
 `client_dv7_to_dv81`, `client_dv7_to_hdr10`, `client_managed_dynamic_range`,
 `client_dv8_base_layer`, `evidence_insufficient_for_direct`,
+`surround_bitstream_conversion` (§11; advertised on `/api/v2` as the
+`surround_bitstream_conversion_v1` server feature),
 and the quality reasons `quality_auto_source`, `quality_fixed_rung`,
 `quality_device_limit`, `quality_bandwidth_limit` (a measured estimate could
 not carry the source), `quality_bandwidth_cap`, and `quality_original` (an
@@ -1718,11 +1802,6 @@ names such a value, planning skips that whole entry, because the server cannot
 tell what its player gets wrong, and the track falls back to a sidecar or
 burn-in like any track without a native entry. Older clients send no
 limitations, and their entries plan as before.
-
-The frozen `/api/v1` surface never advertises the feature. It ignores
-`limitations` and plans an entry as it did before they existed, and its
-inventory rows carry no `stream_index`, `container_track_id` or
-`native_selectable`.
 
 Roku OS 16 declares `{"container": "mkv", "codecs": ["subrip"],
 "track_identity": "container_track_id", "ass_styling": false,
@@ -2100,6 +2179,12 @@ remaining candidates until one produces a plan. A refused lower-resolution
 candidate therefore does not hide a later 4K version that can direct-play or
 remux without video encoding.
 
+Playback uses the same edition alias groups as the native catalog. It checks
+the viewer's live, authorized file inventory and stored durations before
+choosing a new alias source. Grouping adds no media probes. When an automatic
+alias fallback plays a different file, the requested file remains the
+remembered choice so a later Auto start can use it on a faster connection.
+
 A 4K version whose 4K transcoding is disabled takes its lower qualities from a
 lower-resolution version instead, when the item has one and the request allows
 version fallback. With 4K transcoding allowed, the same holds while
@@ -2215,10 +2300,11 @@ can measure use the bandwidth probe ([playback-api.md](../playback-api.md#bandwi
 A transcode is a single HLS rendition, so the player cannot step down on its
 own. A client on `auto` whose playback keeps rebuffering sends a
 `quality_change` replan that keeps `quality_preference: "auto"` and lowers
-`bandwidth_estimate_kbps` below the bitrate that stalled, with
-`bandwidth_estimate_source: "observed_rebuffer"`; the planner then re-runs
-`auto` against the lower estimate, and the server records a learned limit
-(see [Buffering quality](#buffering-quality-native-v2)). The
+`bandwidth_estimate_kbps` below the bitrate that stalled; the planner then
+re-runs `auto` against the lower estimate. With slow-link evidence the replan
+also carries `bandwidth_estimate_source: "observed_rebuffer"`, and the server
+records a learned limit (see [Buffering quality](#buffering-quality-native-v2));
+without it the replan has no source and records nothing. The
 [buffering-quality design](../design/2026-10-17-buffering-quality.md) defines
 when every client does this: after two stalls of at least a second within two
 minutes, or one stall of six seconds. Stall time in the first ten seconds of a
@@ -2265,6 +2351,8 @@ A transformation is a named, versioned media operation with claims attached.
 | Name | Executor | Recipe version | Promises | Claims |
 | --- | --- | --- | --- | --- |
 | `audio_to_aac` | `server` | `4` | — | `audio_decode` |
+| `audio_to_eac3` | `server` | `1` | E-AC-3 5.1, 48 kHz, 640 kbps | `audio_decode` |
+| `audio_to_ac3` | `server` | `1` | AC-3 5.1, 48 kHz, 640 kbps | `audio_decode` |
 | `video_to_h264` | `server` | `2` | `sdr` output | `h264_decode` |
 | `video_to_hevc` | `server` | `1` | `sdr` output | `hevc_decode` |
 | `hdr_to_sdr_tonemap` | `server` | `1` | limited-range BT.709 `sdr` output with HDR metadata removed | `hdr_metadata_removed`, `sdr_bt709_output` |
@@ -2310,6 +2398,30 @@ clock (version 3 did this for the stereo downmix only). When a source with more 
 stereo, FFmpeg first rematrixes it to stereo, then applies up to 6 dB of input
 gain through a limiter with a -2 dBFS sample ceiling. Mono output, surround
 output, stereo sources, and copied audio do not use the boost.
+
+`audio_to_eac3` and `audio_to_ac3` serve the surround bitstream conversion
+(`decision_reason: surround_bitstream_conversion`). A client that would decode a
+track with more than two channels to PCM may lose its surround channels: an
+Android TV's own HDMI/eARC output commonly mixes app PCM to stereo, and Android
+cannot tell that mixer from one that carries multichannel PCM. When the client
+attests `exact` audio evidence and `layout_aware_passthrough`, its sink
+validates E-AC-3 (preferred) or AC-3 at six channels with a `5.1` layout, and
+the sink does not validate the source codec, the planner prefers a copy-video
+`server_remux_hls` that converts the selected track to 5.1 in the first of
+those codecs an HLS executor offers. This route ranks ahead of the original
+file. The
+plan claims passthrough for the converted codec and carries an
+`audio_converted` warning. Only routes that keep the original picture and
+subtitle presentation qualify: the source quality with no server bitrate cap,
+the native dynamic range, no Dolby Vision Profile 7 handling, and the same
+subtitle mode and claims as the original route. When no executor offers the recipe or the client already attempted the
+plan, the planner returns the route the conversion improved on. When session
+admission or route preparation refuses the conversion on a start or replan,
+the server re-plans once without it; the refused start's session records no
+watch history. A seek reanchor keeps its frozen recipe and reports the refusal
+instead. A device whose mixer does carry
+multichannel PCM therefore trades lossless PCM for E-AC-3 5.1 on codecs its
+sink cannot take; a sink that passes the source codec through is unaffected.
 
 Recipe 2 is fenced at every byte-producing boundary during a rolling upgrade.
 Token-based proxy remuxes use `/stream/remux/audio-v2/{token}`; Jellyfin-compatible
@@ -2369,12 +2481,14 @@ tone-map smoke probe is lazy and cached by binary, backend, and device:
 | `server_dv7_to_hdr10` | `ffmpeg -bsfs` contains `dovi_rpu` and `filter_units` |
 | `server_dv7_to_dv81` | `ffmpeg -bsfs` contains `filter_units` |
 | `audio_to_aac` | `ffmpeg -encoders` contains an `aac` encoder and bounded silent-frame smoke tests execute the exact timestamp-normalisation graph (stereo input) and stereo-downmix limiter graph (5.1 input) |
+| `audio_to_eac3`, `audio_to_ac3` | `ffmpeg -encoders` contains the `eac3` / `ac3` encoder and a bounded silent-frame smoke test encodes 48 kHz 5.1 at 640 kbps into fragmented MP4 |
 | `video_to_h264` | `ffmpeg -encoders` contains any of `libx264`, `h264_qsv`, `h264_vaapi`, `h264_nvenc`, `h264_videotoolbox` |
 | `video_to_hevc` | `ffmpeg -encoders` contains `libx265` and a bounded one-frame `libx265` 8-bit SDR encode succeeds; the transcode backend probe validates a hardware HEVC encoder before that backend is selected |
 | `hdr_to_sdr_tonemap` | A bounded decode → BT.709 H.264 encode succeeds for the advertised PQ, BT.2100 HLG, legacy HLG, BT.709 SDR-base, and/or BT.2020 SDR-base source kinds on the real software, VAAPI/QSV, or NVENC executor. The Dolby Vision kind is smoke-tested only on executors whose filter applies an RPU (`tonemapx`, `tonemap_opencl`, `tonemap_cuda`, each run with `apply_dovi=1`), and the full-range PQ kind only on the software executor (`tonemapx` or the Hable fallback) |
 
-`GET /playback/capability` reports the union of currently eligible local and
-pooled executors. The generic tone-map transformation does not reveal hardware
+The administrator inventory (`GET /api/v2/admin/system/hw-accel`, §2.1)
+reports the union of currently eligible local and pooled executors;
+`GET /api/v2/playback/capabilities` lists no transformations. The generic tone-map transformation does not reveal hardware
 selection policy; the server freezes a validated executor into each accepted
 recipe. Heterogeneous pools are filtered again at transport startup, and a stale
 or older node advertisement is rejected instead of silently changing modes.
@@ -2572,8 +2686,9 @@ profile check the account's registry after their delete commits.
 Only a start or replan that the client sent with
 `bandwidth_estimate_source: "observed_rebuffer"` on Auto records a limit, and
 recording restarts its 24 hours. `observed_throughput_kbps` is the throughput
-the plan that kept buffering received, measured as `plan_summary`
-`throughput_kbps`; the server plans with, and records, the lower of it and
+the plan that kept buffering received, timed from first byte to last as
+`plan_summary` `throughput_kbps` is, even where the client sends no such
+sample; the server plans with, and records, the lower of it and
 `bandwidth_estimate_kbps`. An estimate without a source, which is how a
 client repeats its kept step-down estimate on later replans, records nothing.
 A seek reanchor reuses the playing recipe and a seek failure recovery replays
@@ -2592,7 +2707,42 @@ reading or the reading ages out; an automatic test does not clear the playback
 sample. That covers weak Wi-Fi in another room, and a device whose key stays
 the same on every network, such as one that reaches the server through a VPN
 address or an untrusted proxy. A network-access provider path follows the
-device across networks, so its lowerings are always recorded.
+device across networks, so this check never holds back its lowerings; the
+check for a stall the server's own transcode caused, below, still applies.
+
+A stall the server's own transcode caused is not the link's. When a replan
+would record an `observed_rebuffer` estimate while the playing transcode has no
+lead over the client (the client has fetched every produced segment but at
+most the newest), the encoder was slower than real time, as a heavy subtitle
+burn-in can be, and the server plans the replan under the estimate but records
+no limit. An encoder that keeps up runs ahead of the client up to the throttle
+window, so a slow link leaves it far ahead. A transcode on the replica that
+answers the replan is judged from its live session. A transcode on a remote
+node is judged by that node, which the replica asks with the signed
+`GET /transcode/{session_id}/output-bound` (see
+[worker HTTP contracts](worker-http-protocol.md)); the node counts a segment
+fetched when the relay that delivered it acknowledges it, so the answer is the
+same whichever API replica or proxy relays the stream.
+
+A segment counts as fetched once its download completed, output an earlier
+FFmpeg generation left behind is no lead, and a client whose transcode is
+restarting is waiting on the server. An FFmpeg that failed is judged like a
+running one, by its output's lead over the client. A progressive remux has no
+segment lead and is never judged bound.
+
+When the answer is unknown, the stall counts as the server's and records
+nothing: the replan found a node on the session's route unreachable (its
+transcode node or its egress proxy, whatever the delivery), the node no longer
+runs the transport, the read failed or took longer than two seconds, or the
+session plays HLS but its transcode runs neither on the replica that answers
+nor on a node, as while it is being rebuilt or when another API replica runs
+it. A node older than the read answers it as unknown, so its transcodes teach
+no limit until it is upgraded. Each is a
+server-side fault that stalls a client on any link, as a node dying mid-stream
+does. Skipping the record loses only memory, since the replan still plans under
+the estimate and a slow link stalls and is learned again, while a wrong limit
+lowers every file the device plays for a day. The read is made only for a
+replan that would otherwise record.
 
 An Auto start or replan without `bandwidth_estimate_kbps` plans with the
 connection's current reading, the one `GET /api/v2/playback/connection`
@@ -2640,6 +2790,6 @@ once. The delivery is the reported plan's, read from the stored start or replan
 response, not its replacement's; an unresolvable plan reports `unknown`.
 
 The connection endpoints, probe results and the admin view are in the
-[Playback API](../playback-api.md#buffering-quality-native-v2). The
+[Playback API](../playback-api.md#buffering-quality). The
 [buffering-quality design](../design/2026-10-17-buffering-quality.md) and its
 shared conformance vectors define the client controller.

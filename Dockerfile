@@ -56,6 +56,32 @@ RUN --network=none go build \
     -ldflags "-X github.com/Silo-Server/silo-server/internal/buildinfo.revisionOverride=${BUILD_REVISION} -X github.com/Silo-Server/silo-server/internal/buildinfo.dirtyOverride=${BUILD_DIRTY} -X github.com/Silo-Server/silo-server/internal/buildinfo.buildNumberOverride=${BUILD_NUMBER} -X github.com/Silo-Server/silo-server/internal/buildinfo.builtAtOverride=${BUILD_DATE}" \
     -o /silo ./cmd/silo/
 
+# The macOS transcode node (darwin/arm64), cross-compiled on the build host.
+# The silo_node tag leaves out libvips and the web app, so it needs no cgo and
+# links only system frameworks; the Go linker signs it ad hoc. A Mac copies it
+# out of the image so it matches this server (docs/architecture/transcode-nodes.md).
+FROM --platform=$BUILDPLATFORM golang:1.27 AS node_darwin
+ENV GOPROXY=https://proxy.golang.org,direct
+ENV GOPRIVATE=github.com/Silo-Server/*
+ENV GONOSUMDB=github.com/Silo-Server/*
+WORKDIR /app
+COPY go.mod go.sum ./
+COPY internal/compat/zishang520-webtransport-go/ internal/compat/zishang520-webtransport-go/
+RUN go mod download
+COPY internal/ internal/
+COPY migrations/ migrations/
+COPY contracts/ contracts/
+COPY cmd/ cmd/
+COPY web/embed.go web/embed_node.go web/
+RUN --network=none CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags silo_node -trimpath -o /dev/null ./cmd/silo/
+ARG BUILD_REVISION
+ARG BUILD_DIRTY=false
+ARG BUILD_NUMBER
+ARG BUILD_DATE
+RUN --network=none CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags silo_node -trimpath \
+    -ldflags "-s -w -X github.com/Silo-Server/silo-server/internal/buildinfo.revisionOverride=${BUILD_REVISION} -X github.com/Silo-Server/silo-server/internal/buildinfo.dirtyOverride=${BUILD_DIRTY} -X github.com/Silo-Server/silo-server/internal/buildinfo.buildNumberOverride=${BUILD_NUMBER} -X github.com/Silo-Server/silo-server/internal/buildinfo.builtAtOverride=${BUILD_DATE}" \
+    -o /silo-darwin-arm64 ./cmd/silo/
+
 # Stage 3: Runtime
 # CI rebuilds this stage without the layer cache (no-cache-filters: runtime in
 # trusted-linux-build.yml) so every image picks up Debian security updates; the
@@ -134,6 +160,8 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
 ENV NODE_OPTIONS=--use-openssl-ca
 LABEL io.silo.intel-qsv-runtime="${INTEL_QSV_RUNTIME}"
 COPY --from=build /silo /usr/local/bin/silo
+# Not run here: a Mac copies it out to run a transcode node with VideoToolbox.
+COPY --from=node_darwin /silo-darwin-arm64 /usr/share/silo/nodes/silo-darwin-arm64
 EXPOSE 8080 8096 13378
 # Silo runs database migrations before its HTTP listener starts, and an
 # upgrade on a large library can migrate for many minutes. The start period

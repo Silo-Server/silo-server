@@ -35,6 +35,36 @@ def stamp(root, paths):
             raise ValueError('filesystem lost timestamp precision: ' + str(path))
 
 
+def tracked_worktree_files(root):
+    raw = subprocess.check_output(['git', 'ls-files', '-t', '-z'], cwd=root).decode()
+    paths = []
+    for entry in raw.split('\0'):
+        if not entry:
+            continue
+        status, _, name = entry.partition(' ')
+        # Sparse checkouts mark excluded tracked files as skip-worktree ('S').
+        if status != 'S':
+            paths.append(name)
+    return paths
+
+
+def refresh_index(root):
+    # Re-sync .git/index stat metadata with the stamped mtimes so downstream
+    # `git diff --name-only` on blob:none clones neither hits the Git < 2.53
+    # diffcore_skip_stat_unmatch segfault nor prefetches excluded blobs.
+    res = subprocess.run(
+        ['git', 'update-index', '-q', '--ignore-submodules', '--refresh'],
+        cwd=root,
+        check=False,
+    )
+    if res.returncode not in (0, 1):
+        raise subprocess.CalledProcessError(res.returncode, res.args)
+
+
+def normalize(root):
+    stamp(root, tracked_worktree_files(root))
+    refresh_index(root)
+
+
 if __name__ == '__main__':
-    names = subprocess.check_output(['git', 'ls-files', '-z']).decode().rstrip('\0').split('\0')
-    stamp(Path.cwd(), names)
+    normalize(Path.cwd())

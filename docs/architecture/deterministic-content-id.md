@@ -9,7 +9,7 @@
 
 This is the dev-facing reference for *why* `content_id` is what it is and *how*
 it works. It merges the original design spec, the implementation notes, and the
-PR write-up into one place.
+write-up into one place.
 
 ---
 
@@ -309,7 +309,7 @@ Provider-derived IDs are pure ASCII, but `content_id` inherits the DB default
   scans), `en_US.utf8` invokes libc `strcoll` while `C` is a plain `memcmp`.
 - Structured keys share long prefixes (`episode-tvdb-296762-…`), which makes
   `strcoll` *worse* than on 18-digit Sonyflake strings — so a structured key
-  under `en_US.utf8` is *slower* than the status quo. Under `C` it's ~3–5×
+  under `en_US.utf8` is *slower* than Sonyflake. Under `C` it's ~3–5×
   faster.
 
 So `COLLATE "C"` is load-bearing, not a free upgrade.
@@ -330,31 +330,29 @@ profile's *entire* history. Two facts:
 
 The remaining `JOIN media_items` stays — it's for access/library filtering, not
 the show id. Reducing full-history scans to O(page) for the heaviest profiles is
-follow-up work (a per-`(profile, display_id)` summary table), not part of this
-change.
+follow-up work (a per-`(profile, display_id)` summary table).
 
 ---
 
-## 6. Performance — measured at production scale
+## 6. Performance
 
-Measured on an isolated, prod-tuned PostgreSQL 18 instance (`shared_buffers=4GB`)
-loaded with an **exact-cardinality copy of production**: 184k items, 1.93M
-episodes, 775k watch-history rows / 1,622 profiles. "Before" reproduces
-production today (Sonyflake, `en_US.utf8`); "after" applies the structured-key
-remap + `COLLATE "C"`. **Every metric improves.**
+Measured on an isolated PostgreSQL 18 instance (`shared_buffers=4GB`) loaded with
+a production-sized catalog and watch history. "Before" is the Sonyflake scheme
+under `en_US.utf8`; "after" applies the structured-key remap + `COLLATE "C"`.
+**Every metric improves.**
 
-**`content_id` index-probe cost** — 300k forced point lookups over 1.9M keys:
+**`content_id` index-probe cost** — forced point lookups over the episode keys:
 
 The last three columns are *why* the faster schemes were rejected: speed alone
 isn't the goal — the scheme has to carry the properties the whole feature exists
 for. ✓ = has the property, ✗ = lacks it.
 
-| Key scheme | Index size | µs / probe | vs today | Cross-server deterministic | Zero-join show transform | Human-readable |
-| ---------- | ---------- | ---------- | -------- | :------------------------: | :----------------------: | :------------: |
-| Sonyflake text, `en_US.utf8` *(today)* | 74 MB | 5.05 | 1.00× | ✗ | ✗ | ✗ |
-| 128-bit hash `bytea(16)` | 74 MB | 1.80 | 2.81× | ✓ | ✗ | ✗ |
-| `bigint` surrogate | 41 MB | 1.23 | 4.11× | ✗ | ✗ | ✗ |
-| **Structured + `COLLATE "C"` (this PR)** | 84 MB | **1.86** | **2.71×** | ✓ | ✓ | ✓ |
+| Key scheme | Index size vs Sonyflake | µs / probe | vs Sonyflake | Cross-server deterministic | Zero-join show transform | Human-readable |
+| ---------- | ----------------------- | ---------- | ------------ | :------------------------: | :----------------------: | :------------: |
+| Sonyflake text, `en_US.utf8` | 1.00× | 5.05 | 1.00× | ✗ | ✗ | ✗ |
+| 128-bit hash `bytea(16)` | 1.00× | 1.80 | 2.81× | ✓ | ✗ | ✗ |
+| `bigint` surrogate | 0.55× | 1.23 | 4.11× | ✗ | ✗ | ✗ |
+| **Structured + `COLLATE "C"`** | 1.14× | **1.86** | **2.71×** | ✓ | ✓ | ✓ |
 
 The structured key lands within 3% of a 128-bit hash and is the **only all-✓
 row**. The two faster schemes each give up something load-bearing:
@@ -363,20 +361,20 @@ row**. The two faster schemes each give up something load-bearing:
   key), but an opaque digest can't be string-transformed, so episode→series
   needs a catalog join (no zero-join hot path), and it isn't legible in logs,
   URLs, or `psql`.
-- **`bigint` surrogate** is just the status quo's narrow integer: fast because
-  it's 8 bytes, but per-server (not reproducible elsewhere), no embedded anchor
-  to transform, and not meaningful to a human.
+- **`bigint` surrogate** is just the Sonyflake scheme's narrow integer: fast
+  because it's 8 bytes, but per-server (not reproducible elsewhere), no embedded
+  anchor to transform, and not meaningful to a human.
 
-Index grows ~14% (84 vs 74 MB), immaterial.
+The index grows ~14% over Sonyflake, immaterial.
 
-**Real history-page query** — heaviest profile (25,384 rows):
+**Real history-page query** — the profile with the largest watch history:
 
 | State | Latency | `episodes_pkey` probes | Speedup |
 | ----- | ------- | ---------------------- | ------- |
-| Before | 385 ms | 25,348 | 1.00× |
-| **This PR** | **150 ms** | **2,775** | **2.57×** |
+| Before | 385 ms | baseline | 1.00× |
+| **Structured + `COLLATE "C"`** | **150 ms** | **~9× fewer** | **2.57×** |
 
-**Concurrency** (`pgbench`, 150 real profiles): at 100 concurrent users,
+**Concurrency** (`pgbench` across a sample of profiles): at 100 concurrent users,
 **311 ms / 321 tps → 181 ms / 551 tps** — 1.7× throughput, 42% lower tail
 latency. Comparison cost is pure CPU, so cheaper `COLLATE "C"` comparisons raise
 the throughput ceiling under load.
@@ -407,9 +405,9 @@ are the robust result, not absolute tps.*
   (`sha256(path)[:14]`) so a `local-` id packs losslessly into a compat UUID
   (see below).
 - **Client-visible id churn.** `jellycompat` encodes `content_id` into the
-  client-facing UUID, so item ids seen by Android/Apple/Jellyfin clients change at
-  migration (caches/resume keyed on item id reset once). **silo-android** and
-  **silo-apple** should be made aware; server-side state is fully remapped. The
+  client-facing UUID, so the item ids Android, Apple, and Jellyfin clients saw
+  changed once, at the migration: client caches and resume state keyed on item
+  id reset that one time, while server-side state was fully remapped. The
   encoding is *reversible* — a structured or local `content_id` is bit-packed
   into the UUID (`contentid.Pack`/`Unpack`), not hashed into a lookup table — so
   a compat item id decodes by pure computation and is stable across server

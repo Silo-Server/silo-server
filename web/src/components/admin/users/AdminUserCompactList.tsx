@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useT } from "@/i18n";
+import { emailDir } from "@/lib/direction";
 
 import { AdminUserRoleBadge, AdminUserStatusBadge } from "./AdminUserRowParts";
 import type { AdminUserRow } from "./useAdminUserRows";
@@ -53,18 +54,32 @@ function AdminUserCompactRow({ row }: { row: AdminUserRow }) {
         className="hover:bg-accent/40 focus-visible:ring-ring/50 min-w-0 flex-1 space-y-0.5 py-2.5 ps-4 pe-1 outline-none focus-visible:ring-[3px] focus-visible:ring-inset"
       >
         <span className="flex min-h-6 items-center gap-1.5">
-          <span className="min-w-0 flex-1 truncate font-medium">{user.username}</span>
+          {/* The outer span takes the free space so the badges stay at the end. The
+              name inside keeps its start when cut, in either script, and w-fit keeps
+              a short one on the page's start side. */}
+          <span className="min-w-0 flex-1">
+            <span dir="auto" className="block w-fit max-w-full truncate font-medium">
+              {user.username}
+            </span>
+          </span>
           <AdminUserRoleBadge user={user} />
           <AdminUserStatusBadge user={user} />
         </span>
+        {/* Left to right unless it starts in a right-to-left script, so a cut email
+            keeps its start; w-fit keeps it on the page's start side. */}
         {user.email ? (
-          <span className="text-muted-foreground block truncate text-sm">{user.email}</span>
+          <span
+            dir={emailDir(user.email)}
+            className="text-muted-foreground block w-fit max-w-full truncate text-sm"
+          >
+            {user.email}
+          </span>
         ) : null}
         {/* The group name gives way first, so the last-active time stays whole. */}
         <span className="text-muted-foreground flex gap-1 text-xs">
           {group.kind === "admin" ? null : (
             <>
-              <span className="truncate">
+              <span dir="auto" className="truncate">
                 {group.kind === "group" ? group.name : t("web.admin.users.list.noGroup")}
               </span>
               <span aria-hidden="true">{SEPARATOR}</span>

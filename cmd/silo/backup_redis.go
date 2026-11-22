@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -39,12 +38,6 @@ type goRedisFlusher struct{ client *redis.Client }
 
 func (f goRedisFlusher) FlushDB(ctx context.Context) error { return f.client.FlushDB(ctx).Err() }
 func (f goRedisFlusher) Close() error                      { return f.client.Close() }
-
-// liveRedisConfig is the Redis the live deployment uses: REDIS_URL when the
-// environment sets it, otherwise the redis.url and redis.db settings.
-func liveRedisConfig(cfg *config.Config) config.RedisConfig {
-	return cfg.Redis.WithBootstrapURL(os.Getenv("REDIS_URL"))
-}
 
 // redisPlan is what a replace does with Redis once the restored database is
 // live: clear the deployment's Redis database, so no server serves state

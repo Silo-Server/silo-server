@@ -37,6 +37,15 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 		key   string
 		value string
 	}{
+		{key: "direct_connections.enabled", value: "maybe"},
+		{key: "direct_connections.port_mapping", value: "maybe"},
+		{key: "direct_connections.stun_servers", value: "example.com:0"},
+		{key: "direct_connections.stun_servers", value: "example.com:65536"},
+		{key: "direct_connections.stun_servers", value: "example.com"},
+		{key: "direct_connections.stun_servers", value: "a:1,b:1,c:1,d:1,e:1,f:1,g:1,h:1,i:1"},
+		{key: "direct_connections.stun_servers", value: "bad_host:3478"},
+		{key: "direct_connections.stun_servers", value: "192.168.1.256:3478"},
+		{key: "direct_connections.stun_servers", value: "10.0.0:3478"},
 		{key: "database.max_connections", value: "0"},
 		{key: "metadata.cache_images", value: "maybe"},
 		{key: ChapterThumbnailSoftwareToneMapSettingKey, value: "maybe"},
@@ -90,6 +99,68 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 		t.Run(tc.key, func(t *testing.T) {
 			if _, err := NormalizeAdminSetting(tc.key, tc.value); err == nil {
 				t.Fatalf("NormalizeAdminSetting(%q, %q) returned nil error", tc.key, tc.value)
+			}
+		})
+	}
+}
+
+func TestNormalizeAdminSettingAcceptsDirectConnectionValues(t *testing.T) {
+	tests := []struct{ key, value, want string }{
+		{key: "direct_connections.enabled", value: " TRUE ", want: "true"},
+		{key: "direct_connections.stun_servers", value: " STUN.Example.COM:3478,stun.example.com:3478,[2001:db8::1]:19302 ", want: "stun.example.com:3478,[2001:db8::1]:19302"},
+		{key: "direct_connections.stun_servers", value: "", want: ""},
+		// An IPv4-mapped literal becomes the plain IPv4 endpoint before
+		// deduplication; native IPv6 literals and DNS names stay as they are.
+		{key: "direct_connections.stun_servers", value: "[::ffff:192.0.2.53]:3478", want: "192.0.2.53:3478"},
+		{key: "direct_connections.stun_servers", value: "[::FFFF:C000:235]:3478", want: "192.0.2.53:3478"},
+		{key: "direct_connections.stun_servers", value: "[::ffff:192.0.2.53]:3478,192.0.2.53:3478", want: "192.0.2.53:3478"},
+		{key: "direct_connections.stun_servers", value: "192.0.2.53:3478,[::ffff:192.0.2.53]:3478", want: "192.0.2.53:3478"},
+		{key: "direct_connections.stun_servers", value: "[2001:db8::1]:3478,stun.example.com:3478", want: "[2001:db8::1]:3478,stun.example.com:3478"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.key, func(t *testing.T) {
+			got, err := NormalizeAdminSetting(tc.key, tc.value)
+			if err != nil || got != tc.want {
+				t.Fatalf("NormalizeAdminSetting(%q, %q) = %q, %v; want %q", tc.key, tc.value, got, err, tc.want)
+			}
+		})
+	}
+}
+
+// The login credential travels to this origin, so only a bare https origin may
+// be stored, and a stray "?" must not leak into the published stripe URL.
+func TestAdminSettingWebMediaURLValidation(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string // empty with wantErr unset means the setting is off
+		err   bool
+	}{
+		{name: "origin", value: "https://media.example.test", want: "https://media.example.test"},
+		{name: "port", value: "https://media.example.test:8443", want: "https://media.example.test:8443"},
+		{name: "trailing slash", value: "https://media.example.test/", want: "https://media.example.test"},
+		{name: "empty query marker", value: "https://media.example.test?", want: "https://media.example.test"},
+		{name: "empty is off", value: "", want: ""},
+		{name: "plain http", value: "http://media.example.test", err: true},
+		{name: "user information", value: "https://user@media.example.test", err: true},
+		{name: "path", value: "https://media.example.test/path", err: true},
+		{name: "query", value: "https://media.example.test?q=1", err: true},
+		{name: "fragment", value: "https://media.example.test#f", err: true},
+		{name: "port out of range", value: "https://media.example.test:65536", err: true},
+		{name: "port without a hostname", value: "https://:443", err: true},
+		{name: "hostname a browser rejects", value: "https://a<b.example", err: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := NormalizeAdminSetting(WebMediaURLSettingKey, tc.value)
+			if tc.err {
+				if err == nil {
+					t.Fatalf("NormalizeAdminSetting(%q) = %q, nil; want an error", tc.value, got)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("NormalizeAdminSetting(%q) = %q, %v; want %q", tc.value, got, err, tc.want)
 			}
 		})
 	}

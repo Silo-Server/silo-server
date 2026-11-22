@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Download, Ear, Loader2, Search } from "lucide-react";
 
 import type { FileVersion, SubtitleResult } from "@/api/types";
+import { readableErrorText } from "@/api/v2/request";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +34,7 @@ import { SubtitleUploadForm } from "@/components/subtitles/SubtitleUploadForm";
 import { buildQualitySummary } from "./VersionFlyout";
 import { formatLocale } from "@/lib/appLocale";
 import { useT } from "@/i18n";
+import { leadingGraphemes } from "@/lib/text";
 
 interface SubtitleSearchDialogProps {
   open: boolean;
@@ -165,7 +167,7 @@ export default function SubtitleSearchDialog({
     } catch (err) {
       if (controller.signal.aborted) return;
       setResults([]);
-      setSearchError(err instanceof Error ? err.message : t("web.detail.subtitleSearch.failed"));
+      setSearchError(readableErrorText(err, t("web.detail.subtitleSearch.failed")));
     } finally {
       if (!controller.signal.aborted) {
         setSearching(false);
@@ -314,7 +316,7 @@ export default function SubtitleSearchDialog({
               <div className="min-w-0 space-y-2">
                 {parsedResults.map(({ result, key, names }) => {
                   const provider = providerInfo[result.provider] ?? {
-                    abbr: result.provider.slice(0, 2).toUpperCase(),
+                    abbr: leadingGraphemes(result.provider, 2).toUpperCase(),
                     className: "bg-muted text-muted-foreground",
                   };
                   const tone = scoreTone(result.score);

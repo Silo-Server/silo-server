@@ -395,6 +395,13 @@ const (
 const maxUsernameAttempts = 50
 
 func (r *AccountResolver) createAccount(ctx context.Context, tx pgx.Tx, in ResolveInput) (*models.User, int64, error) {
+	pending, err := claimSetupBoundary(ctx, tx)
+	if err != nil {
+		return nil, 0, err
+	}
+	if pending {
+		return nil, 0, ErrAccountRequired
+	}
 	identity := in.Identity
 	email := normalizedProviderEmail(identity.Email)
 	if email != "" {

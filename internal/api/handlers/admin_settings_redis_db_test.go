@@ -27,6 +27,10 @@ func redisFromEnvironment(settings *fakeServerSettingsStore) *AdminHandler {
 			"redis.url":              "redis://env.example.invalid:6379/1",
 			config.RedisDBSettingKey: "1",
 		},
+		BootstrapEnvVars: map[string]string{
+			"redis.url":              "REDIS_URL",
+			config.RedisDBSettingKey: "REDIS_URL",
+		},
 		RedisBootstrapAvailable: true,
 	}
 }
@@ -369,6 +373,9 @@ func TestAdminSettingsRefuseRedisDBManagedByEnvironment(t *testing.T) {
 	status := redisFromEnvironment(&fakeServerSettingsStore{}).adminSensitiveSettingsStatus(nil)
 	if !slices.Contains(status.ManagedByEnv, "redis.db") {
 		t.Errorf("managed by environment = %v, want redis.db listed for the admin UI", status.ManagedByEnv)
+	}
+	if status.ManagedByEnvVars["redis.db"] != "REDIS_URL" {
+		t.Errorf("variables = %v, want redis.db set by REDIS_URL", status.ManagedByEnvVars)
 	}
 	if slices.Contains(status.Configured, "redis.db") {
 		t.Errorf("configured secrets = %v, want redis.db left out: it is not a secret", status.Configured)

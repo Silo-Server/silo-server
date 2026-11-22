@@ -292,6 +292,13 @@ func TestInstallArchiveRefusesUnsupportedOrUnlistedPlugins(t *testing.T) {
 func TestServiceInstallLocalRefusesBeforeStoppingInstalledPlugin(t *testing.T) {
 	future := testPluginManifest(t, "silo.metadb", "0.0.36")
 	future.SiloApiVersion = "v2"
+	nestedForm := testPluginManifest(t, "silo.metadb", "0.0.36")
+	nestedForm.Capabilities = append(nestedForm.Capabilities, &pluginv1.CapabilityDescriptor{
+		Type: "notification_channel.v1", Id: "ntfy",
+		NotificationChannel: &pluginv1.NotificationChannelDescriptor{DisplayName: "ntfy", DestinationSchema: &pluginv1.ConfigSchema{
+			Key: "destination", JsonSchema: `{"type":"object","properties":{"auth":{"type":"object"}}}`,
+		}},
+	})
 	for _, tc := range []struct {
 		name  string
 		write func(t *testing.T, path string)
@@ -315,6 +322,11 @@ func TestServiceInstallLocalRefusesBeforeStoppingInstalledPlugin(t *testing.T) {
 		}},
 		{name: "unsupported API", want: `needs Silo plugin API "v2"`, write: func(t *testing.T, path string) {
 			writePluginArchive(t, path, future)
+		}},
+		// The admin sees what is wrong with the manifest, not only that the
+		// archive was refused.
+		{name: "invalid manifest", want: `manifest is invalid: plugin capability "ntfy" destination schema`, write: func(t *testing.T, path string) {
+			writePluginArchive(t, path, nestedForm)
 		}},
 		// Extraction writes each entry to its cleaned path, so a second entry
 		// for the same file, on a case- or normalization-insensitive
@@ -430,17 +442,33 @@ func TestLoadManifestFromBinaryClassifiesRunFailures(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses shell scripts")
 	}
-	_, _, err := loadManifestFromBinary(context.Background(), []byte("#!/bin/sh\nexit 3\n"))
+	installer := NewInstaller(nil, InstallerOptions{BaseDir: t.TempDir()})
+	_, _, err := installer.loadManifestFromBinary(t.Context(), []byte("#!/bin/sh\nexit 3\n"))
 	requirePackageError(t, err, "couldn't run the plugin")
 
-	_, _, err = loadManifestFromBinary(context.Background(), []byte("not an executable"))
+	_, _, err = installer.loadManifestFromBinary(t.Context(), []byte("not an executable"))
 	requirePackageError(t, err, "couldn't run the plugin")
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, _, err = loadManifestFromBinary(ctx, []byte("#!/bin/sh\nexit 0\n"))
+	_, _, err = installer.loadManifestFromBinary(ctx, []byte("#!/bin/sh\nexit 0\n"))
 	if _, ok := AsPackageError(err); ok || !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled manifest read = %v, want context.Canceled and no PackageError", err)
+	}
+}
+
+func TestLoadManifestFromBinaryUsesExecutableCache(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("TMPDIR", filepath.Join(base, "unavailable"))
+	installer := NewInstaller(nil, InstallerOptions{BaseDir: base})
+	binary := manifestScript(t, packageErrorTestManifest("test.plugin", "1.2.3"), "")
+	manifest, _, err := installer.loadManifestFromBinary(t.Context(), binary)
+	if err != nil || manifest.GetPluginId() != "test.plugin" {
+		t.Fatalf("manifest in executable cache = %v, %v", manifest, err)
+	}
+	entries, err := os.ReadDir(filepath.Join(base, provisionStageRoot))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("temporary manifest files remaining = %v, %v", entries, err)
 	}
 }
 
@@ -462,7 +490,8 @@ func TestLoadManifestFromBinaryWithholdsServerEnvironment(t *testing.T) {
 		t.Setenv("SILO_TEST_HOST_ONLY", "secret")
 		seen := filepath.Join(t.TempDir(), "seen")
 		script := "#!/bin/sh\nprintf '%s' \"${SILO_TEST_HOST_ONLY-absent}\" > '" + seen + "'\n"
-		_, _, _ = loadManifestFromBinary(context.Background(), []byte(script))
+		installer := NewInstaller(nil, InstallerOptions{BaseDir: t.TempDir()})
+		_, _, _ = installer.loadManifestFromBinary(t.Context(), []byte(script))
 		got, err := os.ReadFile(seen)
 		if err != nil {
 			t.Fatalf("only host variable %v: manifest command did not run: %v", onlyHostVariable, err)

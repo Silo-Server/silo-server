@@ -424,3 +424,28 @@ func TestGetMediaDetailFollowerStopsWaitingOnCancel(t *testing.T) {
 		t.Fatalf("upstream calls = %d, want 1 shared fetch", calls.Load())
 	}
 }
+
+// A collection is fetched in the language asked for, the way the TMDB
+// metadata plugin asks for titles: English as en-US, any other language as
+// given, and no language at all when none is asked for.
+func TestGetCollectionLanguage(t *testing.T) {
+	for _, tc := range []struct{ language, sent string }{
+		{"de", "de"},
+		{"en", "en-US"},
+		{"", ""},
+	} {
+		t.Run(tc.language, func(t *testing.T) {
+			var got url.Values
+			client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				got = r.URL.Query()
+				_, _ = w.Write([]byte(`{"id":10,"name":"Star Wars - Saga","poster_path":"/fr.jpg","parts":[]}`))
+			})
+			if _, err := client.GetCollection(context.Background(), 10, tc.language); err != nil {
+				t.Fatal(err)
+			}
+			if lang := got.Get("language"); lang != tc.sent {
+				t.Errorf("language = %q, want %q", lang, tc.sent)
+			}
+		})
+	}
+}

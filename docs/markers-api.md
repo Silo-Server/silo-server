@@ -194,18 +194,11 @@ rematching invalidates derived markers; a result fetched for the previous file
 identity cannot overwrite the new one. Successful provider refreshes can correct
 or withdraw that provider's existing ranges.
 
-`POST /api/v2/admin/items/{id}/refresh-markers` explicitly refreshes an episode
-or a movie from its configured sources; `movie_credits` on
-`GET /api/v2/admin/markers/capabilities` reports that movies are accepted. In
-`both` mode, eligible local detection fills missing intro and credits markers
-of an episode, or missing credits of a movie, for the kinds the two detection
-settings leave on.
-`POST /api/v2/admin/items/{id}/redetect-markers`, which `redetect_markers` on
-the same capabilities document reports, reruns local detection of an episode's
-intro, credits, or both, or of a movie's credits; see
-[admin-catalog-api.md](admin-catalog-api.md#episode-and-movie-marker-analysis).
-`POST /api/v2/admin/items/{id}/redetect-intro` analyzes episode intros only,
-whatever the detection settings say.
+Administrators can refresh one item's markers from its sources, or rerun local
+detection for it, through `refresh-markers`, `redetect-markers` and
+`redetect-intro` under `/api/v2/admin/items/{id}`, and discover them through
+`GET /api/v2/admin/markers/capabilities`. Their contract is in
+[episode and movie marker analysis](admin-catalog-api.md#episode-and-movie-marker-analysis).
 
 ## Operations
 
@@ -255,7 +248,8 @@ duration validation retains its one-second tolerance; an unknown duration cannot
 supply a default end.
 
 Credits from every source follow the placement local detection uses, because
-players open Up Next at the credits start. When the duration is known, credits
+skipping credits that run to the end of the file finishes the item. When the
+duration is known, credits
 must start in the file's tail window (for an episode the last 450 seconds or
 40% of the file, whichever is shorter; for anything else the last 900 seconds
 or 25%), at or after the end of the intro, and run from 15 seconds up to the
@@ -286,7 +280,7 @@ Jellyfin does not expose these manual editing routes. Its MediaSegments response
 returns each occurrence separately, with credits represented as `Outro`.
 The generated OpenAPI document is the authoritative v2 schema and error contract.
 
-### Marker preview images (v2)
+### Marker preview images
 
 The `marker_thumbnails_v1` playback capability advertises optional `thumbnail_url`,
 `thumbnail_thumbhash` and `thumbnail_capture_seconds` fields on effective marker

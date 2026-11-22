@@ -27,10 +27,7 @@ bearer failures remain `text/plain`; they are not native API Problem Details.
 Hardware capability responses use the existing `playback.HWAccelInfo` shape.
 
 Describing a worker operation does not change its routing, middleware, execution,
-or delivery authorization. It does not ratify a migration row or authorize a
-fleet cutover. The migration ledger separately records outstanding descriptions,
-review state, exclusions, and required accountable-owner decisions. Root probe
-readiness and wire-generation acceptance remain separate from hardware capability
+or delivery authorization. Root probe readiness and wire-generation acceptance remain separate from hardware capability
 hashes and capacity checks.
 
 The six retained admin commands are declared by `ProtocolControls` on each
@@ -72,6 +69,30 @@ trickplay extraction, chapter-thumbnail extraction and media sampling answer
 their existing unavailable shapes. Reads, deletes, stops and the traffic of
 running sessions are unaffected. Its health `status` is `draining`, then
 `drained`.
+
+A transcode node that declares a job cap (`SILO_NODE_MAX_TRANSCODES`, see
+[transcode nodes](transcode-nodes.md#what-the-node-enforces)) refuses new work
+past it with `503`, `Retry-After: 5` and `X-Silo-Node-Refusal: at_capacity`
+(`nodepool.NodeRefusalHeader`). It counts what health reports as
+`active_jobs`, plus work it has admitted and not yet counted, under one lock,
+so two starts arriving at the cap less one cannot both pass. The routes that
+count a job refuse: `POST /transcode/start` (plain text, as when draining),
+`POST /downloads/prepare` (plain text), `POST /trickplay/extract` (reason
+`node_busy`) and a progressive remux `GET`. Work that continues a job the node
+holds is never refused: a start with a session id the node runs, a start or
+remux for a `playback_session_id` it runs exactly one session or remux for
+(the replacement overlaps what it replaces; a third transport for one
+playback session is new work), a remux `GET` for a playback session it runs
+nothing for now but served within ten minutes (a seek or a reconnect), a
+prepare whose artifact it is
+preparing or has prepared with the same recipe (one it has to encode again
+takes a slot), and the rebuild of a lost HLS session. Chapter-thumbnail extraction and media
+sampling count no job and are not capped. A node that declares a
+prepared-download budget (`SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES`) refuses a
+new preparation once its last measurement of the directory reaches it, with
+`X-Silo-Node-Refusal: storage_full`. Every other `503`, a draining refusal
+included, carries no `X-Silo-Node-Refusal`, and a core that does not read the
+header treats these refusals as it treats a draining one.
 
 `POST /chapter-thumbnails/extract` on the transcode listener takes the existing
 `chapterthumbs.RemoteExtractRequest` JSON shape and returns an `image/jpeg` frame.
@@ -193,6 +214,19 @@ Repeating the exact acknowledgement is naturally idempotent; this is not a
 durable completion receipt and the generation header is never forwarded to the
 end client. Runtime acknowledgement and pruning behavior remain unchanged.
 
+The transcode `GET /transcode/{session_id}/output-bound` answers
+`{"output_bound": bool}` for a transport the node runs: `true` while a restart
+replaces its FFmpeg, or while FFmpeg runs (or has failed) and the client has
+fetched every produced segment but at most the newest, so playback is paced by
+the encoder. Those fetches are the acknowledgements
+above, so the answer is the same whichever relay delivered the segments. A
+progressive remux answers `false`, and the core does not ask about one. A
+transport the node does not run is 404; the read reconstructs nothing and does
+not refresh the session's idle timer. The core reads it before it learns a
+bandwidth limit from a stall (see [learned limits](playback-protocol-v3.md)).
+An older node without the route also answers 404, so the core learns no limit
+from stalls on its transcodes until the node is upgraded.
+
 The retained transcode `POST /downloads/prepare` synchronously prepares or reuses
 an MP4 on that node. It requires node bearer authorization and a source grant
 the node opens for the whole preparation. The 64 KiB JSON decoder ignores
@@ -284,6 +318,10 @@ request still in flight when the stop lands cannot restart the encode. A fresh
 installs none, and neither does a stop sent with `fence=0`. The API sends that
 when it releases a transport it is moving to another node, since the ID lives
 on and a replica whose copy still names the old node may rebuild it there.
+A release ends only the HLS job it was sent for and answers 404 for any other:
+with `start_id`, the job published by the start that carried that
+`start_id` in `POST /transcode/start`; without it, the job running when the release arrived or a rebuild published
+while it waited for the lifecycle lock, not a job a start published then. A fenced stop ends whatever job runs under the ID.
 Progressive remux keeps its own fence against a new `/remux` request, which
 every fenced stop installs too, since a stop can reach a remux between its GETs.
 The API deletes the transport's stored recipe before it stops a node, unless
@@ -464,6 +502,7 @@ serve them. The `x-silo-worker-protocols` extension lists them under listener
 | Route | Purpose |
 | --- | --- |
 | `GET config` | The calling node's configuration document, with a strong `ETag`. |
+| `PUT registration` | The configuration the node declares from its environment, sent at startup; the API writes it to the node's row and locks those fields. |
 | `POST report` | Session records and stream telemetry, every second, fenced on `(boot_id, seq)`. |
 | `POST logs` | A batch of up to 100 operational log entries. |
 | `POST health-changed` | The node's drain state changed; the API publishes `node_drain_changed`. |
@@ -481,9 +520,10 @@ budgets but under a per-node cap on concurrent responses (`429` with
 graceful shutdown.
 
 [Transcode nodes](transcode-nodes.md) is the authority for what each route
-checks, its statuses, the two per-node request budgets (one for config, report,
-logs, health-changed and revoke-recipes, one for resolve and sources/open, both
-answering `429` with `Retry-After`), and how the node calls them.
+checks, its statuses, the three per-node request budgets (one for config,
+report, logs, health-changed and revoke-recipes, one for resolve and
+sources/open, and a much smaller one for registration, all answering `429`
+with `Retry-After`), and how the node calls them.
 
 ### Source grants
 
@@ -516,7 +556,9 @@ Transcode nodes have no rolling upgrade across the change to node keys. An
 older API server or proxy signs for a transcode node with the shared secret,
 which a current node refuses, and a current API server signs for an older node
 with its node key, which that node cannot verify. Stop the transcode nodes,
-upgrade the API servers and proxies, issue each transcode node a key, then
+upgrade the API servers and proxies, issue each transcode node a key (a node
+the API servers [declare](transcode-nodes.md#declared-nodes) is adopted with
+that issued key; only a new id can take a generated one), then
 start the upgraded nodes with `SILO_CORE_URL` and `SILO_NODE_KEY` (see
 [transcode nodes](transcode-nodes.md#failure-behavior)). Until a node has a key, placement
 gives it no work, and a node still running an older binary answers health
@@ -608,6 +650,5 @@ acknowledgment. No new durable availability, runtime execution, reconstruction
 authority, generic retry contract or native v2 alias is introduced.
 
 The forty described worker registrations exclude health, readiness, metrics and
-the legacy health alias on each worker listener. Those eight probe registrations
-remain separate operational/exclusion evidence gates. Description coverage alone
-is not review acceptance, release ratification or consumer compatibility evidence.
+the legacy health alias on each worker listener; those eight probe registrations
+are not described.

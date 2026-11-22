@@ -643,7 +643,7 @@ export default function EbookReader() {
 
   if (error || !item || item.type !== "ebook") {
     return (
-      <div className="page-shell py-10">
+      <div className="page-shell relative py-10">
         <PageBack />
         <div className="text-muted-foreground mt-10 text-sm">{t("web.reader.page.notFound")}</div>
       </div>
@@ -687,7 +687,7 @@ export default function EbookReader() {
 
   if (!selectedFile) {
     return (
-      <div className="page-shell py-10">
+      <div className="page-shell relative py-10">
         <PageBack />
         <div className="text-muted-foreground mt-10 text-sm">{t("web.reader.page.noFiles")}</div>
       </div>
@@ -695,8 +695,8 @@ export default function EbookReader() {
   }
 
   return (
-    <div className="bg-background min-h-screen">
-      <header className="border-border/70 bg-background/95 sticky top-0 z-20 border-b backdrop-blur">
+    <div className="bg-background">
+      <header className="border-border/70 bg-background/95 sticky top-(--impersonation-banner-height) z-20 border-b backdrop-blur">
         <div className="flex h-14 items-center gap-3 px-4">
           <Button asChild variant="ghost" size="icon" aria-label={t("web.reader.toolbar.back")}>
             <Link
@@ -866,7 +866,7 @@ export default function EbookReader() {
 
       <main
         className={cn(
-          "grid h-[calc(100vh-6rem)] min-h-0 w-full overflow-hidden",
+          "grid h-[calc(100vh-6rem-var(--impersonation-banner-height))] min-h-0 w-full overflow-hidden",
           panelOpen ? "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem]" : "grid-cols-1",
         )}
       >

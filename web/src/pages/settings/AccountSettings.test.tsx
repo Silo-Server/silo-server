@@ -21,6 +21,7 @@ vi.mock("sonner", () => ({
   toast: { success: (...args: unknown[]) => mocks.toastSuccess(...args) },
 }));
 
+import { v2Problem } from "@/api/v2/problems.test-support";
 import AccountSettings from "./AccountSettings";
 
 class MockResizeObserver implements ResizeObserver {
@@ -101,6 +102,31 @@ describe("AccountSettings", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("New passwords do not match.");
     expect(mocks.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("shows the server's refusal, and its own message when the server never answered", async () => {
+    const user = userEvent.setup();
+    render(<AccountSettings />);
+    const submit = async () => {
+      const fill = async (label: string, value: string) => {
+        await user.clear(screen.getByLabelText(label));
+        await user.type(screen.getByLabelText(label), value);
+      };
+      await fill("Current password", "old password");
+      await fill("New password", "new password");
+      await fill("Confirm new password", "new password");
+      await user.click(screen.getByRole("button", { name: "Change password" }));
+    };
+
+    mocks.mutateAsync.mockRejectedValueOnce(
+      v2Problem(422, "validation_failed", "Current password is incorrect."),
+    );
+    await submit();
+    expect(screen.getByRole("alert")).toHaveTextContent("Current password is incorrect.");
+
+    mocks.mutateAsync.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await submit();
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed to change password.");
   });
 
   it("does not render the form when the server denies the capability", () => {

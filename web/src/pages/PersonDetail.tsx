@@ -27,6 +27,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatBirthDate, computeAge } from "@/lib/date";
 import { getInitials } from "@/lib/text";
 import { useT, type MessageKey } from "@/i18n";
+import { hasArabicScript } from "@/lib/direction";
 
 type TypeFilter = "all" | "movie" | "series";
 
@@ -167,7 +168,12 @@ export default function PersonDetail() {
           {/* Info */}
           <div className="min-w-0 flex-1 pt-1">
             <div className="mb-3 flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{person.name}</h1>
+              <h1
+                className="text-2xl font-semibold tracking-tight sm:text-3xl"
+                data-cursive={hasArabicScript(person.name) || undefined}
+              >
+                {person.name}
+              </h1>
               {id && user && (
                 <div className="flex flex-wrap gap-2">
                   <Button

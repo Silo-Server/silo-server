@@ -60,6 +60,7 @@ Examples:
 - Hero titles are the largest and heaviest text on the page.
 - Section headers are clearly smaller than page and hero titles.
 - Metadata stays small and muted.
+- Secondary text on the solid accent (a pressed pill, a default button) keeps the label's own color and steps down in size and weight. Opacity there can drop it below 4.5:1 with some admin accents.
 - Primary actions should be the most visually prominent controls.
 
 ### 5. Ambient Immersion
@@ -138,9 +139,13 @@ Colors are organized as semantic layers. `app.css` provides the actual values; c
 
 - `--primary`: primary action color
 - `--primary-foreground`: text on primary elements
+- `--primary-hover`: solid primary fill on hover. Use it instead of `hover:bg-primary/90`: an accent that takes the dark label fades toward that label when drawn translucent, and its label can drop below 4.5:1
+- `--primary-text`: the primary color as text, which `text-primary` uses. An admin accent sets it to the accent, lightened only as far as needed to read at 4.5:1 on Cinema Dark's surfaces; without one it is `--primary`. Draw accent-colored text with `text-primary`, never `var(--primary)`
 - `--secondary`: secondary element backgrounds
 - `--accent`: highlighted and active backgrounds
-- `--destructive`: destructive actions
+- `--destructive`: danger and error text, icons, borders, and status dots. Themes set it as `--destructive-base`; high contrast lightens it toward `--contrast-boost` so red text keeps 4.5:1 on every surface high contrast lightens
+- `--destructive-fill`: solid danger background for destructive buttons and badges, labelled with `--destructive-foreground`. A white label on `--destructive` doesn't reach 4.5:1, so don't fill with it
+- `--success-label`, `--warning-label`, `--info-label`, `--destructive-label`: status-coloured text on a 10% tint of its own colour, such as the play-method tags (`bg-destructive/10 text-destructive-label`), or on a plain `--surface` or `--surface-hover`, such as the dashboard health strip's error count. Red mixes toward `--contrast-boost`, and in high contrast every label does (red's is the lightened `--destructive`), so each stays above 4.5:1 on a hovered row, where the plain status colour doesn't
 - `--ring`: focus ring
 
 ### Ambient Tokens

@@ -26,9 +26,17 @@ import (
 //  3. The receipt carries authority_revoked and client_notified separately; it
 //     never promises that buffered media stops instantly.
 //
-// Repeating terminate on a session this replica no longer holds is unknown
-// (404), as on the bridge. In a cluster the terminate runs on the replica
-// holding the session's control lane (see Terminate).
+// A terminate of a session whose attempt row the server already stopped for
+// an administrator (an earlier terminate, the fallback for a stop the player
+// did not confirm, or the player's socket confirmation of a stop when it
+// reached the row first) converges: 200 with already_revoked and delivery
+// "none", and nothing is dispatched. The row stays readable for at least 24
+// hours after the play started (playback.MaxTokenTTL; a replan onto a new
+// stream extends it). After it lapses, the session is unknown (404), as it is
+// when the row records the player's own stop (including a player whose HTTP
+// stop beat its confirmation of an administrator's stop), when it expired, or
+// when it has no attempt row (a Jellyfin play). In a cluster the terminate runs on the replica holding the
+// session's control lane (see Terminate).
 
 const (
 	AdminTerminateDeliveryDispatched  = "dispatched"
@@ -109,7 +117,15 @@ func (h *AdminPlaybackControlHandler) terminateLocal(ctx context.Context, in Adm
 	// replica's copy, or from the attempt row when another replica holds the
 	// copy; that replica's copy is then reaped by the deny marker and the
 	// stopped row.
-	if err := h.playback.endSessionAsAdmin(ctx, in.SessionID); err != nil {
+	err := h.playback.endSessionAsAdmin(ctx, in.SessionID)
+	if errors.Is(err, ErrSessionEndedByAdmin) {
+		// An earlier administrator end already revoked it: the call
+		// converges on that outcome and tells the player nothing.
+		view.AuthorityRevoked, view.AlreadyRevoked = true, true
+		h.dropCommandLedger(in.SessionID)
+		return view, nil
+	}
+	if err != nil {
 		return AdminTerminateView{}, err
 	}
 	view.AuthorityRevoked = true

@@ -7,9 +7,13 @@
 /**
  * Grows a centered dialog's built-in close button to a 44px target below `lg`
  * without moving its icon: the padding adds the area, the offset cancels it.
+ * The grown button sits 2px inside the dialog, which clips anything drawn
+ * outside it, so its focus ring and the ring's offset gap are drawn inside
+ * the button instead. In forced colors, where app.css swaps the ring for an
+ * outline that beats Tailwind's layers, the outline moves inside too.
  */
 export const TOUCH_DIALOG_CLOSE_CLASS =
-  "max-lg:[&>[data-slot=dialog-close]]:end-0.5 max-lg:[&>[data-slot=dialog-close]]:top-0.5 max-lg:[&>[data-slot=dialog-close]]:p-3.5 max-lg:[&>[data-slot=dialog-close]]:leading-[0]";
+  "max-lg:[&>[data-slot=dialog-close]]:end-0.5 max-lg:[&>[data-slot=dialog-close]]:top-0.5 max-lg:[&>[data-slot=dialog-close]]:p-3.5 max-lg:[&>[data-slot=dialog-close]]:leading-[0] max-lg:[&>[data-slot=dialog-close]]:ring-inset max-lg:[&>[data-slot=dialog-close]]:forced-colors:-outline-offset-2!";
 
 /**
  * Below `sm` the dialog fills the screen and scrolls as one page, with its

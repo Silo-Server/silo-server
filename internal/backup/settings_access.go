@@ -70,8 +70,6 @@ var accessSettings = func() map[string]widerFunc {
 		"notifications.android_push_delivery_enabled": on,
 		"notifications.discord_enabled":               on,
 		"notifications.server_channels_enabled":       on,
-		"notifications.fanout_enabled":                on,
-		settingReleaseEvents:                          on,
 		"notifications.ui_enabled":                    on,
 		// What leaves the server: downloads, library data sent to outside AI
 		// and embedding providers, markers shared online, and the server's
@@ -114,7 +112,6 @@ const (
 	settingSMTPSecurity       = "email.smtp_security"
 	smtpStartTLS, smtpTLS     = "starttls", "tls"
 	smtpNone                  = "none"
-	settingReleaseEvents      = "notifications.release_events_enabled"
 	settingEmailEnabled       = "email.enabled"
 	settingSMTPHost           = "email.smtp_host"
 	settingSMTPPassword       = "email.smtp_password" //nolint:gosec // G101: a setting key, not a credential

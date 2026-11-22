@@ -23,7 +23,7 @@ func TestDeleteRemoteTranscodeSignsTheRequest(t *testing.T) {
 
 	manager := NewTranscodeManager()
 	manager.NodeKeysFn = func() nodeauth.Keyring { return nodeauthtest.NodeKey(key) }
-	if err := manager.deleteRemoteTranscode(t.Context(), "session-1", node.URL, true); err != nil {
+	if err := manager.deleteRemoteTranscode(t.Context(), "session-1", node.URL, true, ""); err != nil {
 		t.Fatalf("deleteRemoteTranscode: %v", err)
 	}
 	if !signed.Load() {
@@ -45,7 +45,7 @@ func TestDeleteRemoteTranscodeDoesNotFollowRedirects(t *testing.T) {
 
 	manager := NewTranscodeManager()
 	manager.NodeKeysFn = func() nodeauth.Keyring { return nodeauthtest.NodeKey("snk1_1_delete-key") }
-	if err := manager.deleteRemoteTranscode(t.Context(), "session-1", node.URL, true); err == nil {
+	if err := manager.deleteRemoteTranscode(t.Context(), "session-1", node.URL, true, ""); err == nil {
 		t.Fatal("deleteRemoteTranscode succeeded on a redirect, want an error")
 	}
 	if followed.Load() {
