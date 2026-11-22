@@ -944,18 +944,19 @@ func TestLifecycleSweepRecordsTheAttemptsSubtitle(t *testing.T) {
 // subtitle recorded latest, so a stale copy would otherwise replace the real
 // stop's.
 func TestStaleCopyRecordsTheAttemptsSubtitle(t *testing.T) {
+	id := uuid.NewString()
 	stale := &playback.SessionSubtitle{TrackID: "file:42:subtitle:0", Source: "embedded", Delivery: "sidecar"}
 	for _, reason := range []PlaybackEndReason{"", PlaybackEndExpired} {
 		admin := &recordingPlaybackAdminStore{}
 		h := newFinishHistoryReplica(newPlaybackTestStore(t), admin, finishHistoryFile()).handler
 		store := playback.NewMemoryPlanStoreV3()
-		if err := store.SaveAttempt(t.Context(), playback.AttemptRecordV3{PlaybackAttemptID: "a-1", SessionID: "s-1", UserID: 7, ProfileID: "p-1",
+		if err := store.SaveAttempt(t.Context(), playback.AttemptRecordV3{PlaybackAttemptID: "a-1", SessionID: id, UserID: 7, ProfileID: "p-1",
 			CurrentPlanID: "plan-2", CurrentPlan: playback.PlanV3{Subtitle: playback.SubtitleDecisionV3{Mode: playback.SubtitleOffV3}},
 			ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 			t.Fatal(err)
 		}
 		h.PlanStoreV3 = store
-		session := &playback.Session{ID: "s-1", UserID: 7, ProfileID: "p-1", MediaFileID: 42, PlayMethod: playback.PlayTranscode,
+		session := &playback.Session{ID: id, UserID: 7, ProfileID: "p-1", MediaFileID: 42, PlayMethod: playback.PlayTranscode,
 			StartedAt: time.Now().Add(-time.Hour), Position: 60, Subtitle: stale}
 		if err := h.recordAdminStopHistory(t.Context(), session, reason); err != nil {
 			t.Fatal(err)

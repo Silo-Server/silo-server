@@ -1438,11 +1438,15 @@ func (h *PlaybackHandler) recordStopHistory(ctx context.Context, session *playba
 // latest, and a copy that missed a replan on another server, or whose own
 // replan failed, still holds an older one.
 func (h *PlaybackHandler) recordCommittedSubtitle(ctx context.Context, session *playback.Session, entry *AdminPlaybackHistoryEntry) {
-	if h.PlanStoreV3 == nil || session.IsJellyfinCompat {
+	// Only a native play's session ID, a UUID, can name an attempt.
+	if h.PlanStoreV3 == nil || session.IsJellyfinCompat || lifecycleIDParam(session.ID) == nil {
 		return
 	}
 	record, err := h.PlanStoreV3.GetAttempt(ctx, session.ID)
-	if err != nil || record == nil || record.UserID != session.UserID || record.CurrentPlanID == "" {
+	if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+		slog.WarnContext(ctx, "failed to read the attempt for a session's admin history subtitle", "component", "api", "session", session.ID, "error", err)
+	}
+	if err != nil || record == nil || record.UserID != session.UserID || record.ProfileID != session.ProfileID || record.CurrentPlanID == "" {
 		return
 	}
 	entry.Subtitle = playback.SessionSubtitleFromPlanV3(&record.CurrentPlan)
