@@ -84,6 +84,7 @@ const episodeCatalogSelectBody = `(
 		si.air_time,
 		si.air_timezone,
 		COALESCE(si.show_status, '') AS show_status,
+		'' AS episode_labels,
 		si.matched_at,
 		si.last_refreshed,
 		si.refresh_failures,
