@@ -240,7 +240,13 @@ func textCheckFailed(ctx context.Context, err error, apiKey string) connectionCh
 	// the provider's error code, not in the error text.
 	attrs := []any{logComponentKey, "api", "error", redact(err.Error())}
 	if httpErr, ok := errors.AsType[*llm.HTTPError](err); ok {
-		attrs = append(attrs, "status", httpErr.StatusCode, "provider_code", redact(httpErr.Code), "provider_param", redact(httpErr.Param))
+		// A failure reported inside a successful response has no HTTP status.
+		if httpErr.InResponse {
+			attrs = append(attrs, "in_response", true)
+		} else {
+			attrs = append(attrs, "status", httpErr.StatusCode)
+		}
+		attrs = append(attrs, "provider_code", redact(httpErr.Code), "provider_param", redact(httpErr.Param))
 	}
 	slog.WarnContext(ctx, "text AI connection check failed", attrs...)
 	return checkFailed(textCheckFailureMessage(err))

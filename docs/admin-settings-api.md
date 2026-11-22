@@ -91,9 +91,11 @@ Provider failures return `success: false` with a message written by Silo that
 excludes provider error bodies and credentials. The `ai_chat` and
 `ai_transcription` checks name the kind of failure when they can classify it,
 such as a rejected key, an unknown model, a billing or rate limit, or a timeout.
-A refused `ai_chat` request of any other kind carries its status code as the
-`status` argument, and the server log records the provider's error for
-`ai_chat` with the configured key removed.
+A refused `ai_chat` request of any other kind answers
+`web.admin.common.connectionCheck.result.textAIRejected` with its status code as
+the `status` argument, or `textAIRefused`, with no arguments, when the provider
+reported the refusal inside a successful response. The server log records the
+provider's error for `ai_chat` with the configured key removed.
 Invalid kinds/configuration return `422`.
 The result's `message` is English. `message_key` names its entry in the shared
 translation catalog (`web.admin.common.connectionCheck.result.*`) and
