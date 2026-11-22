@@ -46132,6 +46132,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Skannaukset ja metatietojen päivitykset näkyvät tässä, kun ne ovat käynnissä."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Ei käynnissä olevia skannauksia tai päivityksiä"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Kaikki ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Piilota jono"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " muu kirjasto"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " muuta kirjastoa"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Metatietojen päivitykset"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Päivitetään metatietoja…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Näytä jono"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Korkea"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Matala"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Kohtalainen"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -46570,6 +46678,30 @@
       "value": "Vahvista tyhjien juurikansioiden siivous"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Tarkastele"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Metatietojen tunnistusjonossa ei ole odottavia kohteita."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Ohitettuja juurikansioita ei ole kirjattu."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Vanhentuneita ulkoisia tunnuksia ei ole kirjattu."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -46606,6 +46738,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Muokkaa"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Kirjastoja ei ole vielä määritetty."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -46658,6 +46802,12 @@
       "value": "Piilota polut"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Joutilas"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -46692,6 +46842,12 @@
       "value": "Osittainen skannaus"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Täydennä puuttuvat tai korvaa kaikki metatiedot"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -46704,6 +46860,12 @@
       "value": "Juurikansio ei saatavilla"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Skannaa"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -46714,6 +46876,12 @@
     {
       "type": 0,
       "value": "Näytä polut"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Pysäytä"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -46732,6 +46900,26 @@
     {
       "type": 0,
       "value": "Tarkista liitokset"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Tarkista, että kaikki kirjaston kansiot ovat saatavilla"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Näytä kirjaston "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " käynnissä olevat skannaukset"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -46835,7 +47023,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Hallitse kirjastojen juurikansioita ja skannauksia. Katalogin tuonti ja vienti löytyvät nyt kohdasta Ylläpito."
+      "value": "Hallitse mediakansioita, seuraa skannauksia ja ratkaise tunnistusongelmia."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -47322,6 +47510,56 @@
       "value": "Vanhentuneet ulkoiset tunnukset"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " käynnissä"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " käynnissä"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Skannaustoiminta"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Katalogin kunto"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Kirjastot"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -47772,6 +48010,24 @@
     {
       "type": 0,
       "value": "Hae ohitetuista kohteista nimen, kirjaston tai tyypin mukaan…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Monitulkintainen"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Odottaa"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Täsmäämätön"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -129585,6 +129841,12 @@
     {
       "type": 0,
       "value": "Lue profiilin ilmoitukset niiden saapuessa ja merkitse ne luetuiksi."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Katso, mitä profiilissa toistetaan juuri nyt, tai kaikissa tilin profiileissa, jos avaimelle ei ole valittu profiilia: nimike, toistokohta, taukotila, laite ja toistotapa. Ei toiston ohjausta eikä verkkotietoja."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

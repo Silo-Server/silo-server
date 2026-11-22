@@ -67238,6 +67238,160 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "تظهر هنا الفحوصات وعمليات تحديث البيانات الوصفية أثناء تشغيلها."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "لا توجد فحوصات أو عمليات تحديث نشطة"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "الكل ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "إخفاء قائمة الانتظار"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مكتبة أخرى"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ مكتبة أخرى"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ مكتبتان أخريان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مكتبات أخرى"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مكتبة أخرى"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مكتبة أخرى"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "تحديثات البيانات الوصفية"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "جارٍ تحديث البيانات الوصفية"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "عرض قائمة الانتظار"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "عالية"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "منخفضة"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "متوسطة"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -67940,6 +68094,30 @@
       "value": "تأكيد تنظيف الجذور الفارغة"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "فحص"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "لا توجد عناصر في انتظار قائمة مطابقة البيانات الوصفية."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "لم تُسجَّل أي جذور متخطاة."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "لم تُسجَّل أي معرّفات خارجية قديمة."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -67976,6 +68154,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "تعديل"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "لم تُضبط أي مكتبات بعد."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -68063,6 +68253,12 @@
       "value": "إخفاء المسارات"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "خاملة"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -68097,6 +68293,12 @@
       "value": "فحص جزئي"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "إكمال البيانات الوصفية الناقصة أو استبدالها كلها"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -68109,6 +68311,12 @@
       "value": "يتعذّر الوصول إلى الجذر"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "فحص"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -68119,6 +68327,12 @@
     {
       "type": 0,
       "value": "عرض المسارات"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "إيقاف"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -68137,6 +68351,22 @@
     {
       "type": 0,
       "value": "التحقق من نقاط التحميل"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "التحقق من إمكانية الوصول إلى كل مجلدات المكتبة"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "عرض الفحوصات النشطة لـ "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -68240,7 +68470,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "أدر جذور المكتبات وفحوصاتها. أصبح استيراد الكتالوج وتصديره الآن ضمن «الصيانة»."
+      "value": "أدر مجلدات الوسائط، وراقب الفحوصات، وحلّ مشكلات المطابقة."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -69027,6 +69257,91 @@
       "value": "المعرّفات الخارجية القديمة"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا مهام نشطة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مهمة نشطة واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مهمتان نشطتان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مهام نشطة"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مهمة نشطة"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مهمة نشطة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "نشاط الفحص"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "سلامة الكتالوج"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "المكتبات"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -69541,6 +69856,24 @@
     {
       "type": 0,
       "value": "ابحث في العناصر المتجاهلة حسب العنوان أو المكتبة أو النوع..."
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "ملتبس"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "قيد الانتظار"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "غير مطابق"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -171891,6 +172224,12 @@
     {
       "type": 0,
       "value": "قراءة إشعارات الملف الشخصي فور وصولها وتعليمها كمقروءة."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "معرفة ما يُشغَّل الآن على الملف الشخصي، أو على كل ملف شخصي في الحساب إذا لم يحدد المفتاح ملفًا شخصيًا: العنوان والموضع وحالة الإيقاف المؤقت والجهاز وطريقة التشغيل. دون التحكم في التشغيل أو تفاصيل الشبكة."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

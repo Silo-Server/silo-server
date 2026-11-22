@@ -51755,6 +51755,129 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Skeniranja i osvježavanja metapodataka prikazuju se ovdje dok su u tijeku."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Nema aktivnih skeniranja ni osvježavanja"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Sve ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Sakrij red čekanja"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ još "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " medijateka"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ još "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " medijateke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ još "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " medijateka"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Osvježavanja metapodataka"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Osvježavanje metapodataka"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Prikaži red čekanja"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Visoka"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Niska"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Srednja"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -52265,6 +52388,30 @@
       "value": "Potvrda čišćenja praznih korijena"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Pregledaj"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Nijedna stavka ne čeka u redu čekanja za povezivanje metapodataka."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Nema zabilježenih preskočenih korijena."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Nema zabilježenih zastarjelih vanjskih ID-ova."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -52301,6 +52448,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Uredi"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Još nije konfigurirana nijedna medijateka."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -52364,6 +52523,12 @@
       "value": "Sakrij putanje"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Neaktivno"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -52398,6 +52563,12 @@
       "value": "Djelomično skeniranje"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Dopunite nedostajuće ili zamijenite sve metapodatke"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -52410,6 +52581,12 @@
       "value": "Korijen nedostupan"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Skeniraj"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -52420,6 +52597,12 @@
     {
       "type": 0,
       "value": "Prikaži putanje"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Zaustavi"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -52438,6 +52621,22 @@
     {
       "type": 0,
       "value": "Provjeri točke montiranja"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Provjerite jesu li sve mape medijateke dostupne"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Prikaži aktivna skeniranja za "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -52541,7 +52740,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Upravljajte korijenima medijateka i skeniranjima. Uvoz i izvoz kataloga sada se nalaze u odjeljku Održavanje."
+      "value": "Upravljajte mapama s medijima, pratite skeniranja i rješavajte probleme s povezivanjem."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -53100,6 +53299,67 @@
       "value": "Zastarjeli vanjski ID-ovi"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktivan"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktivna"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktivnih"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Aktivnost skeniranja"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Stanje kataloga"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Medijateke"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -53566,6 +53826,24 @@
     {
       "type": 0,
       "value": "Pretražite zanemarene stavke po naslovu, medijateci ili vrsti…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Nejednoznačno"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Na čekanju"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Nepovezano"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -140889,6 +141167,12 @@
     {
       "type": 0,
       "value": "Čitanje obavijesti profila čim stignu i njihovo označavanje kao pročitanih."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Prikaz onoga što se trenutačno reproducira na profilu ili, kada ključ ne navodi nijedan profil, na svim profilima računa: naslov, položaj, stanje pauze, uređaj i način reprodukcije. Bez upravljanja reprodukcijom i bez mrežnih pojedinosti."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

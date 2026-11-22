@@ -45968,6 +45968,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Scans und Metadaten-Aktualisierungen werden hier angezeigt, während sie laufen."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Keine aktiven Scans oder Aktualisierungen"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Alle ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Warteschlange ausblenden"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " weitere Mediathek"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " weitere Mediatheken"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Metadaten-Aktualisierungen"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Metadaten werden aktualisiert"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Warteschlange anzeigen"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Hoch"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Niedrig"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Mittel"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -46398,6 +46506,30 @@
       "value": "Bereinigung leerer Stammordner bestätigen"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Prüfen"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "In der Warteschlange des Metadaten-Abgleichs warten keine Einträge."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Keine übersprungenen Stammordner erfasst."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Keine veralteten externen IDs erfasst."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -46434,6 +46566,18 @@
     {
       "type": 0,
       "value": " bearbeiten"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Bearbeiten"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Noch keine Mediatheken eingerichtet."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -46486,6 +46630,12 @@
       "value": "Pfade ausblenden"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Inaktiv"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -46520,6 +46670,12 @@
       "value": "Teilweiser Scan"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Fehlende Metadaten ergänzen oder alle ersetzen"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -46532,6 +46688,12 @@
       "value": "Stammordner nicht erreichbar"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Scannen"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -46542,6 +46704,12 @@
     {
       "type": 0,
       "value": "Pfade anzeigen"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Stoppen"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -46560,6 +46728,26 @@
     {
       "type": 0,
       "value": "Einhängepunkte prüfen"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Prüfen, ob alle Ordner der Mediathek erreichbar sind"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Aktive Scans für "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " anzeigen"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -46663,7 +46851,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Verwalte Stammordner und Scans der Mediatheken. Katalogimport und -export findest du jetzt unter Wartung."
+      "value": "Verwalte Medienordner, überwache Scans und löse Zuordnungsprobleme."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -47142,6 +47330,56 @@
       "value": "Veraltete externe IDs"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktiv"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktiv"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Scan-Aktivität"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Katalogzustand"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Mediatheken"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -47584,6 +47822,24 @@
     {
       "type": 0,
       "value": "Ignorierte Einträge nach Titel, Mediathek oder Typ durchsuchen…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Mehrdeutig"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Ausstehend"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Nicht zugeordnet"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -128834,6 +129090,12 @@
     {
       "type": 0,
       "value": "Benachrichtigungen des Profils beim Eintreffen lesen und als gelesen markieren."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Sehen, was gerade auf dem Profil abgespielt wird, oder auf jedem Profil des Kontos, wenn der Schlüssel keines angibt: Titel, Position, Pausenstatus, Gerät und Wiedergabemethode. Keine Steuerung der Wiedergabe und keine Netzwerkdetails."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

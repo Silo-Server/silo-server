@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, Unlink } from "lucide-react";
 
 import type { StaleMediaID } from "@/api/types";
@@ -35,10 +35,17 @@ import { numberText, useT } from "@/i18n";
 import { formatDateTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 
-export function StaleIDsSection() {
+export function StaleIDsSection({
+  embedded = false,
+  onStatusChange,
+}: {
+  embedded?: boolean;
+  onStatusChange?: (status: { count: number | undefined; isError?: boolean }) => void;
+} = {}) {
   const t = useT();
   const showTable = useWideDiagnosticsTableLayout();
   const [open, setOpen] = useState(false);
+  const isOpen = embedded || open;
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
   const [matchItem, setMatchItem] = useState<StaleMediaID | null>(null);
@@ -47,11 +54,20 @@ export function StaleIDsSection() {
   // not make the server walk every row on mount.
   const {
     data: stalePages,
+    isError,
+    isLoading,
     hasNextPage,
     fetchNextPage,
     isFetchingNextPage,
-  } = useStaleMediaIDs({ enabled: open, search: debouncedSearch });
+  } = useStaleMediaIDs({ enabled: isOpen, search: debouncedSearch });
   const staleIDs = useMemo(() => flattenStaleMediaIDs(stalePages), [stalePages]);
+  const totalCount = stalePages?.pages[0]?.total;
+
+  useEffect(() => {
+    if (!onStatusChange) return;
+    if (debouncedSearch.trim() !== "") return;
+    onStatusChange({ count: totalCount, isError: stalePages === undefined && isError });
+  }, [debouncedSearch, isError, onStatusChange, stalePages, totalCount]);
 
   // Preserve the server's last-seen order across the pages loaded so far.
   const pag = usePagination(staleIDs);
@@ -69,16 +85,8 @@ export function StaleIDsSection() {
     </Button>
   );
 
-  return (
-    <CollapsibleDiagnosticsSection
-      title={t("web.admin.libraries.staleIds.title")}
-      description={t("web.admin.libraries.staleIds.description")}
-      count={stalePages?.pages[0]?.total}
-      icon={<Unlink className="h-4 w-4 text-red-400" />}
-      iconClassName="bg-red-500/10"
-      open={open}
-      onOpenChange={setOpen}
-    >
+  const body = (
+    <>
       <DiagnosticsSearch
         className="mb-2"
         placeholder={t("web.admin.libraries.staleIds.filterPlaceholder")}
@@ -88,7 +96,11 @@ export function StaleIDsSection() {
           pag.setPage(0);
         }}
       />
-      {showTable ? (
+      {!isLoading && pag.rows.length === 0 ? (
+        <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
+          {t("web.admin.libraries.health.staleEmpty")}
+        </div>
+      ) : showTable ? (
         <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
           <Table aria-label={t("web.admin.libraries.staleIds.tableLabel")}>
             <TableHeader>
@@ -213,6 +225,34 @@ export function StaleIDsSection() {
           }}
         />
       )}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <section className="surface-panel space-y-3 rounded-2xl border-0 p-4 sm:p-5">
+        <div className="space-y-0.5">
+          <h2 className="text-sm font-semibold">{t("web.admin.libraries.staleIds.title")}</h2>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.libraries.staleIds.description")}
+          </p>
+        </div>
+        {body}
+      </section>
+    );
+  }
+
+  return (
+    <CollapsibleDiagnosticsSection
+      title={t("web.admin.libraries.staleIds.title")}
+      description={t("web.admin.libraries.staleIds.description")}
+      count={totalCount}
+      icon={<Unlink className="h-4 w-4 text-red-400" />}
+      iconClassName="bg-red-500/10"
+      open={open}
+      onOpenChange={setOpen}
+    >
+      {body}
     </CollapsibleDiagnosticsSection>
   );
 }

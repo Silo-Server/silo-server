@@ -40724,6 +40724,99 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Imbasan dan muat semula metadata dipaparkan di sini semasa sedang berjalan."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Tiada imbasan atau muat semula aktif"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Semua ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Sembunyikan baris gilir"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pustaka lain"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Muat semula metadata"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Memuat semula metadata…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Lihat baris gilir"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Tinggi"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Rendah"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Sederhana"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -41090,6 +41183,30 @@
       "value": "Sahkan pembersihan akar kosong"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Periksa"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Tiada item yang menunggu dalam baris gilir pemadan metadata."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Tiada akar dilangkau direkodkan."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Tiada ID luaran lapuk direkodkan."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -41126,6 +41243,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Edit"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Belum ada pustaka dikonfigurasikan."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -41167,6 +41296,12 @@
       "value": "Sembunyikan laluan"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Melahu"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -41201,6 +41336,12 @@
       "value": "Imbasan separa"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Isi metadata yang tiada atau ganti semua metadata"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -41213,6 +41354,12 @@
       "value": "Akar tidak dapat dicapai"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Imbas"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -41223,6 +41370,12 @@
     {
       "type": 0,
       "value": "Tunjukkan laluan"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Hentikan"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -41241,6 +41394,22 @@
     {
       "type": 0,
       "value": "Sahkan lekapan"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Semak bahawa semua folder pustaka boleh dicapai"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Lihat imbasan aktif untuk pustaka "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -41344,7 +41513,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Urus akar dan imbasan pustaka. Import/eksport katalog kini terletak di bawah Penyelenggaraan."
+      "value": "Urus folder media, pantau imbasan dan selesaikan masalah pemadanan."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -41745,6 +41914,45 @@
     {
       "type": 0,
       "value": "ID luaran lapuk"
+    }
+  ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktif"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Aktiviti imbasan"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Kesihatan katalog"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Pustaka"
     }
   ],
   "web.admin.libraries.toast.cancelJobFailed": [
@@ -42165,6 +42373,24 @@
     {
       "type": 0,
       "value": "Cari item diabaikan mengikut tajuk, pustaka atau jenis…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Tidak jelas"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Belum selesai"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Tidak dipadankan"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -118058,6 +118284,12 @@
     {
       "type": 0,
       "value": "Baca pemberitahuan profil apabila tiba dan tandakannya sebagai dibaca."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Lihat perkara yang sedang dimainkan sekarang pada profil, atau pada setiap profil akaun apabila kunci tidak menamakan sebarang profil: tajuk, kedudukan main, status jeda, peranti dan kaedah main. Tiada kawalan main balik atau butiran rangkaian."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

@@ -45884,6 +45884,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Scans en metadatavernieuwingen verschijnen hier zolang ze actief zijn."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Geen actieve scans of vernieuwingen"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Alle ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Wachtrij verbergen"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " andere bibliotheek"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " andere bibliotheken"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Metadatavernieuwingen"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Metadata vernieuwen"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Wachtrij bekijken"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Hoog"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Laag"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Gemiddeld"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -46314,6 +46422,30 @@
       "value": "Opschonen van lege hoofdmappen bevestigen"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Inspecteren"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Er wachten geen items in de wachtrij van de metadatamatcher."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Geen overgeslagen hoofdmappen geregistreerd."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Geen verouderde externe ID’s geregistreerd."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -46350,6 +46482,18 @@
     {
       "type": 0,
       "value": " bewerken"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Bewerken"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Nog geen bibliotheken ingesteld."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -46402,6 +46546,12 @@
       "value": "Paden verbergen"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Inactief"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -46436,6 +46586,12 @@
       "value": "Gedeeltelijke scan"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Ontbrekende metadata aanvullen of alle metadata vervangen"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -46448,6 +46604,12 @@
       "value": "Hoofdmap onbereikbaar"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Scannen"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -46458,6 +46620,12 @@
     {
       "type": 0,
       "value": "Paden tonen"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Stoppen"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -46476,6 +46644,26 @@
     {
       "type": 0,
       "value": "Koppelpunten controleren"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Controleren of alle bibliotheekmappen bereikbaar zijn"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Actieve scans voor "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " bekijken"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -46579,7 +46767,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Beheer hoofdmappen en scans van bibliotheken. Catalogusimport/-export staat nu onder Onderhoud."
+      "value": "Beheer mediamappen, volg scans en los koppelingsproblemen op."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -47058,6 +47246,56 @@
       "value": "Verouderde externe ID’s"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " actief"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " actief"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Scanactiviteit"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Catalogusstatus"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Bibliotheken"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -47500,6 +47738,24 @@
     {
       "type": 0,
       "value": "Genegeerde items zoeken op titel, bibliotheek of type…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Onduidelijk"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "In afwachting"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Niet gekoppeld"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -128599,6 +128855,12 @@
     {
       "type": 0,
       "value": "De meldingen van het profiel lezen zodra ze binnenkomen en ze als gelezen markeren."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Zien wat er nu wordt afgespeeld op het profiel, of op elk profiel van het account als de sleutel er geen noemt: titel, positie, pauzestatus, apparaat en afspeelmethode. Geen afspeelbediening of netwerkgegevens."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

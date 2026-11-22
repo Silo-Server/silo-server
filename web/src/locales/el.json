@@ -46344,6 +46344,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Οι σαρώσεις και οι ανανεώσεις μεταδεδομένων εμφανίζονται εδώ όσο εκτελούνται."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Δεν υπάρχουν ενεργές σαρώσεις ή ανανεώσεις"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Όλα ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Απόκρυψη ουράς"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ακόμη βιβλιοθήκη"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ακόμη βιβλιοθήκες"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Ανανεώσεις μεταδεδομένων"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Ανανέωση μεταδεδομένων…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Προβολή ουράς"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Υψηλή"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Χαμηλή"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Μέτρια"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -46782,6 +46890,30 @@
       "value": "Επιβεβαίωση εκκαθάρισης κενών ριζικών φακέλων"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Έλεγχος"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Δεν υπάρχουν στοιχεία σε αναμονή στην ουρά αντιστοίχισης μεταδεδομένων."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Δεν έχουν καταγραφεί ριζικοί φάκελοι που παραλείφθηκαν."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Δεν έχουν καταγραφεί παρωχημένα εξωτερικά αναγνωριστικά."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -46818,6 +46950,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Επεξεργασία"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Δεν έχουν ρυθμιστεί ακόμη βιβλιοθήκες."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -46870,6 +47014,12 @@
       "value": "Απόκρυψη διαδρομών"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Σε αδράνεια"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -46904,6 +47054,12 @@
       "value": "Μερική σάρωση"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Συμπλήρωση όσων λείπουν ή αντικατάσταση όλων των μεταδεδομένων"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -46916,6 +47072,12 @@
       "value": "Μη προσβάσιμος ριζικός φάκελος"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Σάρωση"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -46926,6 +47088,12 @@
     {
       "type": 0,
       "value": "Εμφάνιση διαδρομών"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Διακοπή"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -46944,6 +47112,22 @@
     {
       "type": 0,
       "value": "Επαλήθευση προσαρτήσεων"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Έλεγχος ότι όλοι οι φάκελοι της βιβλιοθήκης είναι προσβάσιμοι"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Προβολή ενεργών σαρώσεων της βιβλιοθήκης "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -47047,7 +47231,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Διαχείριση ριζικών φακέλων βιβλιοθηκών και σαρώσεων. Η εισαγωγή/εξαγωγή καταλόγου βρίσκεται πλέον στην ενότητα «Συντήρηση»."
+      "value": "Διαχείριση φακέλων πολυμέσων, παρακολούθηση σαρώσεων και επίλυση προβλημάτων αντιστοίχισης."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -47534,6 +47718,56 @@
       "value": "Παρωχημένα εξωτερικά αναγνωριστικά"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ενεργή"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ενεργές"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Δραστηριότητα σαρώσεων"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Κατάσταση καταλόγου"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Βιβλιοθήκες"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -47976,6 +48210,24 @@
     {
       "type": 0,
       "value": "Αναζήτηση στοιχείων σε παράβλεψη κατά τίτλο, βιβλιοθήκη ή τύπο…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Αμφίσημη αντιστοίχιση"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Σε εκκρεμότητα"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Χωρίς αντιστοίχιση"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -129995,6 +130247,12 @@
     {
       "type": 0,
       "value": "Ανάγνωση των ειδοποιήσεων του προφίλ καθώς φτάνουν και επισήμανσή τους ως αναγνωσμένων."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Προβολή όσων αναπαράγονται αυτή τη στιγμή στο προφίλ ή σε όλα τα προφίλ του λογαριασμού, όταν το κλειδί δεν ορίζει προφίλ: τίτλος, σημείο αναπαραγωγής, κατάσταση παύσης, συσκευή και μέθοδος αναπαραγωγής. Χωρίς έλεγχο της αναπαραγωγής ή στοιχεία δικτύου."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

@@ -48964,6 +48964,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EScans and metadata refreshes appear here while they run.\u202C"
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo active scans or refreshes\u202C"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAll (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide queue\u202C"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202E+ \u202C"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E other library\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202E+ \u202C"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E other libraries\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMetadata Refreshes\u202C"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERefreshing metadata\u202C"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EView queue\u202C"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHigh\u202C"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELow\u202C"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMedium\u202C"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -49434,6 +49542,30 @@
       "value": "\u200F\u202EConfirm empty root cleanup\u202C"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInspect\u202C"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo items are waiting in the metadata matcher queue.\u202C"
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo skipped roots recorded.\u202C"
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo stale external IDs recorded.\u202C"
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -49470,6 +49602,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEdit\u202C"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo libraries configured yet.\u202C"
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -49530,6 +49674,12 @@
       "value": "\u200F\u202EHide paths\u202C"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIdle\u202C"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -49564,6 +49714,12 @@
       "value": "\u200F\u202EPartial scan\u202C"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFill missing or replace all metadata\u202C"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -49576,6 +49732,12 @@
       "value": "\u200F\u202ERoot unreachable\u202C"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EScan\u202C"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -49586,6 +49748,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EShow paths\u202C"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStop\u202C"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -49604,6 +49772,22 @@
     {
       "type": 0,
       "value": "\u200F\u202EVerify Mounts\u202C"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECheck that all library folders are reachable\u202C"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EView active scans for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -49715,7 +49899,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EManage library roots and scans. Catalog import/export now lives under Maintenance.\u202C"
+      "value": "\u200F\u202EManage media folders, monitor scans, and resolve matching issues.\u202C"
     }
   ],
   "web.admin.libraries.page.title": [
@@ -50230,6 +50414,64 @@
       "value": "\u200F\u202EStale External IDs\u202C"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E active\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E active\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EScan Activity\u202C"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECatalog Health\u202C"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELibraries\u202C"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -50688,6 +50930,24 @@
     {
       "type": 0,
       "value": "\u200F\u202ESearch ignored items by title, library, or type...\u202C"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAmbiguous\u202C"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPending\u202C"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUnmatched\u202C"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -135923,6 +136183,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ERead the profile's notifications as they arrive and mark them read.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESee what is playing right now on the profile, or on every profile of the account when the key names none: title, position, paused state, device and play method. No playback control or network details.\u202C"
     }
   ],
   "web.settings.apiKeys.scope.requests": [

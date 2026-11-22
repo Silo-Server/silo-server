@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { AlertTriangle, FolderOpen, XIcon } from "lucide-react";
 
@@ -77,10 +77,19 @@ function rootRowModel(t: Translate, root: LibraryRoot) {
  * AmbiguousRootsSection displays scanner roots that require manual resolution,
  * handling loading, confirmed empty, populated warning, and error states.
  */
-export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
+export function AmbiguousRootsSection({
+  libraries,
+  embedded = false,
+  onStatusChange,
+}: {
+  libraries: Library[];
+  embedded?: boolean;
+  onStatusChange?: (status: { count: number | undefined; isError?: boolean }) => void;
+}) {
   const t = useT();
   const showTable = useWideDiagnosticsTableLayout();
   const [open, setOpen] = useState(false);
+  const isOpen = embedded || open;
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | undefined>(libraries[0]?.id);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
@@ -98,7 +107,7 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
     fetchNextPage,
     isFetchingNextPage,
   } = useLibraryRoots(effectiveSelectedLibraryId, "ambiguous", {
-    enabled: open,
+    enabled: isOpen,
     search: debouncedSearch,
   });
   const roots = useMemo(() => flattenLibraryRoots(rootPages), [rootPages]);
@@ -111,10 +120,29 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
   const countUnknown = rootPages === undefined && !isError;
   const isWarning = totalRoots > 0;
 
+  useEffect(() => {
+    if (!onStatusChange) return;
+    if (debouncedSearch.trim() !== "") return;
+    onStatusChange({ count: countUnknown ? undefined : totalRoots, isError: loadFailed });
+  }, [countUnknown, debouncedSearch, loadFailed, onStatusChange, totalRoots]);
+
   const pag = usePagination(roots);
 
   if (libraries.length === 0) {
-    return null;
+    if (!embedded) return null;
+    return (
+      <section className="surface-panel space-y-3 rounded-2xl border-0 p-4 sm:p-5">
+        <div className="space-y-0.5">
+          <h2 className="text-sm font-semibold">{t("web.admin.libraries.ambiguousRoots.title")}</h2>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.libraries.ambiguousRoots.description")}
+          </p>
+        </div>
+        <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
+          {t("web.admin.libraries.list.empty")}
+        </div>
+      </section>
+    );
   }
 
   // The line shown instead of rows while loading, after a failure, or when empty.
@@ -131,27 +159,8 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
           }
         : null;
 
-  return (
-    <CollapsibleDiagnosticsSection
-      title={t("web.admin.libraries.ambiguousRoots.title")}
-      description={t("web.admin.libraries.ambiguousRoots.description")}
-      count={countUnknown ? undefined : totalRoots}
-      isError={loadFailed}
-      icon={
-        loadFailed ? (
-          <AlertTriangle className="text-destructive h-4 w-4" />
-        ) : (
-          <FolderOpen
-            className={cn("h-4 w-4", isWarning ? "text-amber-500" : "text-muted-foreground")}
-          />
-        )
-      }
-      iconClassName={
-        loadFailed ? "bg-destructive/10" : isWarning ? "bg-amber-500/10" : "bg-muted/50"
-      }
-      open={open}
-      onOpenChange={setOpen}
-    >
+  const body = (
+    <>
       <div className="mb-2 flex flex-col gap-2 sm:flex-row">
         <Select
           value={
@@ -336,6 +345,45 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
           }}
         />
       ) : null}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <section className="surface-panel space-y-3 rounded-2xl border-0 p-4 sm:p-5">
+        <div className="space-y-0.5">
+          <h2 className="text-sm font-semibold">{t("web.admin.libraries.ambiguousRoots.title")}</h2>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.libraries.ambiguousRoots.description")}
+          </p>
+        </div>
+        {body}
+      </section>
+    );
+  }
+
+  return (
+    <CollapsibleDiagnosticsSection
+      title={t("web.admin.libraries.ambiguousRoots.title")}
+      description={t("web.admin.libraries.ambiguousRoots.description")}
+      count={countUnknown ? undefined : totalRoots}
+      isError={loadFailed}
+      icon={
+        loadFailed ? (
+          <AlertTriangle className="text-destructive h-4 w-4" />
+        ) : (
+          <FolderOpen
+            className={cn("h-4 w-4", isWarning ? "text-amber-500" : "text-muted-foreground")}
+          />
+        )
+      }
+      iconClassName={
+        loadFailed ? "bg-destructive/10" : isWarning ? "bg-amber-500/10" : "bg-muted/50"
+      }
+      open={open}
+      onOpenChange={setOpen}
+    >
+      {body}
     </CollapsibleDiagnosticsSection>
   );
 }

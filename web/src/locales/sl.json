@@ -57121,6 +57121,144 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Pregledi in osvežitve metapodatkov so prikazani tukaj, dokler se izvajajo."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Ni dejavnih pregledov ali osvežitev"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Vse ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Skrij čakalno vrsto"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ še "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " knjižnica"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ še "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " knjižnici"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ še "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " knjižnice"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ še "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " knjižnic"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Osvežitve metapodatkov"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Osveževanje metapodatkov …"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Prikaži čakalno vrsto"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Visoka"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Nizka"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Srednja"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -57703,6 +57841,30 @@
       "value": "Potrditev čiščenja praznih korenskih map"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Preveri"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "V čakalni vrsti povezovalnika metapodatkov ni elementov."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Ni zabeleženih preskočenih korenskih map."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Ni zabeleženih zastarelih zunanjih ID-jev."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -57739,6 +57901,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Uredi"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Nobena knjižnica še ni nastavljena."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -57813,6 +57987,12 @@
       "value": "Skrij poti"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Nedejavno"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -57847,6 +58027,12 @@
       "value": "Delni pregled"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Dopolni manjkajoče ali zamenjaj vse metapodatke"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -57859,6 +58045,12 @@
       "value": "Korenska mapa ni dosegljiva"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Preglej"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -57869,6 +58061,12 @@
     {
       "type": 0,
       "value": "Prikaži poti"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Ustavi"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -57887,6 +58085,22 @@
     {
       "type": 0,
       "value": "Preveri priklope"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Preveri, ali so vse mape knjižnice dosegljive"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Prikaži dejavne preglede knjižnice "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -57990,7 +58204,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Upravljajte korenske mape in preglede knjižnic. Uvoz/izvoz kataloga je zdaj v razdelku Vzdrževanje."
+      "value": "Upravljajte mape s predstavnostjo, spremljajte preglede in razrešujte težave s povezovanjem."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -58629,6 +58843,78 @@
       "value": "Zastareli zunanji ID-ji"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dejavno"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dejavni"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dejavna"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dejavnih"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Dejavnost pregledov"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Stanje kataloga"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Knjižnice"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -59119,6 +59405,24 @@
     {
       "type": 0,
       "value": "Iščite med prezrtimi elementi po naslovu, knjižnici ali vrsti …"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Dvoumno"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "V čakanju"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Nepovezano"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -152145,6 +152449,12 @@
     {
       "type": 0,
       "value": "Branje obvestil profila ob njihovem prejemu in označevanje obvestil kot prebranih."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Ogled tega, kar se trenutno predvaja v profilu ali, če ključ ne navaja nobenega profila, v vseh profilih računa: naslov, položaj predvajanja, stanje premora, naprava in način predvajanja. Brez upravljanja predvajanja in brez podatkov o omrežju."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

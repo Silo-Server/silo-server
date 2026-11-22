@@ -57880,6 +57880,144 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Skanowania i odświeżania metadanych pojawiają się tutaj w trakcie działania."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Brak aktywnych skanowań i odświeżań"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Wszystkie ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Ukryj kolejkę"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " inna biblioteka"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " inne biblioteki"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " innych bibliotek"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " innej biblioteki"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Odświeżanie metadanych"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Odświeżanie metadanych"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Pokaż kolejkę"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Wysoka"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Niska"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Średnia"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -58462,6 +58600,30 @@
       "value": "Potwierdź czyszczenie pustych katalogów głównych"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Sprawdź"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Żadne elementy nie czekają w kolejce dopasowywania metadanych."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Brak zarejestrowanych pominiętych katalogów głównych."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Brak zarejestrowanych nieaktualnych identyfikatorów zewnętrznych."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -58498,6 +58660,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Edytuj"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Nie skonfigurowano jeszcze żadnych bibliotek."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -58572,6 +58746,12 @@
       "value": "Ukryj ścieżki"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Brak aktywności"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -58606,6 +58786,12 @@
       "value": "Częściowe skanowanie"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Uzupełnij brakujące lub zastąp wszystkie metadane"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -58618,6 +58804,12 @@
       "value": "Katalog główny niedostępny"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Skanuj"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -58628,6 +58820,12 @@
     {
       "type": 0,
       "value": "Pokaż ścieżki"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Zatrzymaj"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -58646,6 +58844,22 @@
     {
       "type": 0,
       "value": "Sprawdź punkty montowania"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Sprawdź, czy wszystkie foldery biblioteki są dostępne"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Pokaż aktywne skanowania biblioteki "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -58749,7 +58963,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Zarządzaj katalogami głównymi bibliotek i skanowaniem. Import i eksport katalogu znajdują się teraz w sekcji Konserwacja."
+      "value": "Zarządzaj folderami multimediów, monitoruj skanowanie i rozwiązuj problemy z dopasowaniem."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -59404,6 +59618,78 @@
       "value": "Nieaktualne identyfikatory zewnętrzne"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Aktywne: "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Aktywne: "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Aktywne: "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Aktywne: "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Aktywność skanowania"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Kondycja katalogu"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Biblioteki"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -59894,6 +60180,24 @@
     {
       "type": 0,
       "value": "Przeszukaj zignorowane elementy według tytułu, biblioteki lub typu…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Niejednoznaczne"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Oczekuje"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Brak dopasowania"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -153029,6 +153333,12 @@
     {
       "type": 0,
       "value": "Odczytywanie powiadomień profilu na bieżąco i oznaczanie ich jako przeczytane."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Sprawdzanie, co jest teraz odtwarzane w profilu lub we wszystkich profilach konta, gdy klucz nie wskazuje żadnego: tytuł, pozycja, stan wstrzymania, urządzenie i metoda odtwarzania. Bez sterowania odtwarzaniem i bez szczegółów sieci."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

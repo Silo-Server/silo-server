@@ -45820,6 +45820,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "स्कैन और मेटाडेटा रीफ़्रेश चलते समय यहाँ दिखाई देते हैं।"
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "कोई स्कैन या रीफ़्रेश जारी नहीं है"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "सभी ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "कतार छिपाएँ"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " और लाइब्रेरी"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " और लाइब्रेरी"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "मेटाडेटा रीफ़्रेश"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "मेटाडेटा रीफ़्रेश हो रहा है…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "कतार देखें"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "ज़्यादा"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "कम"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "मध्यम"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -46250,6 +46358,30 @@
       "value": "खाली रूट की सफ़ाई की पुष्टि करें"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "जाँचें"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "मेटाडेटा मैचर कतार में कोई आइटम इंतज़ार में नहीं है।"
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "छोड़ा गया कोई रूट दर्ज नहीं है।"
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "कोई पुराना एक्सटर्नल ID दर्ज नहीं है।"
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -46286,6 +46418,18 @@
     {
       "type": 0,
       "value": " में बदलाव करें"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "बदलाव करें"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "अभी तक कोई लाइब्रेरी सेट अप नहीं की गई है।"
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -46338,6 +46482,12 @@
       "value": "पाथ छिपाएँ"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "निष्क्रिय"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 1,
@@ -46372,6 +46522,12 @@
       "value": "आंशिक स्कैन"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "गायब मेटाडेटा भरें या पूरा मेटाडेटा बदलें"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -46384,6 +46540,12 @@
       "value": "रूट तक पहुँच नहीं"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "स्कैन करें"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -46394,6 +46556,12 @@
     {
       "type": 0,
       "value": "पाथ दिखाएँ"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "रोकें"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -46412,6 +46580,26 @@
     {
       "type": 0,
       "value": "माउंट जाँचें"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "जाँचें कि लाइब्रेरी के सभी फ़ोल्डरों तक पहुँचा जा सकता है"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "लाइब्रेरी "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " के जारी स्कैन देखें"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -46515,7 +46703,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "लाइब्रेरी रूट और स्कैन प्रबंधित करें। कैटलॉग इंपोर्ट/एक्सपोर्ट अब रखरखाव में है।"
+      "value": "मीडिया फ़ोल्डर प्रबंधित करें, स्कैन पर नज़र रखें और मैचिंग की समस्याएँ हल करें।"
     }
   ],
   "web.admin.libraries.page.title": [
@@ -46990,6 +47178,56 @@
       "value": "पुराने एक्सटर्नल ID"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " जारी"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " जारी"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "स्कैन गतिविधि"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "कैटलॉग की स्थिति"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "लाइब्रेरी"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -47432,6 +47670,24 @@
     {
       "type": 0,
       "value": "अनदेखा किए गए आइटम टाइटल, लाइब्रेरी या प्रकार से खोजें…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "अस्पष्ट"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "लंबित"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "मैच नहीं हुआ"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -128671,6 +128927,12 @@
     {
       "type": 0,
       "value": "प्रोफ़ाइल की सूचनाएँ आते ही पढ़ें और उन्हें पढ़ी गई के रूप में मार्क करें।"
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "देखें कि प्रोफ़ाइल पर अभी क्या चल रहा है, या जब कुंजी में कोई प्रोफ़ाइल न दी गई हो, तो खाते की हर प्रोफ़ाइल पर: टाइटल, पोज़िशन, रोका गया है या नहीं, डिवाइस और प्लेबैक का तरीका। प्लेबैक कंट्रोल या नेटवर्क की जानकारी शामिल नहीं है।"
     }
   ],
   "web.settings.apiKeys.scope.requests": [
