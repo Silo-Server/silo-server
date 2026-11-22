@@ -40,6 +40,7 @@ type OAuthHandshakeCapabilitiesOutputBody struct {
 	Native         bool `json:"native" doc:"Whether startNativeOAuthLogin serves the phone and desktop apps: the flow ends on org.siloserver.silo:/auth/callback with a one-time code bound to the app's PKCE S256 challenge, redeemed with completeOAuthLogin and its code_verifier"`
 	Linking        bool `json:"linking" doc:"Whether createAccountIdentityLinkTicket issues link tickets: the web starts a linking flow with startAccountIdentityLink, an app passes the ticket as link_ticket to startNativeOAuthLogin and confirms the link with completeAccountIdentityLink"`
 	ProviderLogout bool `json:"provider_logout" doc:"Whether getProviderLogout answers the provider end-session URL for web sign-out"`
+	StableCallback bool `json:"stable_callback" doc:"Whether finishStableOAuthCallback accepts provider redirects for bindings using the stable callback mode"`
 	SelectAccount  bool `json:"select_account" doc:"Whether startOAuthLogin, initOAuthLogin and startNativeOAuthLogin accept prompt=select_account, which asks the provider to let the person choose another provider account (a Switch account sign-in)"`
 }
 
@@ -92,6 +93,7 @@ func registerOAuthHandshakes(reg *Registry) {
 			out.Body.Linking = svc.LinkingAvailable()
 			out.Body.ProviderLogout = svc.ProviderLogoutAvailable()
 			out.Body.SelectAccount = true
+			out.Body.StableCallback = true
 		}
 		return out, nil
 	})
@@ -122,11 +124,22 @@ func registerOAuthHandshakes(reg *Registry) {
 		}))
 	}
 
-	callbackParams := []*huma.Param{{Name: "install_id", In: paramInPath, Required: true, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Positive authentication-plugin installation ID."}}
+	registerOAuthCallback(reg, false)
+	registerOAuthCallback(reg, true)
+	registerOAuthAccountOperations(reg)
+}
+
+func registerOAuthCallback(reg *Registry, stable bool) {
+	path, operationID := Prefix+"/auth/oauth/"+oauthCallbackStep, "finishStableOAuthCallback"
+	var callbackParams []*huma.Param
+	if !stable {
+		path, operationID = Prefix+"/auth/oauth/{install_id}/"+oauthCallbackStep, "finishOAuthCallback"
+		callbackParams = append(callbackParams, &huma.Param{Name: "install_id", In: paramInPath, Required: true, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Positive authentication-plugin installation ID."})
+	}
 	for _, name := range []string{oauthStateParameter, oauthCodeParameter, oauthErrorParameter} {
 		callbackParams = append(callbackParams, &huma.Param{Name: name, In: oauthQueryParameter, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Provider redirect value; validated by the owning handshake."})
 	}
-	callback := Operation{Operation: huma.Operation{Method: http.MethodGet, Path: Prefix + "/auth/oauth/{install_id}/" + oauthCallbackStep, OperationID: "finishOAuthCallback", Summary: "Continue the OAuth handshake at the provider's redirect back.",
+	callback := Operation{Operation: huma.Operation{Method: http.MethodGet, Path: path, OperationID: operationID, Summary: "Continue the OAuth handshake at the provider's redirect back.",
 		Description: "Accepts only the browser holding the flow's binding cookie. A web sign-in continues to /login/oauth-complete?code=; a failure to /login?error=oauth_failed&reason=<reason> (not_permitted, account_required, email_in_use, identity_linked_elsewhere, account_disabled, provider_unavailable, state_invalid, session_expired, already_linked, login_failed). A web linking flow returns to its next path with linked=1 or error=oauth_link_failed&reason=<reason>; a native flow to the app redirect, which carries iss (see startNativeOAuthLogin).",
 		Tags:        []string{oauthTag}, Parameters: callbackParams, Responses: oauthHandshakeResponses("302", "400")}, Class: ClassPublic, ServiceBacked: true}
 	RegisterRaw(reg, RawOperation{Operation: callback, Protocol: "oauth-redirect", Reason: "Browser form submission and provider callback require HTTP redirects, without JSON negotiation."}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -137,14 +150,17 @@ func registerOAuthHandshakes(reg *Registry) {
 			writeProblem(w, r, unavailable("OAuth handshake"))
 			return
 		}
-		installID, err := intOfID(ID(chi.URLParam(r, "install_id")))
-		if err != nil || installID <= 0 {
-			http.Error(w, "invalid install_id", http.StatusBadRequest)
-			return
+		var installID int
+		if !stable {
+			var err error
+			installID, err = intOfID(ID(chi.URLParam(r, "install_id")))
+			if err != nil || installID <= 0 {
+				http.Error(w, "invalid install_id", http.StatusBadRequest)
+				return
+			}
 		}
 		svc.ServeCallback(w, r, Prefix, installID)
 	}))
-	registerOAuthAccountOperations(reg)
 }
 
 // serveOAuthStart answers the three flow starts. POST init bounces to the

@@ -5,6 +5,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { getInitial } from "@/lib/text";
 
 /**
  * Whose settings these are. Almost every personal setting is stored per
@@ -27,14 +28,17 @@ export function CurrentProfileLink({ className }: { className?: string }) {
       <Avatar className="border-border h-8 w-8 border">
         {profile?.avatar_url ? <AvatarImage src={profile.avatar_url} alt="" /> : null}
         <AvatarFallback className="bg-accent text-foreground text-xs font-semibold">
-          {profileName.charAt(0).toUpperCase()}
+          {getInitial(profileName)}
         </AvatarFallback>
       </Avatar>
       <span className="min-w-0 flex-1">
         <span className="text-muted-foreground block text-xs leading-tight">
           {t("web.settings.currentProfileLink.caption")}
         </span>
-        <span className="block truncate text-sm font-semibold">{profileName}</span>
+        {/* w-fit keeps a short name on the start side under the caption. */}
+        <span dir="auto" className="block w-fit max-w-full truncate text-sm font-semibold">
+          {profileName}
+        </span>
       </span>
       <ChevronRight className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden="true" />
     </Link>

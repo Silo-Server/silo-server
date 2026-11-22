@@ -68,7 +68,9 @@ func (w *WatchTime) Observe(position float64, paused bool, now time.Time) {
 	}
 
 	elapsed := secondsBetween(w.Until, now)
-	if !w.pausedAt.IsZero() {
+	// A sample from before the confirmed pause, replayed at the time it
+	// arrived, doesn't show the player resumed: the pause stays pending.
+	if !w.pausedAt.IsZero() && !now.Before(w.pausedAt) {
 		if paused {
 			// The player played until the confirmed pause and was paused
 			// after it, so only the time before it can explain the advance.
@@ -91,6 +93,16 @@ func (w *WatchTime) Observe(position float64, paused bool, now time.Time) {
 	w.Until = now
 	w.lastPosition = position
 	w.lastPaused = paused
+}
+
+// Close extends the measurement to now from where it stands, for an end that
+// brought no sample newer than it: a player paused there, or whose pause was
+// confirmed, was paused until now, and no advance is credited.
+func (w *WatchTime) Close(now time.Time) {
+	if !w.Measured || !now.After(w.Until) {
+		return
+	}
+	w.Observe(w.lastPosition, w.lastPaused || !w.pausedAt.IsZero(), now)
 }
 
 // Credit records a sample from a player that reports how many seconds it

@@ -125,8 +125,6 @@ func (f *fakeServiceHost) Stop(installationID int) error {
 	return nil
 }
 
-func (f *fakeServiceHost) NextStartSeq() uint64 { return 0 }
-
 func (f *fakeServiceHost) Shutdown(context.Context) error {
 	return nil
 }
@@ -284,10 +282,11 @@ func (s *fakeServiceInstallationStore) Update(_ context.Context, id int, input U
 	if input.InstallPath != nil {
 		installation.InstallPath = *input.InstallPath
 	}
+	enablementChanged := input.Enabled != nil && *input.Enabled != installation.Enabled
 	if input.Enabled != nil {
 		installation.Enabled = *input.Enabled
 	}
-	if input.Restart {
+	if input.Restart || enablementChanged {
 		installation.RuntimeGeneration++
 	}
 	return nil

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Loader2 } from "lucide-react";
+import { Direction } from "radix-ui";
 
 import type { PluginAdminForm, PluginAdminFormField, PluginAdminFormSection } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,10 @@ import { useT } from "@/i18n";
 import {
   effectiveValue,
   evaluateShowWhen,
+  isSecretField,
   ownValue,
+  rendersMultiline,
+  textDirection,
   validateSchemaValues,
   type SchemaOption,
 } from "./schemaFormUtils";
@@ -54,10 +58,16 @@ type Props = {
    * shown under the control (e.g. why a server's type cannot change).
    */
   lockedKeys?: Readonly<Record<string, string>>;
+  /**
+   * Fields that hold server paths. On a right-to-left page their values stay
+   * left to right, even when a path starts with a right-to-left folder name.
+   */
+  pathKeys?: readonly string[];
 };
 
 const NO_HIDDEN_KEYS: readonly string[] = [];
 const NO_LOCKED_KEYS: Readonly<Record<string, string>> = {};
+const NO_PATH_KEYS: readonly string[] = [];
 
 function optionsFor(
   field: PluginAdminFormField,
@@ -173,8 +183,10 @@ export function SchemaForm({
   hiddenKeys = NO_HIDDEN_KEYS,
   expandSections = false,
   lockedKeys = NO_LOCKED_KEYS,
+  pathKeys = NO_PATH_KEYS,
 }: Props) {
   const t = useT();
+  const pageDir = Direction.useDirection();
   const hidden = useMemo(() => new Set(hiddenKeys), [hiddenKeys]);
   const byKey = useMemo(() => {
     const map = new Map<string, PluginAdminFormField>();
@@ -311,13 +323,19 @@ export function SchemaForm({
       );
     }
 
-    if (field.control === "TEXTAREA" || field.multiline) {
+    const text = String(effectiveValue(field, values) ?? "");
+    const masked = isSecretField(field);
+    const alwaysLeftToRight = masked || pathKeys.includes(field.key);
+    const textDir = textDirection(pageDir, text, field.placeholder, alwaysLeftToRight);
+
+    if (rendersMultiline(field)) {
       return (
         <textarea
           id={id}
+          dir={textDir}
           className="border-input bg-background min-h-24 w-full rounded-md border px-3 py-2 text-sm"
           rows={field.rows && field.rows > 0 ? field.rows : 4}
-          value={String(effectiveValue(field, values) ?? "")}
+          value={text}
           placeholder={field.placeholder}
           onChange={(event) => setField(field.key, event.target.value)}
           disabled={locked}
@@ -331,14 +349,9 @@ export function SchemaForm({
         id={id}
         disabled={locked}
         aria-describedby={describedBy}
-        type={
-          field.control === "PASSWORD" || field.secret
-            ? "password"
-            : field.control === "NUMBER"
-              ? "number"
-              : "text"
-        }
-        value={String(effectiveValue(field, values) ?? "")}
+        type={masked ? "password" : field.control === "NUMBER" ? "number" : "text"}
+        dir={textDir}
+        value={text}
         placeholder={field.placeholder}
         onChange={(event) => setField(field.key, event.target.value)}
       />

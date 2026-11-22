@@ -177,13 +177,14 @@ func (s *Postgres) getAttemptIdentity(ctx context.Context, predicate string, val
 func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) (*playback.AttemptRecordV3, error) {
 	var record playback.AttemptRecordV3
 	var planJSON, recipeJSON, requestJSON, responseJSON, sampleJSON, desiredJSON []byte
+	var sampleAcceptedAt *time.Time
 	err := s.db.QueryRow(ctx, `
 		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id,
 		       requested_media_file_id, effective_media_file_id,
 		       current_plan_id, current_replan_request_id, current_plan, frozen_recipe,
 		       normalized_request, start_response, request_digest, expires_at, server_bitrate_cap_kbps,
 		       last_sequence, last_sample, stopped_at, COALESCE(stop_receipt->>'stop_id', ''), updated_at,
-		       desired_tracks, created_at, login_session_id, COALESCE(sample_accepted_at, updated_at)
+		       desired_tracks, created_at, login_session_id, sample_accepted_at
 		FROM playback_v3_attempts
 		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
 		&record.PlaybackAttemptID, &record.SessionID, &record.UserID, &record.ProfileID,
@@ -191,7 +192,7 @@ func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) 
 		&record.CurrentPlanID, &record.CurrentReplanRequestID, &planJSON, &recipeJSON,
 		&requestJSON, &responseJSON, &record.RequestDigest, &record.ExpiresAt, &record.ServerBitrateCapKbps,
 		&record.LastSequence, &sampleJSON, &record.StoppedAt, &record.StopID, &record.LastSampleAt,
-		&desiredJSON, &record.CreatedAt, &record.LoginSessionID, &record.SampleAcceptedAt,
+		&desiredJSON, &record.CreatedAt, &record.LoginSessionID, &sampleAcceptedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound
@@ -201,6 +202,9 @@ func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) 
 	}
 	if record.LastSample, err = decodeProgressSample(sampleJSON); err != nil {
 		return nil, err
+	}
+	if sampleAcceptedAt != nil {
+		record.SampleAcceptedAt = *sampleAcceptedAt
 	}
 	if len(desiredJSON) > 0 {
 		record.DesiredTracks = &playback.DesiredTracksV3{}

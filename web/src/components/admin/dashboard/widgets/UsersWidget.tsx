@@ -12,9 +12,11 @@ import {
 import type { AdminUser } from "@/api/types";
 import { accountRoleLabel } from "@/lib/accountOwner";
 import { formatRelativeTime } from "@/lib/date";
+import { emailDir } from "@/lib/direction";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { SectionError, UserSkeletonRows } from "../feedback";
 import { useT } from "@/i18n";
+import { getInitial } from "@/lib/text";
 
 // Most recently active first; users with no recorded activity sink to the
 // bottom. The list endpoint itself returns account-creation order.
@@ -96,18 +98,27 @@ export function UsersWidget() {
                         className="text-primary-foreground flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
                         style={{ background: `var(--primary)` }}
                       >
-                        {u.username.charAt(0).toUpperCase()}
+                        {getInitial(u.username)}
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="truncate text-[13px] font-semibold">{u.username}</span>
+                          {/* A cut username keeps its start in either script. */}
+                          <span dir="auto" className="truncate text-[13px] font-semibold">
+                            {u.username}
+                          </span>
                           {u.role === "admin" && (
                             <Badge variant="default" className="px-1.5 py-0 text-[9px]">
                               {accountRoleLabel(u)}
                             </Badge>
                           )}
                         </div>
-                        <div className="text-muted-foreground hidden truncate text-[10px] sm:block">
+                        {/* Left to right unless it starts in a right-to-left script, so
+                            a cut email keeps its start; w-fit keeps it on the page's
+                            start side. */}
+                        <div
+                          dir={emailDir(u.email)}
+                          className="text-muted-foreground hidden w-fit max-w-full truncate text-[10px] sm:block"
+                        >
                           {u.email}
                         </div>
                       </div>

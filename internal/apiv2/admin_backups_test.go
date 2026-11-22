@@ -279,6 +279,7 @@ func TestAdminBackupUploadRefusals(t *testing.T) {
 // deadline answers 408. It takes about two seconds: the deadlines are a real
 // listener's, which no fake clock reaches.
 func TestAdminBackupUploadPartReadDeadline(t *testing.T) {
+	t.Parallel()
 	f := &fakeBackups{}
 	srv := httptest.NewUnstartedServer(backupsHandlerWith(f, func(d *Dependencies) { d.uploadPartReadTimeout = 600 * time.Millisecond }))
 	srv.Config.ReadTimeout = 100 * time.Millisecond

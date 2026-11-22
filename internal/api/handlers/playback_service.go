@@ -447,12 +447,12 @@ func (h *PlaybackHandler) writeProgressSideEffectsV2(ctx context.Context, record
 		}
 		if current, getErr := h.sessionMgr.GetSession(sessionID); getErr == nil && current != nil {
 			h.syncSessionsOnPauseChange(ctx, wasPaused, current.IsPaused)
-			h.persistProgress(ctx, current)
+			h.persistProgress(ctx, current, sample)
 			h.scrobblePauseTransitionV2(ctx, current, wasPaused)
 			return
 		}
 	}
-	h.persistProgress(ctx, h.attemptSessionV2(ctx, record, sample.Position, sample.IsPaused))
+	h.persistProgress(ctx, h.attemptSessionV2(ctx, record, sample.Position, sample.IsPaused), sample)
 }
 
 // progressSideEffectLock serializes progress side effects for one session.
@@ -568,7 +568,12 @@ const stopFinalizationLease = 30 * time.Second
 // the finalized receipt. When the claim is lost the stored receipt is returned
 // unchanged. The request cannot fail from here: the receipt is already durable.
 func (h *PlaybackHandler) finalizeStopV2(ctx context.Context, store playback.ProgressStoreV3, record *playback.AttemptRecordV3, sessionID string, receipt playback.StopReceiptV3) playback.StopReceiptV3 {
-	claimed, err := store.ClaimStopFinalization(ctx, sessionID, time.Now().Add(stopFinalizationLease))
+	leaseUntil := time.Now().Add(stopFinalizationLease)
+	// The attempt already accepted the stop. Let the initial claim reach the
+	// store even if the player closed its connection in the meantime.
+	claimCtx, cancelClaim := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	claimed, err := store.ClaimStopFinalization(claimCtx, sessionID, leaseUntil)
+	cancelClaim()
 	if err != nil {
 		slog.WarnContext(ctx, "failed to claim playback stop finalization", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
 		return receipt
@@ -586,7 +591,8 @@ func (h *PlaybackHandler) finalizeStopV2(ctx context.Context, store playback.Pro
 				receipt = replay
 			}
 			if !receipt.FinalizingUntil.IsZero() && !time.Now().Before(receipt.FinalizingUntil) {
-				claimed, err = store.ClaimStopFinalization(ctx, sessionID, time.Now().Add(stopFinalizationLease))
+				leaseUntil = time.Now().Add(stopFinalizationLease)
+				claimed, err = store.ClaimStopFinalization(ctx, sessionID, leaseUntil)
 				if err == nil && claimed {
 					break
 				}
@@ -600,46 +606,39 @@ func (h *PlaybackHandler) finalizeStopV2(ctx context.Context, store playback.Pro
 			}
 		}
 	}
-	receipt.HistoryID = h.finishStopV2(ctx, record, sessionID, receipt.Accepted, endReasonForStop(sessionID, receipt.StopID, receipt.AdminStopRequested))
+	// A player may close its HTTP connection once it has sent the stop.
+	// Finish the durable claim within its lease even if that happens.
+	ctx, cancel := context.WithDeadline(context.WithoutCancel(ctx), leaseUntil)
+	defer cancel()
+	historyID, err := h.finishStop(ctx, record, sessionID, receipt)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to finalize playback stop", "component", "api", "session", sessionID, "error", err)
+		return receipt
+	}
+	receipt.HistoryID = historyID
 	receipt.Finalized = true
+	receipt.FinalizingUntil = time.Time{}
 	if err := store.RecordStopReceipt(ctx, sessionID, receipt); err != nil {
 		slog.WarnContext(ctx, "failed to record playback stop receipt", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
 	}
 	return receipt
 }
 
-// finishStopV2 runs the v1 stop side effects for the winning stop: the
-// session stop + transcode teardown when this replica holds the session (its
-// finalizer runs the history writer), the history writer directly from a
-// session synthesized from the attempt row otherwise. The deny marker is
-// written in both cases. It returns the watch-history id when one was made.
-// reason is the end reason of the stop that won the row: a replayed stop can
-// finish an administrator's or an expiry's.
-func (h *PlaybackHandler) finishStopV2(ctx context.Context, record *playback.AttemptRecordV3, sessionID string, accepted *playback.ProgressSampleV3, reason PlaybackEndReason) string {
-	historyID, err := h.finishStop(ctx, record, sessionID, accepted, reason)
-	if err != nil {
-		slog.WarnContext(ctx, "failed to stop playback session", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
-	}
-	return historyID
-}
-
-// finishStop is finishStopV2 reporting a failure to stop the live copy here,
-// for callers that answer with it.
-func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.AttemptRecordV3, sessionID string, accepted *playback.ProgressSampleV3, reason PlaybackEndReason) (string, error) {
+// finishStop runs the winning stop's writers from the live session or,
+// when no copy is held here, one reconstructed from the attempt.
+func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.AttemptRecordV3, sessionID string, receipt playback.StopReceiptV3) (string, error) {
+	reason := endReasonForStop(sessionID, receipt.StopID, receipt.AdminStopRequested)
+	accepted := receipt.Accepted
+	ctx = withNativeStopHistory(ctx, sessionID, receipt.StopID)
 	h.StreamDeny.Deny(ctx, sessionID)
 	position, paused := 0.0, false
 	if accepted != nil {
 		position, paused = accepted.Position, accepted.IsPaused
 	}
 	if session, err := h.sessionMgr.GetSession(sessionID); err == nil && session != nil {
-		if accepted != nil {
-			if err := h.sessionMgr.UpdateProgress(sessionID, position, paused); err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
-				slog.WarnContext(ctx, "failed to apply final playback position", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
-			}
-		}
-		result, err := h.stopPlaybackSessionWithResult(ctx, session, reason)
+		result, err := h.stopPlaybackSessionWithResult(ctx, session, reason, accepted)
 		if err == nil {
-			return result.HistoryID, nil
+			return result.HistoryID, result.WatchStateErr
 		}
 		if !errors.Is(err, playback.ErrSessionNotFound) {
 			return "", err
@@ -658,16 +657,29 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 	session.Watch = carried
 	h.fillDetachedSession(ctx, session, record.CreatedAt)
 	fromRemovedCopy := carried.Measured && session.Watch.Until.Equal(carried.Until)
-	if !fromRemovedCopy && record.LastSample != nil {
+	dated := !fromRemovedCopy && record.LastSample != nil && !record.SampleAcceptedAt.IsZero()
+	if dated {
 		// The measurement was restored from the last save rather than handed
 		// over by the copy this end removed. Progress does not trigger a
 		// save, so the row's latest sample can be newer than it. Judge that
 		// sample at the time the row accepted it, not now, so a seek before
-		// the stop is not credited as watch time.
+		// the stop is not credited as watch time. A sample accepted before
+		// that time was recorded has no time to judge it at.
 		observeEndSample(session, record.LastSample.Position, record.LastSample.IsPaused, record.SampleAcceptedAt)
 	}
-	if accepted != nil && accepted.Sequence > record.LastSequence {
+	switch {
+	case accepted != nil && accepted.Sequence > record.LastSequence:
 		// The stop's own final sample, which arrived just now.
+		observeEndSample(session, accepted.Position, accepted.IsPaused, time.Now())
+	case accepted != nil && dated && session.Watch.Measured:
+		// No sample newer than the row's: close the measurement at the stop
+		// from where it stands, which is the save's own state when the save
+		// is newer than the row's sample (a seek replan saves without a
+		// report). A player paused there was paused until the stop, and no
+		// advance is credited.
+		session.Watch.Close(time.Now())
+	case accepted != nil && !fromRemovedCopy:
+		// The row's sample has no time to judge it at: as before it had one.
 		observeEndSample(session, accepted.Position, accepted.IsPaused, time.Now())
 	}
 	if record.CurrentPlanID != "" {
@@ -676,6 +688,9 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 		session.Subtitle = playback.SessionSubtitleFromPlanV3(&record.CurrentPlan)
 	}
 	result := h.recordStopHistory(ctx, session, reason)
+	if result.WatchStateErr != nil {
+		return "", result.WatchStateErr
+	}
 	// The copy on another replica is dropped without telling providers, so
 	// the end recorded here does, unless its caller tells them itself.
 	if !leaveProviderNotice(ctx) {

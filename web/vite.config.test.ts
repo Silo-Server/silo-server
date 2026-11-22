@@ -11,7 +11,7 @@ import path from "node:path";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import type { Rollup } from "vite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { catalogParts, precompressStaticAssets } from "./vite.config";
+import { brotliQualityForAsset, catalogParts, precompressStaticAssets } from "./vite.config";
 
 /**
  * The Go frontend handler (internal/server/frontend.go) serves an /assets/
@@ -71,6 +71,16 @@ describe("precompressStaticAssets", () => {
       expect(existsSync(path.join(dir, `${name}.br`)), `${name}.br`).toBe(false);
       expect(existsSync(path.join(dir, `${name}.gz`)), `${name}.gz`).toBe(false);
     }
+  });
+
+  it("uses quality 11 for eager chunks, css, wasm, and small js, and quality 6 for large lazy js", () => {
+    const large = 1024 * 1024;
+    expect(brotliQualityForAsset("assets/index-Abc123.js", large)).toBe(11);
+    expect(brotliQualityForAsset("assets/vendor-react-Abc123.js", large)).toBe(11);
+    expect(brotliQualityForAsset("assets/jassub-worker-modern.wasm", large * 2)).toBe(11);
+    expect(brotliQualityForAsset("assets/index-Abc123.css", large)).toBe(11);
+    expect(brotliQualityForAsset("assets/small-Abc123.js", 64 * 1024)).toBe(11);
+    expect(brotliQualityForAsset("assets/ar-CqUlOaGF.js", large)).toBe(6);
   });
 });
 

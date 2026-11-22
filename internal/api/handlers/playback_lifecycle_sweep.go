@@ -275,7 +275,7 @@ func (h *PlaybackHandler) finishInterruptedNativeEnd(ctx context.Context, sessio
 	if err != nil {
 		return
 	}
-	historyID, err := h.finishStop(ctx, record, sessionID, receipt.Accepted, endReasonForStop(sessionID, receipt.StopID, receipt.AdminStopRequested))
+	historyID, err := h.finishStop(ctx, record, sessionID, receipt)
 	if err != nil {
 		// Left unfinalized: the lease lapses and a later sweep retries.
 		slog.WarnContext(ctx, "lifecycle sweep could not finish a session's end", "component", "api", "session", sessionID, "error", err)

@@ -24,8 +24,6 @@ import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
 import { resolveAdminDocumentTitle, resolveAdminHeaderTitle } from "@/lib/documentTitle";
 import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { Menu, Search, X } from "lucide-react";
-import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
-import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 
 const ADMIN_DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
 /** The play-mark glyph on the phone header's logo tile; not text. */
@@ -66,9 +64,6 @@ function AdminLayoutContent() {
       }),
     [adminInstallations, policyCapability.data?.editor_available],
   );
-  const { isBackgroundBarVisible } = useWatchPlaybackController();
-  const audiobookPlayback = useAudiobookPlaybackController();
-  const hasBackgroundBar = isBackgroundBarVisible || audiobookPlayback?.isBackgroundBarVisible;
   const documentTitle = resolveAdminDocumentTitle(location.pathname);
   const mobileTitle = resolveAdminHeaderTitle(location.pathname);
 
@@ -100,8 +95,13 @@ function AdminLayoutContent() {
     return () => desktopMedia.removeEventListener("change", closeMobileNavigation);
   }, []);
 
+  // `clip` rather than `hidden`: `hidden` makes this wrapper a scroll container
+  // that never scrolls, so every `sticky` element on an admin page (the phone
+  // header, a page's pinned panel) would stick to it and scroll away with the
+  // page. `flow-root` keeps the phone header's top margin inside the wrapper,
+  // as `hidden` did.
   return (
-    <div className="bg-background relative min-h-[100dvh] overflow-x-hidden">
+    <div className="bg-background relative flow-root min-h-[100dvh] overflow-x-clip">
       <AdminSectionCommandDialog
         sections={adminSearchSections}
         open={commandOpen}
@@ -120,8 +120,14 @@ function AdminLayoutContent() {
       </div>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        {/* Mobile header */}
-        <div className="glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-3 py-2.5 lg:hidden">
+        {/* Mobile header. Pinned while the page scrolls, below the
+            impersonation banner when one shows, so an in-page jump target
+            needs `scroll-mt-24` below lg to land clear of it (the root's
+            scroll padding adds the banner). */}
+        <div
+          data-sticky-header
+          className="glass-dark border-border/70 sticky top-(--impersonation-banner-height) z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-3 py-2.5 lg:hidden"
+        >
           <div className="flex min-w-0 items-center gap-2.5">
             <SheetTrigger asChild>
               <button
@@ -136,10 +142,13 @@ function AdminLayoutContent() {
                 {LOGO_GLYPH}
               </div>
               <div className="min-w-0">
-                <span className="text-muted-foreground block text-[10px] leading-none font-semibold tracking-[0.16em] uppercase">
+                {/* Not `truncate`: it cuts accents and descenders off this tight line box, and
+                    stops CJK labels wrapping. A word too wide for the column ends in "…". */}
+                <span className="text-muted-foreground block overflow-x-clip text-[10px] leading-none font-semibold tracking-[0.16em] text-ellipsis uppercase">
                   {t("web.admin.shell.mobileHeader.eyebrow")}
                 </span>
-                <span className="mt-1 block truncate text-[15px] leading-none font-extrabold tracking-tight">
+                {/* truncate clips to the line box: a tighter leading cuts off descenders and accents. */}
+                <span className="block truncate text-[15px] leading-normal font-extrabold tracking-tight">
                   {mobileTitle}
                 </span>
               </div>
@@ -179,23 +188,28 @@ function AdminLayoutContent() {
         </SheetContent>
       </Sheet>
 
-      {/* Desktop activity indicator; search lives in the sidebar */}
-      <div className="fixed end-5 top-5 z-40 hidden items-center gap-2 lg:flex">
+      {/* Desktop activity indicator; search lives in the sidebar. It sits
+          below the impersonation banner, which would otherwise cover it. */}
+      <div className="fixed end-5 top-[calc(1.25rem+var(--impersonation-banner-height))] z-40 hidden items-center gap-2 lg:flex">
         <ServerActivity />
       </div>
 
       {/* `lg:pt-16` starts the content below the fixed activity control
-          (top-5, h-9 → it ends 3.5rem down). With less, a page
+          (top-5 below any banner, h-9 → it ends 3.5rem down). With less, a page
           header's right-aligned buttons sit underneath them until the capped
-          content column pulls away from the viewport's right edge.
+          content column pulls away from the viewport's right edge. A side
+          panel that sticks on desktop starts 4rem below any banner for the
+          same reason.
           `--page-gutter` is published so fixed page chrome (the collection
-          editor's save bar) can line up with the content column. */}
+          editor's save bar) can line up with the content column.
+          `scroll-mt-24` keeps Skip to content's jump clear of the phone
+          header. The bottom padding adds `--playback-bar-clearance`, the
+          background playback bar's measured footprint (0 without one), at
+          every width, so the end of each page scrolls clear of the bar. */}
       <main
         id="main-content"
         tabIndex={-1}
-        className={`relative z-10 min-h-screen min-w-0 px-(--page-gutter) py-4 [--page-gutter:1rem] sm:[--page-gutter:1.5rem] lg:ms-[240px] lg:pt-16 lg:pb-8 lg:[--page-gutter:2rem] xl:[--page-gutter:2.5rem] ${
-          hasBackgroundBar ? "pb-32 sm:pb-36" : ""
-        }`}
+        className="relative z-10 min-h-screen min-w-0 scroll-mt-24 px-(--page-gutter) pt-4 pb-[calc(1rem+var(--playback-bar-clearance,0px))] [--page-gutter:1rem] sm:[--page-gutter:1.5rem] lg:ms-[240px] lg:scroll-mt-0 lg:pt-16 lg:pb-[calc(2rem+var(--playback-bar-clearance,0px))] lg:[--page-gutter:2rem] xl:[--page-gutter:2.5rem]"
       >
         <PageFrame className="admin-shell">
           {/* Above the routed page and inside the content column, so every

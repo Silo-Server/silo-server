@@ -1025,7 +1025,7 @@ func resolvedPlaybackAudioLanguage(ctx context.Context, store userstore.UserStor
 // persistProgress saves the current playback position to the UserStore.
 // It resolves the mediaFileID to a mediaItemID via the file resolver.
 // Errors are logged but do not fail the HTTP request.
-func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback.Session) {
+func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback.Session, sample playback.ProgressSampleV3) {
 	if h.StoreProvider == nil || h.fileResolver == nil {
 		return
 	}
@@ -1036,7 +1036,7 @@ func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback
 	// and the jellycompat report path). Progress is last-write-wins, so an
 	// early zero heartbeat — e.g. before a client finishes seeking to its
 	// resume point — must not wipe the stored resume position.
-	if session.Position <= 0 {
+	if sample.Position <= 0 {
 		return
 	}
 
@@ -1053,25 +1053,38 @@ func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback
 	}
 
 	duration := float64(file.Duration)
-	completed, err := userstore.UpdateProgressReportingCompletion(ctx, store, session.ProfileID, targetID, session.Position, duration, h.playbackThresholds(ctx))
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to persist progress", "component", "api", "session", session.ID, "error", err)
-	} else if completed {
-		// A heartbeat that only moves the position leaves the taste profile
-		// alone; the stop (persistStopAndHistory) refreshes it for the play,
-		// and marking the item watched refreshes it here.
-		notifySignalsChanged(ctx, h.signalsNotifier, session.UserID, session.ProfileID)
-	}
-
-	if err := store.UpdateProgressHints(ctx, session.ProfileID, targetID, userstore.VersionHints{
+	thresholds := h.playbackThresholds(ctx)
+	hints := userstore.VersionHints{
 		FileID:     file.ID,
 		Resolution: file.Resolution,
 		HDR:        file.HDR,
 		CodecVideo: file.CodecVideo,
 		EditionKey: file.EditionKey,
-	}); err != nil {
-		slog.ErrorContext(ctx, "failed to persist version hints", "component", "api", "session", session.ID, "error", err)
 	}
+	_, completed, err := userstore.WritePlaybackProgress(ctx, store, session.ID, sample.Sequence, session.ProfileID, targetID, sample.Position, duration, thresholds, hints)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to persist progress", "component", "api", "session", session.ID, "error", err)
+	}
+	if completed {
+		// A heartbeat that only moves the position leaves the taste profile
+		// alone; the stop (persistStopAndHistory) refreshes it for the play,
+		// and marking the item watched refreshes it here.
+		notifySignalsChanged(ctx, h.signalsNotifier, session.UserID, session.ProfileID)
+	}
+}
+
+type nativeStopHistoryKey struct{}
+
+var nativeStopHistoryNamespace = uuid.MustParse("fd1d7ea1-cd63-4ddd-98af-4b07fe0a5346")
+
+func withNativeStopHistory(ctx context.Context, sessionID, stopID string) context.Context {
+	id := uuid.NewSHA1(nativeStopHistoryNamespace, []byte(sessionID+":"+stopID))
+	return context.WithValue(ctx, nativeStopHistoryKey{}, id.String())
+}
+
+func nativeStopHistoryID(ctx context.Context) string {
+	id, _ := ctx.Value(nativeStopHistoryKey{}).(string)
+	return id
 }
 
 // persistStopAndHistory saves the final position and adds a watch history entry
@@ -1087,7 +1100,11 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 
 	file, err := h.loadFileByPreferredID(ctx, requestedMediaFileID(session), session.MediaFileID)
 	targetID := playbackProgressTarget(file)
+	historyID := nativeStopHistoryID(ctx)
 	if err != nil || targetID == "" {
+		if historyID != "" && err != nil && !isPlaybackFileLookupMissing(err) {
+			return watchstate.PlaybackStopResult{WatchStateErr: err}
+		}
 		return watchstate.PlaybackStopResult{}
 	}
 
@@ -1107,19 +1124,57 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	var result watchstate.PlaybackStopResult
 	if session.IsJellyfinCompat {
 		result, err = watchSvc.RecordPlaybackStopOnce(ctx, session.UserID, session.ProfileID, targetID, duration, session.Position, stoppedAt, hints, thresholds, compatPlayHistoryID(session.ID))
+	} else if historyID != "" {
+		var targets []watchstate.LeafWatchTarget
+		if _, completed, _ := userstore.ResolveProgressState(session.Position, duration, thresholds); completed {
+			targets, err = h.spannedEpisodeTargets(ctx, file)
+		}
+		if err == nil {
+			// Attempts expire within MaxTokenTTL. Keep the marker that
+			// long from the write, including a finalization near expiry.
+			replayUntil := stoppedAt.Add(playback.MaxTokenTTL)
+			result, err = watchSvc.RecordFinalPlaybackStop(ctx, session.UserID, session.ProfileID, targetID, duration, session.Position, stoppedAt, replayUntil, hints, thresholds, historyID, targets)
+		}
 	} else {
 		result, err = watchSvc.RecordPlaybackStop(ctx, session.UserID, session.ProfileID, targetID, duration, session.Position, stoppedAt, hints, thresholds)
 	}
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to persist playback stop", "component", "api", "session", session.ID, "error", err)
+		if historyID != "" && !session.IsJellyfinCompat {
+			result.WatchStateErr = err
+			return result
+		}
 	}
 	// A completed play marks the rest of a multi-episode file's range. A
 	// repeated stop of a play already in history marks it again, so a range
 	// an earlier stop failed to mark is not lost; the mark skips episodes
 	// already completed.
-	if result.Completed || (result.AlreadyRecorded && duration > 0 &&
-		session.Position/duration > userstore.WatchedFraction(thresholds.WatchedPct)) {
-		h.markSpannedEpisodesWatched(ctx, watchSvc, session, file, stoppedAt)
+	var spanWritten bool
+	if (historyID == "" || session.IsJellyfinCompat) && (result.Completed || (result.AlreadyRecorded && duration > 0 &&
+		session.Position/duration > userstore.WatchedFraction(thresholds.WatchedPct))) {
+		targets, spanErr := h.spannedEpisodeTargets(ctx, file)
+		if spanErr == nil {
+			spanWritten, spanErr = watchSvc.RecordSpannedEpisodesWatched(ctx, session.UserID, session.ProfileID, targets, stoppedAt)
+		}
+		if spanErr != nil {
+			slog.ErrorContext(ctx, "failed to mark multi-episode file episodes watched", "component", "api", "session", session.ID, "error", spanErr)
+		}
+	}
+	// Let other clients re-read after the final writes, including when an
+	// earlier progress sample already marked the first episode watched.
+	if (result.ProgressWritten || result.HistoryID != "" || spanWritten) && h.EventsHub != nil && session.UserID > 0 && session.ProfileID != "" {
+		publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		publishErr := h.EventsHub.PublishJSON(publishCtx, evt.ChannelUserState, userStateChangedEvent, userStateEventPayload{
+			ProfileID:       session.ProfileID,
+			ContentID:       targetID,
+			SeriesID:        h.resolveSeriesID(publishCtx, file),
+			Change:          userStateChangeProgress,
+			PlaybackStopped: true,
+		}, evt.PublishOptions{UserID: session.UserID, ProfileID: session.ProfileID, V2Only: true})
+		if publishErr != nil {
+			slog.WarnContext(publishCtx, "failed to publish playback watch-state change", "component", "api", "session", session.ID, "error", publishErr)
+		}
 	}
 	// A history row this stop wrote still counts when a later write failed:
 	// no later stop of a once-recorded play refreshes the profile for it.
@@ -1313,7 +1368,9 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 
 func (h *PlaybackHandler) recordStoppedSession(ctx context.Context, session *playback.Session, reason PlaybackEndReason) watchstate.PlaybackStopResult {
 	stopResult := h.recordStopHistory(ctx, session, reason)
-	h.notifyStoppedSession(ctx, session, stopResult, reason)
+	if stopResult.WatchStateErr == nil {
+		h.notifyStoppedSession(ctx, session, stopResult, reason)
+	}
 	return stopResult
 }
 
@@ -1370,7 +1427,9 @@ func (h *PlaybackHandler) recordStopHistory(ctx context.Context, session *playba
 		return watchstate.PlaybackStopResult{}
 	}
 	result := h.persistStopAndHistory(ctx, session)
-	h.recordAdminStopHistory(ctx, session, reason)
+	if result.WatchStateErr == nil {
+		_ = h.recordAdminStopHistory(ctx, session, reason)
+	}
 	return result
 }
 
@@ -1552,8 +1611,13 @@ func (h *PlaybackHandler) expireSessionCopy(ctx context.Context, session *playba
 		return
 	}
 	claim.applyAccepted(session)
+	if claim.leased() {
+		ctx = withNativeStopHistory(ctx, session.ID, claim.receipt.StopID)
+	}
 	result := h.finalizeSessionStopWithResult(ctx, session, false, "", PlaybackEndExpired)
-	claim.finish(ctx, session.ID, result.HistoryID)
+	if result.WatchStateErr == nil {
+		claim.finish(ctx, session.ID, result.HistoryID)
+	}
 }
 
 // historyEndReader reads the end reason the admin log recorded for a session.
@@ -1854,26 +1918,25 @@ type playbackSeasonEpisodeLister interface {
 	ListBySeason(ctx context.Context, seriesID string, seasonNum int) ([]*models.Episode, error)
 }
 
-// markSpannedEpisodesWatched marks the later episodes of a completed
+// spannedEpisodeTargets finds the later episodes of a completed
 // multi-episode file watched. Playback records the file against its first
 // episode only, and each later episode of the range resolves to the same file,
 // so leaving them unwatched would offer the file again as the next episode.
-func (h *PlaybackHandler) markSpannedEpisodesWatched(ctx context.Context, watchSvc *watchstate.Service, session *playback.Session, file *models.MediaFile, watchedAt time.Time) {
+func (h *PlaybackHandler) spannedEpisodeTargets(ctx context.Context, file *models.MediaFile) ([]watchstate.LeafWatchTarget, error) {
 	if file.EpisodeID == "" || file.MultiEpisodeEnd <= file.MultiEpisodeStart {
-		return
+		return nil, nil
 	}
 	lister, ok := h.EpisodeLookup.(playbackSeasonEpisodeLister)
 	if !ok {
-		return
+		return nil, nil
 	}
 	first, err := h.EpisodeLookup.GetByID(ctx, file.EpisodeID)
 	if err != nil || first == nil {
-		return
+		return nil, err
 	}
 	season, err := lister.ListBySeason(ctx, first.SeriesID, first.SeasonNumber)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to list multi-episode file episodes", "component", "api", "session", session.ID, "error", err)
-		return
+		return nil, fmt.Errorf("list episodes spanned by file %d: %w", file.ID, err)
 	}
 	// Only the episodes the file serves: lookups stop catalog.MaxEpisodeSpan
 	// episodes past the first.
@@ -1885,9 +1948,7 @@ func (h *PlaybackHandler) markSpannedEpisodesWatched(ctx context.Context, watchS
 			targets = append(targets, watchstate.LeafWatchTarget{MediaItemID: episode.ContentID})
 		}
 	}
-	if err := watchSvc.RecordSpannedEpisodesWatched(ctx, session.UserID, session.ProfileID, targets, watchedAt); err != nil {
-		slog.ErrorContext(ctx, "failed to mark multi-episode file episodes watched", "component", "api", "session", session.ID, "error", err)
-	}
+	return targets, nil
 }
 
 func playbackProgressTarget(file *models.MediaFile) string {

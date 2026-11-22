@@ -373,7 +373,10 @@ submission with completion.
 files are matched again. A podcast library keeps its links: the podcast scanner
 finds a show through them and rewrites the show and its episodes from their tags
 on every scan, so clearing them would replace the show and episode IDs that
-favorites and progress refer to.
+favorites and progress refer to. An audiobook or ebook runs `complete` as
+`reset`: the book scanners find a book only through its linked files, so
+clearing them would give the book a new content ID and leave its progress,
+favorites and provider IDs on the old one.
 
 `reset` is Reset to Provider: a quick refresh of the movie, series, season or
 episode that also removes its `locked_fields` and gives every lockable field,

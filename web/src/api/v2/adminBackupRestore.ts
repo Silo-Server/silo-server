@@ -13,6 +13,10 @@ export type RestoreJob = components["schemas"]["AdminTaskJob"];
 export type RestoreReport = components["schemas"]["AdminBackupRestoreReport"];
 export type RestoreReportItem = RestoreReport["items"][number];
 export type RestoreReason = NonNullable<RestoreItem["reason"]>;
+/** What a restore replaces in a section or writes to a template collection. */
+export type RestoreChange =
+  | NonNullable<components["schemas"]["AdminBackupRestoreHomeSection"]["changes"]>[number]
+  | NonNullable<components["schemas"]["AdminBackupRestoreCollection"]["changes"]>[number];
 export type RestoreErrorCode = NonNullable<RestoreReport["error_code"]>;
 export type RestoreAccount = components["schemas"]["AdminBackupRestoreAccount"];
 export type RestoreProfile = components["schemas"]["AdminBackupRestoreProfile"];

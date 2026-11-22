@@ -223,3 +223,27 @@ func TestAdmitSearchMatchWithoutAnAuthorNeedsTheTitleToIdentifyTheBook(t *testin
 		})
 	}
 }
+
+func TestAdmitProviderIDsComparesISBNsAsISBN13(t *testing.T) {
+	admit := func(candidate string) ProviderIDAdmission {
+		t.Helper()
+		got, err := AdmitProviderIDs(context.Background(), ProviderIDAdmissionRequest{
+			CandidateProviderIDs: map[string]string{"isbn": candidate},
+			// Stored by the scanner or an old plugin before ISBNs were
+			// stored as ISBN-13.
+			ExistingProviderIDs: map[string]string{"isbn": "0-306-40615-2"},
+			ItemType:            "ebook",
+			ContentID:           "this-book",
+		})
+		if err != nil {
+			t.Fatalf("AdmitProviderIDs: %v", err)
+		}
+		return got
+	}
+	if got := admit("9780306406157"); got.ContradictsExisting || !got.HasUsableIdentity {
+		t.Fatalf("the same book's ISBN-13: admission = %+v, want admitted", got)
+	}
+	if got := admit("9781861972712"); !got.ContradictsExisting {
+		t.Fatalf("another book's ISBN: admission = %+v, want a contradiction", got)
+	}
+}

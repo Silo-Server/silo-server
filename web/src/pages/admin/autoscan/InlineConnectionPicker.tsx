@@ -306,6 +306,7 @@ export function InlineConnectionPicker({
                   {t("web.admin.autoscan.connections.form.baseURL")}
                 </Label>
                 <Input
+                  dir="ltr"
                   id={`${idPrefix}-url`}
                   placeholder={BASE_URL_EXAMPLE}
                   value={baseUrl}
@@ -339,8 +340,8 @@ export function InlineConnectionPicker({
               role="status"
               className={`flex items-start gap-2 rounded-md border p-2.5 text-sm ${
                 testResult.ok
-                  ? "border-success/30 bg-success/10 text-success"
-                  : "border-destructive/30 bg-destructive/10 text-destructive"
+                  ? "border-success/30 bg-success/10 text-success-label"
+                  : "border-destructive/30 bg-destructive/10 text-destructive-label"
               }`}
             >
               {testResult.ok ? (

@@ -271,7 +271,8 @@ export function retentionPlan(items: readonly AdminBackup[], keep: number): Rete
 /**
  * The line under Saved backups: how many copies Silo keeps and which saved
  * copies go next. `next` is when the next backup starts, or null when it is
- * unknown or nightly backups are off; `running` says one is being taken now.
+ * unknown, nightly backups are off, or backups are paused; `running` says one
+ * is being taken now.
  */
 export function retentionNote({
   keep,
@@ -325,16 +326,40 @@ export function retentionNote({
   return sentences.join(" ");
 }
 
-/** The status line under the header: the last success and the next run. */
+/**
+ * Whether the server refuses every backup until the admin acts: no storage
+ * to write them to (capabilities `not_configured`), the SQLite user store,
+ * or encryption with an unconfirmed key. The nightly run still fires and
+ * fails, so the page forecasts no run while this holds.
+ */
+export function backupsPaused(
+  configured: boolean,
+  warnings: readonly AdminBackupWarning[],
+): boolean {
+  return (
+    !configured ||
+    warnings.some(
+      (warning) => warning.code === "sqlite_user_store" || warning.code === "key_not_confirmed",
+    )
+  );
+}
+
+/**
+ * The status line under the header: the last success and the next run. A
+ * paused server shows no next run; its warning says why.
+ */
 export function backupSchedulePhrases({
   lastSuccessAt,
   enabled,
+  paused,
   busy,
   next,
   now,
 }: {
   lastSuccessAt?: string;
   enabled: boolean;
+  /** From {@link backupsPaused}. */
+  paused: boolean;
   busy: boolean;
   next: Date | null;
   now: Date;
@@ -350,6 +375,7 @@ export function backupSchedulePhrases({
   let upcoming: string | null;
   if (busy) upcoming = null;
   else if (!enabled) upcoming = t("web.admin.backups.schedule.off");
+  else if (paused) upcoming = null;
   else if (next)
     upcoming = t(
       lastDate ? "web.admin.backups.schedule.next" : "web.admin.backups.schedule.first",
@@ -394,7 +420,7 @@ export function lastRunProblem(lastRun: AdminBackupLastRun | undefined, now: Dat
  * Warnings for the status line. "Backups are off" is already the status
  * line's own second half, so it is not repeated as a warning. "No recent
  * backup" says nothing while one is being taken, or before any backup has
- * run at all, where the empty state already says so.
+ * run at all, where the status line already says so.
  */
 export function visibleWarnings(
   warnings: readonly AdminBackupWarning[],

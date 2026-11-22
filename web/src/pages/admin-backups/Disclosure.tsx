@@ -4,9 +4,12 @@ import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const DISCLOSURE =
-  "text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 inline-flex items-center gap-1 rounded-sm text-xs outline-none focus-visible:ring-[3px]";
+  "text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 inline-flex items-start gap-1 rounded-sm text-start text-xs outline-none focus-visible:ring-[3px]";
 
-/** A text button that opens or closes a region it names. */
+/**
+ * A text button that opens or closes a region it names. The chevron sits in a
+ * box one line tall, so it stays on the first line when the label wraps.
+ */
 export function Disclosure({
   open,
   onOpenChange,
@@ -28,10 +31,12 @@ export function Disclosure({
       aria-controls={controls}
       className={cn(DISCLOSURE, className)}
     >
-      <ChevronDown
-        aria-hidden="true"
-        className={cn("size-3.5 motion-safe:transition-transform", open && "rotate-180")}
-      />
+      <span className="flex h-lh shrink-0 items-center">
+        <ChevronDown
+          aria-hidden="true"
+          className={cn("size-3.5 motion-safe:transition-transform", open && "rotate-180")}
+        />
+      </span>
       {children}
     </button>
   );

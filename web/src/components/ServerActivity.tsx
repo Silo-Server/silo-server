@@ -215,7 +215,7 @@ function ServerActivityContent({ hideWhenEmpty = false, className }: ServerActiv
             }`}
           />
           {totalActive > 0 && (
-            <span className="absolute -end-0.5 -top-0.5 flex h-[18px] min-w-[18px] animate-[pulse-opacity_2s_ease-in-out_infinite] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow-sm">
+            <span className="bg-foreground text-background ring-background absolute -end-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold ring-2">
               {totalActiveLabel}
             </span>
           )}
@@ -442,7 +442,7 @@ function TaskRow({ task, onNavigate }: { task: TaskInfo; onNavigate: () => void 
         <Link
           to={`/admin/tasks/${task.key}`}
           onClick={onNavigate}
-          className="hover:text-primary truncate text-[12px] font-medium transition-colors"
+          className="hover:text-primary truncate text-[12px] font-medium transition-colors hover:underline"
         >
           {taskText(serverText, task, "name")}
         </Link>
@@ -559,7 +559,7 @@ function PreparationRow({
         <Link
           to={PREPARATIONS_HREF}
           onClick={onNavigate}
-          className="hover:text-primary truncate text-[12px] font-medium transition-colors"
+          className="hover:text-primary truncate text-[12px] font-medium transition-colors hover:underline"
         >
           {preparationCompactTitle(prep)}
         </Link>
@@ -608,7 +608,9 @@ function ScanRow({ scan, libraryName }: { scan: ScanRun; libraryName: string }) 
       )}
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex items-center gap-2">
-          <span className="truncate text-[12px] font-medium">{libraryName}</span>
+          <span dir="auto" className="truncate text-[12px] font-medium">
+            {libraryName}
+          </span>
           <span className="text-muted-foreground ms-auto shrink-0 text-[10px]">
             {scan.status === "running"
               ? t("web.admin.common.serverActivity.scanning")
