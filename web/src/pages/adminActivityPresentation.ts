@@ -707,16 +707,25 @@ export function getPlaybackSessionTitle(session: AdminSession): string {
   return session.media_title || t("web.common.activity.title.file", { id: session.media_file_id });
 }
 
-export function getPlaybackSessionSubtitle(session: AdminSession): string | null {
+/**
+ * The line under a session's title. `withType: false` leaves out the type label, for the phone
+ * layout, which only says which show an episode is from.
+ */
+export function getPlaybackSessionSubtitle(
+  session: AdminSession,
+  { withType = true }: { withType?: boolean } = {},
+): string | null {
   if (session.series_title && session.season_number != null && session.episode_number != null) {
     const code = t("web.detail.episodeCode", {
       season: codeNumber(session.season_number),
       episode: codeNumber(session.episode_number),
     });
-    return t("web.common.activity.subtitle.episode", {
+    const episode = t("web.common.activity.subtitle.episode", {
       code,
       series: session.series_title,
     });
+    // Lead with the type, as movies do, so an episode row says what kind of title it is.
+    return withType ? [t("web.common.activity.subtitle.series"), episode].join(" · ") : episode;
   }
   if (session.media_type === "movie") {
     return t("web.common.activity.subtitle.movie");

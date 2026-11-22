@@ -918,7 +918,7 @@ function StreamRow({
               {session.series_title ? (
                 // An episode's own title doesn't say which show it is.
                 <div className="text-muted-foreground truncate text-[12px]">
-                  {getPlaybackSessionSubtitle(session)}
+                  {getPlaybackSessionSubtitle(session, { withType: false })}
                 </div>
               ) : null}
               <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[12px]">
