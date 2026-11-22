@@ -65,7 +65,9 @@ export function KindCard({
         </button>
         <span
           id={sentenceId}
-          className="text-muted-foreground mt-0.5 block text-[13px] leading-[1.45]"
+          // Below the chips or variant summary (/80). Not text-muted-foreground: high
+          // contrast pins that brighter than them.
+          className="text-foreground/65 mt-0.5 block text-[13px] leading-[1.45]"
         >
           {sentence}
           {tag ? (
@@ -89,7 +91,8 @@ export function KindCard({
       {compact ? (
         <ChevronRight
           aria-hidden
-          className="text-muted-foreground absolute end-3.5 top-1/2 size-4 -translate-y-1/2"
+          // The same tone as the description.
+          className="text-foreground/65 absolute end-3.5 top-1/2 size-4 -translate-y-1/2"
         />
       ) : null}
     </div>

@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { PAGE_SIZE, type SortDir } from "@/components/admin/libraries/diagnosticsListState";
+import { PathText } from "@/components/PathText";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,10 +29,11 @@ import { cn } from "@/lib/utils";
 
 /*
  * Pieces shared by the diagnostics sections under the admin libraries list:
- * the table chrome they use from `lg` up and the card chrome below it.
+ * the table chrome they use from `lg` up (`xl` for the widest tables) and the
+ * card chrome below it.
  */
 
-/** Controls at least 44px tall below `lg`, where the sections show cards. */
+/** Controls at least 44px tall below `lg`, where every section shows cards. */
 export const TOUCH_CONTROL_CLASS = "max-lg:h-11!";
 
 /** A full-width labeled action at the bottom of a card. */
@@ -230,8 +232,10 @@ export function DiagnosticsSearch({
         placeholder={placeholder}
         value={value}
         onChange={(e) => onValueChange(e.target.value)}
-        // 16px below sm so focusing it does not zoom the page on iOS.
-        className="h-8 ps-8 text-xs max-lg:h-11 max-lg:text-sm max-sm:text-base"
+        // 16px below sm so focusing it does not zoom the page on iOS. A placeholder
+        // too long for a phone (and long typed text, while the field isn't
+        // focused) ends in an ellipsis instead of stopping mid-word.
+        className="h-8 ps-8 text-xs text-ellipsis max-lg:h-11 max-lg:text-sm max-sm:text-base"
       />
     </div>
   );
@@ -286,7 +290,7 @@ export function CardPath({ path, className }: { path: string; className?: string
       )}
       dir="ltr"
     >
-      {path}
+      <PathText path={path} />
     </code>
   );
 }

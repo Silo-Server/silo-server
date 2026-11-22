@@ -51,6 +51,9 @@ function Dialog({ row }: { row: HomeRow }) {
 - **Plurals:** one `plural` spanning the message,
   `{count, plural, one {# page} other {# pages}}`; pass `count` as a number. A
   language without the message falls back to English with English plural rules.
+  Wording that refers to the items as one or several ("it" / "them") selects on
+  `{amount, select, exactlyOne {…} exactlyTwo {…} other {…}}` instead; pass
+  `amount: exactAmount(count)` (see docs/architecture/i18n.md).
 - **Placeholders:** pass dates, durations and sizes already formatted, as strings
   (`formatLocale()` / `appLanguage()` from `@/lib/appLocale`).
 - **Digits:** in Arabic, numbers print in the format locale's digits, as dates do
@@ -120,12 +123,15 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   reason; a `dir="ltr"` box keeps flex order and text there left to right. `pre` is
   always left to right; inline `code`, `kbd` and `samp` take their text's direction
   unless they carry a `dir`.
-- An input or read-only field that holds a URL or server path sets `dir="ltr"`
-  (`SettingField` takes a `dir` prop); otherwise trailing `/` or `…` moves to the
-  start. When the field can show a translated placeholder or message instead, set
-  it only while it shows the URL or path (`dir={value ? "ltr" : undefined}`).
-  `dir="auto"` leaves an empty field's example in the page's direction, and
-  `type="url"` rejects addresses without a scheme.
+- An input or read-only field that holds a URL, server path, or network address
+  (hostname, IP address, CIDR list) sets `dir="ltr"` (`SettingField` takes a `dir`
+  prop); otherwise trailing `/`, `.` or `…` moves to the start, and a comma-separated
+  list draws in reverse order. When the field can show a translated placeholder or
+  message instead, set it only while it shows the value
+  (`dir={value ? "ltr" : undefined}`).
+  `dir="auto"` doesn't do this: an empty field resolves to left to right, so a
+  translated placeholder lands on the wrong side. `type="url"` rejects addresses
+  without a scheme.
 - A path or URL shown as text (a `code` block, a list of folders) also sets `dir="ltr"`,
   and the block that holds it takes `align-with-page` (in `app.css`). The class gives the
   block its parent's `text-align`, with `start` and `end` resolved in the parent's

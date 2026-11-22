@@ -93,6 +93,20 @@ function draftToMs(text: string, unit: IntervalUnit): number | undefined {
   return Number.isFinite(ms) && ms >= 1 && ms <= MAX_INTERVAL_MS ? ms : undefined;
 }
 
+interface MaxRuntimeDraft {
+  // The max_runtime_ms this draft was read from or last sent to onChange.
+  ms: number | undefined;
+  text: string;
+}
+
+// Shows a stored limit in minutes, rounded to five decimals so a millisecond
+// count that isn't a round number of minutes doesn't fill the box with a long
+// float. Five decimals of a minute is 0.6 ms, so the text still rounds back to
+// the same millisecond count.
+function maxRuntimeToDraft(ms: number | undefined): MaxRuntimeDraft {
+  return { ms, text: ms == null ? "" : String(Number((ms / 60_000).toFixed(5))) };
+}
+
 export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowProps) {
   const t = useT();
   // The box and the unit select show what was typed and picked, not the unit
@@ -107,6 +121,15 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
     setIntervalDraft({ ms, text, unit });
     onChange({ ...trigger, interval_ms: ms });
   };
+  // The Max runtime box shows what was typed, so "1.23456" isn't rewritten to
+  // the minutes its rounded millisecond count works out to.
+  const [maxRuntimeDraft, setMaxRuntimeDraft] = useState(() =>
+    maxRuntimeToDraft(trigger.max_runtime_ms),
+  );
+  if (maxRuntimeDraft.ms !== trigger.max_runtime_ms) {
+    // max_runtime_ms changed outside this row, so show the new value.
+    setMaxRuntimeDraft(maxRuntimeToDraft(trigger.max_runtime_ms));
+  }
 
   return (
     <div className="surface-panel-subtle flex flex-col gap-3 rounded-xl p-3 sm:flex-row sm:items-start">
@@ -216,17 +239,24 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
               step="any"
               className={MAX_RUNTIME_INPUT_WIDTH}
               placeholder={t("web.admin.tasks.detail.maxRuntimeNone")}
-              value={trigger.max_runtime_ms != null ? trigger.max_runtime_ms / 60_000 : ""}
+              value={maxRuntimeDraft.text}
               onChange={(e) => {
                 // Fractional minutes keep sub-minute limits saved through the API.
                 // A typed 0 stays 0 (no limit) so "0.5" can be entered; only an
                 // empty field clears it.
                 const raw = e.target.value;
-                onChange({
-                  ...trigger,
-                  max_runtime_ms:
-                    raw === "" ? undefined : Math.max(0, Math.round(Number(raw) * 60_000)),
-                });
+                const ms = raw === "" ? undefined : Math.max(0, Math.round(Number(raw) * 60_000));
+                // A negative entry is saved as 0, so show the 0 that Save sends.
+                setMaxRuntimeDraft({ ms, text: Number(raw) < 0 ? "0" : raw });
+                onChange({ ...trigger, max_runtime_ms: ms });
+              }}
+              onBlur={() => {
+                // An entry under half a millisecond, such as "0.000008" or "-0",
+                // saves as 0 (no limit). Show that 0 once the admin leaves the box,
+                // not while they type, so "0.00001" can still be entered.
+                if (maxRuntimeDraft.ms === 0 && maxRuntimeDraft.text !== "0") {
+                  setMaxRuntimeDraft({ ms: 0, text: "0" });
+                }
               }}
             />
             <span className="text-muted-foreground text-xs">

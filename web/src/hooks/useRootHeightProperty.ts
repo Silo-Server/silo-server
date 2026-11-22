@@ -4,11 +4,17 @@ import { useCallback } from "react";
  * Publish a pinned element's height on the document root as the CSS length
  * `property` while it is mounted, so chrome elsewhere in the tree can clear it.
  * `includeBottomInset` adds the element's bottom offset, for a bar that floats
- * above the bottom edge. Pass constants: a new value re-attaches the ref.
+ * above the bottom edge. `keepAfterUnmount` leaves the last height on the root
+ * when the element unmounts, for a bar that another view covers for a while;
+ * the caller then removes the property itself once the bar is gone for good.
+ * Pass constants: a new value re-attaches the ref.
  */
 export function useRootHeightProperty(
   property: `--${string}`,
-  { includeBottomInset = false }: { includeBottomInset?: boolean } = {},
+  {
+    includeBottomInset = false,
+    keepAfterUnmount = false,
+  }: { includeBottomInset?: boolean; keepAfterUnmount?: boolean } = {},
 ) {
   return useCallback(
     (element: HTMLElement | null) => {
@@ -27,9 +33,9 @@ export function useRootHeightProperty(
       return () => {
         observer?.disconnect();
         window.removeEventListener("resize", measure);
-        root.style.removeProperty(property);
+        if (!keepAfterUnmount) root.style.removeProperty(property);
       };
     },
-    [property, includeBottomInset],
+    [property, includeBottomInset, keepAfterUnmount],
   );
 }

@@ -265,13 +265,15 @@ export default function PreparationTab() {
                         : workerFilter && "opacity-30",
                     )}
                   >
-                    <span className="text-muted-foreground me-1">{worker.label}</span>
+                    {/* Spaces, not only margins, separate the parts, so the button's
+                        accessible name reads "Node gpu-01 2", not "Nodegpu-012". */}
+                    {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
+                    <span className="text-muted-foreground me-0.5">{worker.label}</span>{" "}
                     {/* Isolated, so a count after a left-to-right name doesn't join its
                         run in a right-to-left language ("gpu-01" and "3" as "gpu-013"). */}
-                    <bdi>{worker.name}</bdi>
-                    <span className="text-muted-foreground ms-1.5 tabular-nums">
-                      {worker.count}
-                    </span>
+                    {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
+                    <bdi>{worker.name}</bdi>{" "}
+                    <span className="text-muted-foreground ms-1 tabular-nums">{worker.count}</span>
                   </button>
                 ))}
               </div>
@@ -727,7 +729,7 @@ function WorkerBadge({ prep }: { prep: AdminDownloadPreparation }) {
   return (
     <span className="border-primary/20 bg-primary/10 text-primary inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold">
       {/* Same label treatment as the playback route badges (PlaybackRouteBadges). */}
-      <span className="text-foreground/75 [html[data-high-contrast=true]_&]:text-muted-foreground font-(--font-weight-ui)">
+      <span className="text-foreground/75 [html[data-high-contrast=true]_&]:text-muted-foreground font-normal">
         {worker.label}
       </span>
       <span dir="auto" className="truncate">

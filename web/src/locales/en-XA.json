@@ -281,6 +281,18 @@
       "value": "⟦Ţĥîš šîĝñ-îñ çöđé éẋþîŕéđ. Šţåŕţ åĝåîñ.~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš åççöûñţ ĥåš ŕéåçĥéđ îţš ļîɱîţ öƒ đéṽîçéš ƒöŕ đîŕéçţ çöññéçţîöñš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "⟦Åñöţĥéŕ đéṽîçé åļŕéåđý ûšéš ţĥîš çöññéçţîöñ ķéý. Ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -339,6 +351,12 @@
     {
       "type": 0,
       "value": "⟦Šéţ ƀý ţĥé éñṽîŕöñɱéñţ. Çĥåñĝé îţ ţĥéŕé åñđ ŕéšţåŕţ ţĥé åƒƒéçţéđ šéŕṽîçé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš ṽåļûé îš ɱîššîñĝ.~~~~~~~~~⟧"
     }
   ],
   "error.field.out_of_range": [
@@ -16033,14 +16051,26 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦Ĥîđé îţ~~~⟧"
+              "value": "Ĥîđé îţ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ĥîđé ţĥéɱ"
             }
           ]
         },
@@ -16048,13 +16078,15 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦Ĥîđé ţĥéɱ~~~~⟧"
+              "value": "Ĥîđé ţĥéɱ"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16227,14 +16259,26 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦Šĥöŵ îţ~~~⟧"
+              "value": "Šĥöŵ îţ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Šĥöŵ ţĥéɱ"
             }
           ]
         },
@@ -16242,13 +16286,15 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦Šĥöŵ ţĥéɱ~~~~⟧"
+              "value": "Šĥöŵ ţĥéɱ"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17113,14 +17159,18 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦Åļšö çĥöšé "
+              "value": "Åļšö çĥöšé "
             },
             {
               "type": 1,
@@ -17128,7 +17178,23 @@
             },
             {
               "type": 0,
-              "value": ", ŵĥîçĥ îš ñééđéđ ƀý ŵĥåţ ýöû çĥöšé.~~~~~~~~~~~~~~~~~~~⟧"
+              "value": ", ŵĥîçĥ îš ñééđéđ ƀý ŵĥåţ ýöû çĥöšé."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Åļšö çĥöšé "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", ŵĥîçĥ åŕé ñééđéđ ƀý ŵĥåţ ýöû çĥöšé."
             }
           ]
         },
@@ -17136,7 +17202,7 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦Åļšö çĥöšé "
+              "value": "Åļšö çĥöšé "
             },
             {
               "type": 1,
@@ -17144,25 +17210,31 @@
             },
             {
               "type": 0,
-              "value": ", ŵĥîçĥ åŕé ñééđéđ ƀý ŵĥåţ ýöû çĥöšé.~~~~~~~~~~~~~~~~~~~~⟧"
+              "value": ", ŵĥîçĥ åŕé ñééđéđ ƀý ŵĥåţ ýöû çĥöšé."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦Åļšö ûñçĥöšé "
+              "value": "Åļšö ûñçĥöšé "
             },
             {
               "type": 1,
@@ -17170,7 +17242,23 @@
             },
             {
               "type": 0,
-              "value": ", ŵĥîçĥ ñééđš ŵĥåţ ýöû ûñçĥöšé.~~~~~~~~~~~~~~~~~~⟧"
+              "value": ", ŵĥîçĥ ñééđš ŵĥåţ ýöû ûñçĥöšé."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Åļšö ûñçĥöšé "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", ŵĥîçĥ ñééđ ŵĥåţ ýöû ûñçĥöšé."
             }
           ]
         },
@@ -17178,7 +17266,7 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦Åļšö ûñçĥöšé "
+              "value": "Åļšö ûñçĥöšé "
             },
             {
               "type": 1,
@@ -17186,13 +17274,15 @@
             },
             {
               "type": 0,
-              "value": ", ŵĥîçĥ ñééđ ŵĥåţ ýöû ûñçĥöšé.~~~~~~~~~~~~~~~~~~⟧"
+              "value": ", ŵĥîçĥ ñééđ ŵĥåţ ýöû ûñçĥöšé."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -22259,14 +22349,26 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦îţš đåţå çöûļđñ'ţ ƀé ŕéåđ~~~~~~~~~~⟧"
+              "value": "îţš đåţå çöûļđñ'ţ ƀé ŕéåđ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ţĥéîŕ đåţå çöûļđñ'ţ ƀé ŕéåđ"
             }
           ]
         },
@@ -22274,13 +22376,15 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦ţĥéîŕ đåţå çöûļđñ'ţ ƀé ŕéåđ~~~~~~~~~~~⟧"
+              "value": "ţĥéîŕ đåţå çöûļđñ'ţ ƀé ŕéåđ"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -22529,6 +22633,426 @@
     {
       "type": 0,
       "value": "⟦Ţĥéý'ŕé ŕéƒéŕéñçéđ îñ ţĥé đåţåƀåšé ƀûţ ŵéŕéñ'ţ ƒöûñđ îñ šţöŕåĝé; ŕéšţöŕéš ļéåṽé ţĥéɱ öûţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ƀŕåñđîñĝ åššéţ~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ƀŕåñđîñĝ åššéţš~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çöļļéçţîöñ ƀåçķđŕöþ~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çöļļéçţîöñ ƀåçķđŕöþš~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çöļļéçţîöñ þöšţéŕ~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çöļļéçţîöñ þöšţéŕš~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " đöŵñļöåđéđ šûƀţîţļé~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " đöŵñļöåđéđ šûƀţîţļéš~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ļîƀŕåŕý þöšţéŕ~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ļîƀŕåŕý þöšţéŕš~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " öṽéŕļåý îɱåĝé~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " öṽéŕļåý îɱåĝéš~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " þéŕšöñåļ çöļļéçţîöñ þöšţéŕ~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " þéŕšöñåļ çöļļéçţîöñ þöšţéŕš~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " þŕöƒîļé åṽåţåŕ~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " þŕöƒîļé åṽåţåŕš~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ûþļöåđéđ åŕţŵöŕķ ƒîļé~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ûþļöåđéđ åŕţŵöŕķ ƒîļéš~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ûþļöåđéđ šûƀţîţļé~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ûþļöåđéđ šûƀţîţļéš~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -22839,14 +23363,18 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦îţš "
+              "value": "îţš "
             },
             {
               "type": 1,
@@ -22854,7 +23382,23 @@
             },
             {
               "type": 0,
-              "value": " çöûļđñ'ţ ƀé ŕéåđ~~~~~~~~~⟧"
+              "value": " çöûļđñ'ţ ƀé ŕéåđ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ţĥéîŕ "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " çöûļđñ'ţ ƀé ŕéåđ"
             }
           ]
         },
@@ -22862,7 +23406,7 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦ţĥéîŕ "
+              "value": "ţĥéîŕ "
             },
             {
               "type": 1,
@@ -22870,13 +23414,15 @@
             },
             {
               "type": 0,
-              "value": " çöûļđñ'ţ ƀé ŕéåđ~~~~~~~~~~⟧"
+              "value": " çöûļđñ'ţ ƀé ŕéåđ"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~⟧"
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -23057,14 +23603,26 @@
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦îţš đåţå îš ţöö ļåŕĝé ƒöŕ ţĥé ŕéšţöŕé šéţ~~~~~~~~~~~~~~~~~⟧"
+              "value": "îţš đåţå îš ţöö ļåŕĝé ƒöŕ ţĥé ŕéšţöŕé šéţ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ţĥéîŕ đåţå îš ţöö ļåŕĝé ƒöŕ ţĥé ŕéšţöŕé šéţ"
             }
           ]
         },
@@ -23072,13 +23630,15 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦ţĥéîŕ đåţå îš ţöö ļåŕĝé ƒöŕ ţĥé ŕéšţöŕé šéţ~~~~~~~~~~~~~~~~~~⟧"
+              "value": "ţĥéîŕ đåţå îš ţöö ļåŕĝé ƒöŕ ţĥé ŕéšţöŕé šéţ"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -25850,7 +26410,7 @@
   "web.admin.common.connectionCheck.result.textAIForbidden": [
     {
       "type": 0,
-      "value": "⟦Ţéẋţ ÅÎ åççéšš ŵåš đéñîéđ. Çĥéçķ ţĥåţ ţĥé ÅÞÎ ķéý ɱåý ûšé ţĥîš ɱöđéļ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ţéẋţ ÅÎ åççéšš ŵåš đéñîéđ. Çĥéçķ ţĥåţ ţĥé ÅÞÎ ķéý öŕ ÇĥåţĜÞŢ åççöûñţ ɱåý ûšé ţĥîš ɱöđéļ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.common.connectionCheck.result.textAINotFound": [
@@ -25869,6 +26429,12 @@
     {
       "type": 0,
       "value": "⟦Ţéẋţ ÅÎ þŕöṽîđéŕ îš ŕåţé ļîɱîţîñĝ ŕéǫûéšţš. Ţŕý åĝåîñ ļåţéŕ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ÅÎ þŕöṽîđéŕ ŕéƒûšéđ ţĥé çĥéçķ ŕéǫûéšţ. Çĥéçķ ţĥé ɱöđéļ, ţĥé ŕéåšöñîñĝ ļéṽéļ, åñđ ţĥé åççöûñţ'š ûšåĝé šéţţîñĝš. Ţĥé šéŕṽéŕ ļöĝ ĥåš ţĥé þŕöṽîđéŕ'š éŕŕöŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.common.connectionCheck.result.textAIRejected": [
@@ -26009,6 +26575,12 @@
     {
       "type": 0,
       "value": "⟦Çļéåŕ ļîɱîţ~~~~~⟧"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "⟦Đîŕéçţ~~~⟧"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -50124,6 +50696,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "⟦Šçåñš åñđ ɱéţåđåţå ŕéƒŕéšĥéš åþþéåŕ ĥéŕé ŵĥîļé ţĥéý ŕûñ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "⟦Ñö åçţîṽé šçåñš öŕ ŕéƒŕéšĥéš~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "⟦Åļļ ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîđé ǫûéûé~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " öţĥéŕ ļîƀŕåŕý~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " öţĥéŕ ļîƀŕåŕîéš~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "⟦Ṁéţåđåţå Ŕéƒŕéšĥéš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéƒŕéšĥîñĝ ɱéţåđåţå~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "⟦Ṽîéŵ ǫûéûé~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîĝĥ~~⟧"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "⟦Ļöŵ~~⟧"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "⟦Ṁéđîûɱ~~~⟧"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -50594,6 +51274,30 @@
       "value": "⟦Çöñƒîŕɱ éɱþţý ŕööţ çļéåñûþ~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "⟦Îñšþéçţ~~~⟧"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö îţéɱš åŕé ŵåîţîñĝ îñ ţĥé ɱéţåđåţå ɱåţçĥéŕ ǫûéûé.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö šķîþþéđ ŕööţš ŕéçöŕđéđ.~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö šţåļé éẋţéŕñåļ ÎĐš ŕéçöŕđéđ.~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -50638,6 +51342,18 @@
     {
       "type": 0,
       "value": "~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "⟦Éđîţ~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ļîƀŕåŕîéš çöñƒîĝûŕéđ ýéţ.~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -50698,6 +51414,12 @@
       "value": "⟦Ĥîđé þåţĥš~~~~⟧"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "⟦Îđļé~~⟧"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -50736,6 +51458,12 @@
       "value": "⟦Þåŕţîåļ šçåñ~~~~~⟧"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļļ ɱîššîñĝ öŕ ŕéþļåçé åļļ ɱéţåđåţå~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -50748,6 +51476,12 @@
       "value": "⟦Ŕööţ ûñŕéåçĥåƀļé~~~~~~~⟧"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "⟦Šçåñ~~⟧"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -50758,6 +51492,12 @@
     {
       "type": 0,
       "value": "⟦Šĥöŵ þåţĥš~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "⟦Šţöþ~~⟧"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -50776,6 +51516,26 @@
     {
       "type": 0,
       "value": "⟦Ṽéŕîƒý Ṁöûñţš~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "⟦Çĥéçķ ţĥåţ åļļ ļîƀŕåŕý ƒöļđéŕš åŕé ŕéåçĥåƀļé~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "⟦Ṽîéŵ åçţîṽé šçåñš ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~⟧"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -50895,7 +51655,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "⟦Ṁåñåĝé ļîƀŕåŕý ŕööţš åñđ šçåñš. Çåţåļöĝ îɱþöŕţ/éẋþöŕţ ñöŵ ļîṽéš ûñđéŕ Ṁåîñţéñåñçé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ṁåñåĝé ɱéđîå ƒöļđéŕš, ɱöñîţöŕ šçåñš, åñđ ŕéšöļṽé ɱåţçĥîñĝ îššûéš.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.libraries.page.title": [
@@ -51418,6 +52178,64 @@
       "value": "⟦Šţåļé Éẋţéŕñåļ ÎĐš~~~~~~~~⟧"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åçţîṽé~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åçţîṽé~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "⟦Šçåñ Åçţîṽîţý~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "⟦Çåţåļöĝ Ĥéåļţĥ~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "⟦Ļîƀŕåŕîéš~~~~⟧"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -51896,6 +52714,24 @@
     {
       "type": 0,
       "value": "⟦Šéåŕçĥ îĝñöŕéđ îţéɱš ƀý ţîţļé, ļîƀŕåŕý, öŕ ţýþé...~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "⟦Åɱƀîĝûöûš~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "⟦Þéñđîñĝ~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "⟦Ûñɱåţçĥéđ~~~~⟧"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -69093,6 +69929,664 @@
     {
       "type": 0,
       "value": "⟦Šýñç öñļîñé ɱåŕķéŕš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "⟦Åļĝöŕîţĥɱ: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "⟦ŕéǫûéšţéđ "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; åçţîṽé "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "⟦Åļļöŵéđ: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "⟦Çöñĝéšţîöñ çöñţŕöļ: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "⟦Åççöûñţ~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "⟦Öñ ţĥîš þåţĥ šîñçé~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "⟦Đéṽîçé~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö đéṽîçé îš çöññéçţéđ đîŕéçţļý.~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "⟦Þééŕ éñđþöîñţ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "⟦Çöññéçţéđ đéṽîçéš~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "⟦ţö þöŕţ "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "⟦Đéƒåûļţ: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "⟦Çĥéçķ ţĥîš šéŕṽéŕ’š ŕéåđîñéšš ƒöŕ đîŕéçţ çöññéçţîöñš.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "⟦Éƒƒéçţîṽé: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "⟦Éñåƀļé đîŕéçţ çöññéçţîöñš~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "⟦ÑÉŢ_ÅĐṀÎÑ çåþåƀîļîţý~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "⟦Đîŕéçţ çöññéçţîöñ éñĝîñé~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "⟦ÑÅŢ ĥåîŕþîñ~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "⟦ÑÅŢ ɱåþþîñĝ~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "⟦ÞṀŢÛ ƒåļļƀåçķ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéåçĥåƀîļîţý~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "⟦Šöçķéţ ŕéçéîṽé ƀûƒƒéŕ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "⟦Šöçķéţ šéñđ ƀûƒƒéŕ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöšţ ţûñîñĝ~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "⟦ÅÇĶ đéçîɱåţîöñ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "⟦ƁƁŔ ļöšš þöļîçý~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "⟦ÛĐÞ šéĝɱéñţåţîöñ öƒƒļöåđ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "⟦Çļîéñţ ŕéçéîṽé ŵîñđöŵ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "⟦Đîŕéçţ çöññéçţîöñ ÛĐÞ þöŕţ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "⟦ŢÇÞ çöñĝéšţîöñ çöñţŕöļ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "⟦ŢÇÞ šéñđ ƀûƒƒéŕ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "⟦Ļåšţ çĥéçķéđ "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöẋý~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "⟦Ļîšţéñéŕš~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "⟦Öƀšéŕṽéđ þûƀļîç åđđŕéšš: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "⟦Çĥéçķ ţĥé ŕöûţéŕ ƒöŕ ÛÞñÞ, ÑÅŢ-ÞṀÞ, öŕ ÞÇÞ šûþþöŕţ.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "⟦Þöŕţ ɱåþþîñĝ~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéåđîñéšš çĥéçķš đö ñöţ šţåŕţ đîŕéçţ þļåýƀåçķ.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "⟦Đîšåƀļéđ ƀý åđɱîñîšţŕåţöŕ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "⟦Đîšåƀļéđ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé đîŕéçţ çöññéçţîöñ éñĝîñé çöûļđ ñöţ šţåŕţ~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ îñçŕéåšé ƀûƒƒéŕ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "⟦Ŕöûţéŕ đöéš ñöţ šûþþöŕţ þöŕţ ɱåþþîñĝ~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "⟦Ɓûƒƒéŕ îš šɱåļļéŕ ţĥåñ ŕéǫûéšţéđ~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "⟦Ñéţŵöŕķ ţûñîñĝ ĥéļþéŕ ûñåṽåîļåƀļé~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ṽåļûé; ûšîñĝ öƒƒ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "⟦Šýšţéɱ çöûļđ ñöţ åþþļý öŕ ŕéåđ ţĥîš šéţţîñĝ~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ šûþþöŕţéđ ƀý ţĥîš ķéŕñéļ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöšţ ƀûƒƒéŕ ļîɱîţ ŕéåçĥéđ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ ŕéåđ ĥöšţ ƀûƒƒéŕ ļîɱîţš~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "⟦Þûƀļîç åđđŕéšš ṽåŕîéš ƀý đéšţîñåţîöñ~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "⟦ƁƁŔ îš ñöţ åṽåîļåƀļé~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "⟦ƁƁŔ îš ñöţ ļöåđéđ öŕ åļļöŵéđ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöŕé ţĥåñ öñé ÅÞÎ šéŕṽéŕ îš ŕûññîñĝ~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "⟦ÑÉŢ_ÅĐṀÎÑ çåþåƀîļîţý đŕöþþéđ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "⟦ÑÉŢ_ÅĐṀÎÑ çåþåƀîļîţý ɱîššîñĝ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ŕöûţéŕ ƒöûñđ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "⟦ÑÉŢ_ÅĐṀÎÑ çåþåƀîļîţý ɱîššîñĝ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "⟦Þéŕɱîššîöñ đéñîéđ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ åṽåîļåƀļé~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ ɱéåšûŕéđ~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "⟦Ñö îñçŕéåšé ñééđéđ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöšţ þöļîçý šéļéçţéđ åñöţĥéŕ åļĝöŕîţĥɱ~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "⟦Çĥéçķ ƒåîļéđ~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ çĥéçķ ƒöŕ öţĥéŕ ÅÞÎ šéŕṽéŕš~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "⟦Åñöţĥéŕ ÅÞÎ šéŕṽéŕ ĥöšţš đîŕéçţ çöññéçţîöñš~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåîţîñĝ ţö ƀéçöɱé ţĥé đîŕéçţ çöññéçţîöñ ĥöšţ~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "⟦Đîŕéçţ çöññéçţîöñ šţåţé îš ûñåṽåîļåƀļé~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ öþéñ ţĥé ÛĐÞ þöŕţ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "⟦ÛĐÞ þöŕţ îš îñṽåļîđ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ šûþþöŕţéđ öñ ţĥîš þļåţƒöŕɱ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţéđ: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţéđ: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; ĝŕåñţéđ: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "⟦Ŕûñ çĥéçķ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "⟦Šéñđ ƀûƒƒéŕ: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "⟦Çåþþéđ~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "⟦Đéĝŕåđéđ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåļļƀåçķ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ ñééđéđ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "⟦Öƒƒ~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "⟦Öñ~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "⟦Ûñķñöŵñ~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "⟦Å çöɱɱå-šéþåŕåţéđ ļîšţ öƒ ûþ ţö éîĝĥţ ĥöšţ:þöŕţ éñţŕîéš. Ļéåṽé îţ éɱþţý ţö ûšé ţĥé đéƒåûļţš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "⟦ŠŢÛÑ šéŕṽéŕš~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "⟦Đîŕéçţ çöññéçţîöñš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "⟦Ļéţ đéṽîçéš ŕéåçĥ ţĥîš šéŕṽéŕ öṽéŕ å đîŕéçţ ÛĐÞ þåţĥ. Ţĥé ÛĐÞ þöŕţ çöɱéš ƒŕöɱ "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " åñđ îš ŕéåđ-öñļý ĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -138501,6 +139995,20 @@
       "value": "⟦Ɓåçķ ţö þåĝé 1~~~~~~⟧"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "⟦Ĝö ţö þåĝé "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -138599,6 +140107,20 @@
     {
       "type": 0,
       "value": "⟦Ŕéǫûéšţ ţö åđđ þåĝéš~~~~~~~~⟧"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "⟦Þåĝé "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " îš þåšţ ţĥé éñđ öƒ ţĥéšé ŕéšûļţš.~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.requests.toAdd.series": [
@@ -140283,6 +141805,12 @@
     {
       "type": 0,
       "value": "⟦Ŕéåđ ţĥé þŕöƒîļé'š ñöţîƒîçåţîöñš åš ţĥéý åŕŕîṽé åñđ ɱåŕķ ţĥéɱ ŕéåđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "⟦Šéé ŵĥåţ îš þļåýîñĝ ŕîĝĥţ ñöŵ öñ ţĥé þŕöƒîļé, öŕ öñ éṽéŕý þŕöƒîļé öƒ ţĥé åççöûñţ ŵĥéñ ţĥé ķéý ñåɱéš ñöñé: ţîţļé, þöšîţîöñ, þåûšéđ šţåţé, đéṽîçé åñđ þļåý ɱéţĥöđ. Ñö þļåýƀåçķ çöñţŕöļ öŕ ñéţŵöŕķ đéţåîļš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.apiKeys.scope.requests": [
