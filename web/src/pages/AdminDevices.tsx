@@ -1,5 +1,5 @@
 import { DeviceConnections } from "@/components/admin/DeviceConnections";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { Children, isValidElement, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import {
   Activity,
@@ -590,40 +590,34 @@ function FleetPulse({
 
   return (
     <div className="surface-panel-subtle text-muted-foreground flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl px-4 py-3 text-[12px]">
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+      <SeparatedRow wide separatorClassName="text-muted-foreground/30">
         <Stat
           label={t("web.admin.devices.stats.users", { count: totalUsers })}
           value={totalUsers}
         />
-        <Dot />
         <Stat
           label={t("web.admin.devices.stats.devices", { count: totalDevices })}
           value={totalDevices}
         />
-        <Dot />
         <Stat
           label={t("web.admin.devices.stats.profiles", { count: totalProfiles })}
           value={totalProfiles}
         />
-        <Dot />
         <Stat
           label={t("web.admin.devices.stats.overrides", { count: totalOverrides })}
           value={totalOverrides}
         />
         {anomalyCount > 0 && (
-          <>
-            <Dot />
-            <Stat
-              label={t("web.admin.devices.stats.anomalies", { count: anomalyCount })}
-              value={anomalyCount}
-              tone="destructive"
-            />
-          </>
+          <Stat
+            label={t("web.admin.devices.stats.anomalies", { count: anomalyCount })}
+            value={anomalyCount}
+            tone="destructive"
+          />
         )}
-      </div>
+      </SeparatedRow>
 
       <div className="text-muted-foreground/80 flex items-center gap-2 font-mono text-[10px] tracking-[0.06em] uppercase">
-        <span className="hidden md:inline">{t("web.admin.devices.stats.density")}</span>
+        <span>{t("web.admin.devices.stats.density")}</span>
         <Histogram counts={sortedCounts} max={maxCount} />
       </div>
 
@@ -778,9 +772,53 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: "de
   );
 }
 
-function Dot() {
+/**
+ * A wrapping row with a separator between its items. Each item carries the
+ * separator before it, and the row starts one separator slot outside a
+ * clipped box, so the separator that would lead a line is hidden and none
+ * ends one. The slot has a fixed width so the offset always matches it; a
+ * wider separator (the pseudo-locale's) is centred and clipped to the slot.
+ * The padding and matching negative margin on the clip box keep a focus ring
+ * at a line start visible. The admin user header lays out its meta line the
+ * same way.
+ */
+function SeparatedRow({
+  wide = false,
+  separatorClassName,
+  className,
+  children,
+}: {
+  /** A wider slot around each separator, for spaced-out stats. */
+  wide?: boolean;
+  separatorClassName: string;
+  className?: string;
+  children: ReactNode;
+}) {
   const t = useT();
-  return <span className="text-muted-foreground/30">{t("web.admin.devices.separator")}</span>;
+  return (
+    <div className={cn("-mx-1 min-w-0 overflow-x-clip px-1", className)}>
+      <div className={cn("flex flex-wrap items-baseline gap-y-1", wide ? "-ms-9" : "-ms-5")}>
+        {Children.toArray(children).map((child, i) => (
+          <span
+            key={isValidElement(child) ? child.key : i}
+            className="inline-flex max-w-full min-w-0 items-baseline"
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "inline-flex shrink-0 justify-center overflow-hidden whitespace-nowrap",
+                wide ? "w-9" : "w-5",
+                separatorClassName,
+              )}
+            >
+              {t("web.admin.devices.separator")}
+            </span>
+            <span className="min-w-0 wrap-anywhere">{child}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function Histogram({ counts, max }: { counts: number[]; max: number }) {
@@ -1390,7 +1428,7 @@ function DeviceRow({
       <PlatformTile kind={kind} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="text-foreground truncate text-[13px] font-medium">
+          <span dir="auto" className="text-foreground truncate text-[13px] font-medium">
             {device.device_name || t("web.admin.devices.unnamedDevice")}
           </span>
           {isAnomaly && (
@@ -1785,11 +1823,12 @@ function DeviceDetailPanel({
                 </span>
               )}
             </div>
-            <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]">
+            <SeparatedRow
+              separatorClassName="text-muted-foreground/40"
+              className="text-muted-foreground text-[12px]"
+            >
               <span className="text-foreground/80 font-mono">{data.device_id}</span>
-              <span className="text-muted-foreground/40">{t("web.admin.devices.separator")}</span>
               <span>{platformLabel(data.device_platform)}</span>
-              <span className="text-muted-foreground/40">{t("web.admin.devices.separator")}</span>
               <Link
                 to={`/admin/users/${data.user_id}`}
                 className="text-foreground/85 hover:text-foreground inline-flex items-center gap-0.5 font-medium transition-colors"
@@ -1797,17 +1836,16 @@ function DeviceDetailPanel({
                 {data.username}
                 <ArrowUpRight className="h-3 w-3" />
               </Link>
-              <span className="text-muted-foreground/40">{t("web.admin.devices.separator")}</span>
               <span>
                 {t("web.admin.devices.detail.updated", {
                   time: formatRelative(data.last_updated),
                 })}
               </span>
-            </div>
+            </SeparatedRow>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <SettingsScopeControl
             showAllSettings={effectiveShowAllSettings}
             totalSettings={

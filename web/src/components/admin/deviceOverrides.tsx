@@ -29,6 +29,7 @@ import { formatRelativeTime } from "@/lib/date";
 import { settingDescription, settingLabel } from "@/lib/settingsText";
 import { useT, type Translate } from "@/i18n";
 import type { PlatformKind } from "./devicePlatformLabels";
+import { getInitial } from "@/lib/text";
 
 export { platformKindLabel, platformLabel, type PlatformKind } from "./devicePlatformLabels";
 
@@ -656,8 +657,7 @@ export function DeviceProfileTabs({
         {profiles.map((profile) => {
           const isActive = profile.profileId === active.profileId;
           const tabAccent = profileAccent(profile.profileId);
-          const initial =
-            (profile.profileName || profile.profileId).trim().charAt(0).toUpperCase() || "?";
+          const initial = getInitial(profile.profileName || profile.profileId) || "?";
           return (
             <button
               key={profile.profileId}

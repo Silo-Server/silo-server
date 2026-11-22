@@ -1,16 +1,16 @@
-package playback_test
+package mediatrack_test
 
 import (
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/mediatrack"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func TestSelectAudioTrack(t *testing.T) {
-	pref := func(index int, language string) *playback.AudioTrackPreference {
-		return &playback.AudioTrackPreference{AudioTrackIndex: index, AudioLanguage: language}
+	pref := func(index int, language string) *mediatrack.AudioTrackPreference {
+		return &mediatrack.AudioTrackPreference{AudioTrackIndex: index, AudioLanguage: language}
 	}
 	mixed := []models.AudioTrack{
 		{Language: "en", Codec: "aac", Default: true, Channels: 2},
@@ -36,19 +36,19 @@ func TestSelectAudioTrack(t *testing.T) {
 		{Language: "en-GB", Codec: "eac3", Channels: 6, Layout: "5.1", Title: "English 5.1"},
 		{Language: "en-US", Codec: "eac3", Channels: 6, Layout: "5.1", Title: "English 5.1"},
 	}
-	regionalSignature := func(language string) *playback.AudioTrackPreference {
-		return &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: language, TrackSignature: &userstore.AudioTrackSignature{Language: language, Title: "English 5.1", Codec: "eac3", Layout: "5.1", Channels: 6}}
+	regionalSignature := func(language string) *mediatrack.AudioTrackPreference {
+		return &mediatrack.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: language, TrackSignature: &userstore.AudioTrackSignature{Language: language, Title: "English 5.1", Codec: "eac3", Layout: "5.1", Channels: 6}}
 	}
 	undecodable := undecodableFirstAudioTracks()
-	undecodableSignature := func(track int) *playback.AudioTrackPreference {
-		return &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "zh", TrackSignature: playback.AudioTrackSignatureFromTrack(undecodable[track])}
+	undecodableSignature := func(track int) *mediatrack.AudioTrackPreference {
+		return &mediatrack.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "zh", TrackSignature: mediatrack.AudioTrackSignatureFromTrack(undecodable[track])}
 	}
 
 	tests := []struct {
 		name          string
 		tracks        []models.AudioTrack
 		preferredLang string
-		seriesPref    *playback.AudioTrackPreference
+		seriesPref    *mediatrack.AudioTrackPreference
 		want          int
 	}{
 		{name: "series pref index+lang match", tracks: mixed, preferredLang: "en", seriesPref: pref(2, "ja"), want: 2},
@@ -74,7 +74,7 @@ func TestSelectAudioTrack(t *testing.T) {
 		{name: "exact track signature over index fallback", tracks: []models.AudioTrack{
 			{Language: "eng", Codec: "aac", Channels: 2, Layout: "stereo", Title: "English Stereo", Default: true},
 			{Language: "eng", Codec: "flac", Channels: 6, Layout: "5.1", Title: "English 5.1"},
-		}, preferredLang: "en", seriesPref: &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "en", TrackSignature: &userstore.AudioTrackSignature{
+		}, preferredLang: "en", seriesPref: &mediatrack.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "en", TrackSignature: &userstore.AudioTrackSignature{
 			Language: "eng", Title: "English 5.1", Codec: "flac", Layout: "5.1", Channels: 6, Default: false,
 		}}, want: 1},
 		{name: "undecodable file default", tracks: undecodable, want: 1},
@@ -90,7 +90,7 @@ func TestSelectAudioTrack(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := playback.SelectAudioTrack(tt.tracks, tt.preferredLang, tt.seriesPref); got != tt.want {
+			if got := mediatrack.SelectAudioTrack(tt.tracks, tt.preferredLang, tt.seriesPref); got != tt.want {
 				t.Fatalf("SelectAudioTrack(%q) = %d, want %d", tt.preferredLang, got, tt.want)
 			}
 		})
@@ -153,7 +153,7 @@ func TestMatchAudioTrackAcrossVersions(t *testing.T) {
 			{Language: "en", Codec: "aac", Channels: 2, Default: true},
 		}, 1, 0},
 	} {
-		if got := playback.MatchAudioTrackAcrossVersions(tt.requested, tt.effective, tt.index); got != tt.want {
+		if got := mediatrack.MatchAudioTrackAcrossVersions(tt.requested, tt.effective, tt.index); got != tt.want {
 			t.Errorf("%s: MatchAudioTrackAcrossVersions() = %d, want %d", tt.name, got, tt.want)
 		}
 	}

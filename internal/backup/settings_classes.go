@@ -52,6 +52,7 @@ var serverSpecificSettings = append(strings.Fields(`
 	jellyfin_compat.public_url jellyfin_compat.web_install_dir
 	recommendations.embedding_provider_id recommendations.embedding_lock recommendations.policy_marked_generation
 	media_images. chapter_thumbnails. ui.dashboard.hidden_attention
+	direct_connections.
 `), plugins.ProvisionRestoreHoldKey)
 
 // restoredSettings are the keys and prefixes restored as the backup has

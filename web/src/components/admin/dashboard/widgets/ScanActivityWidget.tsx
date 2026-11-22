@@ -85,7 +85,11 @@ export function ScanActivityWidget() {
             <TableBody>
               {scans.slice(0, ROW_LIMIT).map((scan) => (
                 <TableRow key={scan.id}>
-                  <TableCell className="max-w-[14rem] truncate text-[13px] font-semibold">
+                  {/* align-with-page: a short name lines up with the column's heading. */}
+                  <TableCell
+                    dir="auto"
+                    className="align-with-page max-w-[14rem] truncate text-[13px] font-semibold"
+                  >
                     {libraryNames.get(scan.library_id) ??
                       t("web.admin.dashboard.widgets.scanActivity.libraryFallback", {
                         id: scan.library_id,

@@ -30,7 +30,8 @@ export default function DetailBreadcrumb({ segments }: DetailBreadcrumbProps) {
                 <ViewTransitionLink
                   to={segment.href}
                   up
-                  className="text-muted-foreground hover:text-foreground text-[0.8125rem] transition-colors"
+                  dir="auto"
+                  className="bidi-text text-muted-foreground hover:text-foreground text-[0.8125rem] transition-colors"
                 >
                   {segment.label}
                 </ViewTransitionLink>

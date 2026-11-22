@@ -73,6 +73,7 @@ import {
 import { formatLocale } from "@/lib/appLocale";
 
 const K = "web.admin.downloads.preparation";
+const SEPARATOR = " · ";
 // Product and stream names, not translated.
 const FFMPEG = "FFmpeg";
 const STDERR = "stderr";
@@ -264,11 +265,15 @@ export default function PreparationTab() {
                         : workerFilter && "opacity-30",
                     )}
                   >
-                    <span className="text-muted-foreground me-1">{worker.label}</span>
-                    {worker.name}
-                    <span className="text-muted-foreground ms-1.5 tabular-nums">
-                      {worker.count}
-                    </span>
+                    {/* Spaces, not only margins, separate the parts, so the button's
+                        accessible name reads "Node gpu-01 2", not "Nodegpu-012". */}
+                    {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
+                    <span className="text-muted-foreground me-0.5">{worker.label}</span>{" "}
+                    {/* Isolated, so a count after a left-to-right name doesn't join its
+                        run in a right-to-left language ("gpu-01" and "3" as "gpu-013"). */}
+                    {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
+                    <bdi>{worker.name}</bdi>{" "}
+                    <span className="text-muted-foreground ms-1 tabular-nums">{worker.count}</span>
                   </button>
                 ))}
               </div>
@@ -608,7 +613,7 @@ function PreparationRow({
           <span className="truncate">{formatPreparationOutput(prep)}</span>
         </div>
         <div className="text-muted-foreground flex items-center justify-between gap-2 text-[10px]">
-          <span className="truncate">{requesterSummary(t, prep)}</span>
+          <span className="flex overflow-hidden whitespace-pre">{requesterSummary(t, prep)}</span>
           <div className="flex shrink-0 items-center gap-1">
             {rowActions}
             {detailsButton}
@@ -724,10 +729,12 @@ function WorkerBadge({ prep }: { prep: AdminDownloadPreparation }) {
   return (
     <span className="border-primary/20 bg-primary/10 text-primary inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold">
       {/* Same label treatment as the playback route badges (PlaybackRouteBadges). */}
-      <span className="text-foreground/75 [html[data-high-contrast=true]_&]:text-muted-foreground font-(--font-weight-ui)">
+      <span className="text-foreground/75 [html[data-high-contrast=true]_&]:text-muted-foreground font-normal">
         {worker.label}
       </span>
-      <span className="truncate">{worker.name}</span>
+      <span dir="auto" className="truncate">
+        {worker.name}
+      </span>
     </span>
   );
 }
@@ -855,12 +862,40 @@ function ProgressCell({ prep }: { prep: AdminDownloadPreparation }) {
   }
 }
 
-function requesterSummary(t: Translate, prep: AdminDownloadPreparation): string {
+/** The first requester's device, and how many others asked ("Alex's iPhone · +2 more"). */
+function requesterDevices(
+  t: Translate,
+  first: AdminDownloadPreparation["requesters"][number],
+  others: number,
+): ReactNode {
+  // Its own element, so a device name reads in its own direction and is cut at its own end.
+  const device = (
+    <span dir="auto" className="truncate">
+      {requesterDevice(first)}
+    </span>
+  );
+  return others > 0
+    ? t(`${K}.requesters.deviceMore`, { count: others, count_text: others, device })
+    : device;
+}
+
+/**
+ * The phone row's requester line, in a `flex whitespace-pre` box. The name and
+ * the device read in their own directions; the device is cut first, and the
+ * name only when it alone fills the line.
+ */
+function requesterSummary(t: Translate, prep: AdminDownloadPreparation): ReactNode {
   const [first, ...rest] = prep.requesters;
   if (!first) return t(`${K}.requesters.none`);
-  return [requesterName(first), requesterDevice(first), rest.length > 0 ? `+${rest.length}` : ""]
-    .filter(Boolean)
-    .join(" · ");
+  return (
+    <>
+      <span dir="auto" className="max-w-full shrink-0 truncate">
+        {requesterName(first)}
+      </span>
+      {SEPARATOR}
+      {requesterDevices(t, first, rest.length)}
+    </>
+  );
 }
 
 function Requesters({ prep }: { prep: AdminDownloadPreparation }) {
@@ -888,14 +923,8 @@ function Requesters({ prep }: { prep: AdminDownloadPreparation }) {
           </span>
         )}
       </div>
-      <div className="text-muted-foreground truncate text-[10px]">
-        {rest.length > 0
-          ? t(`${K}.requesters.deviceMore`, {
-              count: rest.length,
-              count_text: rest.length,
-              device: requesterDevice(first),
-            })
-          : requesterDevice(first)}
+      <div className="text-muted-foreground flex overflow-hidden text-[10px] whitespace-pre">
+        {requesterDevices(t, first, rest.length)}
       </div>
     </div>
   );

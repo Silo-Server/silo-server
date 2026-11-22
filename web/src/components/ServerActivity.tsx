@@ -608,7 +608,9 @@ function ScanRow({ scan, libraryName }: { scan: ScanRun; libraryName: string }) 
       )}
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex items-center gap-2">
-          <span className="truncate text-[12px] font-medium">{libraryName}</span>
+          <span dir="auto" className="truncate text-[12px] font-medium">
+            {libraryName}
+          </span>
           <span className="text-muted-foreground ms-auto shrink-0 text-[10px]">
             {scan.status === "running"
               ? t("web.admin.common.serverActivity.scanning")

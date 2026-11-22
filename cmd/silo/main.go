@@ -70,6 +70,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
+	"github.com/Silo-Server/silo-server/internal/directconn"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -104,7 +105,9 @@ import (
 	_ "github.com/Silo-Server/silo-server/internal/metadata/nfo"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodebuild"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/nodeinstall"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
@@ -158,7 +161,9 @@ import (
 	siloweb "github.com/Silo-Server/silo-server/web"
 )
 
-const serverModeTranscode = "transcode"
+// nodeBuildOnly is what a node build answers anything but a transcode node
+// run or a "silo node" subcommand.
+const nodeBuildOnly = "this silo build runs only as a transcode node: install it with `silo node install`, or set MODE=transcode"
 
 // serverModeProxy is MODE for a proxy node.
 const serverModeProxy = "proxy"
@@ -801,6 +806,11 @@ func addRedisBootstrapSettings(redisURL, redisURLVar string, configured map[stri
 
 // main starts the Silo server or a requested maintenance command.
 func main() {
+	// A node build has no image processing or web app, so it runs no
+	// subcommand but its own; flags still reach the transcode node.
+	if nodebuild.Node && len(os.Args) > 1 && os.Args[1] != "node" && !strings.HasPrefix(os.Args[1], "-") {
+		log.Fatal(nodeBuildOnly)
+	}
 	var storageAdmission *pglock.NodeAdmission
 	// The admission session is detached from the pool and lives until process
 	// exit. Worker Stop methods do not all wait for in-flight writes, so closing
@@ -872,6 +882,14 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "node" {
+		if err := nodeinstall.Run(os.Args[2:], os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "silo node: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	envFile := flag.String("env", ".env", "path to .env bootstrap file")
 	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
 	migrateStatus := flag.Bool("migrate-status", false, "show database migration status and exit")
@@ -904,6 +922,9 @@ func main() {
 	if !*migrateOnly && !*migrateStatus && *migrateDownTo < 0 && transcodeNodeMode(*envFile) {
 		runTranscodeNode()
 		return
+	}
+	if nodebuild.Node {
+		log.Fatal(nodeBuildOnly)
 	}
 
 	// Step 1: Bootstrap from .env
@@ -1533,6 +1554,7 @@ func main() {
 	// OnServerSettingUpdated closure, which only runs on admin requests after
 	// startup completes.
 	var ipResolver *clientip.Resolver
+	var directConn *directconn.Service
 	// Assigned below when recommendations start; nil (a no-op) otherwise.
 	var settingsRecWorker *recommendations.Worker
 	// Assigned below with the marker plugin providers; nil without plugins.
@@ -1597,7 +1619,19 @@ func main() {
 			}
 			return nil
 		},
-		OnServerSettingUpdated: func(_ context.Context, key, value string) {
+		OnServerSettingUpdated: func(ctx context.Context, key, value string) {
+			if directConn != nil && strings.HasPrefix(key, "direct_connections.") {
+				// The save has committed; reread in the background so a slow settings
+				// read never holds up the administrator's response. The read outlives
+				// the request; the service bounds it and ends it at shutdown. Reads
+				// serialize in the service, and unchanged values start no check.
+				reloadCtx := context.WithoutCancel(ctx)
+				go func() {
+					if err := directConn.SettingsChanged(reloadCtx); err != nil {
+						slog.WarnContext(reloadCtx, "direct connections: settings reload failed", "component", "directconn", "error", err)
+					}
+				}()
+			}
 			// Key-scoped reload for the client-IP trust boundary: unlike the
 			// whole-config watcher reload below, this cannot be blocked by an
 			// unrelated malformed setting failing config.LoadFromDB. Uses a
@@ -2747,6 +2781,20 @@ func main() {
 		defer policySystem.Stop()
 	}
 
+	// Build a viewer scope resolver using the current userStoreProvider (raw
+	// for notifications before wrapping below, wrapped for downstream callers).
+	newViewerResolver := func(users access.UserRepository, tokens access.ProfileTokenValidator) scopeResolver {
+		if policySystem != nil {
+			return policy.NewViewerResolver(users, userStoreProvider, tokens, policySystem.PDP(), accessGroupStore).
+				WithUnratedContentPolicy(unratedContent).
+				WithAdminDefaults(adminDefaults)
+		}
+		// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+		return access.NewResolver(users, userStoreProvider, tokens, accessGroupStore).
+			WithUnratedContentPolicy(unratedContent).
+			WithAdminDefaults(adminDefaults)
+	}
+
 	// White-label branding: one service shared by the API (public read + admin
 	// upload), the frontend handler (index.html title, favicon, manifest), the
 	// artwork reconcile task, and outgoing email. It is built before the
@@ -2770,13 +2818,7 @@ func main() {
 	if deps.DB != nil && userStoreProvider != nil {
 		userRepo := auth.NewUserRepository(deps.DB)
 		profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
-		var notificationScopes notifications.ScopeResolver
-		if policySystem != nil {
-			notificationScopes = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		} else {
-			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		}
+		notificationScopes := newViewerResolver(userRepo, profileTokens)
 		notificationSystem = notifications.NewSystem(
 			deps.DB,
 			settingsRepo,
@@ -2893,15 +2935,7 @@ func main() {
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, catalog.NewProviderIDRepository(deps.DB))
 		// A sync's episodes follow what the profile may open, as any viewer
 		// read does, so it resolves scope the same way.
-		var watchProviderScopes interface {
-			Resolve(context.Context, access.ResolveInput) (access.Scope, error)
-		}
-		if policySystem != nil {
-			watchProviderScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
-		} else {
-			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path.
-			watchProviderScopes = access.NewResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
-		}
+		watchProviderScopes := newViewerResolver(auth.NewUserRepository(deps.DB), nil)
 		watchProviderLibrary := catalog.NewLibraryItemRepository(deps.DB)
 		watchProviderService.
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
@@ -3120,12 +3154,7 @@ func main() {
 			// Cached rows are built under the scope the API resolves for the
 			// profile's own requests, so reads do not filter them down.
 			recUserRepo := auth.NewUserRepository(deps.DB)
-			if policySystem != nil {
-				recEngine.WithScopeResolver(policy.NewViewerResolver(recUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults))
-			} else {
-				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				recEngine.WithScopeResolver(access.NewResolver(recUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults))
-			}
+			recEngine.WithScopeResolver(newViewerResolver(recUserRepo, nil))
 		}
 		deps.Recommender = recEngine
 		deps.CatalogSearchVectorizer = recEngine
@@ -3185,6 +3214,30 @@ func main() {
 	}
 	ipResolver = clientip.NewResolver(trustedCIDRs)
 	deps.ClientIPResolver = ipResolver
+	if mode == "" || mode == "integrated" || mode == "api" {
+		directConn = directconn.New(appCtx, directconn.Config{Settings: settingsRepo, Logger: slog.Default(), Tuning: tuningCfg, Adjustments: adjustments, HeldAtStart: netadmin.Current().HeldAtStart})
+		deps.DirectConnections = directConn
+		// Subscribe before the initial read: Subscribe returns once Redis
+		// confirms it, so a change another replica commits after that point
+		// reaches this service, and one committed before it is in the read.
+		if err := eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+			if event.Type != cache.EventSettingsChanged {
+				return
+			}
+			// Publishers name the changed key; an empty payload names none.
+			if event.Payload != "" && !strings.HasPrefix(event.Payload, "direct_connections.") {
+				return
+			}
+			if err := directConn.SettingsChanged(appCtx); err != nil {
+				slog.WarnContext(appCtx, "direct connections: settings reload failed", "component", "directconn", "error", err)
+			}
+		}); err != nil {
+			slog.WarnContext(appCtx, "direct connections: settings subscription failed", "component", "directconn", "error", err)
+		}
+		if err := directConn.SettingsChanged(appCtx); err != nil {
+			slog.WarnContext(appCtx, "direct connections: initial settings read failed", "component", "directconn", "error", err)
+		}
+	}
 	// Hot-reload trusted proxies on settings changes via two complementary
 	// paths. The direct event-bus subscription re-reads only the clientip key,
 	// so a malformed unrelated setting (which fails the whole-config reload)
@@ -3366,13 +3419,7 @@ func main() {
 			// Imports fill their item limit with titles their owner profile
 			// can access. Scheduled syncs start with the task manager below,
 			// so the owner resolver is wired here, not in the router.
-			var ownerScopes scopeResolver
-			if policySystem != nil {
-				ownerScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			} else {
-				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				ownerScopes = access.NewResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			}
+			ownerScopes := newViewerResolver(auth.NewUserRepository(deps.DB), nil)
 			userSync := usercollections.NewService(deps.UserStoreProvider, collItemRepo, libraryItemRepo, usercollections.NewOwnerAccess(ownerScopes), nil, slog.Default())
 			userSync.TMDBCollections = collectionService.TMDBCollections
 			// Syncs refresh collages and start with the task manager below,
@@ -3788,13 +3835,7 @@ func main() {
 		if userStoreProvider != nil {
 			userRepo := auth.NewUserRepository(deps.DB)
 			profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
-			var reconcileResolver scopeResolver
-			if policySystem != nil {
-				reconcileResolver = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			} else {
-				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				reconcileResolver = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			}
+			reconcileResolver := newViewerResolver(userRepo, profileTokens)
 			requestReconcileSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: reconcileResolver})
 		}
 		if notificationSystem != nil {
@@ -3951,12 +3992,7 @@ func main() {
 		if deps.ImageResolver != nil {
 			absDetailSvc.SetImageResolver(deps.ImageResolver)
 		}
-		var absScopeResolver scopeResolver
-		if policySystem != nil {
-			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		} else {
-			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		}
+		absScopeResolver := newViewerResolver(absUserRepo, nil)
 		absHDeps := audiobooks.ABSHandlerDeps{
 			Pool:     deps.DB,
 			Items:    absItemRepo,
@@ -4395,24 +4431,8 @@ func main() {
 			// user-disabled libraries, and rating/quality ceilings apply to
 			// the compat API exactly as they do to the native API.
 			if userStoreProvider != nil {
-				var compatScopeResolver jellycompat.ScopeResolver
-				if policySystem != nil {
-					compatScopeResolver = policy.NewViewerResolver(
-						userRepo,
-						userStoreProvider,
-						nil, // profile tokens unused: compat login already verifies PINs
-						policySystem.PDP(),
-						accessGroupStore,
-					).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-				} else {
-					// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-					compatScopeResolver = access.NewResolver(
-						userRepo,
-						userStoreProvider,
-						nil, // profile tokens unused: compat login already verifies PINs
-						accessGroupStore,
-					).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-				}
+				// profile tokens unused: compat login already verifies PINs
+				compatScopeResolver := newViewerResolver(userRepo, nil)
 				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(compatScopeResolver)
 				compatDeps.PlaybackScopeResolver = compatScopeResolver
 			}
@@ -4470,7 +4490,7 @@ func main() {
 	defer stopLANDiscovery()
 	// Bind before serving so resident plugins, which reverse-proxy to this
 	// listener, are only started once it exists.
-	apiListener, _, apiListenErr := tcpcongestion.Listen(appCtx, "tcp", cfg.Server.Listen, tcpcongestion.ListenerAPI, opts)
+	apiListener, apiListenResult, apiListenErr := tcpcongestion.Listen(appCtx, "tcp", cfg.Server.Listen, tcpcongestion.ListenerAPI, opts)
 	if apiListenErr != nil {
 		if pluginProvisionWriter != nil {
 			pluginProvisionWriter.Close()
@@ -4509,8 +4529,20 @@ func main() {
 			}
 		}
 	}
-	startCompatServer(appCtx, compatSrv, tcpcongestion.ListenerJellyfin, opts, errCh)
-	startCompatServer(appCtx, absSrv, tcpcongestion.ListenerABS, opts, errCh)
+	jellyfinListenResult := startCompatServer(appCtx, compatSrv, tcpcongestion.ListenerJellyfin, opts, errCh)
+	absListenResult := startCompatServer(appCtx, absSrv, tcpcongestion.ListenerABS, opts, errCh)
+	if directConn != nil {
+		listeners := make([]directconn.Listener, 0, 3)
+		if apiListenErr == nil {
+			listeners = append(listeners, directConnectionListener(apiListenResult))
+		}
+		for _, result := range []*tcpcongestion.Result{jellyfinListenResult, absListenResult} {
+			if result != nil {
+				listeners = append(listeners, directConnectionListener(*result))
+			}
+		}
+		directConn.SetListeners(listeners)
+	}
 	netadmin.Release()
 	// Step 11: Wait for termination signal.
 	sigCh := make(chan os.Signal, 1)
@@ -5607,4 +5639,9 @@ type audiobooksSettingsAdapter struct {
 
 func (a *audiobooksSettingsAdapter) GetString(ctx context.Context, key string) (string, error) {
 	return a.repo.Get(ctx, key)
+}
+
+// directConnectionListener keeps the netadmin constructor out of directconn.
+func directConnectionListener(result tcpcongestion.Result) directconn.Listener {
+	return directconn.Listener{Listener: result.Listener, Requested: result.Requested, Granted: result.Granted, State: result.State, Reason: result.Reason, Errno: result.Errno, SendBuffer: directconn.SendBuffer{Requested: result.SendBuffer.Requested, Granted: result.SendBuffer.Granted, State: result.SendBuffer.State, Reason: result.SendBuffer.Reason, Errno: result.SendBuffer.Errno}}
 }
