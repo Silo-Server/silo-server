@@ -5,7 +5,7 @@ import {
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
 import type { AdminPlaybackHistoryItem } from "@/api/types";
-import { v2, type V2Query, type V2Result } from "./request";
+import { v2, V2ProblemError, type V2Query, type V2Result } from "./request";
 import { t } from "@/i18n";
 
 export type AdminPlaybackHistoryQuery = V2Query<"GET /api/v2/admin/playback-history">;
@@ -62,6 +62,12 @@ function isEntry(value: unknown): value is AdminPlaybackHistoryEntry {
   );
 }
 
+function parseOptionalNumericId(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 /** Projects a v2 entry onto the row shape the administrator views render. */
 export function adminPlaybackHistoryItemFromV2(
   entry: AdminPlaybackHistoryEntry,
@@ -83,10 +89,84 @@ export function adminPlaybackHistoryItemFromV2(
     duration_seconds: entry.duration_seconds,
     completed: entry.completed,
     played_seconds: entry.played_seconds,
+    measured: entry.measured,
+    start_position_seconds: entry.start_position_seconds,
+    paused_seconds: entry.paused_seconds,
+    measured_since: entry.measured_since,
+    measured_until: entry.measured_until,
+    client_ip: entry.client_ip,
+    device_id: entry.device_id,
+    device_platform: entry.device_platform,
+    client_name: entry.client_name,
+    client_version: entry.client_version,
+    video_decision: entry.video_decision,
+    audio_decision: entry.audio_decision,
+    end_reason: entry.end_reason,
     series_title: entry.series_title,
     season_number: entry.season_number,
     episode_number: entry.episode_number,
+    subtitle: entry.subtitle,
+    target_video_codec: entry.target_video_codec,
+    target_resolution: entry.target_resolution,
+    target_audio_codec: entry.target_audio_codec,
+    target_audio_channels: entry.target_audio_channels,
+    output_container: entry.output_container,
+    output_protocol: entry.output_protocol,
+    target_bitrate_kbps: entry.target_bitrate_kbps,
+    transcode_hw_accel: entry.transcode_hw_accel,
+    tone_map_mode: entry.tone_map_mode,
+    adaptation_reasons: entry.adaptation_reasons ?? [],
+    reporting_node: entry.reporting_node,
+    stream_location: entry.stream_location,
+    compat_origin: entry.compat_origin,
+    is_jellyfin_client: entry.is_jellyfin_client,
+    routing_execution: entry.routing_execution,
+    routing_execution_node_id: parseOptionalNumericId(entry.routing_execution_node_id),
+    routing_execution_node_name: entry.routing_execution_node_name,
+    routing_egress: entry.routing_egress,
+    routing_egress_node_id: parseOptionalNumericId(entry.routing_egress_node_id),
+    routing_egress_node_name: entry.routing_egress_node_name,
+    route_facts_recorded: entry.route_facts_recorded,
+    source_video_codec: entry.source_video_codec,
+    source_resolution: entry.source_resolution,
+    source_audio_codec: entry.source_audio_codec,
+    source_audio_channels: entry.source_audio_channels,
+    source_container: entry.source_container,
+    source_bitrate_kbps: entry.source_bitrate_kbps,
+    source_hdr: entry.source_hdr,
+    source_video_range_type: entry.source_video_range_type,
+    library_id: parseOptionalNumericId(entry.library_id),
+    library_name: entry.library_name,
   };
+}
+
+/** Reads one finalized playback session by ID; returns null on 404. */
+export async function getAdminPlaybackHistoryEntry(
+  sessionId: string,
+  scope: string,
+  signal?: AbortSignal,
+): Promise<AdminPlaybackHistoryItem | null> {
+  const context = captureProfileRequestContext();
+  if (!context || adminPlaybackHistoryScope() !== scope) throw new StaleApiRequestContextError();
+  try {
+    const entry = await v2("GET /api/v2/admin/playback-history/{session_id}", {
+      path: { session_id: sessionId },
+      profileContext: context,
+      signal,
+    });
+    if (!isCapturedProfileAuthorityActive(context) || adminPlaybackHistoryScope() !== scope) {
+      throw new StaleApiRequestContextError();
+    }
+    if (!isEntry(entry)) {
+      throw new Error(t("web.admin.errors.playbackHistoryInvalid"));
+    }
+    return adminPlaybackHistoryItemFromV2(entry);
+  } catch (err) {
+    if (err instanceof V2ProblemError && err.status === 404) {
+      return null;
+    }
+    throw err;
+  }
 }
 
 /**

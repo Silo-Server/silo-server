@@ -31275,6 +31275,12 @@
       "value": "\u200F\u202EHistory Import\u202C"
     }
   ],
+  "web.admin.common.title.header.insights": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInsights\u202C"
+    }
+  ],
   "web.admin.common.title.header.libraries": [
     {
       "type": 0,
@@ -31465,6 +31471,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EAdmin History Import\u202C"
+    }
+  ],
+  "web.admin.common.title.tab.insights": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdmin Insights\u202C"
     }
   ],
   "web.admin.common.title.tab.libraries": [
@@ -34815,6 +34827,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.dashboard.widgets.openInsights": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInsights ›\u202C"
     }
   ],
   "web.admin.dashboard.widgets.playbackActivity.chartLabelDaily": [
@@ -46214,6 +46232,12 @@
       "value": "\u200F\u202EInvalid watch history page. Reload the page.\u202C"
     }
   ],
+  "web.admin.history.column.client": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClient\u202C"
+    }
+  ],
   "web.admin.history.column.ended": [
     {
       "type": 0,
@@ -46260,6 +46284,258 @@
     {
       "type": 0,
       "value": "\u200F\u202EWatch Time\u202C"
+    }
+  ],
+  "web.admin.history.detail.action.ffmpegLogs": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFFmpeg logs\u202C"
+    }
+  ],
+  "web.admin.history.detail.action.openMedia": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen title\u202C"
+    }
+  ],
+  "web.admin.history.detail.action.sessionLogs": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESession logs\u202C"
+    }
+  ],
+  "web.admin.history.detail.column.delivered": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDelivered\u202C"
+    }
+  ],
+  "web.admin.history.detail.column.source": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESource\u202C"
+    }
+  ],
+  "web.admin.history.detail.column.stream": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETrack\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.account": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAccount\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.client": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClient\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.clientIp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClient IP\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.endPosition": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnd position\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.endReason": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnd reason\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.ended": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnded\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.library": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELibrary\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.network": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENetwork\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.paused": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPaused\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.platform": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlatform\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.profile": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EProfile\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.route": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERoute\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.sessionId": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESession ID\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.started": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStarted\u202C"
+    }
+  ],
+  "web.admin.history.detail.field.watched": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWatch time\u202C"
+    }
+  ],
+  "web.admin.history.detail.jellyfinBadge": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EJF\u202C"
+    }
+  ],
+  "web.admin.history.detail.jellyfinBadgeTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EJellyfin compatibility client\u202C"
+    }
+  ],
+  "web.admin.history.detail.keyboardHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUse ↑ and ↓ to step through rows\u202C"
+    }
+  ],
+  "web.admin.history.detail.loading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELoading session details…\u202C"
+    }
+  ],
+  "web.admin.history.detail.nextSession": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENext session\u202C"
+    }
+  ],
+  "web.admin.history.detail.notFound": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis playback session could not be found.\u202C"
+    }
+  ],
+  "web.admin.history.detail.preUpgradeNotice": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERecorded before detailed route telemetry was captured. Source specs and delivery route fields are unavailable for this session.\u202C"
+    }
+  ],
+  "web.admin.history.detail.previousSession": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPrevious session\u202C"
+    }
+  ],
+  "web.admin.history.detail.row.audio": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAudio\u202C"
+    }
+  ],
+  "web.admin.history.detail.row.bitrate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBitrate\u202C"
+    }
+  ],
+  "web.admin.history.detail.row.container": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EContainer\u202C"
+    }
+  ],
+  "web.admin.history.detail.row.subtitles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESubtitles\u202C"
+    }
+  ],
+  "web.admin.history.detail.row.video": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EVideo\u202C"
+    }
+  ],
+  "web.admin.history.detail.section.clientRoute": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClient, device & route\u202C"
+    }
+  ],
+  "web.admin.history.detail.section.reasons": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWhy this session adapted\u202C"
+    }
+  ],
+  "web.admin.history.detail.section.streams": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESource vs. delivered\u202C"
+    }
+  ],
+  "web.admin.history.detail.section.timing": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETiming & watch progress\u202C"
+    }
+  ],
+  "web.admin.history.detail.subtitlesBurnIn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBurned in\u202C"
+    }
+  ],
+  "web.admin.history.detail.subtitlesDirect": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EExternal / Sidecar\u202C"
+    }
+  ],
+  "web.admin.history.detail.subtitlesNone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENone\u202C"
+    }
+  ],
+  "web.admin.history.detail.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESession details\u202C"
     }
   ],
   "web.admin.history.duration.hoursMinutes": [
@@ -46338,10 +46614,106 @@
       "value": "\u200F\u202ENo playback history\u202C"
     }
   ],
+  "web.admin.history.filter.activeChip.client": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClient: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.codec": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECodec: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.dateRange": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDate: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": "\u202E – \u202C"
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.history.filter.activeChip.fromDate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFrom \u202C"
+    },
+    {
+      "type": 1,
+      "value": "from"
+    }
+  ],
+  "web.admin.history.filter.activeChip.platform": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlatform: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.reason": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReason: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.toDate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUntil \u202C"
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
       "value": "\u200F\u202EAll attempts\u202C"
+    }
+  ],
+  "web.admin.history.filter.allLibraries": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAll libraries\u202C"
+    }
+  ],
+  "web.admin.history.filter.allLocations": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAll networks\u202C"
+    }
+  ],
+  "web.admin.history.filter.allMethods": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAll methods\u202C"
     }
   ],
   "web.admin.history.filter.allProfiles": [
@@ -46356,6 +46728,12 @@
       "value": "\u200F\u202EAll users\u202C"
     }
   ],
+  "web.admin.history.filter.burnInOnly": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESubtitle burn-in\u202C"
+    }
+  ],
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
@@ -46368,16 +46746,48 @@
       "value": "\u200F\u202ECompleted\u202C"
     }
   ],
+  "web.admin.history.filter.locationLocal": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELocal\u202C"
+    }
+  ],
+  "web.admin.history.filter.locationRemote": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemote\u202C"
+    }
+  ],
   "web.admin.history.filter.partial": [
     {
       "type": 0,
       "value": "\u200F\u202EPartial\u202C"
     }
   ],
+  "web.admin.history.filter.removeChip": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemove \u202C"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "\u202E filter\u202C"
+    }
+  ],
   "web.admin.history.filter.reset": [
     {
       "type": 0,
       "value": "\u200F\u202EReset\u202C"
+    }
+  ],
+  "web.admin.history.filter.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESearch titles, users, clients, or session IDs…\u202C"
     }
   ],
   "web.admin.history.itemFilterActive": [
@@ -46414,6 +46824,12 @@
     {
       "type": 0,
       "value": "\u200F\u202Eunknown\u202C"
+    }
+  ],
+  "web.admin.history.pagination.firstPage": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFirst page\u202C"
     }
   ],
   "web.admin.history.pagination.next": [
@@ -46494,6 +46910,48 @@
       "value": "total"
     }
   ],
+  "web.admin.history.pagination.summary": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EShowing \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E row\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EShowing \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E rows\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.recent.autoRefreshing": [
     {
       "type": 0,
@@ -46526,6 +46984,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EEstimated: recorded before watch time was measured\u202C"
+    }
+  ],
+  "web.admin.history.row.inspect": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInspect session details\u202C"
     }
   ],
   "web.admin.history.row.meta": [
@@ -49002,6 +49466,1240 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.cellTooltip": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": "\u202E at \u202C"
+    },
+    {
+      "type": 1,
+      "value": "hour"
+    },
+    {
+      "type": 0,
+      "value": "\u202E: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "plays"
+    },
+    {
+      "type": 0,
+      "value": "\u202E (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "watch_time"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo viewing hours recorded in this window\u202C"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.less": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELess\u202C"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.more": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMore\u202C"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.subtitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWhen plays start in \u202C"
+    },
+    {
+      "type": 1,
+      "value": "tz"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EViewing hours\u202C"
+    }
+  ],
+  "web.admin.insights.activity.kpi.completionDetail": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": "\u202E of \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "\u202E completed\u202C"
+    }
+  ],
+  "web.admin.insights.activity.kpi.completionRate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECompletion rate\u202C"
+    }
+  ],
+  "web.admin.insights.activity.kpi.peakStreams": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPeak concurrent streams\u202C"
+    }
+  ],
+  "web.admin.insights.activity.kpi.peakStreamsAt": [
+    {
+      "type": 0,
+      "value": "\u200F\u202Eon \u202C"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.insights.activity.kpi.peakStreamsNone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo stream samples in window\u202C"
+    }
+  ],
+  "web.admin.insights.activity.kpi.plays": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlays\u202C"
+    }
+  ],
+  "web.admin.insights.activity.kpi.playsBreakdown": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "movies"
+    },
+    {
+      "type": 0,
+      "value": "\u202E movies · \u202C"
+    },
+    {
+      "type": 1,
+      "value": "episodes"
+    },
+    {
+      "type": 0,
+      "value": "\u202E episodes\u202C"
+    }
+  ],
+  "web.admin.insights.activity.kpi.watchTime": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWatch time\u202C"
+    }
+  ],
+  "web.admin.insights.activity.kpi.watchTimeMeasured": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "measured"
+    },
+    {
+      "type": 0,
+      "value": "\u202E of \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "\u202E measured\u202C"
+    }
+  ],
+  "web.admin.insights.activity.peak.chartLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPeak concurrent streams per day\u202C"
+    }
+  ],
+  "web.admin.insights.activity.peak.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo concurrency samples in this window\u202C"
+    }
+  ],
+  "web.admin.insights.activity.peak.scopeNotice": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPeak concurrent streams are server-wide and do not change with account or library filters.\u202C"
+    }
+  ],
+  "web.admin.insights.activity.peak.subtitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDaily highest simultaneous streams (server-wide)\u202C"
+    }
+  ],
+  "web.admin.insights.activity.peak.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPeak concurrent streams\u202C"
+    }
+  ],
+  "web.admin.insights.activity.volume.chartLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlayback volume over time\u202C"
+    }
+  ],
+  "web.admin.insights.activity.volume.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo playback in this window\u202C"
+    }
+  ],
+  "web.admin.insights.activity.volume.metricPlays": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlays\u202C"
+    }
+  ],
+  "web.admin.insights.activity.volume.metricWatchTime": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWatch time\u202C"
+    }
+  ],
+  "web.admin.insights.activity.volume.seriesEpisodes": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEpisodes\u202C"
+    }
+  ],
+  "web.admin.insights.activity.volume.seriesMovies": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMovies\u202C"
+    }
+  ],
+  "web.admin.insights.activity.volume.seriesOther": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOther\u202C"
+    }
+  ],
+  "web.admin.insights.activity.volume.splitMediaType": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMedia type\u202C"
+    }
+  ],
+  "web.admin.insights.activity.volume.splitMethod": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlay method\u202C"
+    }
+  ],
+  "web.admin.insights.activity.volume.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlayback volume\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.apiServer": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAPI server\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo bandwidth samples in this window\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.metricPeak": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPeak rate\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.metricVolume": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EVolume\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.peakLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDaily peak egress rate\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEgress over time\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.viewNodes": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBy node\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.viewTotal": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETotal\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.volumeLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDaily egress volume\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.dailyAverage": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDaily average\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.dailyAverageSub": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202Eacross \u202C"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E active day\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202Eacross \u202C"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E active days\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.egressSplit": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "playback"
+    },
+    {
+      "type": 0,
+      "value": "\u202E playback · \u202C"
+    },
+    {
+      "type": 1,
+      "value": "downloads"
+    },
+    {
+      "type": 0,
+      "value": "\u202E downloads\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.peakEgress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPeak egress\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.peakEgressAt": [
+    {
+      "type": 0,
+      "value": "\u200F\u202Eon \u202C"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.remoteShare": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemote play share\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "remote"
+    },
+    {
+      "type": 0,
+      "value": "\u202E remote · \u202C"
+    },
+    {
+      "type": 1,
+      "value": "local"
+    },
+    {
+      "type": 0,
+      "value": "\u202E local\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo location facts in window\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.totalEgress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETotal egress\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.node": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENode\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.peak": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPeak rate\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.share": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShare\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.total": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETotal egress\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo remote node egress in this window\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEgress by node\u202C"
+    }
+  ],
+  "web.admin.insights.bandwidth.scopeNotice": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBandwidth metrics are server-wide and do not change with account or library filters.\u202C"
+    }
+  ],
+  "web.admin.insights.coverage.metricsStart": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDaily bandwidth and concurrency metrics start on \u202C"
+    },
+    {
+      "type": 1,
+      "value": "since"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.insights.coverage.routeFactsNone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo plays in this window carry detailed route facts yet. New sessions record full codec, encoder, and routing telemetry automatically.\u202C"
+    }
+  ],
+  "web.admin.insights.coverage.routeFactsPartial": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDetailed codec, transcode, and routing facts are recorded for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "recorded"
+    },
+    {
+      "type": 0,
+      "value": "\u202E of \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "\u202E plays in this window (recorded since \u202C"
+    },
+    {
+      "type": 1,
+      "value": "since"
+    },
+    {
+      "type": 0,
+      "value": "\u202E).\u202C"
+    }
+  ],
+  "web.admin.insights.coverage.watchTimePartial": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMeasured watch time covers \u202C"
+    },
+    {
+      "type": 1,
+      "value": "measured"
+    },
+    {
+      "type": 0,
+      "value": "\u202E of \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "\u202E plays in this window; older sessions use end-position estimates.\u202C"
+    }
+  ],
+  "web.admin.insights.devices.burnInCodecs.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo subtitle burn-ins in this window\u202C"
+    }
+  ],
+  "web.admin.insights.devices.burnInCodecs.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBurn-in subtitle codecs\u202C"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo video transcodes in this window\u202C"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.software": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESoftware (CPU)\u202C"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEncoder acceleration\u202C"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.unknown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUnknown\u202C"
+    }
+  ],
+  "web.admin.insights.devices.kpi.directPlayDetail": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "direct"
+    },
+    {
+      "type": 0,
+      "value": "\u202E direct · \u202C"
+    },
+    {
+      "type": 1,
+      "value": "remux"
+    },
+    {
+      "type": 0,
+      "value": "\u202E remux · \u202C"
+    },
+    {
+      "type": 1,
+      "value": "transcode"
+    },
+    {
+      "type": 0,
+      "value": "\u202E transcode\u202C"
+    }
+  ],
+  "web.admin.insights.devices.kpi.directPlayRate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDirect play share\u202C"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hdrToneMap": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHDR tone mapping\u202C"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hdrToneMapDetail": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "hw"
+    },
+    {
+      "type": 0,
+      "value": "\u202E HW · \u202C"
+    },
+    {
+      "type": 1,
+      "value": "sw"
+    },
+    {
+      "type": 0,
+      "value": "\u202E SW\u202C"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hwSplit": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETranscode encoder\u202C"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hwSplitDetail": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "hw"
+    },
+    {
+      "type": 0,
+      "value": "\u202E HW · \u202C"
+    },
+    {
+      "type": 1,
+      "value": "sw"
+    },
+    {
+      "type": 0,
+      "value": "\u202E SW\u202C"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hwSplitNone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo transcodes\u202C"
+    }
+  ],
+  "web.admin.insights.devices.kpi.subtitleBurnIn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESubtitle burn-ins\u202C"
+    }
+  ],
+  "web.admin.insights.devices.kpi.subtitleBurnInDetail": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "\u202E% of transcodes\u202C"
+    }
+  ],
+  "web.admin.insights.devices.matrix.allSamples": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAll samples\u202C"
+    }
+  ],
+  "web.admin.insights.devices.matrix.cellTooltip": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "client"
+    },
+    {
+      "type": 0,
+      "value": "\u202E · \u202C"
+    },
+    {
+      "type": 1,
+      "value": "codec"
+    },
+    {
+      "type": 0,
+      "value": "\u202E: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "direct_rate"
+    },
+    {
+      "type": 0,
+      "value": "\u202E% direct (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "plays"
+    },
+    {
+      "type": 0,
+      "value": "\u202E; \u202C"
+    },
+    {
+      "type": 1,
+      "value": "transcodes"
+    },
+    {
+      "type": 0,
+      "value": "\u202E transcodes)\u202C"
+    }
+  ],
+  "web.admin.insights.devices.matrix.clientColumn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClient / Platform\u202C"
+    }
+  ],
+  "web.admin.insights.devices.matrix.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo client-codec pairs meet the sample threshold in this window\u202C"
+    }
+  ],
+  "web.admin.insights.devices.matrix.minPlays": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMin 5 plays\u202C"
+    }
+  ],
+  "web.admin.insights.devices.matrix.subtitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDirect-play rate by client and source codec. Select any cell to inspect matching sessions.\u202C"
+    }
+  ],
+  "web.admin.insights.devices.matrix.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClient × Source video codec\u202C"
+    }
+  ],
+  "web.admin.insights.devices.matrix.totalColumn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETotal\u202C"
+    }
+  ],
+  "web.admin.insights.devices.reasons.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo adaptation reasons recorded in this window\u202C"
+    }
+  ],
+  "web.admin.insights.devices.reasons.subtitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EServer adaptation reasons recorded on non-direct plays\u202C"
+    }
+  ],
+  "web.admin.insights.devices.reasons.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWhy sessions adapted\u202C"
+    }
+  ],
+  "web.admin.insights.devices.topTranscoders.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo transcodes recorded in this window\u202C"
+    }
+  ],
+  "web.admin.insights.devices.topTranscoders.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETop transcoding accounts\u202C"
+    }
+  ],
+  "web.admin.insights.devices.topTranscoders.transcodeShare": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "transcodes"
+    },
+    {
+      "type": 0,
+      "value": "\u202E of \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "\u202E plays\u202C"
+    }
+  ],
+  "web.admin.insights.devices.unknownClient": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUnknown client\u202C"
+    }
+  ],
+  "web.admin.insights.filter.allAccounts": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAll accounts\u202C"
+    }
+  ],
+  "web.admin.insights.filter.allLibraries": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAll libraries\u202C"
+    }
+  ],
+  "web.admin.insights.filter.fromDate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFrom date\u202C"
+    }
+  ],
+  "web.admin.insights.filter.rangeLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETime range\u202C"
+    }
+  ],
+  "web.admin.insights.filter.refresh": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERefresh\u202C"
+    }
+  ],
+  "web.admin.insights.filter.refreshing": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERefreshing\u202C"
+    }
+  ],
+  "web.admin.insights.filter.reset": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReset\u202C"
+    }
+  ],
+  "web.admin.insights.filter.timezone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETime zone\u202C"
+    }
+  ],
+  "web.admin.insights.filter.timezoneBrowser": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": "\u202E (local)\u202C"
+    }
+  ],
+  "web.admin.insights.filter.timezoneUtc": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUTC\u202C"
+    }
+  ],
+  "web.admin.insights.filter.toDate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETo date\u202C"
+    }
+  ],
+  "web.admin.insights.loadError": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFailed to load insights.\u202C"
+    }
+  ],
+  "web.admin.insights.openHistory": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHistory ›\u202C"
+    }
+  ],
+  "web.admin.insights.people.collapseProfiles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide household profiles for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "account"
+    }
+  ],
+  "web.admin.insights.people.column.account": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAccount\u202C"
+    }
+  ],
+  "web.admin.insights.people.column.actions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EActions\u202C"
+    }
+  ],
+  "web.admin.insights.people.column.completionRate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECompletion\u202C"
+    }
+  ],
+  "web.admin.insights.people.column.directRate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDirect %\u202C"
+    }
+  ],
+  "web.admin.insights.people.column.lastSeen": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast seen\u202C"
+    }
+  ],
+  "web.admin.insights.people.column.plays": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlays\u202C"
+    }
+  ],
+  "web.admin.insights.people.column.watchTime": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWatch time\u202C"
+    }
+  ],
+  "web.admin.insights.people.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo viewing activity matches these filters\u202C"
+    }
+  ],
+  "web.admin.insights.people.expandProfiles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow household profiles for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "account"
+    }
+  ],
+  "web.admin.insights.people.kpi.activeAccounts": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EActive accounts\u202C"
+    }
+  ],
+  "web.admin.insights.people.kpi.activeProfiles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EActive profiles\u202C"
+    }
+  ],
+  "web.admin.insights.people.kpi.liveNow": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELive now\u202C"
+    }
+  ],
+  "web.admin.insights.people.liveBadge": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELive\u202C"
+    }
+  ],
+  "web.admin.insights.people.loadMore": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow more accounts\u202C"
+    }
+  ],
+  "web.admin.insights.people.profilesCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E profile\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E profiles\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.people.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESearch accounts or profiles…\u202C"
+    }
+  ],
+  "web.admin.insights.people.unnamedProfile": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EProfile \u202C"
+    },
+    {
+      "type": 1,
+      "value": "id"
+    }
+  ],
+  "web.admin.insights.percent": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "\u202E%\u202C"
+    }
+  ],
+  "web.admin.insights.playCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E play\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E plays\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.range.1y": [
+    {
+      "type": 0,
+      "value": "\u200F\u202E1y\u202C"
+    }
+  ],
+  "web.admin.insights.range.30d": [
+    {
+      "type": 0,
+      "value": "\u200F\u202E30d\u202C"
+    }
+  ],
+  "web.admin.insights.range.7d": [
+    {
+      "type": 0,
+      "value": "\u200F\u202E7d\u202C"
+    }
+  ],
+  "web.admin.insights.range.90d": [
+    {
+      "type": 0,
+      "value": "\u200F\u202E90d\u202C"
+    }
+  ],
+  "web.admin.insights.range.all": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAll time\u202C"
+    }
+  ],
+  "web.admin.insights.range.custom": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECustom\u202C"
+    }
+  ],
+  "web.admin.insights.retry": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERetry\u202C"
+    }
+  ],
+  "web.admin.insights.subtitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlayback trends, household usage, device compatibility, and egress over time.\u202C"
+    }
+  ],
+  "web.admin.insights.tabs.activity": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EActivity\u202C"
+    }
+  ],
+  "web.admin.insights.tabs.bandwidth": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBandwidth\u202C"
+    }
+  ],
+  "web.admin.insights.tabs.devices": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDevices & Quality\u202C"
+    }
+  ],
+  "web.admin.insights.tabs.people": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPeople\u202C"
+    }
+  ],
+  "web.admin.insights.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInsights\u202C"
     }
   ],
   "web.admin.libraries.activeWork.cancelRefresh": [
@@ -81737,6 +83435,18 @@
     {
       "type": 0,
       "value": "\u200F\u202EHistory Import\u202C"
+    }
+  ],
+  "web.admin.shell.nav.page.insights.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlayback trends, accounts, device quality, and bandwidth.\u202C"
+    }
+  ],
+  "web.admin.shell.nav.page.insights.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInsights\u202C"
     }
   ],
   "web.admin.shell.nav.page.libraries.description": [

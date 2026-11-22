@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Link } from "react-router";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { useAdminTimeseries } from "@/hooks/queries/admin/dashboardInsights";
@@ -103,6 +104,12 @@ export function EgressWidget() {
             onChange={setView}
           />
         ) : null}
+        <Link
+          to="/admin/insights?tab=bandwidth"
+          className="text-muted-foreground hover:text-primary hidden text-[11px] whitespace-nowrap transition-colors @lg/card-header:inline"
+        >
+          {t("web.admin.dashboard.widgets.openInsights")}
+        </Link>
         <WidgetRangePicker />
       </WidgetHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">

@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { useAdminUsers } from "@/hooks/queries/admin/users";
-import { useAdminPlaybackHistory, useAdminUserProfiles } from "@/hooks/queries/admin/history";
+import { Flame, History, RefreshCw, Search, X } from "lucide-react";
+
+import type { AdminPlaybackHistoryItem } from "@/api/types";
 import { PageHeader } from "@/components/page/PageHeader";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -13,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { History, RefreshCw } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -22,52 +24,120 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Skeleton } from "@/components/ui/skeleton";
-import { formatRelativeTime } from "@/lib/date";
-import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
-import type { AdminPlaybackHistoryItem } from "@/api/types";
+import {
+  useAdminPlaybackHistoryEntry,
+  useAdminPlaybackHistoryPage,
+  useAdminUserProfiles,
+} from "@/hooks/queries/admin/history";
+import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { useT, type Translate } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
+import { formatRelativeTime } from "@/lib/date";
+import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
+import { formatCodecLabel } from "@/lib/mediaFormat";
+import { cn } from "@/lib/utils";
 import type { MessageKey } from "@/locales/keys";
 
+import { SessionDetailSheet } from "./admin-history/SessionDetailSheet";
 import { episodeCode } from "./admin-users/detail/format";
-import { formatDecisionLabel } from "./adminActivityPresentation";
+import { activityMethodMeta, formatDecisionLabel } from "./adminActivityPresentation";
+import { getAdaptationReasonByCode } from "./adminActivityReasons";
 
-const ALL_USERS = "all";
-const ALL_PROFILES = "all";
-const ALL_COMPLETION = "all";
+const ALL_VALUE = "all";
+const EM_DASH = "—";
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
-// Media types the server sends; others print as sent.
+
 const MEDIA_TYPE_LABELS: Record<string, MessageKey> = {
   movie: "web.admin.history.mediaType.movie",
   episode: "web.admin.history.mediaType.episode",
   series: "web.admin.history.mediaType.series",
 };
 
+interface ActiveFilterChip {
+  key: string;
+  label: string;
+  removeKeys: string[];
+}
+
 export default function AdminPlaybackHistory() {
   const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: users = [] } = useAdminUsers();
-  const [page, setPage] = useState(0);
+  const { data: libraries = [] } = useAdminLibraries();
+
   const [pageSize, setPageSize] = useState(25);
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
   const manualRefreshStartedAtRef = useRef<number | null>(null);
   const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
 
-  const selectedUser = searchParams.get("user_id") ?? ALL_USERS;
-  const selectedProfile = searchParams.get("profile_id") ?? ALL_PROFILES;
-  const selectedCompleted = searchParams.get("completed") ?? ALL_COMPLETION;
+  const selectedUser = searchParams.get("user_id") ?? ALL_VALUE;
+  const selectedProfile = searchParams.get("profile_id") ?? ALL_VALUE;
+  const selectedLibrary = searchParams.get("library_id") ?? ALL_VALUE;
+  const selectedMethod = searchParams.get("play_method") ?? ALL_VALUE;
+  const selectedCompleted = searchParams.get("completed") ?? ALL_VALUE;
+  const selectedLocation = searchParams.get("stream_location") ?? ALL_VALUE;
+  const selectedBurnIn = searchParams.get("subtitle_burn_in") === "true";
   const selectedMediaItemId = searchParams.get("media_item_id")?.trim() ?? "";
+  const selectedClientName = searchParams.get("client_name")?.trim() ?? "";
+  const selectedPlatform = searchParams.get("device_platform")?.trim() ?? "";
+  const selectedCodec = searchParams.get("source_video_codec")?.trim() ?? "";
+  const selectedReason = searchParams.get("adaptation_reason")?.trim() ?? "";
+  const selectedStartedAfter = searchParams.get("started_after")?.trim() ?? "";
+  const selectedStartedBefore = searchParams.get("started_before")?.trim() ?? "";
+  const urlSearch = searchParams.get("search")?.trim() ?? "";
+  const selectedSessionId = searchParams.get("session")?.trim() || null;
 
-  const selectedUserId = selectedUser !== ALL_USERS ? Number(selectedUser) : undefined;
-  const history = useAdminPlaybackHistory({
+  const [searchDraft, setSearchDraft] = useState(urlSearch);
+  const [syncedUrlSearch, setSyncedUrlSearch] = useState(urlSearch);
+  if (syncedUrlSearch !== urlSearch) {
+    setSyncedUrlSearch(urlSearch);
+    setSearchDraft(urlSearch);
+  }
+
+  useEffect(() => {
+    const trimmed = searchDraft.trim();
+    if (trimmed === urlSearch) return;
+    const timer = window.setTimeout(() => {
+      const next = new URLSearchParams(searchParams);
+      if (trimmed) {
+        next.set("search", trimmed);
+      } else {
+        next.delete("search");
+      }
+      setCursorStack([]);
+      setSearchParams(next, { replace: true });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [searchDraft, urlSearch, searchParams, setSearchParams]);
+
+  const selectedUserId = selectedUser !== ALL_VALUE ? Number(selectedUser) : undefined;
+  const selectedLibraryId = selectedLibrary !== ALL_VALUE ? Number(selectedLibrary) : undefined;
+  const activeCursor = cursorStack.length > 0 ? cursorStack[cursorStack.length - 1] : undefined;
+
+  const history = useAdminPlaybackHistoryPage({
     userId: selectedUserId,
-    profileId: selectedProfile !== ALL_PROFILES ? selectedProfile : undefined,
+    profileId: selectedProfile !== ALL_VALUE ? selectedProfile : undefined,
+    libraryId: selectedLibraryId,
     mediaItemId: selectedMediaItemId || undefined,
+    playMethod: selectedMethod !== ALL_VALUE ? selectedMethod : undefined,
     completed:
       selectedCompleted === "true" || selectedCompleted === "false" ? selectedCompleted : "all",
-    limit: 100,
+    streamLocation:
+      selectedLocation === "local" || selectedLocation === "remote" ? selectedLocation : "all",
+    subtitleBurnIn: selectedBurnIn ? "true" : "all",
+    clientName: selectedClientName || undefined,
+    devicePlatform: selectedPlatform || undefined,
+    sourceVideoCodec: selectedCodec || undefined,
+    adaptationReason: selectedReason || undefined,
+    startedAfter: selectedStartedAfter || undefined,
+    startedBefore: selectedStartedBefore || undefined,
+    search: urlSearch || undefined,
+    cursor: activeCursor,
+    limit: pageSize,
   });
+
   const profiles = useAdminUserProfiles(selectedUserId);
   const { refetch: refetchHistory } = history;
 
@@ -79,8 +149,7 @@ export default function AdminPlaybackHistory() {
     } finally {
       const startedAt = manualRefreshStartedAtRef.current;
       if (startedAt !== null) {
-        const elapsed = Date.now() - startedAt;
-        const remaining = REFRESH_SPINNER_MIN_VISIBLE_MS - elapsed;
+        const remaining = REFRESH_SPINNER_MIN_VISIBLE_MS - (Date.now() - startedAt);
         if (remaining > 0) {
           await delay(remaining);
         }
@@ -91,15 +160,15 @@ export default function AdminPlaybackHistory() {
   }, [refetchHistory]);
 
   useEffect(() => {
-    if (selectedUser === ALL_USERS && selectedProfile !== ALL_PROFILES) {
+    if (selectedUser === ALL_VALUE && selectedProfile !== ALL_VALUE) {
       const next = new URLSearchParams(searchParams);
       next.delete("profile_id");
       setSearchParams(next, { replace: true });
       return;
     }
     if (
-      selectedUser !== ALL_USERS &&
-      selectedProfile !== ALL_PROFILES &&
+      selectedUser !== ALL_VALUE &&
+      selectedProfile !== ALL_VALUE &&
       profiles.data &&
       profiles.data.length > 0 &&
       !profiles.data.some((profile) => profile.id === selectedProfile)
@@ -110,29 +179,138 @@ export default function AdminPlaybackHistory() {
     }
   }, [profiles.data, searchParams, selectedProfile, selectedUser, setSearchParams]);
 
-  function updateFilter(key: string, value: string) {
-    const next = new URLSearchParams(searchParams);
-    if (value === ALL_USERS || value === ALL_PROFILES || value === ALL_COMPLETION) {
-      next.delete(key);
-    } else {
-      next.set(key, value);
-    }
-    if (key === "user_id") {
-      next.delete("profile_id");
-    }
-    setPage(0);
-    setSearchParams(next, { replace: true });
-  }
+  const updateFilter = useCallback(
+    (key: string, value: string) => {
+      const next = new URLSearchParams(searchParams);
+      if (!value || value === ALL_VALUE) {
+        next.delete(key);
+      } else {
+        next.set(key, value);
+      }
+      if (key === "user_id") {
+        next.delete("profile_id");
+      }
+      setCursorStack([]);
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
 
-  function resetFilters() {
-    setPage(0);
+  const removeFilterKeys = useCallback(
+    (keys: string[]) => {
+      const next = new URLSearchParams(searchParams);
+      for (const k of keys) next.delete(k);
+      setCursorStack([]);
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const resetFilters = useCallback(() => {
+    setSearchDraft("");
+    setCursorStack([]);
     setSearchParams(new URLSearchParams(), { replace: true });
-  }
+  }, [setSearchParams]);
 
-  const allRows = history.data ?? [];
-  const total = allRows.length;
-  const paginatedRows = allRows.slice(page * pageSize, (page + 1) * pageSize);
-  const activeMediaItemLabel = allRows[0] ? historyRowLabel(allRows[0], t) : selectedMediaItemId;
+  const selectSession = useCallback(
+    (sessionId: string | null) => {
+      const next = new URLSearchParams(searchParams);
+      if (sessionId) {
+        next.set("session", sessionId);
+      } else {
+        next.delete("session");
+      }
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const rows = useMemo(() => history.data?.items ?? [], [history.data?.items]);
+  const hasMore = history.data?.hasMore ?? false;
+  const nextCursor = history.data?.nextCursor ?? null;
+
+  const selectedRowIndex = useMemo(
+    () => (selectedSessionId ? rows.findIndex((r) => r.session_id === selectedSessionId) : -1),
+    [rows, selectedSessionId],
+  );
+  const inPageSession = selectedRowIndex >= 0 ? (rows[selectedRowIndex] ?? null) : null;
+  const detailQuery = useAdminPlaybackHistoryEntry(
+    selectedSessionId,
+    Boolean(selectedSessionId) && !inPageSession,
+  );
+  const activeSession = inPageSession ?? detailQuery.data ?? null;
+
+  const activeChips = useMemo<ActiveFilterChip[]>(() => {
+    const chips: ActiveFilterChip[] = [];
+    if (selectedClientName) {
+      chips.push({
+        key: "client_name",
+        label: t("web.admin.history.filter.activeChip.client", { value: selectedClientName }),
+        removeKeys: ["client_name"],
+      });
+    }
+    if (selectedPlatform) {
+      chips.push({
+        key: "device_platform",
+        label: t("web.admin.history.filter.activeChip.platform", { value: selectedPlatform }),
+        removeKeys: ["device_platform"],
+      });
+    }
+    if (selectedCodec) {
+      chips.push({
+        key: "source_video_codec",
+        label: t("web.admin.history.filter.activeChip.codec", {
+          value: formatCodecLabel(selectedCodec) || selectedCodec.toUpperCase(),
+        }),
+        removeKeys: ["source_video_codec"],
+      });
+    }
+    if (selectedReason) {
+      const reasonLabel = getAdaptationReasonByCode(selectedReason)?.label ?? selectedReason;
+      chips.push({
+        key: "adaptation_reason",
+        label: t("web.admin.history.filter.activeChip.reason", { value: reasonLabel }),
+        removeKeys: ["adaptation_reason"],
+      });
+    }
+    if (selectedStartedAfter && selectedStartedBefore) {
+      chips.push({
+        key: "date_range",
+        label: t("web.admin.history.filter.activeChip.dateRange", {
+          from: formatChipDate(selectedStartedAfter),
+          to: formatChipDate(selectedStartedBefore),
+        }),
+        removeKeys: ["started_after", "started_before"],
+      });
+    } else if (selectedStartedAfter) {
+      chips.push({
+        key: "started_after",
+        label: t("web.admin.history.filter.activeChip.fromDate", {
+          from: formatChipDate(selectedStartedAfter),
+        }),
+        removeKeys: ["started_after"],
+      });
+    } else if (selectedStartedBefore) {
+      chips.push({
+        key: "started_before",
+        label: t("web.admin.history.filter.activeChip.toDate", {
+          to: formatChipDate(selectedStartedBefore),
+        }),
+        removeKeys: ["started_before"],
+      });
+    }
+    return chips;
+  }, [
+    selectedClientName,
+    selectedPlatform,
+    selectedCodec,
+    selectedReason,
+    selectedStartedAfter,
+    selectedStartedBefore,
+    t,
+  ]);
+
+  const activeMediaItemLabel = rows[0] ? historyRowLabel(rows[0], t) : selectedMediaItemId;
 
   return (
     <div className="space-y-6 pb-4 sm:pb-6">
@@ -141,76 +319,6 @@ export default function AdminPlaybackHistory() {
         subtitle={t("web.admin.history.subtitle")}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {selectedMediaItemId && (
-              <div className="border-border bg-muted/40 flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
-                <span className="text-muted-foreground font-medium">
-                  {t("web.admin.history.itemFilterActive")}
-                </span>
-                <Link
-                  to={`/item/${encodeURIComponent(selectedMediaItemId)}`}
-                  className="hover:text-primary font-semibold transition-colors hover:underline"
-                >
-                  {activeMediaItemLabel}
-                </Link>
-              </div>
-            )}
-
-            <Select value={selectedUser} onValueChange={(value) => updateFilter("user_id", value)}>
-              <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder={t("web.admin.history.filter.allUsers")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_USERS}>{t("web.admin.history.filter.allUsers")}</SelectItem>
-                {users.map((user) => (
-                  <SelectItem key={user.id} value={String(user.id)}>
-                    {user.username}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={selectedProfile}
-              onValueChange={(value) => updateFilter("profile_id", value)}
-              disabled={selectedUser === ALL_USERS}
-            >
-              <SelectTrigger className="w-[220px]">
-                <SelectValue
-                  placeholder={
-                    selectedUser === ALL_USERS
-                      ? t("web.admin.history.filter.chooseUserFirst")
-                      : t("web.admin.history.filter.allProfiles")
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_PROFILES}>
-                  {t("web.admin.history.filter.allProfiles")}
-                </SelectItem>
-                {(profiles.data ?? []).map((profile) => (
-                  <SelectItem key={profile.id} value={profile.id}>
-                    {profile.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={selectedCompleted}
-              onValueChange={(value) => updateFilter("completed", value)}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder={t("web.admin.history.filter.allAttempts")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_COMPLETION}>
-                  {t("web.admin.history.filter.allAttempts")}
-                </SelectItem>
-                <SelectItem value="true">{t("web.admin.history.filter.completed")}</SelectItem>
-                <SelectItem value="false">{t("web.admin.history.filter.partial")}</SelectItem>
-              </SelectContent>
-            </Select>
-
             <Button variant="outline" size="sm" onClick={resetFilters}>
               {t("web.admin.history.filter.reset")}
             </Button>
@@ -224,9 +332,7 @@ export default function AdminPlaybackHistory() {
               disabled={isManualRefreshPending}
               aria-busy={isManualRefreshPending}
             >
-              <RefreshCw
-                className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`}
-              />
+              <RefreshCw className={cn("h-3.5 w-3.5", isManualRefreshPending && "animate-spin")} />
               {isManualRefreshPending
                 ? t("web.admin.activity.page.refreshing")
                 : t("web.admin.activity.page.refresh")}
@@ -235,18 +341,193 @@ export default function AdminPlaybackHistory() {
         }
       />
 
+      {/* Multi-facet Filter Bar */}
+      <div className="surface-panel space-y-3 rounded-2xl border-0 p-3.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[220px] flex-1">
+            <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
+            <Input
+              value={searchDraft}
+              onChange={(e) => setSearchDraft(e.target.value)}
+              placeholder={t("web.admin.history.filter.searchPlaceholder")}
+              className="h-9 ps-8 text-xs"
+            />
+          </div>
+
+          <Select value={selectedUser} onValueChange={(value) => updateFilter("user_id", value)}>
+            <SelectTrigger className="h-9 w-[160px] text-xs">
+              <SelectValue placeholder={t("web.admin.history.filter.allUsers")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_VALUE}>{t("web.admin.history.filter.allUsers")}</SelectItem>
+              {users.map((user) => (
+                <SelectItem key={user.id} value={String(user.id)}>
+                  {user.username}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={selectedProfile}
+            onValueChange={(value) => updateFilter("profile_id", value)}
+            disabled={selectedUser === ALL_VALUE}
+          >
+            <SelectTrigger className="h-9 w-[155px] text-xs">
+              <SelectValue
+                placeholder={
+                  selectedUser === ALL_VALUE
+                    ? t("web.admin.history.filter.chooseUserFirst")
+                    : t("web.admin.history.filter.allProfiles")
+                }
+              />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_VALUE}>{t("web.admin.history.filter.allProfiles")}</SelectItem>
+              {(profiles.data ?? []).map((profile) => (
+                <SelectItem key={profile.id} value={profile.id}>
+                  {profile.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={selectedLibrary}
+            onValueChange={(value) => updateFilter("library_id", value)}
+          >
+            <SelectTrigger className="h-9 w-[155px] text-xs">
+              <SelectValue placeholder={t("web.admin.history.filter.allLibraries")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_VALUE}>
+                {t("web.admin.history.filter.allLibraries")}
+              </SelectItem>
+              {libraries.map((lib) => (
+                <SelectItem key={lib.id} value={String(lib.id)}>
+                  {lib.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={selectedMethod}
+            onValueChange={(value) => updateFilter("play_method", value)}
+          >
+            <SelectTrigger className="h-9 w-[140px] text-xs">
+              <SelectValue placeholder={t("web.admin.history.filter.allMethods")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_VALUE}>{t("web.admin.history.filter.allMethods")}</SelectItem>
+              <SelectItem value="direct">{t("web.admin.activity.decision.direct")}</SelectItem>
+              <SelectItem value="remux">{t("web.admin.activity.decision.remux")}</SelectItem>
+              <SelectItem value="transcode">
+                {t("web.admin.activity.decision.transcode")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={selectedCompleted}
+            onValueChange={(value) => updateFilter("completed", value)}
+          >
+            <SelectTrigger className="h-9 w-[135px] text-xs">
+              <SelectValue placeholder={t("web.admin.history.filter.allAttempts")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_VALUE}>{t("web.admin.history.filter.allAttempts")}</SelectItem>
+              <SelectItem value="true">{t("web.admin.history.filter.completed")}</SelectItem>
+              <SelectItem value="false">{t("web.admin.history.filter.partial")}</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={selectedLocation}
+            onValueChange={(value) => updateFilter("stream_location", value)}
+          >
+            <SelectTrigger className="h-9 w-[135px] text-xs">
+              <SelectValue placeholder={t("web.admin.history.filter.allLocations")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_VALUE}>
+                {t("web.admin.history.filter.allLocations")}
+              </SelectItem>
+              <SelectItem value="local">{t("web.admin.history.filter.locationLocal")}</SelectItem>
+              <SelectItem value="remote">{t("web.admin.history.filter.locationRemote")}</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Button
+            type="button"
+            variant={selectedBurnIn ? "secondary" : "outline"}
+            size="sm"
+            aria-pressed={selectedBurnIn}
+            onClick={() => updateFilter("subtitle_burn_in", selectedBurnIn ? ALL_VALUE : "true")}
+            className="h-9 gap-1.5 text-xs"
+          >
+            <Flame className="h-3.5 w-3.5" />
+            {t("web.admin.history.filter.burnInOnly")}
+          </Button>
+        </div>
+
+        {(selectedMediaItemId || activeChips.length > 0) && (
+          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+            {selectedMediaItemId ? (
+              <div className="border-border bg-muted/40 inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs">
+                <span className="text-muted-foreground font-medium">
+                  {t("web.admin.history.itemFilterActive")}
+                </span>
+                <Link
+                  to={`/item/${encodeURIComponent(selectedMediaItemId)}`}
+                  className="hover:text-primary font-semibold transition-colors hover:underline"
+                >
+                  {activeMediaItemLabel}
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => removeFilterKeys(["media_item_id"])}
+                  aria-label={t("web.admin.history.filter.removeChip", {
+                    label: activeMediaItemLabel,
+                  })}
+                  className="text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ) : null}
+            {activeChips.map((chip) => (
+              <span
+                key={chip.key}
+                className="border-border bg-muted/40 inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs"
+              >
+                <span>{chip.label}</span>
+                <button
+                  type="button"
+                  onClick={() => removeFilterKeys(chip.removeKeys)}
+                  aria-label={t("web.admin.history.filter.removeChip", { label: chip.label })}
+                  className="text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <InfoCard
           label={t("web.admin.history.stats.visibleRows")}
-          value={allRows.length.toLocaleString(formatLocale())}
+          value={rows.length.toLocaleString(formatLocale())}
         />
         <InfoCard
           label={t("web.admin.history.stats.completed")}
-          value={allRows.filter((row) => row.completed).length.toLocaleString(formatLocale())}
+          value={rows.filter((row) => row.completed).length.toLocaleString(formatLocale())}
         />
         <InfoCard
           label={t("web.admin.history.stats.partial")}
-          value={allRows.filter((row) => !row.completed).length.toLocaleString(formatLocale())}
+          value={rows.filter((row) => !row.completed).length.toLocaleString(formatLocale())}
         />
       </div>
 
@@ -275,7 +556,7 @@ export default function AdminPlaybackHistory() {
                 ? history.error.message
                 : t("web.admin.history.loadError")}
             </div>
-          ) : allRows.length === 0 ? (
+          ) : rows.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
               <History className="text-muted-foreground/50 h-10 w-10" />
               <div className="space-y-1">
@@ -294,6 +575,7 @@ export default function AdminPlaybackHistory() {
                       <TableHead>{t("web.admin.history.column.media")}</TableHead>
                       <TableHead>{t("web.admin.history.column.user")}</TableHead>
                       <TableHead>{t("web.admin.history.column.profile")}</TableHead>
+                      <TableHead>{t("web.admin.history.column.client")}</TableHead>
                       <TableHead>{t("web.admin.history.column.method")}</TableHead>
                       <TableHead>{t("web.admin.history.column.watchTime")}</TableHead>
                       <TableHead>{t("web.admin.history.column.status")}</TableHead>
@@ -304,9 +586,11 @@ export default function AdminPlaybackHistory() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {paginatedRows.map((row) => {
+                    {rows.map((row) => {
                       const watch = watchTime(row);
                       const { title, detail } = historyRowTitle(row, t);
+                      const isSelected = row.session_id === selectedSessionId;
+                      const methodMeta = activityMethodMeta(normalizeMethodKey(row.play_method));
                       const titleBlock = (
                         <>
                           {title}
@@ -317,9 +601,20 @@ export default function AdminPlaybackHistory() {
                       );
                       const profileLabel = row.profile_name || row.profile_id;
                       return (
-                        <TableRow key={row.session_id}>
+                        <TableRow
+                          key={row.session_id}
+                          onClick={(e) => {
+                            if ((e.target as HTMLElement).closest("a, button")) return;
+                            selectSession(row.session_id);
+                          }}
+                          className={cn(
+                            "cursor-pointer transition-colors",
+                            isSelected && "bg-primary/8 hover:bg-primary/10",
+                          )}
+                          aria-label={t("web.admin.history.row.inspect")}
+                        >
                           <TableCell>
-                            <div className="max-w-[18rem] min-w-[12rem] space-y-1 break-words whitespace-normal">
+                            <div className="max-w-[18rem] min-w-[11rem] space-y-1 break-words whitespace-normal">
                               {row.media_item_id ? (
                                 <Link
                                   to={`/item/${encodeURIComponent(row.media_item_id)}`}
@@ -359,12 +654,38 @@ export default function AdminPlaybackHistory() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="secondary">
-                              {formatDecisionLabel(row.play_method)}
-                            </Badge>
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-1.5 text-xs font-medium">
+                                <span>{row.client_name ?? EM_DASH}</span>
+                                {row.is_jellyfin_client ? (
+                                  <Badge
+                                    variant="secondary"
+                                    title={t("web.admin.history.detail.jellyfinBadgeTitle")}
+                                    className="px-1 py-0 text-[10px] font-bold"
+                                  >
+                                    {t("web.admin.history.detail.jellyfinBadge")}
+                                  </Badge>
+                                ) : null}
+                              </div>
+                              {row.device_platform ? (
+                                <div className="text-muted-foreground text-[11px]">
+                                  {row.device_platform}
+                                </div>
+                              ) : null}
+                            </div>
                           </TableCell>
                           <TableCell>
-                            <div className="space-y-1">
+                            <span
+                              className={cn(
+                                "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
+                                methodMeta.badgeClass,
+                              )}
+                            >
+                              {formatDecisionLabel(row.play_method)}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1 tabular-nums">
                               <div
                                 title={
                                   watch.estimated
@@ -393,7 +714,7 @@ export default function AdminPlaybackHistory() {
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            <div className="space-y-1">
+                            <div className="space-y-1 tabular-nums">
                               <div>{formatDateTime(row.ended_at)}</div>
                               <div className="text-muted-foreground text-xs">
                                 {t("web.admin.history.row.started", {
@@ -424,73 +745,129 @@ export default function AdminPlaybackHistory() {
                   </TableBody>
                 </Table>
               </div>
-              {total > 0 && (
-                <div className="flex items-center justify-between px-2 py-4">
-                  <div className="flex items-center gap-4">
-                    <span className="text-muted-foreground text-sm">
-                      {t("web.admin.history.pagination.range", {
-                        from: page * pageSize + 1,
-                        to: Math.min((page + 1) * pageSize, total),
-                        total: total,
-                      })}
-                    </span>
-                    <Select
-                      value={String(pageSize)}
-                      onValueChange={(v) => {
-                        setPageSize(Number(v));
-                        setPage(0);
-                      }}
-                    >
-                      <SelectTrigger className="h-8 min-w-[100px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PAGE_SIZE_OPTIONS.map((size) => (
-                          <SelectItem key={size} value={size}>
-                            {t("web.admin.history.pagination.pageSize", { count: Number(size) })}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage((p) => p - 1)}
-                      disabled={page === 0}
-                    >
-                      {t("web.admin.history.pagination.previous")}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage((p) => p + 1)}
-                      disabled={(page + 1) * pageSize >= total}
-                    >
-                      {t("web.admin.history.pagination.next")}
-                    </Button>
-                  </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 px-2 py-4">
+                <div className="flex items-center gap-4">
+                  <span className="text-muted-foreground text-sm tabular-nums">
+                    {t("web.admin.history.pagination.summary", {
+                      count: rows.length,
+                      count_text: rows.length.toLocaleString(formatLocale()),
+                    })}
+                  </span>
+                  <Select
+                    value={String(pageSize)}
+                    onValueChange={(v) => {
+                      setPageSize(Number(v));
+                      setCursorStack([]);
+                    }}
+                  >
+                    <SelectTrigger className="h-8 min-w-[100px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAGE_SIZE_OPTIONS.map((size) => (
+                        <SelectItem key={size} value={size}>
+                          {t("web.admin.history.pagination.pageSize", { count: Number(size) })}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              )}
+                <div className="flex gap-2">
+                  {cursorStack.length > 1 ? (
+                    <Button variant="outline" size="sm" onClick={() => setCursorStack([])}>
+                      {t("web.admin.history.pagination.firstPage")}
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCursorStack((stack) => stack.slice(0, -1))}
+                    disabled={cursorStack.length === 0}
+                  >
+                    {t("web.admin.history.pagination.previous")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (nextCursor) {
+                        setCursorStack((stack) => [...stack, nextCursor]);
+                      }
+                    }}
+                    disabled={!hasMore || !nextCursor}
+                  >
+                    {t("web.admin.history.pagination.next")}
+                  </Button>
+                </div>
+              </div>
             </>
           )}
         </CardContent>
       </Card>
+
+      <SessionDetailSheet
+        open={Boolean(selectedSessionId)}
+        onOpenChange={(open) => {
+          if (!open) selectSession(null);
+        }}
+        session={activeSession}
+        isLoading={Boolean(selectedSessionId) && !inPageSession && detailQuery.isLoading}
+        notFound={
+          Boolean(selectedSessionId) &&
+          !inPageSession &&
+          !detailQuery.isLoading &&
+          activeSession === null
+        }
+        hasPrevious={selectedRowIndex > 0}
+        hasNext={selectedRowIndex >= 0 && selectedRowIndex < rows.length - 1}
+        onPrevious={() => {
+          if (selectedRowIndex > 0) {
+            const prev = rows[selectedRowIndex - 1];
+            if (prev) selectSession(prev.session_id);
+          }
+        }}
+        onNext={() => {
+          if (selectedRowIndex >= 0 && selectedRowIndex < rows.length - 1) {
+            const next = rows[selectedRowIndex + 1];
+            if (next) selectSession(next.session_id);
+          }
+        }}
+      />
     </div>
   );
 }
 
-/**
- * An episode leads with its series title, with "S02E04 · Episode title" as the
- * detail line. A row without a series title keeps its own title.
- */
+function normalizeMethodKey(playMethod: string): string {
+  switch (playMethod) {
+    case "direct":
+    case "direct_play":
+      return "direct";
+    case "remux":
+    case "direct_stream":
+      return "remux";
+    case "transcode":
+      return "transcode";
+    default:
+      return "unknown";
+  }
+}
+
+function formatChipDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString(formatLocale(), {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function historyRowTitle(
   row: AdminPlaybackHistoryItem,
   t: Translate,
 ): { title: string; detail: string } {
   if (row.series_title) {
-    // A pilot named after its show would otherwise repeat the series title.
     const episodeTitle = row.media_title === row.series_title ? "" : row.media_title;
     const detail = [episodeCode(row.season_number, row.episode_number), episodeTitle]
       .filter(Boolean)
@@ -515,13 +892,11 @@ function InfoCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="surface-panel rounded-2xl border-0 p-4">
       <div className="text-muted-foreground text-[11px] font-medium">{label}</div>
-      <div className="mt-1 text-2xl font-extrabold tracking-tight">{value}</div>
+      <div className="mt-1 text-2xl font-extrabold tracking-tight tabular-nums">{value}</div>
     </div>
   );
 }
 
-// Measured watch time, or for a play recorded before it was measured the
-// server's estimate: the end position capped at the session's length.
 function watchTime(row: AdminPlaybackHistoryItem) {
   if (row.played_seconds !== null) return { seconds: row.played_seconds, estimated: false };
   const elapsed = (Date.parse(row.ended_at) - Date.parse(row.started_at)) / 1000;
@@ -546,17 +921,17 @@ function formatDuration(seconds: number | null, t: Translate) {
 
   if (hours > 0) {
     return t("web.admin.history.duration.hoursMinutes", {
-      hours: hours,
-      minutes: minutes,
+      hours: String(hours),
+      minutes: String(minutes),
     });
   }
   if (minutes > 0) {
     return t("web.admin.history.duration.minutesSeconds", {
-      minutes: minutes,
-      seconds: secs,
+      minutes: String(minutes),
+      seconds: String(secs),
     });
   }
-  return t("web.admin.history.duration.seconds", { seconds: secs });
+  return t("web.admin.history.duration.seconds", { seconds: String(secs) });
 }
 
 function formatDateTime(value: string) {

@@ -505,13 +505,20 @@ export const adminKeys = {
   invitations: () => ["admin", "invitations"] as const,
   apiKeys: () => ["admin", "apiKeys"] as const,
   rateLimitConfig: () => ["admin", "rateLimitConfig"] as const,
-  playbackHistory: (params: {
-    userId?: number;
-    profileId?: string;
-    mediaItemId?: string;
-    completed?: string;
-    limit?: number;
-  }) => ["admin", "playbackHistory", params] as const,
+  playbackHistory: (params: Record<string, unknown>) =>
+    ["admin", "playbackHistory", params] as const,
+  playbackHistoryDetail: (sessionId: string) =>
+    ["admin", "playbackHistory", "detail", sessionId] as const,
+  insightsRoot: () => ["admin", "insights"] as const,
+  insightsCapabilities: () => ["admin", "insights", "capabilities"] as const,
+  insightsActivity: (params: Record<string, unknown>) =>
+    ["admin", "insights", "activity", params] as const,
+  insightsPeople: (params: Record<string, unknown>) =>
+    ["admin", "insights", "people", params] as const,
+  insightsDevices: (params: Record<string, unknown>) =>
+    ["admin", "insights", "devices", params] as const,
+  insightsBandwidth: (params: Record<string, unknown>) =>
+    ["admin", "insights", "bandwidth", params] as const,
   userIPs: (userId: number, days?: number) => ["admin", "users", userId, "ips", days] as const,
   ipUsers: (ip: string, days?: number) => ["admin", "ips", ip, days] as const,
   operationalLogsRoot: () => ["admin", "logs", "app"] as const,

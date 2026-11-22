@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Link } from "react-router";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { formatTime } from "@/lib/datetime";
@@ -56,6 +57,12 @@ export function PlaybackActivityWidget() {
             count_text: total.toLocaleString(formatLocale()),
           })}
         </span>
+        <Link
+          to="/admin/insights?tab=activity"
+          className="text-muted-foreground hover:text-primary hidden text-[11px] whitespace-nowrap transition-colors @md/card-header:inline"
+        >
+          {t("web.admin.dashboard.widgets.openInsights")}
+        </Link>
         <WidgetRangePicker />
       </WidgetHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">
