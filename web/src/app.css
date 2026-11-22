@@ -1151,7 +1151,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
       color-mix(in srgb, var(--background) 85%, transparent) 10rem
     );
     --detail-hero-copy-side-fades: linear-gradient(
-      calc(90deg * var(--dir-sign)),
+      to right,
       transparent,
       rgb(0 0 0 / 6%) 1.6rem,
       rgb(0 0 0 / 24%) 3.2rem,
