@@ -3635,16 +3635,22 @@ automatically.
 `POST /api/v2/admin/plugins/installations/{id}/config/test` probes one prospective entry:
 the server starts a temporary plugin instance with the merged configuration, runs the
 plugin's connection check under a 20 s timeout, and stops the instance. Nothing is stored.
-A metadata provider is checked with a movie search; a marker provider is asked for its
-account statistics, which need the staged credentials.
+A plugin whose manifest metadata declares `configuration_check: true` checks itself: the
+server calls its `ConfigurationChecks.TestConfiguration` with every global config entry,
+the staged one in place of its saved value, and shows the plugin's message when it answers
+`ok` false. This takes precedence over the built-in probes, whatever the plugin's
+capabilities. Otherwise a metadata provider is checked with a movie search, and a marker
+provider is asked for its account statistics, which need the staged credentials.
 A completed failed check, including a plugin without connection-check support, is a 200
 result with `success` false and the message; only transport or store failures are problems.
 Each installation's `connection_check_supported` says whether the check contacts the
-provider: true for a marker provider and for a metadata provider that serves movies, since
-the probe is a movie search. A metadata provider without movie priority, such as a
-series-only one, reports false; its check succeeds without contacting anything. Clients
-offer the check only when the field is true. A marker provider without account statistics
-can still answer that checks are not supported, since only running it tells.
+provider: true for a plugin that declares `configuration_check`, for a marker provider, and
+for a metadata provider that serves movies, since the probe is a movie search. A metadata
+provider without movie priority and without the declaration, such as a series-only one,
+reports false; its check succeeds without contacting anything. Clients offer the check only
+when the field is true. A marker provider without account statistics, or a plugin that
+declares `configuration_check` without serving it, can still answer that checks are not
+supported, since only running it tells.
 The probe launches a process and may call a billed provider, so it is non-retryable: the
 web hook disables mutation retries and authentication replay and reports an uncertain
 result to the operator instead of resubmitting.

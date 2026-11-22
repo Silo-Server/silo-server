@@ -133,6 +133,8 @@ type fakePluginClient struct {
 	manifest              *pluginv1.PluginManifest
 	metadataProviderCalls int
 	markerProvider        *pluginhost.MarkerProviderClient
+	configurationChecks   *pluginhost.ConfigurationChecksClient
+	configurationCheckErr error
 }
 
 func (f *fakePluginClient) Manifest() *pluginv1.PluginManifest {
@@ -190,6 +192,13 @@ func (f *fakePluginClient) NetworkAccessProvider(string) (*pluginhost.NetworkAcc
 
 func (f *fakePluginClient) NotificationChannel(string) (*pluginhost.NotificationChannelClient, error) {
 	return nil, nil
+}
+
+func (f *fakePluginClient) ConfigurationChecks() (*pluginhost.ConfigurationChecksClient, error) {
+	if f.configurationCheckErr != nil {
+		return nil, f.configurationCheckErr
+	}
+	return f.configurationChecks, nil
 }
 
 type fakeServiceInstallationStore struct {
