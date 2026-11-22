@@ -12,6 +12,14 @@ inputs:
       binaries), so each keeps a cache that matches its own work.
     required: true
 
+  build-cache-in-memory:
+    description: >-
+      Whether to keep the build cache on a tmpfs. The tmpfs gets half the
+      runner's memory, and Go drops cache writes it has no room for without
+      failing the build, so a job whose cache can outgrow that passes 'false'.
+    required: false
+    default: 'true'
+
 outputs:
   cache-key:
     description: The primary key to save after pruning the build cache.
@@ -61,7 +69,7 @@ runs:
     # background. On tmpfs, those writes and the job's compile output stay off
     # the disk the install writes to. The path, and so the cache key, is unchanged.
     - name: Keep the Go build cache in memory
-      if: runner.environment == 'github-hosted'
+      if: runner.environment == 'github-hosted' && inputs.build-cache-in-memory == 'true'
       shell: bash
       run: |
         mkdir -p ~/.cache/go-build

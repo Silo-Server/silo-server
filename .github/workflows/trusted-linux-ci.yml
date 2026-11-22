@@ -526,6 +526,12 @@ jobs:
         id: setup-go
         with:
           cache-name: vet
+          # This cache holds three builds of the tree (Linux vet, darwin vet,
+          # the trimmed darwin node build), about 6 GB for one commit. After a
+          # go.sum change it also holds the restored stale entries and passes
+          # the 8 GB tmpfs, and route-inventory's go list then fails reading
+          # back a cgo file list it could not write.
+          build-cache-in-memory: 'false'
 
       - *libvips-save
 
