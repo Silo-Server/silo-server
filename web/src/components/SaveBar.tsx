@@ -65,9 +65,8 @@ export function SaveBar({
   const shown = placement === "page" ? visible : dirtyCount > 0;
   // The room the bar takes at the bottom of the viewport, with a gap. Toasts
   // stay above it (`Toaster`), so a toast's action and Discard and Save never
-  // cover each other.
-  const clearance =
-    placement === "page" ? "calc(var(--playback-bar-clearance, 0px) + 5.5rem)" : "5rem";
+  // cover each other. Both bars rise above a background playback bar.
+  const clearance = `calc(var(--playback-bar-clearance, 0px) + ${placement === "page" ? "5.5rem" : "5rem"})`;
   useEffect(() => {
     if (!shown) return;
     const style = document.documentElement.style;
