@@ -1846,7 +1846,8 @@ func TestRealtimeConfirmedStopKeepsANewerSavedMeasurement(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		// readOnce: the save can be read one time. failFirst: the first read
-		// fails, so nothing is estimated and the play ends at the report.
+		// fails, so nothing is estimated and the play ends at the report,
+		// though the copy itself measured an earlier report.
 		readOnce, failFirst bool
 		played, end         float64
 	}{
@@ -1864,9 +1865,16 @@ func TestRealtimeConfirmedStopKeepsANewerSavedMeasurement(t *testing.T) {
 				admin := &onceSavedWatchAdminStore{savedWatchAdminStore: savedWatchAdminStore{watch: saved}, once: tc.readOnce, failFirst: tc.failFirst}
 				f.handler.AdminStore = admin
 				f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+				sequence := int64(1)
+				if tc.failFirst {
+					if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 0}); err != nil {
+						t.Fatal(err)
+					}
+					sequence = 2
+				}
 				time.Sleep(890 * time.Second) //nolint:forbidigo // advances the synctest clock to the other replica's report
 				store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
-				if _, err := store.ApplyProgress(f.ctx, f.session.ID, playback.ProgressSampleV3{Sequence: 1, Position: 900}); err != nil {
+				if _, err := store.ApplyProgress(f.ctx, f.session.ID, playback.ProgressSampleV3{Sequence: sequence, Position: 900}); err != nil {
 					t.Fatal(err)
 				}
 				time.Sleep(7 * time.Second) //nolint:forbidigo // advances the synctest clock to the stop

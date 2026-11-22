@@ -186,14 +186,17 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	var file *models.MediaFile
 	var fileErr error
 	var final *playback.ProgressSampleV3
+	var estimatedFrom playback.WatchTime
 	if record.LastSample == nil && session.Position > 0 {
 		// A bridge progress report may have updated the live session without
 		// a sequenced native sample. Preserve its final resume position.
 		final = &playback.ProgressSampleV3{Sequence: record.LastSequence + 1, Position: session.Position, IsPaused: session.IsPaused}
-	} else if record.LastSample != nil && record.StoppedAt == nil {
+	} else if record.LastSample != nil {
 		// The anchor also brings the copy up to a report another replica
-		// accepted, which the play's history needs even without an estimate.
-		if anchor, ok := h.realtimeStopAnchor(ctx, session, record); ok && !sentAt.IsZero() {
+		// accepted, which the play's history needs even without an estimate,
+		// including when another stop already took the row and this worker
+		// finishes it. Only an open row can still take an estimate.
+		if anchor, ok := h.realtimeStopAnchor(ctx, session, record); ok && !sentAt.IsZero() && record.StoppedAt == nil {
 			duration := session.TimelineDuration
 			if duration <= 0 {
 				// The file bounds the final sample. A short budget keeps a
@@ -208,12 +211,7 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 				}
 			}
 			final = playedSinceLastReport(record, anchor, sentAt, duration)
-			if final != nil {
-				// The finalizer judges the final sample against the
-				// measurement it was estimated from, even if a second read
-				// of the save fails or finds nothing newer.
-				session.Watch = anchor
-			}
+			estimatedFrom = anchor
 		}
 	}
 	// The stop write gets its own budget, whatever the reads above took.
@@ -231,6 +229,12 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	if err != nil {
 		slog.WarnContext(ctx, "failed to record realtime stop attempt", "session", session.ID, "error", err)
 		return unarbitratedRealtimeStop(watchstate.PlaybackStopResult{})
+	}
+	if final != nil {
+		// The finalizer judges the final sample against the measurement it
+		// was estimated from, even if a second read of the save fails or
+		// finds nothing newer.
+		session.Watch = estimatedFrom
 	}
 	// An administrator end that finalized the receipt without a history row
 	// (nothing to record, or a failed write) is written from this snapshot.
