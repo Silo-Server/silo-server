@@ -665,8 +665,11 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 		// the stop is not credited as watch time.
 		observeEndSample(session, record.LastSample.Position, record.LastSample.IsPaused, record.SampleAcceptedAt)
 	}
-	if accepted != nil && accepted.Sequence > record.LastSequence {
-		// The stop's own final sample, which arrived just now.
+	if accepted != nil && (accepted.Sequence > record.LastSequence || !fromRemovedCopy) {
+		// The stop's own final sample, which arrived just now, or the row's
+		// sample again, which closes the measurement at the stop: a player
+		// still paused there was paused until then, and an unmoved position
+		// credits no play.
 		observeEndSample(session, accepted.Position, accepted.IsPaused, time.Now())
 	}
 	if record.CurrentPlanID != "" {

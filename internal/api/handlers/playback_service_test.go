@@ -561,6 +561,38 @@ func TestDetachedStopDoesNotCreditASeekBeforeIt(t *testing.T) {
 	}
 }
 
+// TestDetachedStopWithoutASampleKeepsThePauseUntilTheStop covers a paused
+// player whose stop, with no final sample, is finalized from the attempt row:
+// the time from the row's last paused sample to the stop is paused time, as it
+// is when the stop reaches the live copy.
+func TestDetachedStopWithoutASampleKeepsThePauseUntilTheStop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newPlaybackServiceFixture(t)
+		var saved playback.WatchTime
+		saved.Observe(100, true, time.Now())
+		admin := &savedWatchAdminStore{watch: saved}
+		f.handler.AdminStore = admin
+		f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+		if err := f.manager.StopSession(f.session.ID); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(5 * time.Second) //nolint:forbidigo // advances the synctest clock: a paused report 5 s after the save
+		if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 100, IsPaused: true}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Minute) //nolint:forbidigo // advances the synctest clock to the late stop
+		if _, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString()}); err != nil {
+			t.Fatal(err)
+		}
+		if len(admin.history) != 1 {
+			t.Fatalf("admin history = %+v, want one row", admin.history)
+		}
+		if got := admin.history[0].Watch.PausedSeconds; got != 605 {
+			t.Fatalf("paused = %v s, want 605 s: paused from the save to the stop", got)
+		}
+	})
+}
+
 // savedWatchAdminStore is a recording admin store whose sessions all have a
 // saved measurement.
 type savedWatchAdminStore struct {

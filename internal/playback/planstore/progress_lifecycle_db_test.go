@@ -307,4 +307,18 @@ func TestSampleAcceptedAtDB(t *testing.T) {
 	if got := read(); !got.SampleAcceptedAt.Equal(accepted) {
 		t.Fatalf("after a stop without a sample: sample at %v, want %v", got.SampleAcceptedAt, accepted)
 	}
+
+	// A stop whose final sample is newer than the row's dates it to the stop,
+	// so a finalizer that reads the stopped row judges it against then.
+	ctx, _, store, session = newLifecycleAttemptDB(t)
+	if _, err := store.ApplyProgress(ctx, session, playback.ProgressSampleV3{Sequence: 1, Position: 400}); err != nil {
+		t.Fatal(err)
+	}
+	accepted = read().SampleAcceptedAt
+	if _, _, err := store.StopAttempt(ctx, session, uuid.NewString(), &playback.ProgressSampleV3{Sequence: 2, Position: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); !got.SampleAcceptedAt.After(accepted) || got.LastSample == nil || got.LastSample.Position != 1000 {
+		t.Fatalf("after a stop with a newer sample: sample %+v at %v, want position 1000 after %v", got.LastSample, got.SampleAcceptedAt, accepted)
+	}
 }
