@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -309,15 +311,17 @@ const adminPlaybackHistorySelectSQL = `
 		h.compat_origin,
 		h.routing_execution,
 		h.routing_execution_node_id,
-		NULLIF(BTRIM(COALESCE(exec_node.name, '')), ''),
+		COALESCE(NULLIF(BTRIM(exec_node.name), ''), NULLIF(BTRIM(h.routing_execution_node_name), '')),
 		h.routing_egress,
 		h.routing_egress_node_id,
-		NULLIF(BTRIM(COALESCE(egress_node.name, '')), ''),
+		COALESCE(NULLIF(BTRIM(egress_node.name), ''), NULLIF(BTRIM(h.routing_egress_node_name), '')),
 		h.route_facts_recorded,
 		NULLIF(BTRIM(COALESCE(mf.codec_video, '')), ''),
 		NULLIF(BTRIM(COALESCE(mf.resolution, '')), ''),
 		NULLIF(BTRIM(COALESCE(mf.codec_audio, '')), ''),
 		mf.audio_channels,
+		h.audio_track_index,
+		COALESCE(mf.audio_tracks::text, '[]'),
 		NULLIF(BTRIM(COALESCE(mf.container, '')), ''),
 		mf.bitrate,
 		mf.hdr,
@@ -329,13 +333,36 @@ const adminPlaybackHistorySelectSQL = `
 	LEFT JOIN media_items mi ON mi.content_id = h.media_item_id
 	LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
 	LEFT JOIN media_items sm ON sm.content_id = ep.series_id
-	LEFT JOIN media_files mf ON mf.id = h.media_file_id
+	LEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)
 	LEFT JOIN media_folders lib ON lib.id = mf.media_folder_id
 	LEFT JOIN stream_nodes exec_node ON exec_node.id = h.routing_execution_node_id
 	LEFT JOIN stream_nodes egress_node ON egress_node.id = h.routing_egress_node_id`
 
+func applySelectedHistoryAudioTrack(row *AdminPlaybackHistoryRow, audioTrackIndex *int, audioTracksJSON string) {
+	if audioTrackIndex == nil || audioTracksJSON == "" || audioTracksJSON == "[]" {
+		return
+	}
+	var audioTracks []models.AudioTrack
+	if json.Unmarshal([]byte(audioTracksJSON), &audioTracks) != nil {
+		return
+	}
+	track := pickAdminAudioTrack(audioTracks, *audioTrackIndex)
+	if track == nil {
+		return
+	}
+	if codec := strings.TrimSpace(track.Codec); codec != "" {
+		row.SourceAudioCodec = &codec
+	}
+	if track.Channels > 0 {
+		ch := track.Channels
+		row.SourceAudioChannels = &ch
+	}
+}
+
 func scanAdminPlaybackHistoryRow(rows pgx.Rows) (AdminPlaybackHistoryRow, error) {
 	var row AdminPlaybackHistoryRow
+	var audioTrackIndex *int
+	var audioTracksJSON string
 	if err := rows.Scan(
 		&row.SessionID, &row.UserID, &row.Username, &row.ProfileID, &row.ProfileName,
 		&row.MediaItemID, &row.MediaFileID, &row.MediaTitle, &row.MediaType, &row.PlayMethod,
@@ -353,11 +380,12 @@ func scanAdminPlaybackHistoryRow(rows pgx.Rows) (AdminPlaybackHistoryRow, error)
 		&row.RoutingExecutionNodeName, &row.RoutingEgress, &row.RoutingEgressNodeID,
 		&row.RoutingEgressNodeName, &row.RouteFactsRecorded,
 		&row.SourceVideoCodec, &row.SourceResolution, &row.SourceAudioCodec,
-		&row.SourceAudioChannels, &row.SourceContainer, &row.SourceBitrateKbps,
+		&row.SourceAudioChannels, &audioTrackIndex, &audioTracksJSON, &row.SourceContainer, &row.SourceBitrateKbps,
 		&row.SourceHDR, &row.SourceVideoRangeType, &row.LibraryID, &row.LibraryName,
 	); err != nil {
 		return row, err
 	}
+	applySelectedHistoryAudioTrack(&row, audioTrackIndex, audioTracksJSON)
 	if row.SourceBitrateKbps != nil {
 		if norm := playback.NormalizeBitrateKbps(*row.SourceBitrateKbps); norm > 0 {
 			row.SourceBitrateKbps = &norm

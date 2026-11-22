@@ -1932,9 +1932,11 @@ Each tab shares the time-window parameters `range` (`7d`, `30d`, `90d`, `1y`, `a
   burn-in subtitle codecs, and top transcoding accounts.
 - `GET /api/v2/admin/insights/bandwidth` (`getAdminInsightsBandwidth`) unions
   `dashboard_metric_daily` and `dashboard_node_egress_daily` with unarchived live minute
-  samples (without double-counting archived UTC days) to report multi-year egress volume,
-  playback vs. download totals, peak throughput, per-node daily breakdown, and remote vs.
-  local play share.
+  samples across the requested calendar date span in UTC (without double-counting archived
+  UTC days, so minute-sample pruning does not change historical totals or peaks) to report
+  multi-year egress volume, playback vs. download totals, peak throughput, per-node daily
+  breakdown, and remote vs. local play share. Activity's `peak_streams` series uses the
+  same UTC-day daily rollup union.
 
 ## History imports
 

@@ -16,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useAdminInsightsPeople } from "@/hooks/queries/admin/insights";
+import { useAdminInsightsPeopleInfinite } from "@/hooks/queries/admin/insights";
 import { useT } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
 import { formatRelativeTime } from "@/lib/date";
@@ -41,7 +41,6 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sort, setSort] = useState<PeopleSort>("watch_time");
   const [dir, setDir] = useState<SortDir>("desc");
-  const [limit, setLimit] = useState(50);
   const [expandedUsers, setExpandedUsers] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -58,13 +57,26 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
       ...(debouncedSearch ? { search: debouncedSearch } : {}),
       sort,
       dir,
-      limit,
     }),
-    [filters, debouncedSearch, sort, dir, limit],
+    [filters, debouncedSearch, sort, dir],
   );
 
-  const query = useAdminInsightsPeople(queryParams);
-  const data = query.data;
+  const query = useAdminInsightsPeopleInfinite(queryParams);
+  const data = query.data?.pages[0];
+  const accounts = useMemo(() => {
+    const pages = query.data?.pages ?? [];
+    const seen = new Set<string>();
+    const merged: NonNullable<typeof data>["accounts"] = [];
+    for (const page of pages) {
+      for (const account of page.accounts) {
+        if (!seen.has(account.user_id)) {
+          seen.add(account.user_id);
+          merged.push(account);
+        }
+      }
+    }
+    return merged;
+  }, [query.data?.pages]);
 
   function handleSort(column: PeopleSort) {
     if (sort === column) {
@@ -161,7 +173,7 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
                 void query.refetch();
               }}
             />
-          ) : data.accounts.length === 0 ? (
+          ) : accounts.length === 0 ? (
             <div className="text-muted-foreground py-12 text-center text-sm">
               {t("web.admin.insights.people.empty")}
             </div>
@@ -228,7 +240,7 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data.accounts.map((account) => {
+                    {accounts.map((account) => {
                       const hasProfiles = account.profiles.length > 0;
                       const isExpanded = Boolean(expandedUsers[account.user_id]);
                       const accountHistoryHref = buildHistoryDrilldownHref({
@@ -408,12 +420,15 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
                 </Table>
               </div>
 
-              {data.accounts.length < data.total_accounts && limit < 100 ? (
+              {query.hasNextPage ? (
                 <div className="flex justify-center pt-4">
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setLimit((prev) => Math.min(100, prev + 50))}
+                    disabled={query.isFetchingNextPage}
+                    onClick={() => {
+                      void query.fetchNextPage();
+                    }}
                   >
                     {t("web.admin.insights.people.loadMore")}
                   </Button>

@@ -323,28 +323,277 @@ func assertInsightsEdgeCasesDB(t *testing.T, pool *pgxpool.Pool, h *AdminHandler
 		t.Fatalf("deleted item other_media mismatch: summary=%d buckets=%d", act.Summary.OtherMedia, bucketOther)
 	}
 
-	// 3. Non-UTC 1-day custom range over retained minute samples respects exact
-	// [from, to) bounds instead of summing two full UTC days.
-	targetDate := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -5)
-	dayStr := targetDate.Format("2006-01-02")
-	nyLoc, _ := time.LoadLocation("America/New_York")
-	nyStart := time.Date(targetDate.Year(), targetDate.Month(), targetDate.Day(), 0, 0, 0, 0, nyLoc).UTC()
-	outsideBefore := nyStart.Add(-2 * time.Hour)
-	inside := nyStart.Add(3 * time.Hour)
-	outsideAfter := nyStart.Add(26 * time.Hour)
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO dashboard_metric_samples (bucket, source, streams_total, streams_direct, egress_kbps)
-		VALUES ($1, 'shared', 50, 50, 100000), ($2, 'shared', 4, 4, 2000), ($3, 'shared', 60, 60, 200000)
-	`, outsideBefore, inside, outsideAfter); err != nil {
+	// 3. Pruning minute samples after archiving never changes a non-UTC custom
+	// date range's peak streams, bandwidth, or per-node totals.
+	assertPruneInvariantNonUTCCustomRangeDB(t, pool, h)
+
+	// 4. Alternate edition & selected non-default audio track attribution.
+	assertEffectiveMediaAndAudioTrackDB(t, pool, h, userID)
+
+	// 5. Case-insensitive client+platform merge across codecs meets min_plays.
+	assertDevicesCaseInsensitiveMergeDB(t, pool, h, userID)
+
+	// 6. First-time live viewer without finalized history counts in LiveAccounts.
+	assertPeopleCountsFirstTimeLiveAccountDB(t, pool, h)
+
+	// 7. History search matches literal % and _ without treating them as wildcards.
+	assertHistoryLiteralLikeSearchDB(t, pool, h, userID)
+}
+
+func assertPruneInvariantNonUTCCustomRangeDB(t *testing.T, pool *pgxpool.Pool, h *AdminHandler) {
+	t.Helper()
+	ctx := t.Context()
+	var edgeNodeID int
+	if err := pool.QueryRow(ctx, `SELECT id FROM stream_nodes LIMIT 1`).Scan(&edgeNodeID); err != nil {
 		t.Fatal(err)
 	}
-	bw, err := h.ReadAdminInsightsBandwidth(ctx, AdminInsightsBandwidthQuery{
-		Range: InsightsRangeCustom, FromDate: dayStr, ToDate: dayStr, TZ: "America/New_York",
-	}, false)
+	targetDate := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -5)
+	dayStr := targetDate.Format("2006-01-02")
+	prevUTCSample := targetDate.Add(-1 * time.Hour)
+	earlyUTCSample := targetDate.Add(2 * time.Hour) // Jan 9 evening in NY, inside targetDate UTC
+	midUTCSample := targetDate.Add(8 * time.Hour)
+	nextUTCSample := targetDate.Add(26 * time.Hour)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO dashboard_metric_samples (bucket, source, streams_total, streams_direct, egress_kbps)
+		VALUES ($1, 'shared', 77, 77, 77000),
+		       ($2, 'shared', 90, 90, 9000),
+		       ($3, 'shared', 4, 4, 2000),
+		       ($4, 'shared', 88, 88, 88000)`,
+		prevUTCSample, earlyUTCSample, midUTCSample, nextUTCSample); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO dashboard_node_egress_samples (bucket, node_id, egress_kbps)
+		VALUES ($1, $5, 77000), ($2, $5, 9000), ($3, $5, 2000), ($4, $5, 88000)`,
+		prevUTCSample, earlyUTCSample, midUTCSample, nextUTCSample, edgeNodeID); err != nil {
+		t.Fatal(err)
+	}
+
+	winQ := AdminInsightsWindowQuery{Range: InsightsRangeCustom, FromDate: dayStr, ToDate: dayStr, TZ: "America/New_York"}
+	bwQ := AdminInsightsBandwidthQuery{Range: InsightsRangeCustom, FromDate: dayStr, ToDate: dayStr, TZ: "America/New_York"}
+	actBefore, err := h.ReadAdminInsightsActivity(ctx, winQ, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bw.Summary.TotalEgressBytes != 2000*7500 || bw.Summary.PeakEgressKbps != 2000 {
-		t.Fatalf("non-UTC 1-day custom bandwidth = %+v, want bytes=%d peak=2000", bw.Summary, 2000*7500)
+	bwBefore, err := h.ReadAdminInsightsBandwidth(ctx, bwQ, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBytes := int64((9000 + 2000) * 7500)
+	if actBefore.Summary.PeakConcurrentStreams != 90 || bwBefore.Summary.TotalEgressBytes != wantBytes ||
+		bwBefore.Summary.NodeEgressBytes != wantBytes || bwBefore.Summary.PeakEgressKbps != 9000 {
+		t.Fatalf("before prune: peak=%d bw=%+v", actBefore.Summary.PeakConcurrentStreams, bwBefore.Summary)
+	}
+
+	// Archive targetDate and prune its raw minute samples.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO dashboard_metric_daily
+			(day, peak_streams, peak_direct, peak_streams_direct, peak_egress_kbps, egress_bytes, peak_streams_at, peak_egress_at)
+		VALUES ($1, 90, 90, 90, 9000, $2, $3, $3)`, dayStr, wantBytes, earlyUTCSample); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO dashboard_node_egress_daily (day, node_id, node_name, node_type, egress_bytes, peak_egress_kbps)
+		VALUES ($1, $2, 'edge-eu-1', 'proxy', $3, 9000)`, dayStr, edgeNodeID, wantBytes); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM dashboard_metric_samples WHERE bucket >= $1 AND bucket < $2`,
+		targetDate, targetDate.AddDate(0, 0, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM dashboard_node_egress_samples WHERE bucket >= $1 AND bucket < $2`,
+		targetDate, targetDate.AddDate(0, 0, 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	actAfter, err := h.ReadAdminInsightsActivity(ctx, winQ, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bwAfter, err := h.ReadAdminInsightsBandwidth(ctx, bwQ, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actAfter.Summary.PeakConcurrentStreams != actBefore.Summary.PeakConcurrentStreams ||
+		bwAfter.Summary.TotalEgressBytes != bwBefore.Summary.TotalEgressBytes ||
+		bwAfter.Summary.NodeEgressBytes != bwBefore.Summary.NodeEgressBytes ||
+		bwAfter.Summary.PeakEgressKbps != bwBefore.Summary.PeakEgressKbps {
+		t.Fatalf("pruning changed query answer: before=(peak=%d bytes=%d node=%d) after=(peak=%d bytes=%d node=%d)",
+			actBefore.Summary.PeakConcurrentStreams, bwBefore.Summary.TotalEgressBytes, bwBefore.Summary.NodeEgressBytes,
+			actAfter.Summary.PeakConcurrentStreams, bwAfter.Summary.TotalEgressBytes, bwAfter.Summary.NodeEgressBytes)
+	}
+}
+
+func assertEffectiveMediaAndAudioTrackDB(t *testing.T, pool *pgxpool.Pool, h *AdminHandler, userID int) {
+	t.Helper()
+	ctx := t.Context()
+	var reqFileID, altFileID int
+	audioJSON := `[{"index":0,"codec":"truehd","channels":8},{"index":1,"codec":"aac","channels":2}]`
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO media_files (media_folder_id, file_path, content_id, container, codec_video, resolution, codec_audio, audio_channels, audio_tracks)
+		VALUES ((SELECT id FROM media_folders LIMIT 1), '/movies/dune-4k.mkv', 'movie-1', 'mkv', 'hevc', '4k', 'truehd', 8, $1::jsonb)
+		RETURNING id`, audioJSON).Scan(&reqFileID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO media_files (media_folder_id, file_path, content_id, container, codec_video, resolution, codec_audio, audio_channels, audio_tracks)
+		VALUES ((SELECT id FROM media_folders LIMIT 1), '/movies/dune-1080p.mp4', 'movie-1', 'mp4', 'h264', '1080p', 'truehd', 8, $1::jsonb)
+		RETURNING id`, audioJSON).Scan(&altFileID); err != nil {
+		t.Fatal(err)
+	}
+
+	trackIdx := 1
+	sessID := "sess-alt-" + uuid.NewString()
+	start := time.Now().UTC().Add(-6 * time.Hour).Truncate(time.Second)
+	store := NewPGPlaybackAdminStore(pool, nil)
+	if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+		SessionID: sessID, UserID: userID, ProfileID: "p-alice", ProfileName: "Alice",
+		MediaItemID: "movie-1", MediaFileID: reqFileID, EffectiveMediaFileID: altFileID,
+		AudioTrackIndex: &trackIdx, PlayMethod: string(playback.PlayDirect),
+		VideoDecision: "direct", AudioDecision: "direct",
+		StartedAt: start.Format(time.RFC3339Nano), EndedAt: start.Add(20 * time.Minute).Format(time.RFC3339Nano),
+		ClientName: "AltEditionClient", DevicePlatform: "iOS", RouteFactsRecorded: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	detail, err := h.ReadAdminPlaybackHistoryEntry(ctx, sessID)
+	if err != nil || detail == nil {
+		t.Fatalf("ReadAdminPlaybackHistoryEntry: %+v, %v", detail, err)
+	}
+	if detail.SourceVideoCodec == nil || *detail.SourceVideoCodec != "h264" ||
+		detail.SourceAudioCodec == nil || *detail.SourceAudioCodec != "aac" ||
+		detail.SourceAudioChannels == nil || *detail.SourceAudioChannels != 2 {
+		t.Fatalf("effective edition/audio track mismatch: video=%v audio=%v ch=%v",
+			detail.SourceVideoCodec, detail.SourceAudioCodec, detail.SourceAudioChannels)
+	}
+
+	devs, err := h.ReadAdminInsightsDevices(ctx, AdminInsightsDevicesQuery{
+		AdminInsightsWindowQuery: AdminInsightsWindowQuery{Range: "7d", TZ: "UTC"}, MinPlays: 1,
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, row := range devs.Matrix {
+		if row.ClientName != "AltEditionClient" {
+			continue
+		}
+		found = true
+		if len(row.Cells) != 1 || row.Cells[0].SourceVideoCodec != "h264" || row.Cells[0].DirectPlays != 1 {
+			t.Fatalf("Devices credited wrong edition codec: %+v", row.Cells)
+		}
+	}
+	if !found {
+		t.Fatal("AltEditionClient missing from Devices matrix")
+	}
+}
+
+func assertDevicesCaseInsensitiveMergeDB(t *testing.T, pool *pgxpool.Pool, h *AdminHandler, userID int) {
+	t.Helper()
+	ctx := t.Context()
+	var hevcFileID, h264FileID int
+	if err := pool.QueryRow(ctx, `SELECT id FROM media_files WHERE codec_video = 'hevc' LIMIT 1`).Scan(&hevcFileID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT id FROM media_files WHERE codec_video = 'h264' LIMIT 1`).Scan(&h264FileID); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().UTC().Add(-4 * time.Hour).Truncate(time.Second)
+	for i := range 3 {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO admin_playback_history
+				(session_id, user_id, profile_id, media_item_id, media_file_id, play_method, started_at, ended_at, client_name, device_platform)
+			VALUES ($1, $2, 'p-alice', 'movie-1', $3, 'direct', $4, $5, 'MixedCaseApp', 'Web'),
+			       ($6, $2, 'p-alice', 'movie-1', $7, 'transcode', $4, $5, 'mixedcaseapp', 'web')`,
+			"sess-mc-h264-"+uuid.NewString(), userID, h264FileID, base.Add(time.Duration(i)*time.Minute), base.Add(time.Duration(i+1)*time.Minute),
+			"sess-mc-hevc-"+uuid.NewString(), hevcFileID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	devs, err := h.ReadAdminInsightsDevices(ctx, AdminInsightsDevicesQuery{
+		AdminInsightsWindowQuery: AdminInsightsWindowQuery{Range: "7d", TZ: "UTC"}, MinPlays: 5,
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var merged *AdminInsightsClientMatrixRow
+	for i := range devs.Matrix {
+		if devs.Matrix[i].ClientName == "MixedCaseApp" || devs.Matrix[i].ClientName == "mixedcaseapp" {
+			merged = &devs.Matrix[i]
+			break
+		}
+	}
+	if merged == nil || merged.TotalPlays != 6 || len(merged.Cells) != 2 {
+		t.Fatalf("case-variant client should merge into 1 row of 6 plays at min_plays=5, got %+v", merged)
+	}
+}
+
+func assertPeopleCountsFirstTimeLiveAccountDB(t *testing.T, pool *pgxpool.Pool, h *AdminHandler) {
+	t.Helper()
+	ctx := t.Context()
+	var carolID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ('carol', 'user') RETURNING id`).Scan(&carolID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO playback_sessions_sync (session_id, user_id, profile_id) VALUES ('live-carol', $1, 'p-carol')`, carolID); err != nil {
+		t.Fatal(err)
+	}
+	people, err := h.ReadAdminInsightsPeople(ctx, AdminInsightsPeopleQuery{
+		AdminInsightsWindowQuery: AdminInsightsWindowQuery{Range: "7d", TZ: "UTC"},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if people.LiveAccounts != 2 || people.ActiveAccounts != 2 {
+		t.Fatalf("first-time live viewer undercounted: live=%d active=%d, want 2 and 2", people.LiveAccounts, people.ActiveAccounts)
+	}
+}
+
+func assertHistoryLiteralLikeSearchDB(t *testing.T, pool *pgxpool.Pool, h *AdminHandler, userID int) {
+	t.Helper()
+	ctx := t.Context()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title)
+		VALUES ('m-pct', 'movie', '100% Pure'),
+		       ('m-num', 'movie', '1000 Miles'),
+		       ('m-und', 'movie', 'A_B Test'),
+		       ('m-axb', 'movie', 'AXB Test')`); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+	for i, itemID := range []string{"m-pct", "m-num", "m-und", "m-axb"} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO admin_playback_history
+				(session_id, user_id, profile_id, media_item_id, media_file_id, play_method, started_at, ended_at)
+			VALUES ($1, $2, 'p-alice', $3, 0, 'direct', $4, $5)`,
+			"sess-like-"+uuid.NewString(), userID, itemID, now.Add(time.Duration(i)*time.Minute), now.Add(time.Duration(i+1)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pctPage, err := h.ListAdminPlaybackHistoryPage(ctx, AdminPlaybackHistoryFilter{Search: "100%"}, nil, 10)
+	if err != nil || len(pctPage.Items) != 1 || pctPage.Items[0].MediaItemID != "m-pct" {
+		t.Fatalf("literal %% search got %+v (err=%v), want only m-pct", pctPage.Items, err)
+	}
+	undPage, err := h.ListAdminPlaybackHistoryPage(ctx, AdminPlaybackHistoryFilter{Search: "A_B"}, nil, 10)
+	if err != nil || len(undPage.Items) != 1 || undPage.Items[0].MediaItemID != "m-und" {
+		t.Fatalf("literal _ search got %+v (err=%v), want only m-und", undPage.Items, err)
+	}
+}
+
+func TestResolveInsightsWindowMidnightDST(t *testing.T) {
+	// America/Santiago springs forward from 00:00 (-04) directly to 01:00 (-03) on 2026-09-06.
+	win, err := resolveInsightsWindow(
+		time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC),
+		InsightsRangeCustom, "2026-09-06", "2026-09-06", "America/Santiago",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFrom := time.Date(2026, 9, 6, 4, 0, 0, 0, time.UTC)
+	wantTo := time.Date(2026, 9, 7, 3, 0, 0, 0, time.UTC)
+	if !win.From.Equal(wantFrom) || !win.To.Equal(wantTo) {
+		t.Fatalf("Santiago DST start day = [%v, %v), want [%v, %v)", win.From, win.To, wantFrom, wantTo)
 	}
 }

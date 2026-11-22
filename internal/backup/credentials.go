@@ -564,6 +564,11 @@ func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string) (
 			return err
 		}
 		for i, table := range tables {
+			if table.name == "stream_nodes" {
+				if err := reconcileRestoredStreamNodeReferences(ctx, tx, live[i]); err != nil {
+					return fmt.Errorf("stream_nodes historical references: %w", err)
+				}
+			}
 			if err := table.carryInto(ctx, tx, live[i], &result); err != nil {
 				return fmt.Errorf("%s: %w", table.name, err)
 			}
@@ -928,4 +933,148 @@ func prefixed(prefix string, columns []string) string {
 		out[i] = prefix + col
 	}
 	return strings.Join(out, ", ")
+}
+
+// reconcileRestoredStreamNodeReferences runs inside carryCredentials right
+// before the backup's stream_nodes rows are replaced by the live server's
+// stream_nodes. Any historical reference pointing to a backup node whose
+// (id, url) does not match a live node is decoupled from live stream_nodes.id
+// while preserving its snapshotted node name/type, so restoring a backup onto
+// another server can never attribute or merge old traffic under an unrelated
+// destination node that happens to share an integer ID.
+func reconcileRestoredStreamNodeReferences(ctx context.Context, tx pgx.Tx, liveStreamNodesJSON string) error {
+	if _, err := tx.Exec(ctx, `CREATE TEMP TABLE IF NOT EXISTS matched_stream_nodes (id integer PRIMARY KEY) ON COMMIT DROP`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `TRUNCATE matched_stream_nodes`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO matched_stream_nodes (id)
+		SELECT b.id
+		FROM stream_nodes b
+		JOIN json_populate_recordset(NULL::stream_nodes, $1::json) l
+		  ON l.id = b.id AND l.url IS NOT DISTINCT FROM b.url
+	`, liveStreamNodesJSON); err != nil {
+		return err
+	}
+	if err := reconcileRestoredHistoryNodes(ctx, tx); err != nil {
+		return err
+	}
+	if err := reconcileRestoredDailyNodeEgress(ctx, tx); err != nil {
+		return err
+	}
+	return reconcileRestoredNodeEgressSamples(ctx, tx)
+}
+
+func reconcileRestoredHistoryNodes(ctx context.Context, tx pgx.Tx) error {
+	ok, err := tableExists(ctx, tx, "admin_playback_history")
+	if err != nil || !ok {
+		return err
+	}
+	cols, err := tableColumns(ctx, tx, "admin_playback_history")
+	if err != nil {
+		return err
+	}
+	has := func(col string) bool { return slices.Contains(cols, col) }
+	if !has("routing_execution_node_id") || !has("routing_egress_node_id") {
+		return nil
+	}
+	if has("routing_execution_node_name") {
+		if _, err := tx.Exec(ctx, `
+			UPDATE admin_playback_history h
+			SET routing_execution_node_name = NULLIF(BTRIM(b.name), '')
+			FROM stream_nodes b
+			WHERE h.routing_execution_node_id = b.id
+			  AND (h.routing_execution_node_name IS NULL OR BTRIM(h.routing_execution_node_name) = '')
+		`); err != nil {
+			return err
+		}
+	}
+	if has("routing_egress_node_name") {
+		if _, err := tx.Exec(ctx, `
+			UPDATE admin_playback_history h
+			SET routing_egress_node_name = NULLIF(BTRIM(b.name), '')
+			FROM stream_nodes b
+			WHERE h.routing_egress_node_id = b.id
+			  AND (h.routing_egress_node_name IS NULL OR BTRIM(h.routing_egress_node_name) = '')
+		`); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(ctx, `
+		UPDATE admin_playback_history
+		SET
+			routing_execution_node_id = CASE
+				WHEN routing_execution_node_id IS NOT NULL
+				 AND NOT EXISTS (SELECT 1 FROM matched_stream_nodes m WHERE m.id = routing_execution_node_id)
+				THEN NULL ELSE routing_execution_node_id END,
+			routing_egress_node_id = CASE
+				WHEN routing_egress_node_id IS NOT NULL
+				 AND NOT EXISTS (SELECT 1 FROM matched_stream_nodes m WHERE m.id = routing_egress_node_id)
+				THEN NULL ELSE routing_egress_node_id END
+		WHERE (routing_execution_node_id IS NOT NULL
+		       AND NOT EXISTS (SELECT 1 FROM matched_stream_nodes m WHERE m.id = routing_execution_node_id))
+		   OR (routing_egress_node_id IS NOT NULL
+		       AND NOT EXISTS (SELECT 1 FROM matched_stream_nodes m WHERE m.id = routing_egress_node_id))
+	`)
+	return err
+}
+
+func reconcileRestoredDailyNodeEgress(ctx context.Context, tx pgx.Tx) error {
+	ok, err := tableExists(ctx, tx, "dashboard_node_egress_daily")
+	if err != nil || !ok {
+		return err
+	}
+	cols, err := tableColumns(ctx, tx, "dashboard_node_egress_daily")
+	if err != nil {
+		return err
+	}
+	if slices.Contains(cols, "node_name") && slices.Contains(cols, "node_type") {
+		if _, err := tx.Exec(ctx, `
+			UPDATE dashboard_node_egress_daily d
+			SET
+				node_name = COALESCE(NULLIF(BTRIM(d.node_name), ''), NULLIF(BTRIM(b.name), ''), ''),
+				node_type = COALESCE(d.node_type, b.type)
+			FROM stream_nodes b
+			WHERE d.node_id = b.id
+			  AND (BTRIM(d.node_name) = '' OR d.node_type IS NULL)
+		`); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(ctx, `
+		WITH base AS (
+			SELECT LEAST(0, COALESCE(MIN(node_id), 0)) AS min_id
+			FROM dashboard_node_egress_daily
+		),
+		remap AS (
+			SELECT
+				d.node_id AS old_id,
+				(SELECT min_id FROM base) - ROW_NUMBER() OVER (ORDER BY d.node_id)::integer AS new_id
+			FROM (
+				SELECT DISTINCT node_id
+				FROM dashboard_node_egress_daily
+				WHERE node_id > 0
+				  AND NOT EXISTS (SELECT 1 FROM matched_stream_nodes m WHERE m.id = node_id)
+			) d
+		)
+		UPDATE dashboard_node_egress_daily t
+		SET node_id = r.new_id
+		FROM remap r
+		WHERE t.node_id = r.old_id
+	`)
+	return err
+}
+
+func reconcileRestoredNodeEgressSamples(ctx context.Context, tx pgx.Tx) error {
+	ok, err := tableExists(ctx, tx, "dashboard_node_egress_samples")
+	if err != nil || !ok {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
+		DELETE FROM dashboard_node_egress_samples s
+		WHERE NOT EXISTS (SELECT 1 FROM matched_stream_nodes m WHERE m.id = s.node_id)
+	`)
+	return err
 }

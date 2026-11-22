@@ -138,7 +138,7 @@ function historyItemAsAdminSession(item: AdminPlaybackHistoryItem): AdminSession
     source_audio_channels: item.source_audio_channels ?? null,
     source_container: item.source_container ?? undefined,
     source_bitrate_kbps: item.source_bitrate_kbps ?? null,
-    stream_bitrate_kbps: item.target_bitrate_kbps ?? item.source_bitrate_kbps ?? null,
+    stream_bitrate_kbps: null,
   };
 }
 
@@ -207,14 +207,27 @@ export function SessionDetailSheet({
   );
   const transcodeMode = adminSession ? formatTranscodeModeSummary(adminSession) : null;
   const toneMap = adminSession ? formatToneMapSummary(adminSession) : null;
-  const routeNodes = adminSession ? getSessionRouteNodes(adminSession) : [];
+  const hasRecordedRoute = Boolean(
+    session &&
+    session.route_facts_recorded !== false &&
+    (session.routing_execution?.trim() ||
+      session.routing_egress?.trim() ||
+      session.reporting_node?.trim()),
+  );
+  const routeNodes = adminSession && hasRecordedRoute ? getSessionRouteNodes(adminSession) : [];
   const watch = session ? watchTimeSummary(session) : null;
 
   const sourceBitrate = formatSessionBitrate(session?.source_bitrate_kbps);
-  const deliveredBitrate =
-    session && normalizeMethodKey(session.play_method) === "transcode"
-      ? (formatSessionBitrate(session.target_bitrate_kbps) ?? sourceBitrate ?? EM_DASH)
-      : (sourceBitrate ?? EM_DASH);
+  const targetBitrateCap = formatSessionBitrate(session?.target_bitrate_kbps);
+  const isVideoTranscode =
+    session !== null &&
+    (normalizeMethodKey(session.play_method) === "transcode" ||
+      session.video_decision === "transcode");
+  const deliveredBitrate = isVideoTranscode
+    ? targetBitrateCap
+      ? t("web.admin.activity.bitrate.limit", { rate: targetBitrateCap })
+      : EM_DASH
+    : (sourceBitrate ?? EM_DASH);
 
   const subtitleDisplay = session?.subtitle
     ? [

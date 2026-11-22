@@ -1081,12 +1081,113 @@ func TestApplyAttemptPlanFactsReplan(t *testing.T) {
 			AdaptationReasons:   []string{"subtitle_burn_in"},
 		},
 	}
-	applyAttemptPlanFacts(session, record)
+	applyAttemptPlanFacts(session, record, true)
 	if session.PlayMethod != playback.PlayTranscode || session.TargetVideoCodec != "h264" ||
 		session.OutputProtocol != "hls" || session.OutputContainer != "fmp4" ||
 		session.RoutingEgress != "" || session.RoutingEgressNodeID != 0 || session.TranscodeHWAccel != "" ||
 		session.Subtitle == nil || session.Subtitle.Delivery != playback.SessionSubtitleDeliveryBurnIn ||
 		!reflect.DeepEqual(session.AdaptationReasons, []string{"subtitle_burn_in"}) {
 		t.Fatalf("unexpected replanned session: %+v", session)
+	}
+}
+
+func TestApplyAttemptPlanFactsDetachedSameMethodReplan(t *testing.T) {
+	session := &playback.Session{
+		PlayMethod:          playback.PlayRemux,
+		MediaFileID:         11,
+		OutputContainer:     "mpegts",
+		OutputProtocol:      "hls",
+		RoutingExecution:    "transcode",
+		RoutingEgress:       "proxy",
+		RoutingEgressNodeID: 9,
+		TranscodeHWAccel:    "vaapi",
+	}
+	audioIdx := 2
+	record := &playback.AttemptRecordV3{
+		CurrentPlanID:          "plan-3",
+		CurrentReplanRequestID: "replan-3",
+		CurrentPlan: playback.PlanV3{
+			PlanID:               "plan-3",
+			Delivery:             playback.DeliveryRemuxProgressiveV3,
+			RequestedMediaFileID: 11,
+			EffectiveMediaFileID: 77,
+			SelectedTracks: playback.SelectedTracksV3{
+				Audio: &playback.TrackIdentityV3{Index: &audioIdx},
+			},
+		},
+		FrozenRecipe: playback.ExecutableRecipeV3{
+			PlanID:           "plan-3",
+			PlayMethod:       playback.PlayRemux,
+			TargetResolution: "1080p",
+		},
+	}
+	applyAttemptPlanFacts(session, record, false)
+	if session.OutputContainer != playback.OutputContainerFMP4 || session.OutputProtocol != playback.OutputProtocolHTTP ||
+		session.MediaFileID != 77 || session.RequestedMediaFileID != 11 || session.AudioTrackIndex != 2 ||
+		session.RoutingExecution != "" || session.RoutingEgress != "" || session.RoutingEgressNodeID != 0 ||
+		session.TranscodeHWAccel != "" || session.TargetResolution != "" {
+		t.Fatalf("detached same-method replan left stale facts: %+v", session)
+	}
+}
+
+func TestRecordHistoryReplanReplacesVideoAndAudioDecisionsDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	suffix := uuid.NewString()
+	var account int
+	if err = pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, "replan-dec-"+suffix).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account) }()
+
+	store := NewPGPlaybackAdminStore(pool, nil)
+	sessionID := "sess-replan-decisions-" + suffix
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM admin_playback_history WHERE session_id = $1`, sessionID)
+	})
+
+	start := time.Now().UTC().Add(-20 * time.Minute).Truncate(time.Second)
+	if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+		SessionID: sessionID, UserID: account, ProfileID: "p-1", MediaItemID: "movie-1", MediaFileID: 1,
+		PlayMethod: string(playback.PlayTranscode), VideoDecision: "transcode", AudioDecision: "transcode",
+		TargetVideoCodec: "h264", TargetAudioCodec: "aac", TargetBitrateKbps: 6000,
+		OutputContainer: "fmp4", OutputProtocol: "hls", RoutingExecution: "transcode", RoutingEgress: "proxy",
+		StartedAt: start.Format(time.RFC3339Nano), EndedAt: start.Add(5 * time.Minute).Format(time.RFC3339Nano),
+		RouteFactsRecorded: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+		SessionID: sessionID, UserID: account, ProfileID: "p-1", MediaItemID: "movie-1", MediaFileID: 1,
+		PlayMethod: string(playback.PlayDirect), VideoDecision: "direct", AudioDecision: "direct",
+		OutputContainer: "mkv", OutputProtocol: "http", RoutingExecution: "local", RoutingEgress: "api",
+		StartedAt: start.Format(time.RFC3339Nano), EndedAt: start.Add(15 * time.Minute).Format(time.RFC3339Nano),
+		RouteFactsRecorded: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var playMethod, videoDec, audioDec, targetVideo, routingEgress string
+	if err := pool.QueryRow(ctx, `
+		SELECT play_method, COALESCE(video_decision,''), COALESCE(audio_decision,''),
+		       COALESCE(target_video_codec,''), COALESCE(routing_egress,'')
+		FROM admin_playback_history WHERE session_id = $1`, sessionID).Scan(
+		&playMethod, &videoDec, &audioDec, &targetVideo, &routingEgress,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if playMethod != "direct" || videoDec != "direct" || audioDec != "direct" ||
+		targetVideo != "" || routingEgress != "api" {
+		t.Fatalf("replanned decisions mismatch: method=%q video=%q audio=%q targetVideo=%q egress=%q",
+			playMethod, videoDec, audioDec, targetVideo, routingEgress)
 	}
 }

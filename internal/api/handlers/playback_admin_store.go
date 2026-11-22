@@ -49,15 +49,17 @@ func (r PlaybackEndReason) userInitiated() bool {
 // AdminPlaybackHistoryEntry is the finalized admin-facing record for a
 // playback attempt.
 type AdminPlaybackHistoryEntry struct {
-	SessionID   string
-	UserID      int
-	ProfileID   string
-	ProfileName string
-	MediaItemID string
-	MediaFileID int
-	PlayMethod  string
-	StartedAt   string
-	EndedAt     string
+	SessionID            string
+	UserID               int
+	ProfileID            string
+	ProfileName          string
+	MediaItemID          string
+	MediaFileID          int
+	EffectiveMediaFileID int
+	AudioTrackIndex      *int
+	PlayMethod           string
+	StartedAt            string
+	EndedAt              string
 	// EndPositionSeconds is where the play ended, stored in the
 	// watched_seconds column.
 	EndPositionSeconds float64
@@ -84,24 +86,26 @@ type AdminPlaybackHistoryEntry struct {
 	// Delivered route facts captured from the session when it finalized.
 	// RouteFactsRecorded distinguishes post-upgrade direct-play rows (whose
 	// transcode columns are legitimately NULL) from pre-upgrade rows.
-	TargetVideoCodec       string
-	TargetResolution       string
-	TargetAudioCodec       string
-	TargetAudioChannels    int
-	OutputContainer        string
-	OutputProtocol         string
-	TargetBitrateKbps      int
-	TranscodeHWAccel       string
-	ToneMapMode            string
-	AdaptationReasons      []string
-	ReportingNode          string
-	StreamLocation         string
-	CompatOrigin           bool
-	RoutingExecution       string
-	RoutingExecutionNodeID int
-	RoutingEgress          string
-	RoutingEgressNodeID    int
-	RouteFactsRecorded     bool
+	TargetVideoCodec         string
+	TargetResolution         string
+	TargetAudioCodec         string
+	TargetAudioChannels      int
+	OutputContainer          string
+	OutputProtocol           string
+	TargetBitrateKbps        int
+	TranscodeHWAccel         string
+	ToneMapMode              string
+	AdaptationReasons        []string
+	ReportingNode            string
+	StreamLocation           string
+	CompatOrigin             bool
+	RoutingExecution         string
+	RoutingExecutionNodeID   int
+	RoutingExecutionNodeName string
+	RoutingEgress            string
+	RoutingEgressNodeID      int
+	RoutingEgressNodeName    string
+	RouteFactsRecorded       bool
 }
 
 // PlaybackAdminStore persists finalized playback history and manages the
@@ -168,19 +172,25 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 	// from an earlier plan with a later replan.
 	const routeSnapshotReplace = `(EXCLUDED.route_facts_recorded AND (NOT admin_playback_history.route_facts_recorded OR EXCLUDED.ended_at >= admin_playback_history.ended_at))`
 	const routeSnapshotDistinct = `ROW(
+			EXCLUDED.play_method, EXCLUDED.video_decision, EXCLUDED.audio_decision,
+			EXCLUDED.effective_media_file_id, EXCLUDED.audio_track_index,
 			EXCLUDED.target_video_codec, EXCLUDED.target_resolution, EXCLUDED.target_audio_codec,
 			EXCLUDED.target_audio_channels, EXCLUDED.output_container, EXCLUDED.output_protocol,
 			EXCLUDED.target_bitrate_kbps, EXCLUDED.transcode_hw_accel, EXCLUDED.tone_map_mode,
 			EXCLUDED.adaptation_reasons, EXCLUDED.reporting_node, EXCLUDED.stream_location,
 			EXCLUDED.compat_origin, EXCLUDED.routing_execution, EXCLUDED.routing_execution_node_id,
-			EXCLUDED.routing_egress, EXCLUDED.routing_egress_node_id
+			EXCLUDED.routing_execution_node_name, EXCLUDED.routing_egress, EXCLUDED.routing_egress_node_id,
+			EXCLUDED.routing_egress_node_name
 		) IS DISTINCT FROM ROW(
+			admin_playback_history.play_method, admin_playback_history.video_decision, admin_playback_history.audio_decision,
+			admin_playback_history.effective_media_file_id, admin_playback_history.audio_track_index,
 			admin_playback_history.target_video_codec, admin_playback_history.target_resolution, admin_playback_history.target_audio_codec,
 			admin_playback_history.target_audio_channels, admin_playback_history.output_container, admin_playback_history.output_protocol,
 			admin_playback_history.target_bitrate_kbps, admin_playback_history.transcode_hw_accel, admin_playback_history.tone_map_mode,
 			admin_playback_history.adaptation_reasons, admin_playback_history.reporting_node, admin_playback_history.stream_location,
 			admin_playback_history.compat_origin, admin_playback_history.routing_execution, admin_playback_history.routing_execution_node_id,
-			admin_playback_history.routing_egress, admin_playback_history.routing_egress_node_id
+			admin_playback_history.routing_execution_node_name, admin_playback_history.routing_egress, admin_playback_history.routing_egress_node_id,
+			admin_playback_history.routing_egress_node_name
 		)`
 	batch := &pgx.Batch{}
 	batch.Queue(`
@@ -194,13 +204,25 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 			 output_container, output_protocol, target_bitrate_kbps, transcode_hw_accel, tone_map_mode,
 			 adaptation_reasons, reporting_node, stream_location, compat_origin,
 			 routing_execution, routing_execution_node_id, routing_egress, routing_egress_node_id,
-			 route_facts_recorded)
+			 route_facts_recorded, effective_media_file_id, audio_track_index,
+			 routing_execution_node_name, routing_egress_node_name)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::inet, $14, $15, $16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25, $26::text, CASE WHEN $26::text IS NOT NULL THEN $9::timestamptz END, $27,
-			$28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)
+			$28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45,
+			$46, $47,
+			COALESCE(NULLIF(BTRIM($48::text), ''), (SELECT NULLIF(BTRIM(name), '') FROM stream_nodes WHERE id = $42)),
+			COALESCE(NULLIF(BTRIM($49::text), ''), (SELECT NULLIF(BTRIM(name), '') FROM stream_nodes WHERE id = $44)))
 		ON CONFLICT (session_id) DO UPDATE SET
 			play_method = CASE WHEN `+routeSnapshotReplace+` AND EXCLUDED.play_method <> ''
 				THEN EXCLUDED.play_method ELSE admin_playback_history.play_method END,
+			video_decision = CASE WHEN `+routeSnapshotReplace+`
+				THEN EXCLUDED.video_decision ELSE admin_playback_history.video_decision END,
+			audio_decision = CASE WHEN `+routeSnapshotReplace+`
+				THEN EXCLUDED.audio_decision ELSE admin_playback_history.audio_decision END,
+			effective_media_file_id = CASE WHEN `+routeSnapshotReplace+`
+				THEN EXCLUDED.effective_media_file_id ELSE admin_playback_history.effective_media_file_id END,
+			audio_track_index = CASE WHEN `+routeSnapshotReplace+`
+				THEN EXCLUDED.audio_track_index ELSE admin_playback_history.audio_track_index END,
 			watched_seconds = GREATEST(admin_playback_history.watched_seconds, EXCLUDED.watched_seconds),
 			subtitle = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at
 				THEN EXCLUDED.subtitle ELSE admin_playback_history.subtitle END,
@@ -237,8 +259,10 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 			compat_origin = CASE WHEN `+routeSnapshotReplace+` THEN EXCLUDED.compat_origin ELSE admin_playback_history.compat_origin END,
 			routing_execution = CASE WHEN `+routeSnapshotReplace+` THEN EXCLUDED.routing_execution ELSE admin_playback_history.routing_execution END,
 			routing_execution_node_id = CASE WHEN `+routeSnapshotReplace+` THEN EXCLUDED.routing_execution_node_id ELSE admin_playback_history.routing_execution_node_id END,
+			routing_execution_node_name = CASE WHEN `+routeSnapshotReplace+` THEN EXCLUDED.routing_execution_node_name ELSE admin_playback_history.routing_execution_node_name END,
 			routing_egress = CASE WHEN `+routeSnapshotReplace+` THEN EXCLUDED.routing_egress ELSE admin_playback_history.routing_egress END,
 			routing_egress_node_id = CASE WHEN `+routeSnapshotReplace+` THEN EXCLUDED.routing_egress_node_id ELSE admin_playback_history.routing_egress_node_id END,
+			routing_egress_node_name = CASE WHEN `+routeSnapshotReplace+` THEN EXCLUDED.routing_egress_node_name ELSE admin_playback_history.routing_egress_node_name END,
 			route_facts_recorded = admin_playback_history.route_facts_recorded OR EXCLUDED.route_facts_recorded
 		WHERE EXCLUDED.watched_seconds > admin_playback_history.watched_seconds
 			OR EXCLUDED.played_seconds > admin_playback_history.played_seconds
@@ -296,6 +320,10 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 		nullableString(entry.RoutingEgress),
 		nullablePositiveInt(entry.RoutingEgressNodeID),
 		entry.RouteFactsRecorded,
+		nullablePositiveInt(entry.EffectiveMediaFileID),
+		nullableNonNegIntPtr(entry.AudioTrackIndex),
+		nullableString(entry.RoutingExecutionNodeName),
+		nullableString(entry.RoutingEgressNodeName),
 	)
 	queueHistoryFacts(batch, entry)
 	return batch
@@ -306,15 +334,25 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 // the session recorded when it started. ErrSessionNotFound when there is
 // neither.
 func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string) (*playback.Session, error) {
+	live, _, err := s.LiveSessionWithOrigin(ctx, sessionID)
+	return live, err
+}
+
+// LiveSessionWithOrigin is LiveSession plus whether the returned row came from
+// the live playback_sessions_sync table (true) rather than the start-time
+// fallback in playback_session_lifecycle.start_facts (false).
+func (s *PGPlaybackAdminStore) LiveSessionWithOrigin(ctx context.Context, sessionID string) (*playback.Session, bool, error) {
 	if s == nil || s.pool == nil {
-		return nil, playback.ErrSessionNotFound
+		return nil, false, playback.ErrSessionNotFound
 	}
 	var live playback.Session
+	var source int
 	var playMethod string
 	var toneMapMode string
 	var startedAt *time.Time
 	err := s.pool.QueryRow(ctx, `
-		SELECT user_id, COALESCE(profile_id, ''), COALESCE(media_file_id, 0), COALESCE(requested_media_file_id, media_file_id, 0),
+		SELECT source, user_id, COALESCE(profile_id, ''), COALESCE(media_file_id, 0), COALESCE(requested_media_file_id, media_file_id, 0),
+			COALESCE(audio_track_index, 0),
 			COALESCE(play_method, ''), started_at, COALESCE(HOST(client_ip), ''),
 			COALESCE(client_name, ''), COALESCE(client_version, ''), COALESCE(client_build, ''),
 			COALESCE(client_channel, ''), COALESCE(client_user_agent, ''),
@@ -338,7 +376,8 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 				'started_at', lc.started_at) || lc.start_facts)).*
 			FROM playback_session_lifecycle lc WHERE lc.session_id = $2::uuid
 		) s ORDER BY source LIMIT 1`, sessionID, lifecycleIDParam(sessionID)).Scan(
-		&live.UserID, &live.ProfileID, &live.MediaFileID, &live.RequestedMediaFileID,
+		&source, &live.UserID, &live.ProfileID, &live.MediaFileID, &live.RequestedMediaFileID,
+		&live.AudioTrackIndex,
 		&playMethod, &startedAt, &live.ClientIP,
 		&live.ClientName, &live.ClientVersion, &live.ClientBuild,
 		&live.ClientChannel, &live.ClientUserAgent,
@@ -354,10 +393,10 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 		&live.TimelineDuration, &live.AdaptationReasons, &live.Subtitle,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, playback.ErrSessionNotFound
+		return nil, false, playback.ErrSessionNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("reading live playback session: %w", err)
+		return nil, false, fmt.Errorf("reading live playback session: %w", err)
 	}
 	live.ID = sessionID
 	live.PlayMethod = playback.PlayMethod(playMethod)
@@ -365,7 +404,7 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 	if startedAt != nil {
 		live.StartedAt = *startedAt
 	}
-	return &live, nil
+	return &live, source == 0, nil
 }
 
 // SessionWatch is the watch-time measurement the server holding sessionID
@@ -484,6 +523,13 @@ func nullablePositiveInt(value int) any {
 	return value
 }
 
+func nullableNonNegIntPtr(value *int) any {
+	if value == nil || *value < 0 {
+		return nil
+	}
+	return *value
+}
+
 func nullableStringSlice(values []string) any {
 	if len(values) == 0 {
 		return nil
@@ -513,8 +559,8 @@ func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
 			device_platform = COALESCE(device_platform, $3),
 			client_name = COALESCE(client_name, $4),
 			client_version = COALESCE(client_version, $5),
-			video_decision = COALESCE(video_decision, $6),
-			audio_decision = COALESCE(audio_decision, $7),
+			video_decision = CASE WHEN `+backfillRoute+` THEN $6 ELSE COALESCE(video_decision, $6) END,
+			audio_decision = CASE WHEN `+backfillRoute+` THEN $7 ELSE COALESCE(audio_decision, $7) END,
 			end_reason = CASE WHEN `+laterReason+` THEN $8 ELSE end_reason END,
 			end_reason_at = CASE WHEN `+laterReason+` THEN $9::timestamptz ELSE end_reason_at END,
 			target_video_codec = CASE WHEN `+backfillRoute+` THEN $10 ELSE target_video_codec END,
@@ -534,6 +580,10 @@ func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
 			routing_execution_node_id = CASE WHEN `+backfillRoute+` THEN $24 ELSE routing_execution_node_id END,
 			routing_egress = CASE WHEN `+backfillRoute+` THEN $25 ELSE routing_egress END,
 			routing_egress_node_id = CASE WHEN `+backfillRoute+` THEN $26 ELSE routing_egress_node_id END,
+			effective_media_file_id = CASE WHEN `+backfillRoute+` THEN $28 ELSE effective_media_file_id END,
+			audio_track_index = CASE WHEN `+backfillRoute+` THEN $29 ELSE audio_track_index END,
+			routing_execution_node_name = CASE WHEN `+backfillRoute+` THEN COALESCE(NULLIF(BTRIM($30::text), ''), (SELECT NULLIF(BTRIM(name), '') FROM stream_nodes WHERE id = $24)) ELSE routing_execution_node_name END,
+			routing_egress_node_name = CASE WHEN `+backfillRoute+` THEN COALESCE(NULLIF(BTRIM($31::text), ''), (SELECT NULLIF(BTRIM(name), '') FROM stream_nodes WHERE id = $26)) ELSE routing_egress_node_name END,
 			route_facts_recorded = route_facts_recorded OR $27
 		WHERE session_id = $1 AND (
 			(device_id IS NULL AND $2::text IS NOT NULL)
@@ -572,5 +622,9 @@ func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
 		nullableString(entry.RoutingEgress),
 		nullablePositiveInt(entry.RoutingEgressNodeID),
 		entry.RouteFactsRecorded,
+		nullablePositiveInt(entry.EffectiveMediaFileID),
+		nullableNonNegIntPtr(entry.AudioTrackIndex),
+		nullableString(entry.RoutingExecutionNodeName),
+		nullableString(entry.RoutingEgressNodeName),
 	)
 }

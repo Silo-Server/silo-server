@@ -581,13 +581,53 @@ func (h *AdminHandler) ReadAdminInsightsBandwidth(ctx context.Context, q AdminIn
 // Window validation & resolution helpers.
 
 type resolvedInsightsWindow struct {
-	Range      string
-	TZ         string
-	Loc        *time.Location
-	From       time.Time // UTC inclusive lower bound (zero if AllTime until resolved from earliest row)
-	To         time.Time // UTC exclusive upper bound (or now for presets)
-	AllTime    bool
-	BucketUnit string
+	Range         string
+	TZ            string
+	Loc           *time.Location
+	From          time.Time // UTC inclusive lower bound (zero if AllTime until resolved from earliest row)
+	To            time.Time // UTC exclusive upper bound (or now for presets)
+	FromLocalDate string    // YYYY-MM-DD in Loc (set for presets & custom; resolved for AllTime)
+	ToLocalDate   string    // YYYY-MM-DD in Loc inclusive
+	AllTime       bool
+	BucketUnit    string
+}
+
+// localDayStart returns the earliest valid instant on the calendar date
+// (year, month, day) in loc. When DST springs forward right at 00:00 (such as
+// America/Santiago or America/Havana), Go's time.Date(y, m, d, 0, 0, 0, 0, loc)
+// resolves the nonexistent midnight backward into 23:00 on the previous day.
+// Advancing across the gap and binary-searching back to the exact first second
+// on (year, month, day) yields the true start of the day (e.g. 01:00).
+func localDayStart(year int, month time.Month, day int, loc *time.Location) time.Time {
+	t := time.Date(year, month, day, 0, 0, 0, 0, loc)
+	if !isBeforeCalendarDate(t, year, month, day) {
+		return t
+	}
+	lo := t
+	hi := t
+	for isBeforeCalendarDate(hi, year, month, day) {
+		hi = hi.Add(time.Hour).In(loc)
+	}
+	for hi.Sub(lo) > time.Second {
+		mid := lo.Add(hi.Sub(lo) / 2).In(loc)
+		if isBeforeCalendarDate(mid, year, month, day) {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	return hi
+}
+
+func isBeforeCalendarDate(t time.Time, year int, month time.Month, day int) bool {
+	ty, tm, td := t.Date()
+	if ty != year {
+		return ty < year
+	}
+	if tm != month {
+		return tm < month
+	}
+	return td < day
 }
 
 func normalizeInsightsRange(raw string) string {
@@ -646,21 +686,31 @@ func resolveInsightsWindow(nowUTC time.Time, rangeRaw, fromDateRaw, toDateRaw, t
 	}
 	rng := normalizeInsightsRange(rangeRaw)
 	nowLocal := nowUTC.In(loc)
-	todayStart := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
-	out := resolvedInsightsWindow{Range: rng, TZ: tz, Loc: loc, To: nowUTC.UTC()}
+	todayCal := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, time.UTC)
+	presetStart := func(daysBack int) (time.Time, string) {
+		cal := todayCal.AddDate(0, 0, -daysBack)
+		return localDayStart(cal.Year(), cal.Month(), cal.Day(), loc).UTC(), cal.Format("2006-01-02")
+	}
+	out := resolvedInsightsWindow{
+		Range:       rng,
+		TZ:          tz,
+		Loc:         loc,
+		To:          nowUTC.UTC(),
+		ToLocalDate: todayCal.Format("2006-01-02"),
+	}
 
 	switch rng {
 	case InsightsRange7d:
-		out.From = todayStart.AddDate(0, 0, -6).UTC()
+		out.From, out.FromLocalDate = presetStart(6)
 		out.BucketUnit = InsightsBucketDay
 	case InsightsRange30d:
-		out.From = todayStart.AddDate(0, 0, -29).UTC()
+		out.From, out.FromLocalDate = presetStart(29)
 		out.BucketUnit = InsightsBucketDay
 	case InsightsRange90d:
-		out.From = todayStart.AddDate(0, 0, -89).UTC()
+		out.From, out.FromLocalDate = presetStart(89)
 		out.BucketUnit = InsightsBucketWeek
 	case InsightsRange1y:
-		out.From = todayStart.AddDate(0, 0, -364).UTC()
+		out.From, out.FromLocalDate = presetStart(364)
 		out.BucketUnit = InsightsBucketMonth
 	case InsightsRangeAll:
 		out.AllTime = true
@@ -671,24 +721,28 @@ func resolveInsightsWindow(nowUTC time.Time, rangeRaw, fromDateRaw, toDateRaw, t
 		if fromStr == "" || toStr == "" {
 			return resolvedInsightsWindow{}, fmt.Errorf("%w: from_date and to_date are required for custom range", ErrInvalidInsightsQuery)
 		}
-		fromDay, err := time.ParseInLocation("2006-01-02", fromStr, loc)
+		fromCal, err := time.Parse("2006-01-02", fromStr)
 		if err != nil {
 			return resolvedInsightsWindow{}, fmt.Errorf("%w: invalid from_date %q", ErrInvalidInsightsQuery, fromStr)
 		}
-		toDay, err := time.ParseInLocation("2006-01-02", toStr, loc)
+		toCal, err := time.Parse("2006-01-02", toStr)
 		if err != nil {
 			return resolvedInsightsWindow{}, fmt.Errorf("%w: invalid to_date %q", ErrInvalidInsightsQuery, toStr)
 		}
-		if toDay.Before(fromDay) {
+		if toCal.Before(fromCal) {
 			return resolvedInsightsWindow{}, fmt.Errorf("%w: to_date must be on or after from_date", ErrInvalidInsightsQuery)
 		}
-		endLocal := toDay.AddDate(0, 0, 1)
-		span := endLocal.Sub(fromDay)
+		nextCal := toCal.AddDate(0, 0, 1)
+		fromInstant := localDayStart(fromCal.Year(), fromCal.Month(), fromCal.Day(), loc)
+		endInstant := localDayStart(nextCal.Year(), nextCal.Month(), nextCal.Day(), loc)
+		span := endInstant.Sub(fromInstant)
 		if span > time.Duration(insightsCustomMaxSpanDays)*24*time.Hour {
 			return resolvedInsightsWindow{}, fmt.Errorf("%w: custom range exceeds %d days", ErrInvalidInsightsQuery, insightsCustomMaxSpanDays)
 		}
-		out.From = fromDay.UTC()
-		out.To = endLocal.UTC()
+		out.From = fromInstant.UTC()
+		out.To = endInstant.UTC()
+		out.FromLocalDate = fromCal.Format("2006-01-02")
+		out.ToLocalDate = toCal.Format("2006-01-02")
 		out.BucketUnit = pickInsightsBucketUnit(span)
 	default:
 		return resolvedInsightsWindow{}, fmt.Errorf("%w: unsupported range %q", ErrInvalidInsightsQuery, rng)

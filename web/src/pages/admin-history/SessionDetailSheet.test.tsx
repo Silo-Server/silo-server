@@ -187,5 +187,52 @@ describe("SessionDetailSheet", () => {
     );
 
     expect(screen.getByText(/Recorded before detailed route telemetry was captured/i)).toBeTruthy();
+    expect(screen.queryByText(/Local server/i)).toBeNull();
+  });
+
+  it("labels transcode bitrate caps honestly and hides unknown caps and unrecorded routes", () => {
+    const { rerender } = render(
+      <MemoryRouter>
+        <SessionDetailSheet
+          open
+          onOpenChange={() => {}}
+          session={baseSession}
+          hasPrevious={false}
+          hasNext={false}
+          onPrevious={() => {}}
+          onNext={() => {}}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/limit\s+.*8\.0\s+Mbps/)).toBeTruthy();
+
+    rerender(
+      <MemoryRouter>
+        <SessionDetailSheet
+          open
+          onOpenChange={() => {}}
+          session={{
+            ...baseSession,
+            target_bitrate_kbps: null,
+            route_facts_recorded: false,
+            reporting_node: null,
+            routing_execution: null,
+            routing_egress: null,
+            routing_egress_node_id: null,
+            routing_egress_node_name: null,
+          }}
+          hasPrevious={false}
+          hasNext={false}
+          onPrevious={() => {}}
+          onNext={() => {}}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText(/limit\s+.*8\.0\s+Mbps/)).toBeNull();
+    // Source bitrate is 42.0 Mbps; delivered must not fall back to it when cap is missing.
+    expect(screen.getAllByText(/42\.0\s+Mbps/)).toHaveLength(1);
+    expect(screen.queryByText(/Local server/i)).toBeNull();
   });
 });

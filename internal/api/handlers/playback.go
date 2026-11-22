@@ -887,6 +887,16 @@ func fileBitrateKbps(file *models.MediaFile) int {
 	return file.Bitrate
 }
 
+func effectiveMediaFileID(session *playback.Session) int {
+	if session == nil {
+		return 0
+	}
+	if session.MediaFileID > 0 {
+		return session.MediaFileID
+	}
+	return session.RequestedMediaFileID
+}
+
 func requestedMediaFileID(session *playback.Session) int {
 	if session == nil {
 		return 0
@@ -1235,6 +1245,36 @@ func (h *PlaybackHandler) scrobbleEventForStoppedSession(
 	return event, true
 }
 
+func (h *PlaybackHandler) resolveHistoryOutputFormat(
+	ctx context.Context,
+	session *playback.Session,
+	file *models.MediaFile,
+	effFileID int,
+	playMethod playback.PlayMethod,
+) (outputContainer, outputProtocol string) {
+	outputContainer = session.OutputContainer
+	outputProtocol = session.OutputProtocol
+	if playMethod != playback.PlayDirect {
+		return outputContainer, outputProtocol
+	}
+	if outputProtocol == "" {
+		outputProtocol = playback.OutputProtocolHTTP
+	}
+	if outputContainer != "" {
+		return outputContainer, outputProtocol
+	}
+	effFile := file
+	if effFileID > 0 && (effFile == nil || effFile.ID != effFileID) {
+		if loaded, loadErr := h.fileResolver.GetByID(ctx, effFileID); loadErr == nil && loaded != nil {
+			effFile = loaded
+		}
+	}
+	if effFile != nil {
+		outputContainer = effFile.Container
+	}
+	return outputContainer, outputProtocol
+}
+
 func (h *PlaybackHandler) buildAdminHistoryEntry(
 	ctx context.Context,
 	session *playback.Session,
@@ -1295,6 +1335,13 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 	if reportingNode == "" {
 		reportingNode = h.ReportingNode
 	}
+	effFileID := effectiveMediaFileID(session)
+	outputContainer, outputProtocol := h.resolveHistoryOutputFormat(ctx, session, file, effFileID, playMethod)
+	var audioTrackIndex *int
+	if session.AudioTrackIndex >= 0 {
+		idx := session.AudioTrackIndex
+		audioTrackIndex = &idx
+	}
 
 	entry := &AdminPlaybackHistoryEntry{
 		SessionID:              session.ID,
@@ -1303,6 +1350,8 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 		ProfileName:            profileName,
 		MediaItemID:            targetID,
 		MediaFileID:            requestedMediaFileID(session),
+		EffectiveMediaFileID:   effFileID,
+		AudioTrackIndex:        audioTrackIndex,
 		PlayMethod:             string(playMethod),
 		StartedAt:              session.StartedAt.UTC().Format(time.RFC3339Nano),
 		EndedAt:                time.Now().UTC().Format(time.RFC3339Nano),
@@ -1320,8 +1369,8 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 		TargetResolution:       session.TargetResolution,
 		TargetAudioCodec:       session.TargetAudioCodec,
 		TargetAudioChannels:    session.TargetAudioChannels,
-		OutputContainer:        session.OutputContainer,
-		OutputProtocol:         session.OutputProtocol,
+		OutputContainer:        outputContainer,
+		OutputProtocol:         outputProtocol,
 		TargetBitrateKbps:      session.TargetBitrateKbps,
 		TranscodeHWAccel:       session.TranscodeHWAccel,
 		ToneMapMode:            string(session.ToneMapMode),
@@ -1731,18 +1780,29 @@ type liveSessionReader interface {
 // built from a Jellyfin play row, which keeps only a pseudo-account) takes
 // the live row's. A start time still unknown after that is startedAt, then
 // now.
-func (h *PlaybackHandler) fillDetachedSession(ctx context.Context, session *playback.Session, startedAt time.Time) {
-	if reader, ok := h.AdminStore.(liveSessionReader); ok {
-		live, err := reader.LiveSession(ctx, session.ID)
-		if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.WarnContext(ctx, "failed to read the live row of a detached session", "component", "api", "session", session.ID, "error", err)
-		}
-		if live != nil && session.UserID == 0 {
-			session.UserID, session.ProfileID = live.UserID, live.ProfileID
-		}
-		if live != nil && live.UserID == session.UserID {
-			fillEmptySessionFacts(session, live)
-		}
+// liveSessionOriginReader is liveSessionReader plus whether the row came from
+// the live playback_sessions_sync table rather than the start-time fallback.
+type liveSessionOriginReader interface {
+	LiveSessionWithOrigin(ctx context.Context, sessionID string) (*playback.Session, bool, error)
+}
+
+func (h *PlaybackHandler) fillDetachedSession(ctx context.Context, session *playback.Session, startedAt time.Time) bool {
+	fromLiveRow := false
+	var live *playback.Session
+	var err error
+	if originReader, ok := h.AdminStore.(liveSessionOriginReader); ok {
+		live, fromLiveRow, err = originReader.LiveSessionWithOrigin(ctx, session.ID)
+	} else if reader, ok := h.AdminStore.(liveSessionReader); ok {
+		live, err = reader.LiveSession(ctx, session.ID)
+	}
+	if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+		slog.WarnContext(ctx, "failed to read the live row of a detached session", "component", "api", "session", session.ID, "error", err)
+	}
+	if live != nil && session.UserID == 0 {
+		session.UserID, session.ProfileID = live.UserID, live.ProfileID
+	}
+	if live != nil && live.UserID == session.UserID {
+		fillEmptySessionFacts(session, live)
 	}
 	if session.Position < 0 {
 		session.Position = 0
@@ -1758,6 +1818,7 @@ func (h *PlaybackHandler) fillDetachedSession(ctx context.Context, session *play
 	if watch, ok := h.savedWatch(ctx, session.ID); ok && (!session.Watch.Measured || watch.Until.After(session.Watch.Until)) {
 		session.Watch = watch
 	}
+	return fromLiveRow
 }
 
 // sessionWatchReader reads the watch-time measurement a session's server
@@ -1895,6 +1956,9 @@ func fillEmptySessionFacts(session, live *playback.Session) {
 	}
 	if session.RequestedMediaFileID == 0 {
 		session.RequestedMediaFileID = live.RequestedMediaFileID
+	}
+	if session.AudioTrackIndex == 0 && live.AudioTrackIndex > 0 {
+		session.AudioTrackIndex = live.AudioTrackIndex
 	}
 	if session.TimelineDuration <= 0 {
 		session.TimelineDuration = live.TimelineDuration

@@ -597,268 +597,274 @@ export default function AdminPlaybackHistory() {
                 ? history.error.message
                 : t("web.admin.history.loadError")}
             </div>
-          ) : rows.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-              <History className="text-muted-foreground/50 h-10 w-10" />
-              <div className="space-y-1">
-                <p className="text-sm font-medium">{t("web.admin.history.empty.title")}</p>
-                <p className="text-muted-foreground max-w-sm text-xs">
-                  {t("web.admin.history.empty.body")}
-                </p>
-              </div>
-            </div>
           ) : (
             <>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t("web.admin.history.column.media")}</TableHead>
-                      <TableHead>{t("web.admin.history.column.user")}</TableHead>
-                      <TableHead>{t("web.admin.history.column.profile")}</TableHead>
-                      <TableHead>{t("web.admin.history.column.client")}</TableHead>
-                      <TableHead>{t("web.admin.history.column.method")}</TableHead>
-                      <TableHead>{t("web.admin.history.column.watchTime")}</TableHead>
-                      <TableHead>{t("web.admin.history.column.status")}</TableHead>
-                      <TableHead>{t("web.admin.history.column.ended")}</TableHead>
-                      <TableHead className="text-end">
-                        {t("web.admin.history.column.logs")}
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rows.map((row) => {
-                      const watch = watchTimeSummary(row);
-                      const { title, detail } = historyRowTitle(row, t);
-                      const isSelected = row.session_id === selectedSessionId;
-                      const methodMeta = activityMethodMeta(normalizeMethodKey(row.play_method));
-                      const titleBlock = (
-                        <>
-                          {title}
-                          {detail ? (
-                            <div className="text-muted-foreground font-normal">{detail}</div>
-                          ) : null}
-                        </>
-                      );
-                      const profileLabel = row.profile_name || row.profile_id;
-                      return (
-                        <TableRow
-                          key={row.session_id}
-                          onClick={(e) => {
-                            if ((e.target as HTMLElement).closest("a, button")) return;
-                            selectSession(row.session_id);
-                          }}
-                          className={cn(
-                            "cursor-pointer transition-colors",
-                            isSelected && "bg-primary/8 hover:bg-primary/10",
-                          )}
-                        >
-                          <TableCell>
-                            <div className="max-w-[18rem] min-w-[11rem] space-y-1 break-words whitespace-normal">
-                              {row.media_item_id ? (
-                                <Link
-                                  to={`/item/${encodeURIComponent(row.media_item_id)}`}
-                                  className="hover:text-primary block font-medium transition-colors hover:underline"
-                                >
-                                  {titleBlock}
-                                </Link>
-                              ) : (
-                                <div className="font-medium">{titleBlock}</div>
-                              )}
-                              <div className="text-muted-foreground text-xs">
-                                {t("web.admin.history.row.meta", {
-                                  media_type: mediaTypeLabel(row.media_type, t),
-                                  session: row.session_id.slice(0, 8),
-                                })}
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Link
-                              to={`/admin/users/${row.user_id}`}
-                              className="hover:text-primary font-medium transition-colors hover:underline"
-                            >
-                              {row.username ||
-                                t("web.admin.activity.userFallback", { id: row.user_id })}
-                            </Link>
-                          </TableCell>
-                          <TableCell>
-                            <div className="space-y-1">
-                              <Link
-                                to={`/admin/history?user_id=${row.user_id}&profile_id=${encodeURIComponent(row.profile_id)}`}
-                                className="hover:text-primary block transition-colors hover:underline"
-                              >
-                                {profileLabel}
-                              </Link>
-                              <div className="text-muted-foreground text-xs">{row.profile_id}</div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="space-y-0.5">
-                              <div className="flex items-center gap-1.5 text-xs font-medium">
-                                <span>{row.client_name ?? EM_DASH}</span>
-                                {row.is_jellyfin_client ? (
-                                  <Badge
-                                    variant="secondary"
-                                    title={t("web.admin.history.detail.jellyfinBadgeTitle")}
-                                    className="px-1 py-0 text-[10px] font-bold"
+              {rows.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+                  <History className="text-muted-foreground/50 h-10 w-10" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">{t("web.admin.history.empty.title")}</p>
+                    <p className="text-muted-foreground max-w-sm text-xs">
+                      {t("web.admin.history.empty.body")}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t("web.admin.history.column.media")}</TableHead>
+                        <TableHead>{t("web.admin.history.column.user")}</TableHead>
+                        <TableHead>{t("web.admin.history.column.profile")}</TableHead>
+                        <TableHead>{t("web.admin.history.column.client")}</TableHead>
+                        <TableHead>{t("web.admin.history.column.method")}</TableHead>
+                        <TableHead>{t("web.admin.history.column.watchTime")}</TableHead>
+                        <TableHead>{t("web.admin.history.column.status")}</TableHead>
+                        <TableHead>{t("web.admin.history.column.ended")}</TableHead>
+                        <TableHead className="text-end">
+                          {t("web.admin.history.column.logs")}
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rows.map((row) => {
+                        const watch = watchTimeSummary(row);
+                        const { title, detail } = historyRowTitle(row, t);
+                        const isSelected = row.session_id === selectedSessionId;
+                        const methodMeta = activityMethodMeta(normalizeMethodKey(row.play_method));
+                        const titleBlock = (
+                          <>
+                            {title}
+                            {detail ? (
+                              <div className="text-muted-foreground font-normal">{detail}</div>
+                            ) : null}
+                          </>
+                        );
+                        const profileLabel = row.profile_name || row.profile_id;
+                        return (
+                          <TableRow
+                            key={row.session_id}
+                            onClick={(e) => {
+                              if ((e.target as HTMLElement).closest("a, button")) return;
+                              selectSession(row.session_id);
+                            }}
+                            className={cn(
+                              "cursor-pointer transition-colors",
+                              isSelected && "bg-primary/8 hover:bg-primary/10",
+                            )}
+                          >
+                            <TableCell>
+                              <div className="max-w-[18rem] min-w-[11rem] space-y-1 break-words whitespace-normal">
+                                {row.media_item_id ? (
+                                  <Link
+                                    to={`/item/${encodeURIComponent(row.media_item_id)}`}
+                                    className="hover:text-primary block font-medium transition-colors hover:underline"
                                   >
-                                    {t("web.admin.history.detail.jellyfinBadge")}
-                                  </Badge>
+                                    {titleBlock}
+                                  </Link>
+                                ) : (
+                                  <div className="font-medium">{titleBlock}</div>
+                                )}
+                                <div className="text-muted-foreground text-xs">
+                                  {t("web.admin.history.row.meta", {
+                                    media_type: mediaTypeLabel(row.media_type, t),
+                                    session: row.session_id.slice(0, 8),
+                                  })}
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Link
+                                to={`/admin/users/${row.user_id}`}
+                                className="hover:text-primary font-medium transition-colors hover:underline"
+                              >
+                                {row.username ||
+                                  t("web.admin.activity.userFallback", { id: row.user_id })}
+                              </Link>
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-1">
+                                <Link
+                                  to={`/admin/history?user_id=${row.user_id}&profile_id=${encodeURIComponent(row.profile_id)}`}
+                                  className="hover:text-primary block transition-colors hover:underline"
+                                >
+                                  {profileLabel}
+                                </Link>
+                                <div className="text-muted-foreground text-xs">
+                                  {row.profile_id}
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-1.5 text-xs font-medium">
+                                  <span>{row.client_name ?? EM_DASH}</span>
+                                  {row.is_jellyfin_client ? (
+                                    <Badge
+                                      variant="secondary"
+                                      title={t("web.admin.history.detail.jellyfinBadgeTitle")}
+                                      className="px-1 py-0 text-[10px] font-bold"
+                                    >
+                                      {t("web.admin.history.detail.jellyfinBadge")}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                                {row.device_platform ? (
+                                  <div className="text-muted-foreground text-[11px]">
+                                    {row.device_platform}
+                                  </div>
                                 ) : null}
                               </div>
-                              {row.device_platform ? (
-                                <div className="text-muted-foreground text-[11px]">
-                                  {row.device_platform}
+                            </TableCell>
+                            <TableCell>
+                              <span
+                                className={cn(
+                                  "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
+                                  methodMeta.badgeClass,
+                                )}
+                              >
+                                {formatDecisionLabel(row.play_method)}
+                              </span>
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-1 tabular-nums">
+                                <div
+                                  title={
+                                    watch.estimated
+                                      ? t("web.admin.history.row.estimatedTitle")
+                                      : undefined
+                                  }
+                                >
+                                  {watch.estimated
+                                    ? t("web.admin.history.row.estimatedDuration", {
+                                        duration: formatHistoryDuration(watch.seconds, t),
+                                      })
+                                    : formatHistoryDuration(watch.seconds, t)}
                                 </div>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <span
-                              className={cn(
-                                "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
-                                methodMeta.badgeClass,
-                              )}
-                            >
-                              {formatDecisionLabel(row.play_method)}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <div className="space-y-1 tabular-nums">
-                              <div
-                                title={
-                                  watch.estimated
-                                    ? t("web.admin.history.row.estimatedTitle")
-                                    : undefined
-                                }
-                              >
-                                {watch.estimated
-                                  ? t("web.admin.history.row.estimatedDuration", {
-                                      duration: formatHistoryDuration(watch.seconds, t),
-                                    })
-                                  : formatHistoryDuration(watch.seconds, t)}
+                                <div className="text-muted-foreground text-xs">
+                                  {t("web.admin.history.row.ofDuration", {
+                                    duration: formatHistoryDuration(row.duration_seconds, t),
+                                  })}
+                                </div>
                               </div>
-                              <div className="text-muted-foreground text-xs">
-                                {t("web.admin.history.row.ofDuration", {
-                                  duration: formatHistoryDuration(row.duration_seconds, t),
-                                })}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={row.completed ? "default" : "outline"}>
+                                {row.completed
+                                  ? t("web.admin.history.row.completed")
+                                  : t("web.admin.history.row.partial")}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-1 tabular-nums">
+                                <div>{formatDateTime(row.ended_at)}</div>
+                                <div className="text-muted-foreground text-xs">
+                                  {t("web.admin.history.row.started", {
+                                    time: formatRelative(row.started_at),
+                                  })}
+                                </div>
                               </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={row.completed ? "default" : "outline"}>
-                              {row.completed
-                                ? t("web.admin.history.row.completed")
-                                : t("web.admin.history.row.partial")}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="space-y-1 tabular-nums">
-                              <div>{formatDateTime(row.ended_at)}</div>
-                              <div className="text-muted-foreground text-xs">
-                                {t("web.admin.history.row.started", {
-                                  time: formatRelative(row.started_at),
-                                })}
+                            </TableCell>
+                            <TableCell className="text-end">
+                              <div className="flex items-center justify-end gap-3">
+                                <button
+                                  type="button"
+                                  onClick={(e) => selectSession(row.session_id, e.currentTarget)}
+                                  className="text-primary cursor-pointer text-sm font-medium hover:underline"
+                                >
+                                  {t("web.admin.activity.row.details")}
+                                </button>
+                                <Link
+                                  to={`/admin/logs?playback_session_id=${encodeURIComponent(row.session_id)}&focus=playback`}
+                                  className="text-primary text-sm font-medium"
+                                >
+                                  {t("web.admin.activity.row.viewLogs")}
+                                </Link>
+                                <Link
+                                  to={`/admin/logs?playback_session_id=${encodeURIComponent(row.session_id)}&focus=playback&component=ffmpeg`}
+                                  className="text-primary text-sm"
+                                >
+                                  {t("web.admin.activity.row.ffmpegLogs")}
+                                </Link>
                               </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-end">
-                            <div className="flex items-center justify-end gap-3">
-                              <button
-                                type="button"
-                                onClick={(e) => selectSession(row.session_id, e.currentTarget)}
-                                className="text-primary cursor-pointer text-sm font-medium hover:underline"
-                              >
-                                {t("web.admin.activity.row.details")}
-                              </button>
-                              <Link
-                                to={`/admin/logs?playback_session_id=${encodeURIComponent(row.session_id)}&focus=playback`}
-                                className="text-primary text-sm font-medium"
-                              >
-                                {t("web.admin.activity.row.viewLogs")}
-                              </Link>
-                              <Link
-                                to={`/admin/logs?playback_session_id=${encodeURIComponent(row.session_id)}&focus=playback&component=ffmpeg`}
-                                className="text-primary text-sm"
-                              >
-                                {t("web.admin.activity.row.ffmpegLogs")}
-                              </Link>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3 px-2 py-4">
-                <div className="flex items-center gap-4">
-                  <span className="text-muted-foreground text-sm tabular-nums">
-                    {t("web.admin.history.pagination.summary", {
-                      count: rows.length,
-                      count_text: rows.length.toLocaleString(formatLocale()),
-                    })}
-                  </span>
-                  <Select
-                    value={String(pageSize)}
-                    onValueChange={(v) => {
-                      setPageSize(Number(v));
-                    }}
-                  >
-                    <SelectTrigger className="h-8 min-w-[100px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PAGE_SIZE_OPTIONS.map((size) => (
-                        <SelectItem key={size} value={size}>
-                          {t("web.admin.history.pagination.pageSize", { count: Number(size) })}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
                 </div>
-                <div className="flex gap-2">
-                  {cursorStack.length > 1 ? (
+              )}
+
+              {rows.length > 0 || cursorStack.length > 0 ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 px-2 py-4">
+                  <div className="flex items-center gap-4">
+                    <span className="text-muted-foreground text-sm tabular-nums">
+                      {t("web.admin.history.pagination.summary", {
+                        count: rows.length,
+                        count_text: rows.length.toLocaleString(formatLocale()),
+                      })}
+                    </span>
+                    <Select
+                      value={String(pageSize)}
+                      onValueChange={(v) => {
+                        setPageSize(Number(v));
+                      }}
+                    >
+                      <SelectTrigger className="h-8 min-w-[100px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAGE_SIZE_OPTIONS.map((size) => (
+                          <SelectItem key={size} value={size}>
+                            {t("web.admin.history.pagination.pageSize", { count: Number(size) })}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex gap-2">
+                    {cursorStack.length > 1 ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCursorState({ key: filterKey, stack: [] })}
+                      >
+                        {t("web.admin.history.pagination.firstPage")}
+                      </Button>
+                    ) : null}
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setCursorState({ key: filterKey, stack: [] })}
-                    >
-                      {t("web.admin.history.pagination.firstPage")}
-                    </Button>
-                  ) : null}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      setCursorState({
-                        key: filterKey,
-                        stack: cursorStack.slice(0, -1),
-                      })
-                    }
-                    disabled={cursorStack.length === 0}
-                  >
-                    {t("web.admin.history.pagination.previous")}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (nextCursor) {
+                      onClick={() =>
                         setCursorState({
                           key: filterKey,
-                          stack: [...cursorStack, nextCursor],
-                        });
+                          stack: cursorStack.slice(0, -1),
+                        })
                       }
-                    }}
-                    disabled={!hasMore || !nextCursor}
-                  >
-                    {t("web.admin.history.pagination.next")}
-                  </Button>
+                      disabled={cursorStack.length === 0}
+                    >
+                      {t("web.admin.history.pagination.previous")}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (nextCursor) {
+                          setCursorState({
+                            key: filterKey,
+                            stack: [...cursorStack, nextCursor],
+                          });
+                        }
+                      }}
+                      disabled={!hasMore || !nextCursor}
+                    >
+                      {t("web.admin.history.pagination.next")}
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              ) : null}
             </>
           )}
         </CardContent>

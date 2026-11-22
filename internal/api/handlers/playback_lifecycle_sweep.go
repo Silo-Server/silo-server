@@ -364,11 +364,18 @@ func (h *PlaybackHandler) endReportedPlay(ctx context.Context, pool *pgxpool.Poo
 // endLifecycleWith is endLifecycleFromFacts with the session's facts
 // completed by fill, when it is not nil.
 func (h *PlaybackHandler) endLifecycleWith(ctx context.Context, pool *pgxpool.Pool, sessionID string, reason PlaybackEndReason, now time.Time, fill func(*playback.Session)) {
-	reader, ok := h.AdminStore.(liveSessionReader)
-	if !ok {
-		return
+	var session *playback.Session
+	var fromLiveRow bool
+	var err error
+	if originReader, ok := h.AdminStore.(liveSessionOriginReader); ok {
+		session, fromLiveRow, err = originReader.LiveSessionWithOrigin(ctx, sessionID)
+	} else {
+		reader, ok := h.AdminStore.(liveSessionReader)
+		if !ok {
+			return
+		}
+		session, err = reader.LiveSession(ctx, sessionID)
 	}
-	session, err := reader.LiveSession(ctx, sessionID)
 	if err != nil {
 		if !errors.Is(err, playback.ErrSessionNotFound) {
 			slog.WarnContext(ctx, "lifecycle sweep could not read a session's start", "component", "api", "session", sessionID, "error", err)
@@ -384,7 +391,7 @@ func (h *PlaybackHandler) endLifecycleWith(ctx context.Context, pool *pgxpool.Po
 		// The start row holds the delivery the play began with; the attempt
 		// holds the plan and frozen recipe its last replan committed.
 		if record.CurrentPlanID != "" {
-			applyAttemptPlanFacts(session, record)
+			applyAttemptPlanFacts(session, record, fromLiveRow)
 		}
 	}
 	if fill != nil {

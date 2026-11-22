@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -655,7 +656,7 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 	session := h.attemptSessionV2(ctx, record, position, paused)
 	carried := endWatch(ctx)
 	session.Watch = carried
-	h.fillDetachedSession(ctx, session, record.CreatedAt)
+	fromLiveRow := h.fillDetachedSession(ctx, session, record.CreatedAt)
 	fromRemovedCopy := carried.Measured && session.Watch.Until.Equal(carried.Until)
 	if accepted != nil && (accepted.Sequence > record.LastSequence || !fromRemovedCopy) {
 		// The latest accepted sample: the stop's own, or, when the
@@ -669,7 +670,7 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 		// The attempt holds the plan and frozen recipe the last replan
 		// committed. The live row can be gone after a restart, leaving only
 		// where the play started.
-		applyAttemptPlanFacts(session, record)
+		applyAttemptPlanFacts(session, record, fromLiveRow)
 	}
 	result := h.recordStopHistory(ctx, session, reason)
 	if result.WatchStateErr != nil {
@@ -707,20 +708,38 @@ func (h *PlaybackHandler) attemptSessionV2(ctx context.Context, record *playback
 
 // applyAttemptPlanFacts reconciles a detached session (whose live row may be
 // gone, leaving only start_facts) with the attempt's latest committed plan and
-// frozen recipe. When a replan changed the play method, runtime-only executor
+// frozen recipe. When a replan changed the play method, delivery transport, or
+// container — or when no live row survived a replan — runtime-only executor
 // fields from the earlier plan are cleared rather than attributed to the new
 // delivery.
-func applyAttemptPlanFacts(session *playback.Session, record *playback.AttemptRecordV3) {
+func applyAttemptPlanFacts(session *playback.Session, record *playback.AttemptRecordV3, fromLiveRow bool) {
 	if session == nil || record == nil || record.CurrentPlanID == "" {
 		return
+	}
+	if effID := record.EffectiveMediaFileID; effID > 0 {
+		session.MediaFileID = effID
+	} else if record.CurrentPlan.EffectiveMediaFileID > 0 {
+		session.MediaFileID = record.CurrentPlan.EffectiveMediaFileID
+	}
+	if reqID := record.RequestedMediaFileID; reqID > 0 {
+		session.RequestedMediaFileID = reqID
+	} else if record.CurrentPlan.RequestedMediaFileID > 0 {
+		session.RequestedMediaFileID = record.CurrentPlan.RequestedMediaFileID
+	}
+	if record.CurrentPlan.SelectedTracks.Audio != nil && record.CurrentPlan.SelectedTracks.Audio.Index != nil {
+		session.AudioTrackIndex = *record.CurrentPlan.SelectedTracks.Audio.Index
 	}
 	session.Subtitle = playback.SessionSubtitleFromPlanV3(&record.CurrentPlan)
 	recipe := record.FrozenRecipe
 	if recipe.PlanID != record.CurrentPlanID || recipe.PlayMethod == "" {
 		return
 	}
+	wantProtocol, wantContainer := plannedOutputFormatV3(record.CurrentPlan, recipe)
 	methodChanged := session.PlayMethod != "" && session.PlayMethod != recipe.PlayMethod
-	if methodChanged {
+	deliveryChanged := (wantProtocol != "" && session.OutputProtocol != "" && session.OutputProtocol != wantProtocol) ||
+		(wantContainer != "" && session.OutputContainer != "" && session.OutputContainer != wantContainer)
+	staleStartSnapshot := !fromLiveRow && record.CurrentReplanRequestID != ""
+	if methodChanged || deliveryChanged || staleStartSnapshot {
 		session.TranscodeHWAccel = ""
 		session.OutputContainer = ""
 		session.OutputProtocol = ""
@@ -740,29 +759,58 @@ func applyAttemptPlanFacts(session *playback.Session, record *playback.AttemptRe
 		session.TranscodeHWAccel = ""
 		session.ToneMapMode = ""
 		session.AdaptationReasons = nil
-		if session.OutputProtocol == "" {
-			session.OutputProtocol = eventsSchemeHTTP
-		}
+		session.OutputProtocol = playback.OutputProtocolHTTP
 		return
 	}
-	session.TargetVideoCodec = recipe.TargetVideoCodec
+	targetVideoCodec := recipe.TargetVideoCodec
+	if record.CurrentPlan.Delivery == playback.DeliveryRemuxHLSV3 ||
+		record.CurrentPlan.Delivery == playback.DeliveryRemuxProgressiveV3 ||
+		recipe.PlayMethod == playback.PlayRemux {
+		targetVideoCodec = videoCodecCopy
+	}
+	session.TargetVideoCodec = targetVideoCodec
 	session.TargetResolution = recipe.TargetResolution
 	session.TargetAudioCodec = recipe.TargetAudioCodec
 	session.TargetAudioChannels = recipe.TargetAudioChannels
 	session.TargetBitrateKbps = recipe.TargetBitrateKbps
+	if strings.EqualFold(targetVideoCodec, videoCodecCopy) {
+		session.TargetResolution = ""
+		session.TargetBitrateKbps = 0
+	}
 	session.ToneMapMode = recipe.ToneMapMode
 	session.AdaptationReasons = playback.NormalizeAdaptationReasons(recipe.AdaptationReasons)
-	switch record.CurrentPlan.Delivery {
+	if wantProtocol != "" {
+		session.OutputProtocol = wantProtocol
+	}
+	if wantContainer != "" {
+		session.OutputContainer = wantContainer
+	}
+}
+
+const videoCodecCopy = "copy"
+
+func plannedOutputFormatV3(plan playback.PlanV3, recipe playback.ExecutableRecipeV3) (protocol, container string) {
+	switch plan.Delivery {
 	case playback.DeliveryRemuxHLSV3, playback.DeliveryTranscodeHLSV3:
-		session.OutputProtocol = "hls"
-		if seg := record.CurrentPlan.EffectiveRecipe.SegmentContainer; seg != "" {
-			session.OutputContainer = seg
+		if seg := strings.ToLower(strings.TrimSpace(plan.EffectiveRecipe.SegmentContainer)); seg != "" {
+			return playback.OutputProtocolHLS, seg
 		}
+		videoCodec := recipe.TargetVideoCodec
+		if plan.Delivery == playback.DeliveryRemuxHLSV3 {
+			videoCodec = videoCodecCopy
+		}
+		container = playback.HLSOutputContainer(playback.TranscodeOpts{
+			TargetCodecVideo: videoCodec,
+			SourceVideoCodec: recipe.SourceVideoCodec,
+			CopyVideoMPEGTS:  playback.PlanCopiesVideoAsMPEGTSV3(plan),
+		})
+		return playback.OutputProtocolHLS, container
 	case playback.DeliveryRemuxProgressiveV3:
-		session.OutputProtocol = eventsSchemeHTTP
-		if session.OutputContainer == "" {
-			session.OutputContainer = "mp4"
-		}
+		return playback.OutputProtocolHTTP, playback.OutputContainerFMP4
+	case playback.DeliveryOriginalHTTPV3:
+		return playback.OutputProtocolHTTP, ""
+	default:
+		return "", ""
 	}
 }
 

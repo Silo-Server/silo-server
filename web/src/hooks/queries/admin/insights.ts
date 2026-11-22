@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import {
   captureProfileRequestContext,
@@ -118,6 +118,41 @@ export function useAdminInsightsPeople(query: AdminInsightsPeopleQuery, enabled 
       }),
     enabled,
   );
+}
+
+const INSIGHTS_PEOPLE_PAGE_SIZE = 50;
+
+export function useAdminInsightsPeopleInfinite(
+  query: Omit<AdminInsightsPeopleQuery, "limit" | "offset">,
+  enabled = true,
+) {
+  const scope = insightsScope();
+  return useInfiniteQuery({
+    queryKey: [...adminKeys.insightsPeople(query as Record<string, unknown>), "infinite", scope],
+    initialPageParam: 0,
+    queryFn: ({ pageParam, signal }) =>
+      readInsight(scope, (profileContext) =>
+        v2("GET /api/v2/admin/insights/people", {
+          query: withRefreshFlag({
+            ...query,
+            limit: INSIGHTS_PEOPLE_PAGE_SIZE,
+            offset: pageParam,
+          }),
+          profileContext,
+          signal,
+        }),
+      ),
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((sum, page) => sum + page.accounts.length, 0);
+      if (lastPage.accounts.length === 0 || loaded >= lastPage.total_accounts) {
+        return undefined;
+      }
+      return loaded;
+    },
+    enabled,
+    staleTime: INSIGHTS_STALE_TIME,
+    retry: false,
+  });
 }
 
 export function useAdminInsightsDevices(query: AdminInsightsDevicesQuery, enabled = true) {

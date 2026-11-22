@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import {
   ChartEmptyState,
@@ -69,6 +69,47 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
   const [volumeMetric, setVolumeMetric] = useState<VolumeMetric>("plays");
   const [volumeSplit, setVolumeSplit] = useState<VolumeSplit>("method");
   const [peakView, setPeakView] = useState<PeakView>("lines");
+  const [activeHeatmapCell, setActiveHeatmapCell] = useState<{ dow: number; hour: number }>({
+    dow: 0,
+    hour: 0,
+  });
+  const heatmapCellRefs = useRef<Array<HTMLDivElement | null>>([]);
+
+  function moveHeatmapFocus(dow: number, hour: number) {
+    setActiveHeatmapCell({ dow, hour });
+    heatmapCellRefs.current[dow * 24 + hour]?.focus();
+  }
+
+  function handleHeatmapKeyDown(event: KeyboardEvent<HTMLDivElement>, dow: number, hour: number) {
+    switch (event.key) {
+      case "ArrowRight":
+        event.preventDefault();
+        moveHeatmapFocus(dow, Math.min(23, hour + 1));
+        break;
+      case "ArrowLeft":
+        event.preventDefault();
+        moveHeatmapFocus(dow, Math.max(0, hour - 1));
+        break;
+      case "ArrowDown":
+        event.preventDefault();
+        moveHeatmapFocus(Math.min(6, dow + 1), hour);
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        moveHeatmapFocus(Math.max(0, dow - 1), hour);
+        break;
+      case "Home":
+        event.preventDefault();
+        moveHeatmapFocus(event.ctrlKey ? 0 : dow, 0);
+        break;
+      case "End":
+        event.preventDefault();
+        moveHeatmapFocus(event.ctrlKey ? 6 : dow, 23);
+        break;
+      default:
+        break;
+    }
+  }
 
   const queryParams = useMemo(() => buildInsightsWindowQueryParams(filters), [filters]);
   const query = useAdminInsightsActivity(queryParams);
@@ -392,12 +433,21 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
             ) : (
               <div className="space-y-3">
                 <div className="overflow-x-auto">
-                  <div dir="ltr" className="min-w-[440px] space-y-1">
-                    <div className="grid grid-cols-[2.75rem_repeat(24,minmax(0,1fr))] items-center gap-1 pb-1">
-                      <span />
+                  <div
+                    role="grid"
+                    aria-label={t("web.admin.insights.activity.heatmap.title")}
+                    dir="ltr"
+                    className="min-w-[440px] space-y-1"
+                  >
+                    <div
+                      role="row"
+                      className="grid grid-cols-[2.75rem_repeat(24,minmax(0,1fr))] items-center gap-1 pb-1"
+                    >
+                      <span role="columnheader" aria-hidden="true" />
                       {hourLabels.map((label, hour) => (
                         <span
                           key={hour}
+                          role="columnheader"
                           className="text-muted-foreground text-center text-[10px] tabular-nums"
                         >
                           {hour % 6 === 0 ? label : ""}
@@ -407,9 +457,13 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
                     {weekdayLabels.map((dayLabel, dow) => (
                       <div
                         key={dow}
+                        role="row"
                         className="grid grid-cols-[2.75rem_repeat(24,minmax(0,1fr))] items-center gap-1"
                       >
-                        <span className="text-muted-foreground pe-1 text-end text-[11px] font-medium">
+                        <span
+                          role="rowheader"
+                          className="text-muted-foreground pe-1 text-end text-[11px] font-medium"
+                        >
                           {dayLabel}
                         </span>
                         {hourLabels.map((hourLabel, hour) => {
@@ -417,6 +471,8 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
                           const plays = cell?.plays ?? 0;
                           const watchSeconds = cell?.watchSeconds ?? 0;
                           const level = heatmapLevel(plays, heatmapGrid.maxPlays);
+                          const isActive =
+                            activeHeatmapCell.dow === dow && activeHeatmapCell.hour === hour;
                           const tooltip = t("web.admin.insights.activity.heatmap.cellTooltip", {
                             day: dayLabel,
                             hour: hourLabel,
@@ -429,10 +485,15 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
                           return (
                             <div
                               key={hour}
-                              tabIndex={0}
+                              ref={(el) => {
+                                heatmapCellRefs.current[dow * 24 + hour] = el;
+                              }}
+                              tabIndex={isActive ? 0 : -1}
                               role="gridcell"
                               aria-label={tooltip}
                               title={tooltip}
+                              onFocus={() => setActiveHeatmapCell({ dow, hour })}
+                              onKeyDown={(e) => handleHeatmapKeyDown(e, dow, hour)}
                               className={cn(
                                 "focus-visible:ring-ring h-5 rounded-[4px] transition-transform hover:scale-110 focus-visible:ring-2 focus-visible:outline-none",
                                 HEATMAP_LEVEL_CLASSES[level],

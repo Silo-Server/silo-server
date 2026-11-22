@@ -302,3 +302,94 @@ func assertLockContentionSkipsPrune(t *testing.T, pool *pgxpool.Pool, s *Sampler
 		t.Fatal(err)
 	}
 }
+
+// TestDownsampleRolloverLateSampleAndNodeSnapshotDB verifies that a late sample
+// committed after an initial UTC rollover rollup still updates dashboard_metric_daily
+// and dashboard_node_egress_daily, and that node metadata is snapshotted at rollup time.
+func TestDownsampleRolloverLateSampleAndNodeSnapshotDB(t *testing.T) {
+	pool := samplerTestPool(t)
+	ctx := t.Context()
+
+	var nodeID int
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO stream_nodes (name, type, url, enabled, healthy)
+		VALUES ('edge-lon-1', 'proxy', 'http://edge-lon-1:8090', TRUE, TRUE) RETURNING id
+	`).Scan(&nodeID); err != nil {
+		t.Fatal(err)
+	}
+
+	yesterday := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -1)
+	dayStr := yesterday.Format("2006-01-02")
+	early := yesterday.Add(10 * time.Hour)
+	late := yesterday.Add(23*time.Hour + 59*time.Minute)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO dashboard_metric_samples (bucket, source, streams_total, streams_direct, egress_kbps)
+		VALUES ($1, 'shared', 2, 2, 1000)`, early); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO dashboard_node_egress_samples (bucket, node_id, egress_kbps)
+		VALUES ($1, $2, 1000)`, early, nodeID); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewSampler(pool, nil, "replica-a")
+	if err := s.downsampleCompletedDays(ctx, false); err != nil {
+		t.Fatalf("initial rollover downsample: %v", err)
+	}
+
+	// Late 23:59 sample arrives from another replica after the day was archived.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO dashboard_metric_samples (bucket, source, streams_total, streams_direct, streams_remux, streams_transcode, egress_kbps)
+		VALUES ($1, 'shared', 9, 5, 2, 2, 5000)`, late); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO dashboard_node_egress_samples (bucket, node_id, egress_kbps)
+		VALUES ($1, $2, 5000)`, late, nodeID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.downsampleCompletedDays(ctx, false); err != nil {
+		t.Fatalf("second rollover downsample: %v", err)
+	}
+	assertRolloverLateSampleOutcome(t, pool, dayStr, nodeID, late)
+}
+
+func assertRolloverLateSampleOutcome(t *testing.T, pool *pgxpool.Pool, dayStr string, nodeID int, late time.Time) {
+	t.Helper()
+	ctx := t.Context()
+	var peakStreams, peakDirect, peakRemux, peakTranscode, peakEgress int
+	var egressBytes int64
+	var peakAt time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT peak_streams, peak_streams_direct, peak_streams_remux, peak_streams_transcode,
+		       peak_egress_kbps, egress_bytes, peak_streams_at
+		FROM dashboard_metric_daily WHERE day = $1`, dayStr).Scan(
+		&peakStreams, &peakDirect, &peakRemux, &peakTranscode, &peakEgress, &egressBytes, &peakAt,
+	); err != nil {
+		t.Fatal(err)
+	}
+	wantBytes := int64((1000 + 5000) * BytesPerKbpsMinute)
+	if peakStreams != 9 || peakDirect != 5 || peakRemux != 2 || peakTranscode != 2 ||
+		peakEgress != 5000 || egressBytes != wantBytes || !peakAt.Equal(late) {
+		t.Fatalf("after late rollover sample: peaks=%d(%d/%d/%d) egress=%d bytes=%d at=%v",
+			peakStreams, peakDirect, peakRemux, peakTranscode, peakEgress, egressBytes, peakAt)
+	}
+
+	var snapName, snapType string
+	var nodePeak int
+	var nodeBytes int64
+	if err := pool.QueryRow(ctx, `
+		SELECT node_name, COALESCE(node_type, ''), peak_egress_kbps, egress_bytes
+		FROM dashboard_node_egress_daily WHERE day = $1 AND node_id = $2`, dayStr, nodeID).Scan(
+		&snapName, &snapType, &nodePeak, &nodeBytes,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if snapName != "edge-lon-1" || snapType != "proxy" || nodePeak != 5000 || nodeBytes != wantBytes {
+		t.Fatalf("node daily snapshot = name=%q type=%q peak=%d bytes=%d, want edge-lon-1/proxy/5000/%d",
+			snapName, snapType, nodePeak, nodeBytes, wantBytes)
+	}
+}
