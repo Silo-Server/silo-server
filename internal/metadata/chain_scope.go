@@ -2,11 +2,8 @@ package metadata
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // A refresh that names no library still belongs to the libraries that hold the
@@ -56,15 +53,20 @@ func (s *MetadataService) enabledChainScopeFolders(ctx context.Context, folderID
 	if len(folderIDs) < 2 || s.folderRepo == nil {
 		return folderIDs, nil
 	}
-	enabled := make([]int, 0, len(folderIDs))
+	folders, err := s.folderRepo.ListByIDs(ctx, folderIDs)
+	if err != nil {
+		return nil, fmt.Errorf("loading libraries for the provider chain: %w", err)
+	}
+	isEnabled := make(map[int]bool, len(folders))
+	for _, folder := range folders {
+		if folder != nil && folder.Enabled {
+			isEnabled[folder.ID] = true
+		}
+	}
+	// Keep the item's library order; ListByIDs sorts by display order.
+	enabled := make([]int, 0, len(folders))
 	for _, folderID := range folderIDs {
-		folder, err := s.folderRepo.GetByID(ctx, folderID)
-		switch {
-		case errors.Is(err, catalog.ErrFolderNotFound):
-			continue
-		case err != nil:
-			return nil, fmt.Errorf("loading library %d for the provider chain: %w", folderID, err)
-		case folder != nil && folder.Enabled:
+		if isEnabled[folderID] {
 			enabled = append(enabled, folderID)
 		}
 	}

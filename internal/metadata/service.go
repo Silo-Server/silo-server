@@ -240,6 +240,8 @@ type metadataEpisodeLocalizationRepo interface {
 // for looking up per-library settings like metadata language.
 type metadataFolderRepo interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFolder, error)
+	// ListByIDs returns the enabled folders among ids.
+	ListByIDs(ctx context.Context, ids []int) ([]*models.MediaFolder, error)
 }
 
 // metadataVideoRepo persists remote provider videos. The concrete
