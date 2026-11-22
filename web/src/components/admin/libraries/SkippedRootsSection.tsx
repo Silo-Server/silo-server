@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronRight } from "lucide-react";
 
 import type { LibrarySkippedRoot } from "@/api/types";
@@ -45,17 +45,32 @@ const SKIPPED_PATH_CLASS = "text-foreground min-w-0 select-all";
 const REASON_BADGE_CLASS = "border-warning/30 bg-warning/5 text-warning";
 
 /** The "Troubleshooting" section: roots the scanner skipped, and why. */
-export function SkippedRootsSection() {
+export function SkippedRootsSection({
+  embedded = false,
+  onStatusChange,
+}: {
+  embedded?: boolean;
+  onStatusChange?: (status: { count: number | undefined; isError?: boolean }) => void;
+} = {}) {
   const t = useT();
   const showTable = useWideDiagnosticsTableLayout();
   const [open, setOpen] = useState(false);
+  const isOpen = embedded || open;
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
-  const { data, hasNextPage, fetchNextPage, isFetchingNextPage } = useSkippedLibraryRoots({
-    enabled: open,
-    search: debouncedSearch,
-  });
+  const { data, isError, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage } =
+    useSkippedLibraryRoots({
+      enabled: isOpen,
+      search: debouncedSearch,
+    });
   const skippedRoots = useMemo(() => data?.pages.flatMap((page) => page.roots) ?? [], [data]);
+  const totalCount = data?.pages[0]?.total;
+
+  useEffect(() => {
+    if (!onStatusChange) return;
+    if (debouncedSearch.trim() !== "") return;
+    onStatusChange({ count: totalCount, isError: data === undefined && isError });
+  }, [data, debouncedSearch, isError, onStatusChange, totalCount]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const { sortField, sortDir, toggle, setSortField, setSortDir } = useSort<SkippedSortField>(
     "last_seen",
@@ -100,15 +115,8 @@ export function SkippedRootsSection() {
     </SortableHead>
   );
 
-  return (
-    <CollapsibleDiagnosticsSection
-      title={t("web.admin.libraries.skippedRoots.title")}
-      description={t("web.admin.libraries.skippedRoots.description")}
-      count={data?.pages[0]?.total}
-      icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
-      open={open}
-      onOpenChange={setOpen}
-    >
+  const body = (
+    <>
       <DiagnosticsSearch
         className="mb-2"
         placeholder={t("web.admin.libraries.skippedRoots.filterPlaceholder")}
@@ -118,7 +126,22 @@ export function SkippedRootsSection() {
           pag.setPage(0);
         }}
       />
-      {showTable ? (
+      {data === undefined && isError ? (
+        <div
+          role="alert"
+          className="border-border/40 bg-background/40 text-destructive rounded-xl border px-4 py-8 text-center text-sm"
+        >
+          {t("web.admin.common.diagnosticsSection.countError")}
+        </div>
+      ) : data === undefined && isLoading ? (
+        <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
+          {t("web.admin.libraries.skippedRoots.loading")}
+        </div>
+      ) : data !== undefined && pag.rows.length === 0 ? (
+        <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
+          {t("web.admin.libraries.health.skippedEmpty")}
+        </div>
+      ) : showTable ? (
         <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
           <Table>
             <TableHeader>
@@ -249,6 +272,33 @@ export function SkippedRootsSection() {
             : t("web.admin.libraries.loadMore")}
         </Button>
       ) : null}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <section className="surface-panel space-y-3 rounded-2xl border-0 p-4 sm:p-5">
+        <div className="space-y-0.5">
+          <h2 className="text-sm font-semibold">{t("web.admin.libraries.skippedRoots.title")}</h2>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.libraries.skippedRoots.description")}
+          </p>
+        </div>
+        {body}
+      </section>
+    );
+  }
+
+  return (
+    <CollapsibleDiagnosticsSection
+      title={t("web.admin.libraries.skippedRoots.title")}
+      description={t("web.admin.libraries.skippedRoots.description")}
+      count={totalCount}
+      icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      {body}
     </CollapsibleDiagnosticsSection>
   );
 }

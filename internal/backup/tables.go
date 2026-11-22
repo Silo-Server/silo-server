@@ -36,6 +36,9 @@ var liveTables = []string{"policy_documents", "policy_document_versions"}
 var loggedTables = []string{"activity_log", "operational_logs", "policy_decisions", "catalog_search_index_events", tableIntroFingerprints,
 	// Upload sessions: their parts live outside the backup.
 	"backup_uploads", "backup_upload_parts", "backup_upload_attempts",
+	// Leases of task runs in progress, the backup's own among them: a
+	// restored lease would record a run of the backed-up server as interrupted.
+	"task_execution_leases",
 	// Provisioning status and placement from the current deployment must not
 	// be replayed by a restored backup.
 	tablePluginProvisionStatus, "plugin_provision_placement"}

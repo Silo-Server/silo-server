@@ -171,6 +171,7 @@ type Dependencies struct {
 	PlaybackControlSocket          PlaybackControlSocketService
 	EventsCapability               EventsCapabilityService
 	NetworkAccess                  NetworkAccessService
+	DirectConnections              DirectConnectionsService
 	ServerIdentity                 ServerIdentityService
 	ServerConnections              ServerConnections
 	NotificationDestinationCreate  NotificationDestinationCreateService

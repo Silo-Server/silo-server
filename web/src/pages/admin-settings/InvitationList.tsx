@@ -133,6 +133,10 @@ function useInvitationRow(
   return {
     link,
     recipient: link ? t("web.admin.settings.invitations.row.linkInvitation") : invitation.email,
+    // An email reads left to right unless written in a right-to-left script, so on
+    // a right-to-left page it keeps its order and a cut one its start. The link
+    // invitation's label follows the page.
+    recipientDir: link ? undefined : emailDir(invitation.email),
     details: details.join(" · "),
     badge: STATUS_BADGES[invitation.status],
     expires:
@@ -192,13 +196,8 @@ function InvitationRow({ invitation, shared }: RowProps) {
   return (
     <TableRow>
       <TableCell className="max-w-xs">
-        {/* An email reads left to right unless written in a right-to-left script,
-            so on a right-to-left page a cut one keeps its start; w-fit keeps it on
-            the page's start side. The link invitation's label follows the page. */}
-        <div
-          dir={row.link ? undefined : emailDir(row.recipient)}
-          className="w-fit max-w-full truncate font-medium"
-        >
+        {/* w-fit keeps the recipient on the page's start side. */}
+        <div dir={row.recipientDir} className="w-fit max-w-full truncate font-medium">
           {row.recipient}
         </div>
         {row.details && <div className="text-muted-foreground truncate text-xs">{row.details}</div>}
@@ -245,7 +244,11 @@ function InvitationCard({ invitation, shared }: RowProps) {
     <DiagnosticsCard>
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1 space-y-0.5">
-          <h3 className={cn("font-medium", row.link ? "break-words" : "break-all")}>
+          {/* align-with-page keeps a wrapped email's lines on the page's start side. */}
+          <h3
+            dir={row.recipientDir}
+            className={cn("align-with-page font-medium", row.link ? "break-words" : "break-all")}
+          >
             {row.recipient}
           </h3>
           {row.details && (

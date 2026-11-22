@@ -1494,10 +1494,20 @@ func redisDBRow(active map[string]string, value string) string {
 // exception: REDIS_URL keeps a server up whose saved number it cannot start
 // with, and the clear is how that number is removed.
 func (h *AdminHandler) environmentRefusesSave(key, value string) bool {
-	if !h.BootstrapSensitiveConfigured[key] {
+	if _, set := h.EnvironmentSetting(key); !set {
 		return false
 	}
 	return key != config.RedisDBSettingKey || strings.TrimSpace(value) != ""
+}
+
+// EnvironmentSetting is the value the process environment supplies for key;
+// set is false when it supplies none. A save of such a key is refused
+// (environmentRefusesSave), and a selective restore keeps it.
+func (h *AdminHandler) EnvironmentSetting(key string) (value string, set bool) {
+	if !h.BootstrapSensitiveConfigured[key] {
+		return "", false
+	}
+	return h.BootstrapSensitiveValues[key], true
 }
 
 func shouldPersistAdminSetting(stored map[string]string, key, normalized string, effectiveChanged bool) bool {

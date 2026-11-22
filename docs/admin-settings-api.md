@@ -1,14 +1,21 @@
-# Administrator settings inspection
+# Administrator settings API
 
-The following native v2 operations require an acting administrator and return
+The following reads require an acting administrator and return
 no-store responses:
 
 - `GET /api/v2/admin/settings`: stored settings, excluding secret values and
   machine-managed keys.
 - `GET /api/v2/admin/settings/effective`: active settings with the runtime's
   defaults applied, using the same redaction policy as stored settings.
+- `GET /api/v2/admin/settings/{key}`: one visible stored value and its
+  `restart_required` flag. It applies bootstrap precedence. Sensitive and
+  machine-managed keys answer 404, and so do missing and empty values. The
+  setup wizard reads its Redis configuration through it and treats only 404 as
+  absence, rejecting responses that arrive after an authority change.
 - `GET /api/v2/admin/settings/restart-keys`: the compiled `keys` and `prefixes`
-  whose changes need a server restart.
+  whose changes need a server restart (`internal/config/restart_keys.go`).
+  `GET /api/v2/admin/server/status` reports whether such a change is pending
+  (see [server status and restarts](admin-api.md#server-status-and-restarts)).
 - `GET /api/v2/admin/settings/sensitive-status`: configured secret key names,
   `managed_by_env` names, and `managed_by_env_vars`. Values are never returned.
   `configured` and `managed_by_env` are arrays and `managed_by_env_vars` is an
@@ -57,12 +64,64 @@ returns `503 dependency_unavailable`; other storage failures return a generic
 problem without database error details. Restart metadata is available without
 settings storage.
 
-The web settings pages use the v2 effective settings, restart metadata, and
-sensitive-status operations, and write through `PUT /api/v2/admin/settings` and
-`PUT /api/v2/admin/settings/{key}` (see
-[general settings writes in v2](admin-api.md#general-settings-writes-in-v2)). The migration inventory lists
-no Apple or Android consumers for these inspection operations. Jellyfin
-compatibility does not expose these administrator settings contracts.
+The web settings pages read the effective settings, restart metadata, and
+sensitive status, and write through the operations in
+[settings writes](#settings-writes).
+
+## Settings writes
+
+`PUT /api/v2/admin/settings` accepts `{ "values": { "key": "value" } }`;
+`PUT /api/v2/admin/settings/{key}` accepts `{ "value": "value" }`. Both require
+an acting administrator and `If-Match` from the stored or effective settings GET,
+and both are demo-restricted. `If-None-Match` is an optional additional
+exclusion. Null values are rejected. The validator covers raw stored settings
+and effective defaults, including hidden secret changes, using a keyed digest
+bound to the acting account/profile/access scope. Neither raw secrets nor digest
+inputs are returned to the client.
+
+The service checks the precondition before prerequisite checks and again against
+the current settings inside the atomic update. A stale request returns 412
+without writing settings or publishing settings notifications. A successful
+response is a redacted update receipt, not a new canonical settings snapshot:
+`values`, `restart_required` and `restart_required_keys` for the batch PUT, and
+`key`, `value` and `restart_required` for the single-key PUT.
+The batch PUT returns the settings ETag captured from its resulting state under
+the transaction lock; the single-key PUT returns none. Read settings again before
+preparing another edit. Retained drafts may advance automatically only when that
+read's validator exactly matches the acknowledged batch validator; an
+intervening writer's snapshot cannot rebase them.
+
+Batch validation considers the prospective combined values. Single-key
+validation keeps the paired-setting repair behavior. Empty values follow the
+clear/default rules of each key. A validation failure is `422 validation_failed`,
+with an `errors[]` entry at `body.<field>` when the failure names a field.
+Machine-managed keys, including the `auth.jwt_secret` and
+`audiobooks.abs.jwt_secret` signing keys the server generates itself, are
+refused with `422 validation_failed` and the detail
+`<key> is managed internally`, and nothing is written. The batch PUT checks `If-Match` before the
+keys, so a stale validator still answers 412. Turning
+`auth.local_password_login` off while no enabled break-glass administrator can
+sign in with a password is `409 break_glass_required`.
+
+Both writes are non-retryable. Enabling diagnostics can probe storage before the
+transaction, a change to the Redis connection connects to Redis before it (see
+[saving the Redis connection](#saving-the-redis-connection)), and runtime
+notifications after commit are not durable command receipts. A lost response
+does not establish whether the update committed. The web captures the displayed
+validator, copied values and acting profile before an offline pause, does not
+refresh/replay a failed mutation, and keeps dirty edits on the original baseline
+across background reads and 412 responses. Changing acting authority clears
+local drafts. The diagnostics upload toggle uses the same guarded single-setting
+writer.
+
+Trusted-proxy reloads serialize each authoritative read and resolver application
+within an API process. Direct settings callbacks, Redis notifications and config
+watchers use that same ordering; a failed read keeps the previous trusted set.
+This prevents an older local read from overwriting a newer applied value. It does
+not make settings notifications a durable queue or provide simultaneous trust
+updates across replicas.
+
+## Connection checks
 
 `POST /api/v2/admin/settings/check/{kind}` performs one synchronous connection
 check against the submitted `values` and `dirty_keys`, merged with stored settings.
@@ -87,8 +146,16 @@ which needs the `search` action and an index scope covering Silo's indexes.
 A key Meilisearch refuses for either request, or a missing one on a secured
 instance, fails with a message asking for another key. The check does not
 prove the key can write documents.
-Provider failures return `success: false` with a generic message that excludes
-provider error bodies and credentials. Invalid kinds/configuration return `422`.
+Provider failures return `success: false` with a message written by Silo that
+excludes provider error bodies and credentials. The `ai_chat` and
+`ai_transcription` checks name the kind of failure when they can classify it,
+such as a rejected key, an unknown model, a billing or rate limit, or a timeout.
+A refused `ai_chat` request of any other kind answers
+`web.admin.common.connectionCheck.result.textAIRejected` with its status code as
+the `status` argument, or `textAIRefused`, with no arguments, when the provider
+reported the refusal inside a successful response. The server log records the
+provider's error for `ai_chat` with the configured key removed.
+Invalid kinds/configuration return `422`.
 The result's `message` is English. `message_key` names its entry in the shared
 translation catalog (`web.admin.common.connectionCheck.result.*`) and
 `message_args` fills that entry's placeholders by name, as decimal strings for
@@ -107,7 +174,7 @@ at restart, like every `recommendations.*` setting). The model settings
 unchanged, except that `recommendations.embedding_model` no longer has a
 default. A binding must
 name a stored provider that serves the job's capability; settings writes that
-break this rule return `400`. The ChatGPT plan is not a stored provider; it is
+break this rule return `422 validation_failed`. The ChatGPT plan is not a stored provider; it is
 selected with `ai.auth_mode: chatgpt` and serves text only.
 
 The registry is the encrypted, internal setting `ai.providers`. Generic settings
@@ -291,7 +358,7 @@ to the web administrator UI; Apple, Android, and Jellyfin clients continue to
 consume the existing translated subtitle and metadata contracts and require no
 account or settings changes.
 
-### Managed storage transitions
+## Managed storage transitions
 
 `GET /api/v2/admin/storage-transitions/capabilities`
 (`getAdminStorageTransitionCapabilities`) is the acting-administrator discovery
@@ -344,10 +411,9 @@ policy copies.
 Checks can write temporary storage objects or incur provider charges. They return
 a synchronous result, not a persisted job. The web sends each user-triggered check
 once and disables mutation retries; a lost response must not trigger automatic
-replay. This corrects the inventory's earlier assumption that every check was
-read-only. Demo mode blocks this operation.
+replay. Demo mode blocks this operation.
 
-### Redis database number
+## Redis database number
 
 `redis.db` is the Redis database number: empty by default, otherwise a whole
 number of 0 or more. A value replaces the number in `redis.url`, for a
@@ -379,7 +445,7 @@ single-server URL and for a Sentinel URL. A change needs a restart.
   database. That includes a cleared URL, so a URL emptied and typed again keeps
   the number; a save that leaves no URL stores no number.
 
-### Saving the Redis connection
+## Saving the Redis connection
 
 A server that cannot connect to the Redis its stored settings name stops at its
 next start, and a stored value can then no longer be corrected in the admin UI.
@@ -407,7 +473,7 @@ after 10 seconds, even for a URL that turns the socket timeouts off.
   changes the stored Redis settings in the meantime, the write is refused the
   same way and can be sent again.
 
-### Lower-version transcoding
+## Lower-version transcoding
 
 `playback.prefer_lower_version_transcode` is a boolean setting, default
 `true`. It applies when `allow_4k_transcode` is `true` and a 4K title has a
@@ -420,7 +486,7 @@ whatever this setting says. Changes apply to new playback decisions. The
 Playback settings page shows this policy as **Prefer 1080p
 versions** while 4K transcoding is allowed.
 
-### HEVC encoding
+## HEVC encoding
 
 `playback.allow_hevc_encoding` is a boolean setting, default `false`. When
 `true`, compatible HLS playback routes may choose HEVC video encoding after

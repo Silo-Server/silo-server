@@ -502,12 +502,16 @@ function RequestRow({
             {linkTitle ? (
               <ViewTransitionLink
                 to={href}
-                className="text-foreground min-w-0 truncate text-sm font-semibold hover:underline"
+                dir="auto"
+                className="bidi-text text-foreground min-w-0 truncate text-sm font-semibold hover:underline"
               >
                 {request.title}
               </ViewTransitionLink>
             ) : (
-              <span className="text-foreground min-w-0 truncate text-sm font-semibold">
+              <span
+                dir="auto"
+                className="bidi-text text-foreground min-w-0 truncate text-sm font-semibold"
+              >
                 {request.title}
               </span>
             )}

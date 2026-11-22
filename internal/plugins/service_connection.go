@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	sdkmanifest "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/manifest"
 
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
@@ -51,7 +52,11 @@ func runPluginConnectionCheck(
 	ctx context.Context,
 	client pluginClient,
 	manifest *pluginv1.PluginManifest,
+	configEntries []*pluginv1.ConfigEntry,
 ) error {
+	if sdkmanifest.SupportsConfigurationCheck(manifest) {
+		return runConfigurationCheck(ctx, client, configEntries)
+	}
 	capability, err := connectionCheckCapability(manifest)
 	if err != nil {
 		return err
@@ -133,8 +138,10 @@ func (s *Service) TestGlobalConfigWithClears(
 	if err != nil {
 		return err
 	}
-	if _, err := connectionCheckCapability(manifest); err != nil {
-		return err
+	if !sdkmanifest.SupportsConfigurationCheck(manifest) {
+		if _, err := connectionCheckCapability(manifest); err != nil {
+			return err
+		}
 	}
 
 	configEntries, err := s.mergedGlobalConfigEntries(ctx, installationID, key, value)
@@ -171,7 +178,7 @@ func (s *Service) TestGlobalConfigWithClears(
 		}
 	}()
 
-	return runPluginConnectionCheck(ctx, client, manifest)
+	return runPluginConnectionCheck(ctx, client, manifest, configEntries)
 }
 
 // prepareStagedGlobalConfig applies one staged global config entry the way
@@ -497,16 +504,65 @@ func cloneConfigMap(value map[string]any) map[string]any {
 
 // SupportsConnectionCheck reports whether TestGlobalConfig contacts the
 // provider for this plugin, so clients offer the check only where it does.
-// A metadata provider is probed with a movie search, so one without movie
-// priority has nothing to check. A marker provider that does not implement
-// account statistics still answers the check as unsupported when it runs.
+// A plugin that declares metadata.configuration_check runs its own
+// ConfigurationChecks.TestConfiguration RPC. Otherwise a metadata provider is
+// probed with a movie search (so one without movie priority has nothing to
+// check), and a marker provider is probed for account statistics (one that does
+// not implement them still answers the check as unsupported when it runs).
 func SupportsConnectionCheck(manifest *pluginv1.PluginManifest) bool {
+	if sdkmanifest.SupportsConfigurationCheck(manifest) {
+		return true
+	}
 	capability, err := connectionCheckCapability(manifest)
 	if err != nil {
 		return false
 	}
 	return capability.GetType() == markerProviderCapability ||
 		metadataProviderSupportsConnectionProbe(capability, "movie")
+}
+
+// runConfigurationCheck calls the plugin's generic ConfigurationChecks service
+// with the staged global configuration.
+func runConfigurationCheck(
+	ctx context.Context,
+	client pluginClient,
+	configEntries []*pluginv1.ConfigEntry,
+) error {
+	checkClient, err := client.ConfigurationChecks()
+	if err != nil {
+		if errors.Is(err, pluginhost.ErrCapabilityNotFound) {
+			return &ConnectionTestError{Message: connectionCheckUnsupportedMessage, Cause: ErrConnectionTestUnsupported}
+		}
+		return &ConnectionTestError{
+			Message: fmt.Sprintf("Failed to initialize the configuration check: %v", err),
+			Cause:   err,
+		}
+	}
+	if checkClient == nil {
+		return &ConnectionTestError{Message: connectionCheckUnsupportedMessage, Cause: ErrConnectionTestUnsupported}
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, pluginhost.DefaultConfigurationCheckTimeout)
+	defer cancel()
+
+	resp, err := checkClient.TestConfiguration(probeCtx, &pluginv1.TestConfigurationRequest{Config: configEntries})
+	if err != nil {
+		if status.Code(err) == codes.Unimplemented {
+			return &ConnectionTestError{Message: connectionCheckUnsupportedMessage, Cause: ErrConnectionTestUnsupported}
+		}
+		return &ConnectionTestError{
+			Message: "Connection check failed: " + status.Convert(err).Message(),
+			Cause:   err,
+		}
+	}
+	if !resp.GetOk() {
+		message := strings.TrimSpace(resp.GetMessage())
+		if message == "" {
+			message = "Connection check failed"
+		}
+		return &ConnectionTestError{Message: message}
+	}
+	return nil
 }
 
 // connectionCheckCapability picks the capability a connection check probes: the

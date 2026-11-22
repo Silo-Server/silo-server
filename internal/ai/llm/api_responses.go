@@ -61,12 +61,12 @@ func (c *Client) apiResponses(ctx context.Context, cfg Config, messages []Messag
 				return &permanentError{ErrQuotaExhausted}
 			}
 			if response.Error.Code == responseRateLimitExceeded {
-				return &HTTPError{StatusCode: http.StatusTooManyRequests, Code: response.Error.Code, message: "responses API is rate limiting requests"}
+				return &HTTPError{StatusCode: http.StatusTooManyRequests, InResponse: true, Code: response.Error.Code, message: "responses API is rate limiting requests"}
 			}
 			if response.Error.Code == responseServerError {
-				return &HTTPError{StatusCode: http.StatusServiceUnavailable, Code: response.Error.Code, message: "responses API is temporarily unavailable"}
+				return &HTTPError{StatusCode: http.StatusServiceUnavailable, InResponse: true, Code: response.Error.Code, message: "responses API is temporarily unavailable"}
 			}
-			return &permanentError{&HTTPError{StatusCode: http.StatusBadRequest, Code: response.Error.Code, message: "responses API rejected the text request"}}
+			return &permanentError{&HTTPError{StatusCode: http.StatusBadRequest, InResponse: true, Code: response.Error.Code, message: "responses API rejected the text request"}}
 		}
 		if response.Status != "completed" {
 			return &permanentError{unusable("responses API did not complete the text response")}

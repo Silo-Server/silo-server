@@ -51,6 +51,9 @@ function Dialog({ row }: { row: HomeRow }) {
 - **Plurals:** one `plural` spanning the message,
   `{count, plural, one {# page} other {# pages}}`; pass `count` as a number. A
   language without the message falls back to English with English plural rules.
+  Wording that refers to the items as one or several ("it" / "them") selects on
+  `{amount, select, exactlyOne {…} exactlyTwo {…} other {…}}` instead; pass
+  `amount: exactAmount(count)` (see docs/architecture/i18n.md).
 - **Placeholders:** pass dates, durations and sizes already formatted, as strings
   (`formatLocale()` / `appLanguage()` from `@/lib/appLocale`).
 - **Digits:** in Arabic, numbers print in the format locale's digits, as dates do
@@ -188,9 +191,22 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   loses its "…" in Firefox and its start in WebKit, and a clamped paragraph gets its "…"
   at the start of its last line. `.bidi-text` keeps a short one on the page's start
   side, so it needs no `w-fit`. The mixed-direction limit above applies here too.
-- A path shown as text, cut or not, takes `dir="ltr"` and renders through
-  `PathText` (`src/components/PathText.tsx`), which keeps each folder name in its
-  own direction; without it, folders named in Arabic swap places. An email cut with
+  Clamped text also sets `data-clamp-cut` on the clamped `.bidi-text` element while the
+  clamp cuts it, or Chrome drops its "…" (`app.css`). Take it from `useClampCut`
+  (`src/hooks/useClampCut.ts`), or from a measurement the component already
+  makes, as `DetailOverview` and `DetailTitle` do.
+- A cut title inside a line of translated words ("S01E02 · Title", "Play Title")
+  goes to `t()` as a `LineTitle` and the line renders through `TitleLineParts`
+  (`src/components/TitleLine.tsx`), in a `flex flex-wrap overflow-hidden` box (no
+  `flex-wrap` in a pill or a button). The title is cut in its own box and direction;
+  `dir="auto"` on the whole line would let the title set the words' direction too.
+  A list of names (the crew list) stays in the page's direction and gives each name
+  `dir="auto"`, so the names keep their order and the list is cut at its end. The
+  name the cut falls in can still lose its start.
+- A path or URL shown as text, cut or not, takes `dir="ltr"` and renders through
+  `PathText` (`src/components/PathText.tsx`), which keeps each folder name, and each
+  part of an http(s) URL's query and fragment, in its own direction; without it,
+  folders named in Arabic swap places. An email cut with
   `truncate` takes `dir={emailDir(email)}` (`src/lib/direction.ts`), which keeps one
   with an Arabic name part in the page's direction; `dir="auto"` would turn it right
   to left on a left-to-right page. Size a cut one as for a name, above; a path that

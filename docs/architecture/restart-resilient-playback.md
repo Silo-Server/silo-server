@@ -25,7 +25,7 @@ working notes so a future engineer can see the full evolution, the options
 weighed, the issues raised across review rounds, the variables traded off, and
 why the final shape was chosen. The superseded notes were:
 
-- *unified-playback-reconstruct* — the reconstruct core (PR #174), "RC".
+- *unified-playback-reconstruct* — the reconstruct core, with the recipe card in Postgres, "RC".
 - *token-carried-playback-reconstruct* — the storage evolution, "TR".
 - *async-recipe-card-playback* — a monitoring-preserving middle path, "RC-async".
 - *playback-reconstruct-options-comparison* — the goals/options matrix.
@@ -62,7 +62,7 @@ rebuilds the session just-in-time from two things:
 2. the **position the client supplies** on the triggering request.
 
 Nothing live is serialized (no ffmpeg process, context, channels, or log sink).
-This is the contribution of PR #174 ("RC"), which also unified the native and
+This is the contribution of the reconstruct core ("RC"), which also unified the native and
 Jellyfin-compat paths behind one `playback.TranscodeManager` so the
 card-lifetime rules, the reconstruct concurrency cap, and the node-affinity rule
 live in exactly one place. The reconstruct skeleton —
@@ -102,7 +102,7 @@ Every option is a point on a 2-D grid: **where the descriptor lives** (vertical)
                     re-resolve at      long token       short TTL +
                     reconstruct        (24h, expire)    refresh checkpoint
   D  central        +----------------+----------------+----------------+
-  E  Postgres row   |  RC  (#174)    |   (n/a)        |  RC-async      |
+  E  Postgres row   |  RC            |   (n/a)        |  RC-async      |
   S                 +----------------+----------------+----------------+
   C  client/node-   |   (n/a)        |  TR-24h        |  TR + re-mint  |
   R  carried token  |                |                |                |
@@ -161,7 +161,7 @@ up) and surviving a central restart. G9 scores only the *durable, identity-rich*
 
 Legend: ✓ meets · ✓\* minor asterisk · ~ partial · ✗ fails · ✓✓ best-in-class
 
-| Goal | `main` | RC #174 | TR-24h | TR + re-mint | RC-async | **TR-lease** |
+| Goal | `main` | RC | TR-24h | TR + re-mint | RC-async | **TR-lease** |
 |------|:------:|:-------:|:------:|:------------:|:--------:|:------------:|
 | G1 hot path free of central DB | ✓ | ✓\* | ✓ | ✓ | ✓ | ✓ |
 | G2 bytes offloaded | ✓ | ✓ | ✓✓ | ✓✓ | ✓✓ | ✓✓ |
@@ -192,7 +192,7 @@ behavior — see §7.
 
 ## 6. Why each non-final option was set aside
 
-- **RC (PR #174, the recipe card in Postgres).** Correct and the basis of
+- **RC (the recipe card in Postgres).** Correct and the basis of
   everything here, but it couples reconstruction to a shared per-session Postgres
   store: a write on every start, per audio/quality change, and a ≤1/min refresh,
   with resilience tied to the DB being reachable. It does not give the single-box
@@ -203,7 +203,7 @@ behavior — see §7.
   (zero external dependency) and removes the per-start DB write, but revocation is
   bounded by *nothing tighter than the 24h token TTL* on the node path — a banned
   user keeps node-served direct/remux for up to 24h. This is actually the
-  *status quo* for the node path even pre-branch (the proxy verifies by signature
+  *status quo* for the node path even before this work (the proxy verifies by signature
   alone, no DB), so TR-24h only adds identity claims to the token without
   improving revocation. Not acceptable as the endpoint.
 
@@ -564,7 +564,7 @@ ASCII blocks render anywhere.
                          │   sessions (compat      │   │   = deny  (session kill)  │◀─│ verifyToken + deny GET  │
                          │   store, carries Recipe)│   └──────────────────────────┘  │ serves direct/remux     │
                          └───────────────────────┘                ▲                  │ proxies transcode ──────┼──▶ Transcode node
-   ✗ NO transcode_recipes table (deleted this branch)             │ node-local GET   └────────────────────────┘    (mode=transcode)
+   ✗ NO transcode_recipes table                                   │ node-local GET   └────────────────────────┘    (mode=transcode)
                                                                   └── sub-ms, off Postgres                          ffmpeg /transcode/{sid}/…
 ```
 
