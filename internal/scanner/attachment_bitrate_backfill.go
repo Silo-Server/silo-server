@@ -257,12 +257,12 @@ func (b *AttachmentBitrateBackfiller) retryListed(ctx context.Context, retryIDs 
 		if err := b.eachBatch(ctx, int(pass.from), pass.ids, result, timeouts, func(lastID int, failed []int64, readThrough int) error {
 			from := prunedThrough
 			prunedThrough = int64(lastID)
-			return b.pruneRetries(ctx, from, prunedThrough, failed, int64(readThrough))
+			return b.pruneRetries(ctx, pass.ids, from, prunedThrough, failed, int64(readThrough))
 		}); err != nil {
 			return err
 		}
 		// Listed files after the last batch are no longer candidates.
-		if err := b.pruneRetries(ctx, prunedThrough, pass.through, nil, 0); err != nil {
+		if err := b.pruneRetries(ctx, pass.ids, prunedThrough, pass.through, nil, 0); err != nil {
 			return err
 		}
 	}
@@ -271,17 +271,19 @@ func (b *AttachmentBitrateBackfiller) retryListed(ctx context.Context, retryIDs 
 
 // pruneRetries drops the listed files after afterID up to throughID, except
 // failed, the ones to read again, and records resumeAfter as where the next
-// run starts reading the list.
-func (b *AttachmentBitrateBackfiller) pruneRetries(ctx context.Context, afterID, throughID int64, failed []int64, resumeAfter int64) error {
+// run starts reading the list. It drops only files in read, the list this run
+// started from: a file listed since, by a run on another server that took the
+// lock after this one lost its session, stays listed.
+func (b *AttachmentBitrateBackfiller) pruneRetries(ctx context.Context, read []int64, afterID, throughID int64, failed []int64, resumeAfter int64) error {
 	if _, err := b.pool.Exec(ctx, `
 		UPDATE attachment_bitrate_backfill_state
 		SET retry_media_file_ids = ARRAY(
 		        SELECT id FROM unnest(retry_media_file_ids) id
-		        WHERE id <= $1 OR id > $2 OR id = ANY($3::bigint[])
+		        WHERE id <= $1 OR id > $2 OR id = ANY($3::bigint[]) OR id <> ALL($5::bigint[])
 		        ORDER BY id),
 		    retry_after_id = $4,
 		    updated_at = now()
-		WHERE id = 1`, afterID, throughID, failed, resumeAfter); err != nil {
+		WHERE id = 1`, afterID, throughID, failed, resumeAfter, read); err != nil {
 		return fmt.Errorf("recording attachment bitrate backfill retries: %w", err)
 	}
 	return nil
@@ -455,15 +457,17 @@ func (b *AttachmentBitrateBackfiller) backfillFile(ctx context.Context, c attach
 		return attachmentBitrateOutcomeUnchanged, nil
 	}
 	// Write only over the exact row that was read: a scan that rewrote it in
-	// the meantime stored its own rate.
+	// the meantime stored its own rate, and a relink that moved it to another
+	// path leaves the file just read at the old one.
 	tag, err := b.pool.Exec(ctx, `
 		UPDATE media_files
 		SET bitrate = $5, updated_at = NOW()
 		WHERE id = $1
 		  AND file_size = $2
 		  AND date_trunc('microseconds', file_modified_at) IS NOT DISTINCT FROM $3::timestamptz
-		  AND bitrate = $4`,
-		c.id, c.size, normalizedStoredModifiedAt(c.modifiedAt), c.bitrate, probed.kbps)
+		  AND bitrate = $4
+		  AND file_path = $6`,
+		c.id, c.size, normalizedStoredModifiedAt(c.modifiedAt), c.bitrate, probed.kbps, c.path)
 	if err != nil {
 		return 0, fmt.Errorf("recording attachment-free bitrate for file %d: %w", c.id, err)
 	}
