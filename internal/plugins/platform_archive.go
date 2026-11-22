@@ -55,6 +55,14 @@ func (c *ArchiveCache) checksPlatform(trustVerified bool) bool {
 // loadForHostPlatform is load, persisting, that rehydrates this host's
 // build when the stored archive holds another platform's.
 func (c *ArchiveCache) loadForHostPlatform(ctx context.Context, installation *Installation, read archiveRead, trustVerified bool, archives archiveStore) (*pluginv1.PluginManifest, error) {
+	if c.platforms != nil && !trustVerified {
+		// Only a stored build for another platform records a failure, so
+		// within the retry delay fail without reading, extracting and hashing
+		// that build under mu again on every start.
+		if err := c.platforms.recentFailure(platformBuildKeyOf(installation)); err != nil {
+			return nil, err
+		}
+	}
 	manifest, err := c.load(ctx, installation, read, trustVerified, archives, true)
 	foreign, ok := errors.AsType[*foreignBuildError](err)
 	if !ok || c.platforms == nil {
@@ -90,14 +98,21 @@ type platformArchives struct {
 	fetch platformBuildFetcher
 
 	mu sync.Mutex
-	// failed holds, per installation and stored archive checksum, the last
-	// failure to get this platform's build and when it happened.
+	// failed holds, per installed release, the last failure to get this
+	// platform's build and when it happened.
 	failed map[platformBuildKey]platformBuildFailure
 }
 
+// platformBuildKey is an installed release: the installation row's ID,
+// version and install path, which an install or update changes.
 type platformBuildKey struct {
 	installationID int
-	baseChecksum   string
+	version        string
+	installPath    string
+}
+
+func platformBuildKeyOf(installation *Installation) platformBuildKey {
+	return platformBuildKey{installationID: installation.ID, version: installation.Version, installPath: installation.InstallPath}
 }
 
 type platformBuildFailure struct {
@@ -135,10 +150,8 @@ func (p *platformArchives) archiveFor(ctx context.Context, installation *Install
 		return nil, fmt.Errorf("load stored %s/%s build of plugin %s %s: %w", goos, goarch, installation.PluginID, installation.Version, err)
 	}
 
-	key := platformBuildKey{installationID: installation.ID, baseChecksum: stored.Checksum}
-	if err := p.recentFailure(key); err != nil {
-		return nil, err
-	}
+	// loadForHostPlatform checked the retry delay before reading stored.
+	key := platformBuildKeyOf(installation)
 	build, err := p.fetchBuild(ctx, installation, storedManifest)
 	if err != nil {
 		err = cannot(err)
@@ -302,11 +315,7 @@ func (s *Service) fetchPlatformBuild(ctx context.Context, installation *Installa
 	if installation.RepositoryID == nil {
 		return nil, errors.New("the plugin was not installed from a catalog")
 	}
-	target, err := s.catalog.ResolveInstall(ctx, InstallCatalogRequest{
-		RepositoryID: *installation.RepositoryID,
-		PluginID:     installation.PluginID,
-		Version:      installation.Version,
-	})
+	target, err := s.resolvePlatformBuild(ctx, installation)
 	if err != nil {
 		return nil, fmt.Errorf("%w (update the plugin to a version its catalog lists to install a build for every platform from there)", err)
 	}
@@ -318,6 +327,28 @@ func (s *Service) fetchPlatformBuild(ctx context.Context, installation *Installa
 	return s.installer.downloadBinaryChecked(ctx, target.BinaryRequest(), func(data []byte, signature Signature) error {
 		return checkPlatformBuild(installation, data, signature)
 	})
+}
+
+// resolvePlatformBuild resolves the installation's version for this host's
+// platform in the catalog it was installed from. The official catalog lists
+// only each plugin's current release, so an official installation whose
+// version the list no longer names resolves from that version's release
+// descriptor, as provisioning an exact version does.
+func (s *Service) resolvePlatformBuild(ctx context.Context, installation *Installation) (*ResolvedCatalogInstall, error) {
+	target, err := s.catalog.ResolveInstall(ctx, InstallCatalogRequest{
+		RepositoryID: *installation.RepositoryID,
+		PluginID:     installation.PluginID,
+		Version:      installation.Version,
+	})
+	if err == nil {
+		return target, nil
+	}
+	if official, officialErr := s.catalog.OfficialRepository(ctx); officialErr == nil && official.ID == *installation.RepositoryID {
+		if target, exactErr := s.catalog.ResolveOfficialInstall(ctx, installation.PluginID, installation.Version); exactErr == nil {
+			return target, nil
+		}
+	}
+	return nil, err
 }
 
 // SavePlatformArchiveInput is a build of an installation for one platform.

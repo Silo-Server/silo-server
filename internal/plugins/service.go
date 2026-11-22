@@ -641,7 +641,11 @@ func (s *Service) PreloadEnabled(ctx context.Context) error {
 		if installation.IsBuiltin() {
 			continue
 		}
-		if _, err := s.ensureLoadedInstallation(ctx, installation); err != nil {
+		// A manifest read rehydrates and hashes the files as a launch does,
+		// but doesn't fetch this platform's build of a plugin stored for
+		// another platform: preload runs before the API listens, so a slow or
+		// unreachable catalog must not hold startup. The first launch fetches.
+		if _, err := s.ReadInstalledManifest(ctx, installation); err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return ctxErr
 			}

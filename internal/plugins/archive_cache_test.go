@@ -863,9 +863,12 @@ type platformTestStore struct {
 	// makes every save fail.
 	replaced bool
 	saveErr  error
+	// reads counts reads of the stored archive.
+	reads atomic.Int32
 }
 
 func (s *platformTestStore) GetArchive(context.Context, int) (*InstallationArchive, error) {
+	s.reads.Add(1)
 	return s.stored, nil
 }
 
@@ -1031,12 +1034,15 @@ func testFetchesThisPlatformsBuild(t *testing.T, withRoot bool) {
 
 // A build Silo can't fetch, or one it can't trust as the installed
 // release for this platform, fails before anything runs, nothing is stored,
-// and starts within the retry delay don't fetch it again.
+// and starts within the retry delay neither fetch it again nor read and
+// extract the stored build again.
 func TestArchiveCacheRefusesAPlatformBuildItCannotTrust(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		setup       func(*platformBuildFixture)
 		wantFetches int32
+		// wantReads is how often the stored archive is read; 1 unless set.
+		wantReads int32
 	}{
 		{name: "plugin without a catalog", setup: func(f *platformBuildFixture) { f.installation.RepositoryID = nil }},
 		{name: "build declaring another manifest", wantFetches: 1, setup: func(f *platformBuildFixture) {
@@ -1049,7 +1055,7 @@ func TestArchiveCacheRefusesAPlatformBuildItCannotTrust(t *testing.T) {
 		}},
 		// The fetched build is for a release no longer installed, so it
 		// isn't run; the next start fetches for the current one.
-		{name: "installation replaced during the fetch", wantFetches: 2, setup: func(f *platformBuildFixture) { f.store.replaced = true }},
+		{name: "installation replaced during the fetch", wantFetches: 2, wantReads: 2, setup: func(f *platformBuildFixture) { f.store.replaced = true }},
 		// Nothing shows the installation is still the one fetched for, and
 		// the next start waits out the retry delay like a failed fetch.
 		{name: "storing the build fails", wantFetches: 1, setup: func(f *platformBuildFixture) { f.store.saveErr = errors.New("database unavailable") }},
@@ -1065,6 +1071,9 @@ func TestArchiveCacheRefusesAPlatformBuildItCannotTrust(t *testing.T) {
 			}
 			if f.fetches.Load() != tc.wantFetches || len(f.store.builds) != 0 {
 				t.Fatalf("fetched %d builds and stored %d; want %d fetched and none stored", f.fetches.Load(), len(f.store.builds), tc.wantFetches)
+			}
+			if want := max(tc.wantReads, 1); f.store.reads.Load() != want {
+				t.Fatalf("read the stored archive %d times; want %d", f.store.reads.Load(), want)
 			}
 			if _, err := os.Stat(f.binaryPath(t)); !errors.Is(err, fs.ErrNotExist) {
 				t.Fatalf("a binary was left to run at the install path: %v", err)
@@ -1095,5 +1104,24 @@ func TestArchiveCacheRefetchesAStoredBuildSignedWithLess(t *testing.T) {
 	stored := f.store.builds[runtime.GOOS+"/"+runtime.GOARCH+"@"+f.store.stored.Checksum]
 	if f.fetches.Load() != 1 || stored.Signature.State != SignatureStateVerified {
 		t.Fatalf("fetched %d builds and stored one signed %q; want the unsigned build replaced by a verified fetch", f.fetches.Load(), stored.Signature.State)
+	}
+}
+
+// Preload runs before the API listens, so it leaves fetching this platform's
+// build of a foreign stored archive to the plugin's first launch.
+func TestPreloadLeavesThePlatformBuildFetchToTheFirstLaunch(t *testing.T) {
+	ctx := context.Background()
+	f := newPlatformBuildFixture(t)
+	f.installation.Enabled = true
+	cache := f.cache(t)
+	svc := &Service{installations: newFakeServiceInstallationStore(f.installation), archiveCache: cache}
+	if err := svc.PreloadEnabled(ctx); err != nil {
+		t.Fatalf("PreloadEnabled() = %v", err)
+	}
+	if f.fetches.Load() != 0 {
+		t.Fatalf("preload fetched %d builds; want none before the server listens", f.fetches.Load())
+	}
+	if _, err := cache.Ensure(ctx, f.installation); err != nil || f.fetches.Load() != 1 {
+		t.Fatalf("Ensure() after preload = %v with %d fetches; want this platform's build, fetched once", err, f.fetches.Load())
 	}
 }

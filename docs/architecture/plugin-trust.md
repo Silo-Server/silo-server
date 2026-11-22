@@ -142,10 +142,13 @@ binary for that platform,
 and, when the installed build's signature was verified, verify from the same
 source repository. It is stored in
 `plugin_platform_archives` for that platform, tied to the stored archive's
-checksum, so other servers on that platform extract it without fetching. A
-plugin that was uploaded, or whose version the catalog no longer lists, fails
-to start on that server with an error naming both platforms, and the server
-tries the catalog again after ten minutes.
+checksum, so other servers on that platform extract it without fetching. An
+official plugin whose version the catalog's list no longer names resolves from
+that version's release descriptor, as provisioning an exact version does. A
+plugin that was uploaded, or whose version a third-party catalog no longer
+lists, fails to start on that server with an error naming both platforms, and
+the server tries again after ten minutes without reading the stored archive
+meanwhile. Startup preload doesn't fetch: the plugin's first launch does.
 
 The server enforces these refusals: `cmd/silo` builds the one
 `SignatureChecker` that the catalog service and the installer share with
