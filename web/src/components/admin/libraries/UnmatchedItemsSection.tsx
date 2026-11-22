@@ -308,7 +308,9 @@ export function UnmatchedItemsSection() {
                   {u.library_name}
                 </CardField>
                 <CardField label={t("web.admin.libraries.column.type")}>
-                  <Badge variant="outline">{itemTypeLabel(t, u.content_type)}</Badge>
+                  <Badge variant="outline" className="max-w-full whitespace-normal">
+                    {itemTypeLabel(t, u.content_type)}
+                  </Badge>
                 </CardField>
                 <CardField label={t("web.admin.libraries.column.status")}>
                   <Badge variant="secondary" className="max-w-full whitespace-normal">
