@@ -69,6 +69,8 @@ interface PlaybackSessionState {
    * effects on it rather than on object identity.
    */
   planRevision: number;
+  /** Bumped when a network-tier quality_change replan is adopted. */
+  networkTierRevision: number;
   streamUrl: string | null;
   sessionId: string | null;
   playbackAttemptId: string | null;
@@ -418,6 +420,7 @@ function planToSessionState(
   return {
     plan,
     planRevision,
+    networkTierRevision: 0,
     streamUrl: buildPlayerStreamUrl(config.apiBaseUrl, plan.stream.url, config.getAccessToken()),
     sessionId,
     playbackAttemptId,
@@ -585,6 +588,7 @@ export function usePlaybackSession(
   const [state, setState] = useState<PlaybackSessionState>({
     plan: null,
     planRevision: 0,
+    networkTierRevision: 0,
     streamUrl: null,
     sessionId: null,
     playbackAttemptId: null,
@@ -646,8 +650,10 @@ export function usePlaybackSession(
   latestNetworkTierRef.current = networkTier;
   const tierChangeSeqRef = useRef(0);
   const qualitySelectionSeqRef = useRef(0);
+  const activeQualityOwnerSeqRef = useRef(0);
   const userPickedQualityRef = useRef(false);
   const pendingManualQualityRef = useRef(false);
+  const inFlightQualityRef = useRef<{ quality: string; manual: boolean; seq: number } | null>(null);
   const latestQualitySettingsRef = useRef({
     qualityPreference: normalizeQualityPreferenceV3(qualityPreference),
     maxBitrateKbps: maxBitrateKbps ?? null,
@@ -661,6 +667,7 @@ export function usePlaybackSession(
     keptEstimateRef.current = kbps;
   }, []);
   const planRevisionRef = useRef(0);
+  const networkTierRevisionRef = useRef(0);
   const serverFeaturesRef = useRef<string[]>([]);
   const stateRef = useRef(state);
   // Set as soon as the server says an administrator ended the session, before
@@ -745,6 +752,8 @@ export function usePlaybackSession(
     /** The subtitle inventory the queued request's subtitle ordinal indexes. */
     subtitleInventory: readonly SubtitleInventoryItemV3[];
     onAdopt?: (planRevision: number) => void;
+    onFailure?: () => void;
+    qualityIntent?: { quality: string; manual: boolean; seq: number };
   } | null>(null);
   const issueReplanRef = useRef<
     (
@@ -752,6 +761,8 @@ export function usePlaybackSession(
       failurePolicy?: ReplanFailurePolicy,
       reconnect?: boolean,
       onAdopt?: (planRevision: number) => void,
+      onFailure?: () => void,
+      qualityIntent?: { quality: string; manual: boolean; seq: number },
     ) => Promise<boolean>
   >(async () => false);
   const qualityRef = useRef(normalizeQualityPreferenceV3(qualityPreference));
@@ -969,6 +980,9 @@ export function usePlaybackSession(
         activeBandwidthCapRef.current = requestedCapRef.current;
         activePlanTierRef.current = requestedTierRef.current;
         adoptedQualityRef.current = requestedQualityRef.current;
+        if (pendingReplanRef.current?.options.operation !== "quality_change") {
+          qualityRef.current = requestedQualityRef.current;
+        }
       }
       if (
         Number.isFinite(plan.timeline.source_start_seconds) &&
@@ -994,6 +1008,7 @@ export function usePlaybackSession(
           playbackPlayingRef.current,
           config,
         ),
+        networkTierRevision: networkTierRevisionRef.current,
         initialSubtitleErrorTitle:
           initialSubtitleFailure === undefined
             ? current.initialSubtitleErrorTitle
@@ -1172,10 +1187,12 @@ export function usePlaybackSession(
       // A start takes ownership of the quality it sends and supersedes any
       // in-flight quality replan from the previous session so its refusal
       // cannot roll back the replacement session's displayed preference.
+      // Keep `pendingManualQualityRef` intact until this start adopts or rolls
+      // back, so a second superseding start still sees the pending manual pick.
       const qualitySelectionSeq = ++qualitySelectionSeqRef.current;
+      activeQualityOwnerSeqRef.current = qualitySelectionSeq;
       const startQuality = qualityRef.current;
       const adoptedManualPick = pendingManualQualityRef.current;
-      pendingManualQualityRef.current = false;
       const previousAttempt = {
         playbackAttemptId: playbackAttemptIdRef.current,
         planAttemptId: planAttemptIdRef.current,
@@ -1325,6 +1342,9 @@ export function usePlaybackSession(
           if (adoptedManualPick) {
             userPickedQualityRef.current = true;
           }
+          if (qualitySelectionSeq === activeQualityOwnerSeqRef.current) {
+            pendingManualQualityRef.current = false;
+          }
           // The kept estimate belonged to the attempt this start replaced.
           keptEstimateRef.current = undefined;
           // A start opens a new attempt. Its first frame is still to come:
@@ -1335,11 +1355,12 @@ export function usePlaybackSession(
         if (!adopted && hasExistingSession && allowPreserveExistingSessionOnError) {
           restorePreviousAttempt();
           const rollbackQuality =
-            qualitySelectionSeq === qualitySelectionSeqRef.current
+            qualitySelectionSeq === activeQualityOwnerSeqRef.current
               ? adoptedQualityRef.current
               : undefined;
           if (rollbackQuality !== undefined) {
             qualityRef.current = rollbackQuality;
+            pendingManualQualityRef.current = false;
           }
           setState((current) => ({
             ...current,
@@ -1353,6 +1374,9 @@ export function usePlaybackSession(
           return { kind: "refused", failure: describeDecisionWithoutPlan(decisionToAdopt) };
         }
         if (!adopted) {
+          if (qualitySelectionSeq === activeQualityOwnerSeqRef.current) {
+            pendingManualQualityRef.current = false;
+          }
           retirePreviousSession();
           return { kind: "refused", failure: describeDecisionWithoutPlan(decisionToAdopt) };
         }
@@ -1371,11 +1395,12 @@ export function usePlaybackSession(
           console.error(replacementErrorMessage, err);
           restorePreviousAttempt();
           const rollbackQuality =
-            qualitySelectionSeq === qualitySelectionSeqRef.current
+            qualitySelectionSeq === activeQualityOwnerSeqRef.current
               ? adoptedQualityRef.current
               : undefined;
           if (rollbackQuality !== undefined) {
             qualityRef.current = rollbackQuality;
+            pendingManualQualityRef.current = false;
           }
           setState((current) => ({
             ...current,
@@ -1386,6 +1411,9 @@ export function usePlaybackSession(
           return { kind: "failed", error: err };
         }
 
+        if (qualitySelectionSeq === activeQualityOwnerSeqRef.current) {
+          pendingManualQualityRef.current = false;
+        }
         const nextError = describePlaybackSessionError(err, initialErrorMessage);
         retirePreviousSession(nextError);
         return { kind: "failed", error: err };
@@ -1420,9 +1448,11 @@ export function usePlaybackSession(
     activePlanTierRef.current = networkTier;
     activeBandwidthCapRef.current = maxBitrateKbps ?? null;
     tierChangeSeqRef.current += 1;
-    qualitySelectionSeqRef.current += 1;
+    const resetQualitySeq = ++qualitySelectionSeqRef.current;
+    activeQualityOwnerSeqRef.current = resetQualitySeq;
     userPickedQualityRef.current = false;
     pendingManualQualityRef.current = false;
+    inFlightQualityRef.current = null;
     versionPinnedRef.current = versionPicked;
     const initialQuality = normalizeQualityPreferenceV3(qualityPreference);
     qualityRef.current = initialQuality;
@@ -1513,6 +1543,8 @@ export function usePlaybackSession(
       failurePolicy: ReplanFailurePolicy = NO_RETIRE_POLICY,
       reconnect = false,
       onAdopt?: (planRevision: number) => void,
+      onFailure?: () => void,
+      qualityIntent?: { quality: string; manual: boolean; seq: number },
     ): Promise<boolean> {
       const plan = planRef.current;
       const sessionId = sessionIdRef.current;
@@ -1521,6 +1553,7 @@ export function usePlaybackSession(
         // A Restore with no plan to replan, as after a start that adopted
         // none, owes its `clear` to the next start.
         if (options.learnedLimit === "clear") clearOwedRef.current = true;
+        onFailure?.();
         return false;
       }
       if (replanInFlightRef.current) {
@@ -1553,6 +1586,7 @@ export function usePlaybackSession(
               positionSeconds: options.positionSeconds,
             },
           };
+          onFailure?.();
           return false;
         }
         const shouldQueue =
@@ -1561,7 +1595,10 @@ export function usePlaybackSession(
           (isPendingOutputChange && !hasQueuedFailureRecovery && !hasQueuedUserIntent) ||
           (options.operation === "seek_reanchor" && !hasQueuedFailureRecovery);
         if (shouldQueue) {
-          pendingReplanRef.current?.resolve(false);
+          const displaced = pendingReplanRef.current;
+          pendingReplanRef.current = null;
+          displaced?.onFailure?.();
+          displaced?.resolve(false);
           return new Promise<boolean>((resolve) => {
             pendingReplanRef.current = {
               options,
@@ -1572,9 +1609,12 @@ export function usePlaybackSession(
               mediaFileId: plan.effective_media_file_id,
               subtitleInventory: plan.subtitle.inventory,
               onAdopt,
+              onFailure,
+              qualityIntent,
             };
           });
         }
+        onFailure?.();
         return false;
       }
 
@@ -1665,6 +1705,7 @@ export function usePlaybackSession(
         ? playbackPlayingRef.current
         : planAutoPlayRef.current;
       replanInFlightRef.current = true;
+      inFlightQualityRef.current = qualityIntent ?? null;
       beginAdoption(loadSequence);
       setState((current) => ({
         ...current,
@@ -1674,6 +1715,7 @@ export function usePlaybackSession(
         error: null,
       }));
 
+      let adoptedPlan = false;
       try {
         const decision = await replanV2(config, sessionId, body, serverFeaturesRef.current);
 
@@ -1713,6 +1755,7 @@ export function usePlaybackSession(
           options.operation === "track_change" && options.subtitle !== undefined ? null : undefined,
           onAdopt,
         );
+        adoptedPlan = adopted;
         if (!adopted && (failurePolicy.retireOnRefusal || tightenedStillActive)) {
           const pending = pendingReplanRef.current;
           const pendingCanValidateOutput =
@@ -1790,6 +1833,10 @@ export function usePlaybackSession(
         return false;
       } finally {
         replanInFlightRef.current = false;
+        inFlightQualityRef.current = null;
+        if (!adoptedPlan) {
+          onFailure?.();
+        }
         setState((current) => (current.replanning ? { ...current, replanning: false } : current));
 
         const pendingReplan = pendingReplanRef.current;
@@ -1815,6 +1862,7 @@ export function usePlaybackSession(
           const refreshOwed = subtitleRefreshOwedRef.current;
           subtitleRefreshOwedRef.current = false;
           if (!recoveryAppliesToCurrentPlan || !trackPickAppliesToCurrentFile) {
+            pendingReplan.onFailure?.();
             pendingReplan.resolve(false);
           } else if (
             refreshOwed &&
@@ -1829,7 +1877,10 @@ export function usePlaybackSession(
               positionSeconds: pendingReplan.options.positionSeconds,
             });
             if (replanInFlightRef.current) pendingReplanRef.current = pendingReplan;
-            else pendingReplan.resolve(false);
+            else {
+              pendingReplan.onFailure?.();
+              pendingReplan.resolve(false);
+            }
           } else {
             // The menu the pick was made from may predate a deletion that
             // moved its stored subtitle to another ordinal.
@@ -1842,10 +1893,18 @@ export function usePlaybackSession(
             // render. Dispatch through the latest callback so its request carries
             // the current output evidence rather than the closed-over snapshot.
             void issueReplanRef
-              .current(options, pendingReplan.failurePolicy, false, pendingReplan.onAdopt)
+              .current(
+                options,
+                pendingReplan.failurePolicy,
+                false,
+                pendingReplan.onAdopt,
+                pendingReplan.onFailure,
+                pendingReplan.qualityIntent,
+              )
               .then(pendingReplan.resolve);
           }
         } else {
+          pendingReplan?.onFailure?.();
           pendingReplan?.resolve(false);
         }
         // Last: a queued replan dispatched just above has already counted
@@ -1980,32 +2039,33 @@ export function usePlaybackSession(
         );
       };
       const capTightened = stillTightened();
-      const qualitySelectionSeq =
-        qualityChanged || qualityRef.current !== nextQuality
-          ? ++qualitySelectionSeqRef.current
-          : qualitySelectionSeqRef.current;
+      const ownsQuality = qualityChanged || qualityRef.current !== nextQuality;
+      const qualitySelectionSeq = ownsQuality
+        ? ++qualitySelectionSeqRef.current
+        : activeQualityOwnerSeqRef.current;
+      if (ownsQuality) {
+        activeQualityOwnerSeqRef.current = qualitySelectionSeq;
+      }
       if (qualityRef.current !== nextQuality) {
         qualityRef.current = nextQuality;
         setState((current) => ({ ...current, qualityPreference: nextQuality }));
       }
-      void issueReplanRef
-        .current(
-          {
-            operation: "quality_change",
-            positionSeconds: playbackPositionRef.current,
-          },
-          capTightened ? { retireWhileTightened: stillTightened } : NO_RETIRE_POLICY,
-          false,
-          () => {
-            adoptedQualityRef.current = nextQuality;
-          },
-        )
-        .then((adopted) => {
+      void issueReplanRef.current(
+        {
+          operation: "quality_change",
+          positionSeconds: playbackPositionRef.current,
+        },
+        capTightened ? { retireWhileTightened: stillTightened } : NO_RETIRE_POLICY,
+        false,
+        () => {
+          adoptedQualityRef.current = nextQuality;
+          networkTierRevisionRef.current += 1;
+        },
+        () => {
           if (
-            adopted ||
             !qualityChanged ||
             tierChangeSeq !== tierChangeSeqRef.current ||
-            qualitySelectionSeq !== qualitySelectionSeqRef.current
+            qualitySelectionSeq !== activeQualityOwnerSeqRef.current
           ) {
             return;
           }
@@ -2016,7 +2076,9 @@ export function usePlaybackSession(
               ? { ...current, qualityPreference: rollbackPreference }
               : current,
           );
-        });
+        },
+        { quality: nextQuality, manual: false, seq: qualitySelectionSeq },
+      );
     };
     applyTierChange();
   }, [
@@ -2078,13 +2140,44 @@ export function usePlaybackSession(
       }
       const normalized = normalizeQualityPreferenceV3(label);
       const qualitySelectionSeq = ++qualitySelectionSeqRef.current;
+      activeQualityOwnerSeqRef.current = qualitySelectionSeq;
       if (!buffering) {
         pendingManualQualityRef.current = true;
       }
       qualityRef.current = normalized;
       setState((current) => ({ ...current, qualityPreference: normalized }));
+      let settled = false;
+      const handleFailure = () => {
+        if (settled) return;
+        settled = true;
+        onAdopt?.(undefined);
+        if (qualitySelectionSeq !== activeQualityOwnerSeqRef.current) return;
+        const surviving = inFlightQualityRef.current;
+        if (surviving) {
+          activeQualityOwnerSeqRef.current = surviving.seq;
+          pendingManualQualityRef.current = surviving.manual;
+          qualityRef.current = surviving.quality;
+          setState((current) =>
+            current.qualityPreference === normalized
+              ? { ...current, qualityPreference: surviving.quality }
+              : current,
+          );
+          return;
+        }
+        if (!buffering) {
+          pendingManualQualityRef.current = false;
+        }
+        const rollbackPreference = adoptedQualityRef.current;
+        qualityRef.current = rollbackPreference;
+        setState((current) =>
+          current.qualityPreference === normalized
+            ? { ...current, qualityPreference: rollbackPreference }
+            : current,
+        );
+      };
       // The replan tells onAdopt as it adopts, before the new plan renders; a
-      // refusal is told here.
+      // refusal or displacement runs handleFailure synchronously before any
+      // queued replan reads qualityRef.
       const send = () =>
         void replan(
           {
@@ -2102,28 +2195,19 @@ export function usePlaybackSession(
           NO_RETIRE_POLICY,
           false,
           (planRevision) => {
+            settled = true;
             adoptedQualityRef.current = normalized;
             if (!buffering) {
               userPickedQualityRef.current = true;
-              pendingManualQualityRef.current = false;
+              if (qualitySelectionSeq === activeQualityOwnerSeqRef.current) {
+                pendingManualQualityRef.current = false;
+              }
             }
             onAdopt?.(planRevision);
           },
-        ).then((adopted) => {
-          if (adopted) return;
-          onAdopt?.(undefined);
-          if (qualitySelectionSeq !== qualitySelectionSeqRef.current) return;
-          if (!buffering) {
-            pendingManualQualityRef.current = false;
-          }
-          const rollbackPreference = adoptedQualityRef.current;
-          qualityRef.current = rollbackPreference;
-          setState((current) =>
-            current.qualityPreference === normalized
-              ? { ...current, qualityPreference: rollbackPreference }
-              : current,
-          );
-        });
+          handleFailure,
+          { quality: normalized, manual: !buffering, seq: qualitySelectionSeq },
+        );
       // A Restore sent during a start would replan the plan that start
       // replaces, so it goes out against the plan the start leaves.
       const sendAfterStarts = () => {

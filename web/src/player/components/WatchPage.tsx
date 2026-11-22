@@ -738,6 +738,7 @@ function WatchPagePlayer({
       showMarkerSource={showMarkerSource}
       bufferingMode={bufferingMode}
       bandwidthCapKbps={maxBitrateKbps}
+      networkTierRevision={session.networkTierRevision}
       bufferingTitleId={contentId}
       playbackAttemptId={session.playbackAttemptId}
       onKeptEstimate={session.setKeptEstimate}
