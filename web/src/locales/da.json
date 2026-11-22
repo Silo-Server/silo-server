@@ -24113,6 +24113,12 @@
       "value": "Udbyderen af tale-til-tekst er midlertidigt utilgængelig. Prøv igen senere."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Udbyderen af tekst-AI har ingen tilgængelig kredit, eller en forbrugsgrænse eller et forbrugsloft er nået. Tjek saldoen og grænserne hos udbyderen eller forbrugsindstillingerne for ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24123,6 +24129,80 @@
     {
       "type": 0,
       "value": "Forbindelsen til tekst-AI mislykkedes. Tjek modellen, ræsonneringsniveauet, serviceniveauet, kontotilknytningen og udbyderens forbrugsgrænser."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Adgang til tekst-AI blev nægtet. Tjek, at API-nøglen eller ChatGPT-kontoen må bruge denne model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Endpoint eller model til tekst-AI er ikke tilgængelig. Tjek udbyderens basis-URL og modellen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Den tilknyttede ChatGPT-konto kan ikke dele forbruget i sit abonnement. Tjek forbrugsindstillingerne for ChatGPT, eller tilknyt en anden konto."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Udbyderen af tekst-AI begrænser antallet af forespørgsler. Prøv igen senere."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Udbyderen af tekst-AI afviste tjekforespørgslen. Tjek modellen, ræsonneringsniveauet og kontoens forbrugsindstillinger. Serverloggen indeholder udbyderens fejl."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Udbyderen af tekst-AI afviste tjekforespørgslen (status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Tjek modellen, ræsonneringsniveauet og serviceniveauet. Serverloggen indeholder udbyderens fejl."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Forbindelsestjekket for tekst-AI fik timeout. Tjek, at udbyderen er tilgængelig, og prøv igen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Udbyderen af tekst-AI afviste loginoplysningerne. Erstat udbyderens API-nøgle, eller log ind med ChatGPT igen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Udbyderen af tekst-AI er midlertidigt utilgængelig. Prøv igen senere."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo kunne ikke nå udbyderen af tekst-AI. Tjek udbyderens basis-URL, og at denne server kan oprette forbindelse til den."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Tekstmodellen returnerede et svar, som Silo ikke kan bruge. Vælg en anden model."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

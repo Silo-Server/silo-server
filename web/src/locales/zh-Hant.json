@@ -22148,6 +22148,12 @@
       "value": "語音轉文字提供者暫時無法使用。請稍後再試一次。"
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "文字 AI 提供者沒有可用額度，或已達到使用量或消費上限。請檢查你在提供者的餘額與限制，或 ChatGPT 使用量設定。"
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -22158,6 +22164,80 @@
     {
       "type": 0,
       "value": "文字 AI 連線失敗。請檢查模型、推理等級、服務層級、帳號連線，以及提供者的使用量限制。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "文字 AI 存取遭拒。請確認此 API 金鑰或 ChatGPT 帳號可以使用這個模型。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "無法使用文字 AI 端點或模型。請檢查提供者的基本 URL 與模型。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "已連結的 ChatGPT 帳號無法共用其方案使用量。請檢查 ChatGPT 使用量設定，或連結其他帳號。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "文字 AI 提供者正在限制請求頻率。請稍後再試一次。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "文字 AI 提供者拒絕了檢查請求。請檢查模型、推理等級，以及帳號的使用量設定。伺服器記錄中有提供者傳回的錯誤。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "文字 AI 提供者拒絕了檢查請求（狀態 "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "）。請檢查模型、推理等級與服務層級。伺服器記錄中有提供者傳回的錯誤。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "文字 AI 連線檢查逾時。請檢查提供者是否可用，然後再試一次。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "文字 AI 提供者拒絕了憑證。請更換提供者的 API 金鑰，或重新使用 ChatGPT 登入。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "文字 AI 提供者暫時無法使用。請稍後再試一次。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo 無法連線至文字 AI 提供者。請檢查提供者的基本 URL，並確認此伺服器可以連線至該提供者。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "文字模型傳回了 Silo 無法使用的回應。請選擇其他模型。"
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

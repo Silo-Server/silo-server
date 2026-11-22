@@ -24133,6 +24133,12 @@
       "value": "स्पीच-टू-टेक्स्ट प्रोवाइडर कुछ समय के लिए उपलब्ध नहीं है। बाद में फिर से कोशिश करें।"
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI प्रोवाइडर के पास कोई क्रेडिट उपलब्ध नहीं है, या इस्तेमाल या खर्च की कोई सीमा पूरी हो गई है। प्रोवाइडर पर बैलेंस और सीमाएँ जाँचें, या ChatGPT की इस्तेमाल सेटिंग जाँचें।"
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24143,6 +24149,80 @@
     {
       "type": 0,
       "value": "टेक्स्ट AI कनेक्शन विफल रहा। मॉडल, रीज़निंग लेवल, सर्विस टियर, खाता कनेक्शन और प्रोवाइडर की इस्तेमाल सीमाएँ जाँचें।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI ऐक्सेस नहीं दिया गया। जाँचें कि API कुंजी या ChatGPT खाते से यह मॉडल इस्तेमाल किया जा सकता है।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI एंडपॉइंट या मॉडल उपलब्ध नहीं है। प्रोवाइडर का बेस URL और मॉडल जाँचें।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "कनेक्ट किया गया ChatGPT खाता अपने प्लान का इस्तेमाल शेयर नहीं कर सकता। ChatGPT की इस्तेमाल सेटिंग जाँचें, या कोई दूसरा खाता कनेक्ट करें।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI प्रोवाइडर अनुरोधों की दर सीमित कर रहा है। बाद में फिर से कोशिश करें।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI प्रोवाइडर ने जाँच का अनुरोध अस्वीकार कर दिया। मॉडल, रीज़निंग लेवल और खाते की इस्तेमाल सेटिंग जाँचें। प्रोवाइडर की गड़बड़ी सर्वर लॉग में है।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI प्रोवाइडर ने जाँच का अनुरोध अस्वीकार कर दिया (स्टेटस "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ")। मॉडल, रीज़निंग लेवल और सर्विस टियर जाँचें। प्रोवाइडर की गड़बड़ी सर्वर लॉग में है।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI कनेक्शन की जाँच का समय खत्म हो गया। प्रोवाइडर की उपलब्धता जाँचें और फिर से कोशिश करें।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI प्रोवाइडर ने क्रेडेंशियल अस्वीकार कर दिए। प्रोवाइडर की API कुंजी बदलें, या ChatGPT से फिर से साइन इन करें।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI प्रोवाइडर कुछ समय के लिए उपलब्ध नहीं है। बाद में फिर से कोशिश करें।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo टेक्स्ट AI प्रोवाइडर तक नहीं पहुँच सका। प्रोवाइडर का बेस URL जाँचें, और यह भी कि यह सर्वर उससे कनेक्ट हो सकता है।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट मॉडल ने ऐसा जवाब लौटाया जिसे Silo इस्तेमाल नहीं कर सकता। कोई दूसरा मॉडल चुनें।"
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

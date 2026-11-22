@@ -21872,6 +21872,12 @@
       "value": "Pembekal pertuturan ke teks tidak tersedia buat sementara waktu. Cuba lagi kemudian."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Pembekal AI teks tiada kredit yang tersedia, atau had penggunaan atau perbelanjaan telah dicapai. Semak baki dan had pembekal, atau tetapan penggunaan ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -21882,6 +21888,80 @@
     {
       "type": 0,
       "value": "Sambungan AI teks gagal. Semak model, tahap penaakulan, peringkat perkhidmatan, sambungan akaun dan had penggunaan pembekal."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Akses AI teks ditolak. Pastikan kunci API atau akaun ChatGPT dibenarkan menggunakan model ini."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Titik akhir atau model AI teks tidak tersedia. Semak URL asas pembekal dan model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Akaun ChatGPT yang disambungkan tidak boleh berkongsi penggunaan pelannya. Semak tetapan penggunaan ChatGPT, atau sambungkan akaun lain."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Pembekal AI teks sedang mengehadkan kadar permintaan. Cuba lagi kemudian."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Pembekal AI teks menolak permintaan semakan. Semak model, tahap penaakulan dan tetapan penggunaan akaun. Log pelayan mengandungi ralat daripada pembekal."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Pembekal AI teks menolak permintaan semakan (status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Semak model, tahap penaakulan dan peringkat perkhidmatan. Log pelayan mengandungi ralat daripada pembekal."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Semakan sambungan AI teks tamat masa. Semak ketersediaan pembekal dan cuba lagi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Pembekal AI teks menolak bukti kelayakan. Gantikan kunci API pembekal, atau log masuk dengan ChatGPT sekali lagi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Pembekal AI teks tidak tersedia buat sementara waktu. Cuba lagi kemudian."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo tidak dapat mencapai pembekal AI teks. Semak URL asas pembekal dan pastikan pelayan ini boleh menyambung kepadanya."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Model teks mengembalikan respons yang tidak boleh digunakan oleh Silo. Pilih model lain."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

@@ -26386,6 +26386,12 @@
       "value": "Le fournisseur de transcription vocale est temporairement indisponible. Réessayez plus tard."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Le fournisseur d’IA textuelle n’a plus de crédit disponible, ou une limite d’utilisation ou de dépenses a été atteinte. Vérifiez le solde et les limites du fournisseur, ou les paramètres d’utilisation de ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -26396,6 +26402,80 @@
     {
       "type": 0,
       "value": "Échec de la connexion à l’IA textuelle. Vérifiez le modèle, le niveau de raisonnement, le niveau de service, la connexion du compte et les limites d’utilisation du fournisseur."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "L’accès à l’IA textuelle a été refusé. Vérifiez que la clé API ou le compte ChatGPT peut utiliser ce modèle."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Le point de terminaison ou le modèle d’IA textuelle n’est pas disponible. Vérifiez l’URL de base du fournisseur et le modèle."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Le compte ChatGPT connecté ne peut pas partager l’utilisation de son forfait. Vérifiez les paramètres d’utilisation de ChatGPT, ou connectez un autre compte."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Le fournisseur d’IA textuelle limite le débit des demandes. Réessayez plus tard."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Le fournisseur d’IA textuelle a refusé la demande de vérification. Vérifiez le modèle, le niveau de raisonnement et les paramètres d’utilisation du compte. Le journal du serveur contient l’erreur du fournisseur."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Le fournisseur d’IA textuelle a refusé la demande de vérification (statut "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Vérifiez le modèle, le niveau de raisonnement et le niveau de service. Le journal du serveur contient l’erreur du fournisseur."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "La vérification de la connexion à l’IA textuelle a expiré. Vérifiez la disponibilité du fournisseur et réessayez."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Le fournisseur d’IA textuelle a refusé les identifiants. Remplacez la clé API du fournisseur, ou reconnectez-vous avec ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Le fournisseur d’IA textuelle est temporairement indisponible. Réessayez plus tard."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo n’a pas pu joindre le fournisseur d’IA textuelle. Vérifiez l’URL de base du fournisseur et que ce serveur peut s’y connecter."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Le modèle de texte a renvoyé une réponse que Silo ne peut pas utiliser. Choisissez un autre modèle."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

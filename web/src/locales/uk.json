@@ -28727,6 +28727,12 @@
       "value": "Постачальник розпізнавання мовлення тимчасово недоступний. Спробуйте пізніше."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Постачальник текстового ШІ не має доступних коштів або досягнуто ліміту використання чи витрат. Перевірте баланс і ліміти в постачальника або налаштування використання ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -28737,6 +28743,80 @@
     {
       "type": 0,
       "value": "Не вдалося з’єднатися з текстовим ШІ. Перевірте модель, рівень міркування, рівень обслуговування, під’єднання облікового запису й ліміти використання в постачальника."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "У доступі до текстового ШІ відмовлено. Перевірте, чи може ключ API або обліковий запис ChatGPT використовувати цю модель."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Кінцева точка або модель текстового ШІ недоступна. Перевірте базовий URL постачальника й модель."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Під’єднаний обліковий запис ChatGPT не може надати доступ до використання свого плану. Перевірте налаштування використання ChatGPT або під’єднайте інший обліковий запис."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Постачальник текстового ШІ обмежує частоту запитів. Спробуйте пізніше."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Постачальник текстового ШІ відмовився виконати запит перевірки. Перевірте модель, рівень міркування й налаштування використання облікового запису. Помилку постачальника записано в журнал сервера."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Постачальник текстового ШІ відхилив запит перевірки (статус "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Перевірте модель, рівень міркування й рівень обслуговування. Помилку постачальника записано в журнал сервера."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Час очікування перевірки з’єднання з текстовим ШІ минув. Перевірте доступність постачальника й спробуйте ще раз."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Постачальник текстового ШІ відхилив облікові дані. Замініть ключ API постачальника або знову ввійдіть за допомогою ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Постачальник текстового ШІ тимчасово недоступний. Спробуйте пізніше."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo не вдалося зв’язатися з постачальником текстового ШІ. Перевірте базовий URL постачальника й те, чи може цей сервер до нього під’єднатися."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Текстова модель повернула відповідь, яку Silo не може використати. Виберіть іншу модель."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

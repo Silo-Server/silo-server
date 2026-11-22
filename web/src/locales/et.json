@@ -24517,6 +24517,12 @@
       "value": "Kõnetuvastuse teenusepakkuja pole ajutiselt saadaval. Proovige hiljem uuesti."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI teenusepakkujal pole saadaolevat krediiti või on jõutud kasutus- või kululimiidini. Kontrollige oma saldot ja limiite teenusepakkuja juures või ChatGPT kasutusseadeid."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24527,6 +24533,80 @@
     {
       "type": 0,
       "value": "Tekstipõhise AI ühendus ebaõnnestus. Kontrollige mudelit, arutlustaset, teenusetaset, konto ühendust ja teenusepakkuja kasutuslimiite."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Juurdepääs tekstipõhisele AI-le keelati. Kontrollige, kas API-võti või ChatGPT konto tohib seda mudelit kasutada."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI lõpp-punkt või mudel pole saadaval. Kontrollige teenusepakkuja baas-URL-i ja mudelit."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Ühendatud ChatGPT konto ei saa oma paketi kasutust jagada. Kontrollige ChatGPT kasutusseadeid või ühendage mõni teine konto."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI teenusepakkuja piirab päringute sagedust. Proovige hiljem uuesti."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI teenusepakkuja keeldus kontrollpäringust. Kontrollige mudelit, arutlustaset ja konto kasutusseadeid. Teenusepakkuja tõrketeade on serveri logis."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI teenusepakkuja lükkas kontrollpäringu tagasi (olek "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Kontrollige mudelit, arutlustaset ja teenusetaset. Teenusepakkuja tõrketeade on serveri logis."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI ühenduse kontroll aegus. Kontrollige teenusepakkuja saadavust ja proovige uuesti."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI teenusepakkuja lükkas mandaadid tagasi. Asendage teenusepakkuja API-võti või logige uuesti sisse ChatGPT kontoga."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI teenusepakkuja pole ajutiselt saadaval. Proovige hiljem uuesti."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo ei saanud tekstipõhise AI teenusepakkujaga ühendust. Kontrollige teenusepakkuja baas-URL-i ja seda, kas see server saab sellega ühenduse luua."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Tekstimudel tagastas vastuse, mida Silo ei saa kasutada. Valige muu mudel."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

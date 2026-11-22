@@ -33289,6 +33289,12 @@
       "value": "مزود تحويل الكلام إلى نص غير متاح مؤقتًا. حاول مرة أخرى لاحقًا."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "لا يتوفر رصيد لدى مزود الذكاء الاصطناعي النصي، أو بُلغ حد الاستخدام أو الإنفاق. تحقق من رصيدك وحدودك لدى المزود، أو من إعدادات الاستخدام في ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -33299,6 +33305,80 @@
     {
       "type": 0,
       "value": "فشل اتصال الذكاء الاصطناعي النصي. تحقق من النموذج ومستوى الاستدلال وفئة الخدمة واتصال الحساب وحدود الاستخدام لدى المزود."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "رُفض الوصول إلى الذكاء الاصطناعي النصي. تحقق من أن مفتاح API أو حساب ChatGPT مسموح له باستخدام هذا النموذج."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "نقطة نهاية الذكاء الاصطناعي النصي أو النموذج غير متاحة. تحقق من عنوان URL الأساسي للمزود ومن النموذج."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "لا يمكن لحساب ChatGPT المرتبط مشاركة استخدام خطته. تحقق من إعدادات الاستخدام في ChatGPT، أو اربط حسابًا آخر."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "يحدّ مزود الذكاء الاصطناعي النصي من معدل الطلبات. حاول مرة أخرى لاحقًا."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "رفض مزود الذكاء الاصطناعي النصي طلب الفحص. تحقق من النموذج ومستوى الاستدلال وإعدادات الاستخدام في الحساب. يتضمن سجل الخادم الخطأ الذي أرجعه المزود."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "رفض مزود الذكاء الاصطناعي النصي طلب الفحص (الحالة "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). تحقق من النموذج ومستوى الاستدلال وفئة الخدمة. يتضمن سجل الخادم الخطأ الذي أرجعه المزود."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "انتهت مهلة فحص اتصال الذكاء الاصطناعي النصي. تحقق من توفر المزود وحاول مرة أخرى."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "رفض مزود الذكاء الاصطناعي النصي بيانات الاعتماد. استبدل مفتاح API الخاص بالمزود، أو سجّل الدخول باستخدام ChatGPT مرة أخرى."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "مزود الذكاء الاصطناعي النصي غير متاح مؤقتًا. حاول مرة أخرى لاحقًا."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "تعذّر على Silo الوصول إلى مزود الذكاء الاصطناعي النصي. تحقق من عنوان URL الأساسي للمزود ومن قدرة هذا الخادم على الاتصال به."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "أرجع النموذج النصي استجابة لا يمكن لـ Silo استخدامها. اختر نموذجًا آخر."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

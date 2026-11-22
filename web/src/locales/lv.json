@@ -27122,6 +27122,12 @@
       "value": "Runas pārveides tekstā nodrošinātājs īslaicīgi nav pieejams. Mēģiniet vēlreiz vēlāk."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Teksta AI nodrošinātāja kontā nav pieejama kredīta vai ir sasniegts lietojuma vai tēriņu limits. Pārbaudiet nodrošinātāja konta atlikumu un limitus vai ChatGPT lietojuma iestatījumus."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -27132,6 +27138,80 @@
     {
       "type": 0,
       "value": "Teksta AI savienojums neizdevās. Pārbaudiet modeli, spriešanas līmeni, pakalpojuma līmeni, konta savienojumu un nodrošinātāja lietojuma limitus."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Piekļuve teksta AI tika liegta. Pārbaudiet, vai ar šo API atslēgu vai ChatGPT kontu drīkst izmantot šo modeli."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Teksta AI galapunkts vai modelis nav pieejams. Pārbaudiet nodrošinātāja bāzes URL un modeli."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Savienotais ChatGPT konts nevar koplietot sava plāna lietojumu. Pārbaudiet ChatGPT lietojuma iestatījumus vai savienojiet citu kontu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Teksta AI nodrošinātājs ierobežo pieprasījumu biežumu. Mēģiniet vēlreiz vēlāk."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Teksta AI nodrošinātājs atteicās izpildīt pārbaudes pieprasījumu. Pārbaudiet modeli, spriešanas līmeni un konta lietojuma iestatījumus. Nodrošinātāja kļūda ir redzama servera žurnālā."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Teksta AI nodrošinātājs noraidīja pārbaudes pieprasījumu (statuss "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Pārbaudiet modeli, spriešanas līmeni un pakalpojuma līmeni. Nodrošinātāja kļūda ir redzama servera žurnālā."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Teksta AI savienojuma pārbaudei iestājās noildze. Pārbaudiet nodrošinātāja pieejamību un mēģiniet vēlreiz."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Teksta AI nodrošinātājs noraidīja akreditācijas datus. Nomainiet nodrošinātāja API atslēgu vai vēlreiz pierakstieties ar ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Teksta AI nodrošinātājs īslaicīgi nav pieejams. Mēģiniet vēlreiz vēlāk."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo neizdevās sasniegt teksta AI nodrošinātāju. Pārbaudiet nodrošinātāja bāzes URL un to, vai šis serveris var ar to izveidot savienojumu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Teksta modelis atgrieza atbildi, ko Silo nevar izmantot. Izvēlieties citu modeli."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

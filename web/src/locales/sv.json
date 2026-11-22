@@ -24097,6 +24097,12 @@
       "value": "Leverantören av tal till text är tillfälligt otillgänglig. Försök igen senare."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Leverantören av text-AI har inget tillgängligt saldo, eller så har en användnings- eller utgiftsgräns nåtts. Kontrollera saldot och gränserna hos leverantören, eller användningsinställningarna i ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24107,6 +24113,80 @@
     {
       "type": 0,
       "value": "Anslutningen för text-AI misslyckades. Kontrollera modellen, resonemangsnivån, tjänstenivån, kontoanslutningen och leverantörens användningsgränser."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Åtkomst till text-AI nekades. Kontrollera att API-nyckeln eller ChatGPT-kontot får använda den här modellen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Slutpunkten eller modellen för text-AI är inte tillgänglig. Kontrollera leverantörens bas-URL och modellen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Det anslutna ChatGPT-kontot kan inte dela användningen som ingår i dess abonnemang. Kontrollera användningsinställningarna i ChatGPT eller anslut ett annat konto."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Leverantören av text-AI begränsar antalet förfrågningar. Försök igen senare."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Leverantören av text-AI vägrade att utföra kontrollförfrågan. Kontrollera modellen, resonemangsnivån och kontots användningsinställningar. Serverloggen innehåller leverantörens felmeddelande."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Leverantören av text-AI avvisade kontrollförfrågan (status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Kontrollera modellen, resonemangsnivån och tjänstenivån. Serverloggen innehåller leverantörens felmeddelande."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Anslutningskontrollen för text-AI tog för lång tid. Kontrollera att leverantören är tillgänglig och försök igen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Leverantören av text-AI avvisade autentiseringsuppgifterna. Byt ut leverantörens API-nyckel eller logga in med ChatGPT igen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Leverantören av text-AI är tillfälligt otillgänglig. Försök igen senare."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo kunde inte nå leverantören av text-AI. Kontrollera leverantörens bas-URL och att den här servern kan ansluta till den."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Textmodellen returnerade ett svar som Silo inte kan använda. Välj en annan modell."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

@@ -22100,6 +22100,12 @@
       "value": "음성 텍스트 변환 제공자를 일시적으로 사용할 수 없어요. 잠시 후 다시 시도해 주세요."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "텍스트 AI 제공자에 사용 가능한 크레딧이 없거나 사용량 또는 지출 한도에 도달했어요. 제공자 잔액과 한도 또는 ChatGPT 사용량 설정을 확인하세요."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -22110,6 +22116,80 @@
     {
       "type": 0,
       "value": "텍스트 AI에 연결하지 못했어요. 모델, 추론 수준, 서비스 등급, 계정 연결, 제공자 사용 한도를 확인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "텍스트 AI 액세스가 거부됐어요. API 키 또는 ChatGPT 계정으로 이 모델을 사용할 수 있는지 확인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "텍스트 AI 엔드포인트나 모델을 사용할 수 없어요. 제공자의 기본 URL과 모델을 확인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "연결된 ChatGPT 계정은 요금제 사용량을 공유할 수 없어요. ChatGPT 사용량 설정을 확인하거나 다른 계정을 연결하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "텍스트 AI 제공자가 요청 속도를 제한하고 있어요. 잠시 후 다시 시도해 주세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "텍스트 AI 제공자가 확인 요청을 거부했어요. 모델, 추론 수준, 계정의 사용량 설정을 확인하세요. 서버 로그에서 제공자의 오류를 볼 수 있어요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "텍스트 AI 제공자가 확인 요청을 거부했어요(상태 "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). 모델, 추론 수준, 서비스 등급을 확인하세요. 서버 로그에서 제공자의 오류를 볼 수 있어요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "텍스트 AI 연결 확인 시간이 초과됐어요. 제공자의 사용 가능 여부를 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "텍스트 AI 제공자가 인증 정보를 거부했어요. 제공자의 API 키를 교체하거나 ChatGPT로 다시 로그인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "텍스트 AI 제공자를 일시적으로 사용할 수 없어요. 잠시 후 다시 시도해 주세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo에서 텍스트 AI 제공자에 연결할 수 없어요. 제공자의 기본 URL을 확인하고 이 서버에서 제공자에 연결할 수 있는지 확인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "텍스트 모델이 Silo에서 사용할 수 없는 응답을 반환했어요. 다른 모델을 선택하세요."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

@@ -24181,6 +24181,12 @@
       "value": "Puheentunnistuspalvelu ei ole tilapäisesti käytettävissä. Yritä myöhemmin uudelleen."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Tekstitekoälypalvelulla ei ole käytettävissä olevaa saldoa, tai käyttö- tai kulutusraja on saavutettu. Tarkista palvelun saldo ja rajat tai ChatGPT:n käyttöasetukset."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24191,6 +24197,80 @@
     {
       "type": 0,
       "value": "Tekstitekoälyn yhteys epäonnistui. Tarkista malli, päättelytaso, palvelutaso, tiliyhteys ja palvelun käyttörajat."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Pääsy tekstitekoälyyn estettiin. Tarkista, että API-avaimella tai ChatGPT-tilillä saa käyttää tätä mallia."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Tekstitekoälyn päätepiste tai malli ei ole käytettävissä. Tarkista palvelun perus-URL ja malli."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Yhdistetty ChatGPT-tili ei voi jakaa tilauksensa käyttökiintiötä. Tarkista ChatGPT:n käyttöasetukset tai yhdistä toinen tili."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Tekstitekoälypalvelu rajoittaa pyyntöjen määrää. Yritä myöhemmin uudelleen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Tekstitekoälypalvelu kieltäytyi tarkistuspyynnöstä. Tarkista malli, päättelytaso ja tilin käyttöasetukset. Palvelimen lokissa on palvelun virheilmoitus."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Tekstitekoälypalvelu hylkäsi tarkistuspyynnön (tila "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Tarkista malli, päättelytaso ja palvelutaso. Palvelimen lokissa on palvelun virheilmoitus."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Tekstitekoälyn yhteyden tarkistus aikakatkaistiin. Tarkista palvelun saatavuus ja yritä uudelleen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Tekstitekoälypalvelu hylkäsi tunnistetiedot. Vaihda palvelun API-avain tai kirjaudu sisään uudelleen ChatGPT-tilillä."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Tekstitekoälypalvelu ei ole tilapäisesti käytettävissä. Yritä myöhemmin uudelleen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo ei saanut yhteyttä tekstitekoälypalveluun. Tarkista palvelun perus-URL ja se, että tämä palvelin voi muodostaa siihen yhteyden."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Tekstimalli palautti vastauksen, jota Silo ei voi käyttää. Valitse toinen malli."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

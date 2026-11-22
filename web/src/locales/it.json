@@ -26354,6 +26354,12 @@
       "value": "Il provider di trascrizione vocale è temporaneamente non disponibile. Riprova più tardi."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Il provider di IA per il testo non ha credito disponibile, oppure è stato raggiunto un limite di utilizzo o di spesa. Controlla il saldo e i limiti del provider, oppure le impostazioni di utilizzo di ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -26364,6 +26370,80 @@
     {
       "type": 0,
       "value": "Connessione all’IA per il testo non riuscita. Controlla il modello, il livello di ragionamento, il livello di servizio, il collegamento dell’account e i limiti di utilizzo del provider."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Accesso all’IA per il testo negato. Verifica che la chiave API o l’account ChatGPT possa usare questo modello."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Endpoint o modello di IA per il testo non disponibile. Controlla l’URL di base del provider e il modello."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "L’account ChatGPT collegato non può condividere l’utilizzo del suo piano. Controlla le impostazioni di utilizzo di ChatGPT oppure collega un altro account."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Il provider di IA per il testo sta limitando la frequenza delle richieste. Riprova più tardi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Il provider di IA per il testo ha rifiutato la richiesta di verifica. Controlla il modello, il livello di ragionamento e le impostazioni di utilizzo dell’account. Il log del server contiene l’errore del provider."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Il provider di IA per il testo ha rifiutato la richiesta di verifica (stato "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Controlla il modello, il livello di ragionamento e il livello di servizio. Il log del server contiene l’errore del provider."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Tempo scaduto per la verifica della connessione all’IA per il testo. Controlla la disponibilità del provider e riprova."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Il provider di IA per il testo ha rifiutato le credenziali. Sostituisci la chiave API del provider oppure accedi di nuovo con ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Il provider di IA per il testo è temporaneamente non disponibile. Riprova più tardi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo non è riuscito a raggiungere il provider di IA per il testo. Controlla l’URL di base del provider e che questo server possa connettersi a esso."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Il modello di testo ha restituito una risposta che Silo non può usare. Scegli un altro modello."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

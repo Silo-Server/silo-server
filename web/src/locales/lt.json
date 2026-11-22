@@ -29127,6 +29127,12 @@
       "value": "Kalbos atpažinimo teikėjas laikinai nepasiekiamas. Bandykite vėliau."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Teksto DI teikėjo paskyroje nėra kredito arba pasiektas naudojimo ar išlaidų limitas. Patikrinkite teikėjo paskyros likutį ir limitus arba „ChatGPT“ naudojimo nustatymus."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -29137,6 +29143,80 @@
     {
       "type": 0,
       "value": "Nepavyko prisijungti prie teksto DI. Patikrinkite modelį, samprotavimo lygį, paslaugos pakopą, paskyros ryšį ir teikėjo naudojimo limitus."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Prieiga prie teksto DI atmesta. Patikrinkite, ar API raktui arba „ChatGPT“ paskyrai leidžiama naudoti šį modelį."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Teksto DI galinis taškas arba modelis nepasiekiamas. Patikrinkite teikėjo bazinį URL ir modelį."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Susieta „ChatGPT“ paskyra negali bendrinti savo plano naudojimo. Patikrinkite „ChatGPT“ naudojimo nustatymus arba susiekite kitą paskyrą."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Teksto DI teikėjas riboja užklausų dažnį. Bandykite vėliau."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Teksto DI teikėjas atsisakė vykdyti patikros užklausą. Patikrinkite modelį, samprotavimo lygį ir paskyros naudojimo nustatymus. Teikėjo klaida įrašyta serverio žurnale."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Teksto DI teikėjas atmetė patikros užklausą (būsenos kodas "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Patikrinkite modelį, samprotavimo lygį ir paslaugos pakopą. Teikėjo klaida įrašyta serverio žurnale."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Baigėsi teksto DI ryšio patikros laikas. Patikrinkite, ar teikėjas pasiekiamas, ir bandykite dar kartą."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Teksto DI teikėjas atmetė prisijungimo duomenis. Pakeiskite teikėjo API raktą arba dar kartą prisijunkite per „ChatGPT“."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Teksto DI teikėjas laikinai nepasiekiamas. Bandykite vėliau."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "„Silo“ nepavyko pasiekti teksto DI teikėjo. Patikrinkite teikėjo bazinį URL ir ar šis serveris gali prie jo prisijungti."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Teksto modelis grąžino atsakymą, kurio „Silo“ negali panaudoti. Pasirinkite kitą modelį."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

@@ -26439,6 +26439,12 @@
       "value": "ספק המרת הדיבור לטקסט לא זמין באופן זמני. אפשר לנסות שוב מאוחר יותר."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "לספק ה-AI לטקסט אין קרדיט זמין, או שהושגה מגבלת שימוש או הוצאות. יש לבדוק את היתרה ואת המגבלות אצל הספק, או את הגדרות השימוש ב-ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -26449,6 +26455,80 @@
     {
       "type": 0,
       "value": "החיבור לשירות ה-AI לטקסט נכשל. יש לבדוק את המודל, רמת החשיבה, רמת השירות, חיבור החשבון ומגבלות השימוש אצל הספק."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "הגישה לשירות ה-AI לטקסט נדחתה. יש לוודא שמפתח ה-API או חשבון ה-ChatGPT מורשים להשתמש במודל הזה."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "נקודת הקצה או המודל של שירות ה-AI לטקסט לא זמינים. יש לבדוק את כתובת ה-URL הבסיסית של הספק ואת המודל."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "חשבון ה-ChatGPT המחובר לא יכול לשתף את השימוש בתוכנית שלו. יש לבדוק את הגדרות השימוש ב-ChatGPT, או לחבר חשבון אחר."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "ספק ה-AI לטקסט מגביל את קצב הבקשות. אפשר לנסות שוב מאוחר יותר."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "ספק ה-AI לטקסט סירב לבקשת הבדיקה. יש לבדוק את המודל, את רמת החשיבה ואת הגדרות השימוש של החשבון. השגיאה של הספק מופיעה ביומן השרת."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "ספק ה-AI לטקסט דחה את בקשת הבדיקה (סטטוס "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). יש לבדוק את המודל, רמת החשיבה ורמת השירות. השגיאה של הספק מופיעה ביומן השרת."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "הזמן הקצוב לבדיקת החיבור לשירות ה-AI לטקסט פג. יש לבדוק שהספק זמין ולנסות שוב."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "ספק ה-AI לטקסט דחה את פרטי הכניסה. יש להחליף את מפתח ה-API של הספק, או להתחבר שוב עם ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "ספק ה-AI לטקסט לא זמין באופן זמני. אפשר לנסות שוב מאוחר יותר."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה להתחבר מ-Silo לספק ה-AI לטקסט. יש לבדוק את כתובת ה-URL הבסיסית של הספק ושהשרת הזה יכול להתחבר אליו."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "מודל הטקסט החזיר תגובה ש-Silo לא יכול להשתמש בה. יש לבחור מודל אחר."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

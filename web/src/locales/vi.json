@@ -24209,6 +24209,12 @@
       "value": "Nhà cung cấp chuyển giọng nói thành văn bản tạm thời không khả dụng. Thử lại sau."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản không còn tín dụng khả dụng, hoặc đã đạt giới hạn sử dụng hay hạn mức chi tiêu. Kiểm tra số dư và hạn mức tại nhà cung cấp, hoặc cài đặt sử dụng ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24219,6 +24225,80 @@
     {
       "type": 0,
       "value": "Kết nối AI văn bản không thành công. Kiểm tra mô hình, mức suy luận, cấp dịch vụ, kết nối tài khoản và giới hạn sử dụng của nhà cung cấp."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Quyền truy cập AI văn bản bị từ chối. Kiểm tra xem khóa API hoặc tài khoản ChatGPT có được phép dùng mô hình này không."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Không có sẵn endpoint hoặc mô hình AI văn bản. Kiểm tra URL cơ sở của nhà cung cấp và mô hình."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Tài khoản ChatGPT đã kết nối không thể chia sẻ mức sử dụng của gói. Kiểm tra cài đặt sử dụng ChatGPT, hoặc kết nối tài khoản khác."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản đang giới hạn tần suất yêu cầu. Thử lại sau."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản đã từ chối yêu cầu kiểm tra. Kiểm tra mô hình, mức suy luận và cài đặt sử dụng của tài khoản. Nhật ký máy chủ có lỗi từ nhà cung cấp."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản đã từ chối yêu cầu kiểm tra (trạng thái "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Kiểm tra mô hình, mức suy luận và cấp dịch vụ. Nhật ký máy chủ có lỗi từ nhà cung cấp."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Hết thời gian kiểm tra kết nối AI văn bản. Kiểm tra tình trạng hoạt động của nhà cung cấp và thử lại."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản đã từ chối thông tin xác thực. Thay khóa API của nhà cung cấp, hoặc đăng nhập lại bằng ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản tạm thời không khả dụng. Thử lại sau."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo không thể kết nối với nhà cung cấp AI văn bản. Kiểm tra URL cơ sở của nhà cung cấp và xem máy chủ này có thể kết nối với nhà cung cấp không."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Mô hình văn bản đã trả về phản hồi mà Silo không thể sử dụng. Chọn mô hình khác."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

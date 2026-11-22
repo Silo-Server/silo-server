@@ -24117,6 +24117,12 @@
       "value": "Доставчикът на преобразуване на говор в текст е временно недостъпен. Опитайте отново по-късно."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Доставчикът на текстовия AI няма наличен кредит или е достигнат лимит за използване или разходи. Проверете баланса и лимитите при доставчика или настройките за използване на ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24127,6 +24133,80 @@
     {
       "type": 0,
       "value": "Връзката с текстовия AI е неуспешна. Проверете модела, нивото на разсъждение, нивото на услугата, връзката с акаунта и лимитите за използване при доставчика."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Достъпът до текстовия AI е отказан. Проверете дали API ключът или акаунтът в ChatGPT има право да използва този модел."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Крайната точка или моделът на текстовия AI не са налични. Проверете базовия URL адрес на доставчика и модела."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Свързаният акаунт в ChatGPT не може да споделя използването на плана си. Проверете настройките за използване на ChatGPT или свържете друг акаунт."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Доставчикът на текстовия AI ограничава честотата на заявките. Опитайте отново по-късно."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Доставчикът на текстовия AI отказа заявката за проверка. Проверете модела, нивото на разсъждение и настройките за използване на акаунта. Грешката от доставчика е в дневника на сървъра."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Доставчикът на текстовия AI отхвърли заявката за проверка (статус "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Проверете модела, нивото на разсъждение и нивото на услугата. Грешката от доставчика е в дневника на сървъра."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Времето за проверка на връзката с текстовия AI изтече. Проверете наличността на доставчика и опитайте отново."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Доставчикът на текстовия AI отхвърли идентификационните данни. Сменете API ключа на доставчика или влезте отново с ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Доставчикът на текстовия AI е временно недостъпен. Опитайте отново по-късно."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo не можа да се свърже с доставчика на текстовия AI. Проверете базовия URL адрес на доставчика и дали този сървър може да се свърже с него."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Текстовият модел върна отговор, който Silo не може да използва. Изберете друг модел."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

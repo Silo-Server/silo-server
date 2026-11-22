@@ -24213,6 +24213,12 @@
       "value": "Speech-to-text provider is temporarily unavailable. Try again later."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Text AI provider has no available credit, or a usage or spending limit was reached. Check the provider balance and limits, or ChatGPT usage settings."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24223,6 +24229,80 @@
     {
       "type": 0,
       "value": "Text AI connection failed. Check the model, reasoning level, service tier, account connection, and provider usage limits."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Text AI access was denied. Check that the API key or ChatGPT account may use this model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Text AI endpoint or model is unavailable. Check the provider's base URL and the model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "The connected ChatGPT account can't share its plan usage. Check ChatGPT usage settings, or connect another account."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Text AI provider is rate limiting requests. Try again later."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Text AI provider refused the check request. Check the model, the reasoning level, and the account's usage settings. The server log has the provider's error."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Text AI provider rejected the check request (status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Check the model, reasoning level, and service tier. The server log has the provider's error."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Text AI connection check timed out. Check provider availability and try again."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Text AI provider rejected the credentials. Replace the provider's API key, or sign in with ChatGPT again."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Text AI provider is temporarily unavailable. Try again later."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo could not reach the text AI provider. Check the provider's base URL and that this server can connect to it."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Text model returned a response Silo cannot use. Choose another model."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

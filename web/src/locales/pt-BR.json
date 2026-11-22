@@ -26730,6 +26730,12 @@
       "value": "O provedor de conversão de fala em texto está temporariamente indisponível. Tente novamente mais tarde."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "O provedor de IA de texto não tem crédito disponível ou atingiu um limite de uso ou de gastos. Verifique o saldo e os limites no provedor ou as configurações de uso do ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -26740,6 +26746,80 @@
     {
       "type": 0,
       "value": "Falha na conexão com a IA de texto. Verifique o modelo, o nível de raciocínio, o nível de serviço, a conexão da conta e os limites de uso do provedor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "O acesso à IA de texto foi negado. Verifique se a chave de API ou a conta do ChatGPT pode usar este modelo."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "O endpoint ou o modelo de IA de texto não está disponível. Verifique a URL base do provedor e o modelo."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "A conta do ChatGPT conectada não pode compartilhar o uso do plano. Verifique as configurações de uso do ChatGPT ou conecte outra conta."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "O provedor de IA de texto está limitando a taxa de solicitações. Tente novamente mais tarde."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "O provedor de IA de texto recusou a solicitação de verificação. Verifique o modelo, o nível de raciocínio e as configurações de uso da conta. O log do servidor contém o erro do provedor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "O provedor de IA de texto recusou a solicitação de verificação (status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Verifique o modelo, o nível de raciocínio e o nível de serviço. O log do servidor contém o erro do provedor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "A verificação da conexão com a IA de texto atingiu o tempo limite. Verifique a disponibilidade do provedor e tente novamente."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "O provedor de IA de texto recusou as credenciais. Substitua a chave de API do provedor ou entre com o ChatGPT novamente."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "O provedor de IA de texto está temporariamente indisponível. Tente novamente mais tarde."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "O Silo não conseguiu se conectar ao provedor de IA de texto. Verifique a URL base do provedor e se este servidor consegue se conectar a ele."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "O modelo de texto retornou uma resposta que o Silo não consegue usar. Escolha outro modelo."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

@@ -24217,6 +24217,12 @@
       "value": "Ο πάροχος μετατροπής ομιλίας σε κείμενο δεν είναι προσωρινά διαθέσιμος. Δοκιμάστε ξανά αργότερα."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Ο πάροχος AI κειμένου δεν έχει διαθέσιμη πίστωση ή εξαντλήθηκε κάποιο όριο χρήσης ή δαπανών. Ελέγξτε το υπόλοιπο και τα όρια στον πάροχο ή τις ρυθμίσεις χρήσης του ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24227,6 +24233,80 @@
     {
       "type": 0,
       "value": "Η σύνδεση με τον πάροχο AI κειμένου απέτυχε. Ελέγξτε το μοντέλο, το επίπεδο συλλογισμού, το επίπεδο υπηρεσίας, τη σύνδεση λογαριασμού και τα όρια χρήσης του παρόχου."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Η πρόσβαση στον πάροχο AI κειμένου απορρίφθηκε. Ελέγξτε ότι το κλειδί API ή ο λογαριασμός ChatGPT έχει δικαίωμα χρήσης αυτού του μοντέλου."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Το endpoint ή το μοντέλο AI κειμένου δεν είναι διαθέσιμο. Ελέγξτε το βασικό URL του παρόχου και το μοντέλο."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Ο συνδεδεμένος λογαριασμός ChatGPT δεν μπορεί να μοιραστεί τη χρήση της συνδρομής του. Ελέγξτε τις ρυθμίσεις χρήσης του ChatGPT ή συνδέστε άλλον λογαριασμό."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Ο πάροχος AI κειμένου περιορίζει τον ρυθμό των αιτημάτων. Δοκιμάστε ξανά αργότερα."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Ο πάροχος AI κειμένου αρνήθηκε το αίτημα ελέγχου. Ελέγξτε το μοντέλο, το επίπεδο συλλογισμού και τις ρυθμίσεις χρήσης του λογαριασμού. Το σφάλμα του παρόχου υπάρχει στο αρχείο καταγραφής του διακομιστή."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Ο πάροχος AI κειμένου απέρριψε το αίτημα ελέγχου (κατάσταση "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Ελέγξτε το μοντέλο, το επίπεδο συλλογισμού και το επίπεδο υπηρεσίας. Το σφάλμα του παρόχου υπάρχει στο αρχείο καταγραφής του διακομιστή."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Ο χρόνος του ελέγχου σύνδεσης με τον πάροχο AI κειμένου έληξε. Ελέγξτε τη διαθεσιμότητα του παρόχου και δοκιμάστε ξανά."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Ο πάροχος AI κειμένου απέρριψε τα διαπιστευτήρια. Αντικαταστήστε το κλειδί API του παρόχου ή συνδεθείτε ξανά με το ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Ο πάροχος AI κειμένου δεν είναι προσωρινά διαθέσιμος. Δοκιμάστε ξανά αργότερα."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Το Silo δεν μπόρεσε να επικοινωνήσει με τον πάροχο AI κειμένου. Ελέγξτε το βασικό URL του παρόχου και ότι αυτός ο διακομιστής μπορεί να συνδεθεί σε αυτόν."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Το μοντέλο κειμένου επέστρεψε απάντηση που το Silo δεν μπορεί να χρησιμοποιήσει. Επιλέξτε άλλο μοντέλο."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

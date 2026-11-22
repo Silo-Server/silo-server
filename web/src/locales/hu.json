@@ -24205,6 +24205,12 @@
       "value": "A beszédfelismerési szolgáltató átmenetileg nem érhető el. Próbálja újra később."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "A szöveges AI-szolgáltatónál nincs elérhető kredit, vagy elérte a használati vagy költési korlátot. Ellenőrizze a szolgáltatónál az egyenleget és a korlátokat, vagy a ChatGPT használati beállításait."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24215,6 +24221,80 @@
     {
       "type": 0,
       "value": "A szöveges AI-kapcsolat sikertelen. Ellenőrizze a modellt, az érvelési szintet, a szolgáltatási szintet, a fiókkapcsolatot és a szolgáltató használati korlátait."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "A szöveges AI-hoz való hozzáférés megtagadva. Ellenőrizze, hogy az API-kulccsal vagy a ChatGPT-fiókkal használható-e ez a modell."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "A szöveges AI végpontja vagy modellje nem érhető el. Ellenőrizze a szolgáltató alap-URL-jét és a modellt."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "A csatlakoztatott ChatGPT-fiók nem tudja megosztani az előfizetése használati keretét. Ellenőrizze a ChatGPT használati beállításait, vagy csatlakoztasson másik fiókot."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "A szöveges AI-szolgáltató korlátozza a kérések gyakoriságát. Próbálja újra később."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "A szöveges AI-szolgáltató elutasította az ellenőrző kérést. Ellenőrizze a modellt, az érvelési szintet és a fiók használati beállításait. A szolgáltató hibaüzenete a szerver naplójában található."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "A szöveges AI-szolgáltató elutasította az ellenőrző kérést (állapotkód: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Ellenőrizze a modellt, az érvelési szintet és a szolgáltatási szintet. A szolgáltató hibaüzenete a szerver naplójában található."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "A szöveges AI-kapcsolat ellenőrzése túllépte az időkorlátot. Ellenőrizze a szolgáltató elérhetőségét, és próbálja újra."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "A szöveges AI-szolgáltató elutasította a hitelesítő adatokat. Cserélje le a szolgáltató API-kulcsát, vagy jelentkezzen be újra a ChatGPT-vel."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "A szöveges AI-szolgáltató átmenetileg nem érhető el. Próbálja újra később."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "A Silo nem érte el a szöveges AI-szolgáltatót. Ellenőrizze a szolgáltató alap-URL-jét, és azt, hogy ez a szerver tud-e csatlakozni hozzá."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "A szöveges modell olyan választ adott, amelyet a Silo nem tud használni. Válasszon másik modellt."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

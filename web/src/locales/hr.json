@@ -26422,6 +26422,12 @@
       "value": "Pružatelj pretvaranja govora u tekst privremeno nije dostupan. Pokušajte ponovno kasnije."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Pružatelj tekstnog AI-ja nema dostupnog kredita ili je dosegnuto ograničenje korištenja ili potrošnje. Provjerite stanje računa i ograničenja kod pružatelja ili postavke korištenja za ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -26432,6 +26438,80 @@
     {
       "type": 0,
       "value": "Veza s tekstnim AI-jem nije uspjela. Provjerite model, razinu zaključivanja, razinu usluge, povezanost računa i ograničenja korištenja kod pružatelja."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Pristup tekstnom AI-ju je odbijen. Provjerite smiju li API ključ ili ChatGPT račun koristiti ovaj model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Krajnja točka ili model tekstnog AI-ja nije dostupan. Provjerite osnovni URL pružatelja i model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Povezani ChatGPT račun ne može dijeliti korištenje svojeg plana. Provjerite postavke korištenja za ChatGPT ili povežite drugi račun."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Pružatelj tekstnog AI-ja ograničava učestalost zahtjeva. Pokušajte ponovno kasnije."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Pružatelj tekstnog AI-ja odbio je zahtjev za provjeru. Provjerite model, razinu zaključivanja i postavke korištenja za račun. Pogreška pružatelja nalazi se u zapisniku poslužitelja."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Pružatelj tekstnog AI-ja odbio je zahtjev za provjeru (status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Provjerite model, razinu zaključivanja i razinu usluge. Pogreška pružatelja nalazi se u zapisniku poslužitelja."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Isteklo je vrijeme za provjeru veze s tekstnim AI-jem. Provjerite dostupnost pružatelja i pokušajte ponovno."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Pružatelj tekstnog AI-ja odbio je vjerodajnice. Zamijenite API ključ pružatelja ili se ponovno prijavite ChatGPT računom."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Pružatelj tekstnog AI-ja privremeno nije dostupan. Pokušajte ponovno kasnije."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo se nije mogao povezati s pružateljem tekstnog AI-ja. Provjerite osnovni URL pružatelja i može li se ovaj poslužitelj povezati s njim."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Tekstni model vratio je odgovor koji Silo ne može koristiti. Odaberite drugi model."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [

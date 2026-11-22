@@ -28831,6 +28831,12 @@
       "value": "Poskytovatel převodu řeči na text je dočasně nedostupný. Zkuste to znovu později."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Poskytovatel textové AI nemá dostupný kredit nebo byl dosažen limit využití či útraty. Zkontrolujte zůstatek a limity u poskytovatele nebo nastavení využití ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -28841,6 +28847,80 @@
     {
       "type": 0,
       "value": "Připojení k textové AI selhalo. Zkontrolujte model, úroveň uvažování, úroveň služby, připojení účtu a limity využití u poskytovatele."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Přístup k textové AI byl odepřen. Zkontrolujte, zda klíč API nebo účet ChatGPT smí používat tento model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Koncový bod nebo model textové AI není dostupný. Zkontrolujte základní URL poskytovatele a model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Připojený účet ChatGPT nemůže sdílet využití svého tarifu. Zkontrolujte nastavení využití ChatGPT nebo připojte jiný účet."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Poskytovatel textové AI omezuje četnost požadavků. Zkuste to znovu později."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Poskytovatel textové AI odmítl požadavek na ověření. Zkontrolujte model, úroveň uvažování a nastavení využití účtu. Chybu poskytovatele najdete v logu serveru."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Poskytovatel textové AI odmítl požadavek na ověření (stav "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Zkontrolujte model, úroveň uvažování a úroveň služby. Chybu poskytovatele najdete v logu serveru."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Časový limit ověření připojení k textové AI vypršel. Zkontrolujte dostupnost poskytovatele a zkuste to znovu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Poskytovatel textové AI odmítl přihlašovací údaje. Nahraďte klíč API poskytovatele nebo se znovu přihlaste pomocí ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Poskytovatel textové AI je dočasně nedostupný. Zkuste to znovu později."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo se nepodařilo spojit s poskytovatelem textové AI. Zkontrolujte základní URL poskytovatele a to, zda se k němu tento server může připojit."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Textový model vrátil odpověď, kterou Silo nemůže použít. Vyberte jiný model."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
