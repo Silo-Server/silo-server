@@ -84,6 +84,9 @@ type Stream struct {
 	FrameSideDataRead bool `json:"-"`
 	// FrameColorRange is the range FFmpeg reported on that first frame.
 	FrameColorRange string `json:"-"`
+	// ExtradataSize is the size of an attachment stream's file (a Matroska
+	// font, for example): FFmpeg carries attachment payloads as extradata.
+	ExtradataSize int64 `json:"extradata_size"`
 }
 
 // Disposition is the subset of FFprobe disposition flags used by scans.
