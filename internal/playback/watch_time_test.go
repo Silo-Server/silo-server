@@ -107,6 +107,32 @@ func TestWatchTimeObserve(t *testing.T) {
 	}
 }
 
+// TestWatchTimeClose covers an end with no newer sample closing the
+// measurement: time paused, or after a confirmed pause, runs to the end, and
+// no advance is credited.
+func TestWatchTimeClose(t *testing.T) {
+	start := time.Unix(1_000_000, 0)
+	at := func(s float64) time.Time { return start.Add(time.Duration(s * float64(time.Second))) }
+	for _, tc := range []struct {
+		name                   string
+		build                  func(w *WatchTime)
+		wantPlayed, wantPaused float64
+	}{
+		{"playing", func(w *WatchTime) { w.Observe(0, false, at(0)); w.Observe(10, false, at(10)) }, 10, 0},
+		{"paused", func(w *WatchTime) { w.Observe(0, false, at(0)); w.Observe(10, true, at(10)) }, 10, 90},
+		{"after a confirmed pause", func(w *WatchTime) { w.Observe(0, false, at(0)); w.Pause(at(10)) }, 0, 90},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var w WatchTime
+			tc.build(&w)
+			w.Close(at(100))
+			if w.PlayedSeconds != tc.wantPlayed || w.PausedSeconds != tc.wantPaused || !w.Until.Equal(at(100)) {
+				t.Fatalf("played %v paused %v until %v, want %v, %v, %v", w.PlayedSeconds, w.PausedSeconds, w.Until, tc.wantPlayed, tc.wantPaused, at(100))
+			}
+		})
+	}
+}
+
 // TestWatchTimeJSONCarriesOn covers a measurement saved by one server and
 // restored by another: the restored copy must judge the next sample exactly
 // as the original would, including a confirmed pause no sample has reached.
