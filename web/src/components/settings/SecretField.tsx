@@ -17,10 +17,11 @@ export interface SecretFieldProps {
   configured: boolean;
   onChange: (value: string) => void;
   /**
-   * Called when the input is emptied while a saved value exists, so a
-   * settings-form parent can revert the staged draft (`form.resetValue`)
-   * instead of staging `""` — a dirty `""` would clear the secret on save.
-   * Draft-based parents that already skip empty values may omit it.
+   * Called when the input is emptied, so a settings-form parent can revert the
+   * staged draft (`form.resetValue`) instead of staging `""`: a dirty `""`
+   * would clear a saved secret on save, and with none saved it would leave an
+   * empty change behind. Draft-based parents that already skip empty values
+   * may omit it.
    */
   onKeep?: () => void;
   /**
@@ -99,8 +100,9 @@ export function SecretField({
   }
 
   function handleChange(next: string) {
-    if (next === "" && configured) {
-      // Emptying the field means "keep the saved secret", never "clear it".
+    if (next === "") {
+      // Emptying the field goes back to what is saved: it keeps a saved
+      // secret, never clears it, and with none saved it leaves nothing staged.
       keepSaved();
       return;
     }
