@@ -4,6 +4,7 @@ import (
 	"context"
 	jsonv2 "encoding/json/v2"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1819,36 +1820,57 @@ func TestRealtimeConfirmedStopAfterAPendingPauseAddsNothing(t *testing.T) {
 // stop on a live copy that measured nothing, such as one rebuilt after a
 // restart whose saved measurement it couldn't restore, while another replica
 // accepted the play's report: the play is measured on from the save, not
-// started over at that report.
+// started over at that report, even when the save can't be read a second time
+// while the stop is finalized.
 func TestRealtimeConfirmedStopKeepsANewerSavedMeasurement(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		f := newPlaybackServiceFixture(t)
-		start := time.Now()
-		var saved playback.WatchTime
-		saved.Observe(0, false, start)
-		saved.Observe(880, false, start.Add(880*time.Second))
-		admin := &savedWatchAdminStore{watch: saved}
-		f.handler.AdminStore = admin
-		f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
-		time.Sleep(890 * time.Second) //nolint:forbidigo // advances the synctest clock to the other replica's report
-		store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
-		if _, err := store.ApplyProgress(f.ctx, f.session.ID, playback.ProgressSampleV3{Sequence: 1, Position: 900}); err != nil {
-			t.Fatal(err)
-		}
-		time.Sleep(7 * time.Second) //nolint:forbidigo // advances the synctest clock to the stop
-		f.handler.rememberRealtimeCommand("cmd-stop", f.session.ID, playback.CommandStop)
-		time.Sleep(200 * time.Millisecond) //nolint:forbidigo // advances the synctest clock to the confirmation
-		if err := f.handler.handleRealtimeClientMessage(f.session.ID, realtimeResultMessage(t, f.session.ID, "cmd-stop", playback.RealtimeResultStatusCompleted)); err != nil {
-			t.Fatal(err)
-		}
-		synctest.Wait()
-		if len(admin.history) != 1 {
-			t.Fatalf("admin history = %+v, want one row", admin.history)
-		}
-		if row := admin.history[0]; row.Watch.PlayedSeconds != 907 || row.EndPositionSeconds != 907 {
-			t.Fatalf("played %v s ending at %v, want 907 s ending at 907: measured on from the save", row.Watch.PlayedSeconds, row.EndPositionSeconds)
-		}
-	})
+	for _, readOnce := range []bool{false, true} {
+		t.Run(fmt.Sprintf("read once %v", readOnce), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := newPlaybackServiceFixture(t)
+				start := time.Now()
+				var saved playback.WatchTime
+				saved.Observe(0, false, start)
+				saved.Observe(880, false, start.Add(880*time.Second))
+				admin := &onceSavedWatchAdminStore{savedWatchAdminStore: savedWatchAdminStore{watch: saved}, once: readOnce}
+				f.handler.AdminStore = admin
+				f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+				time.Sleep(890 * time.Second) //nolint:forbidigo // advances the synctest clock to the other replica's report
+				store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+				if _, err := store.ApplyProgress(f.ctx, f.session.ID, playback.ProgressSampleV3{Sequence: 1, Position: 900}); err != nil {
+					t.Fatal(err)
+				}
+				time.Sleep(7 * time.Second) //nolint:forbidigo // advances the synctest clock to the stop
+				f.handler.rememberRealtimeCommand("cmd-stop", f.session.ID, playback.CommandStop)
+				time.Sleep(200 * time.Millisecond) //nolint:forbidigo // advances the synctest clock to the confirmation
+				if err := f.handler.handleRealtimeClientMessage(f.session.ID, realtimeResultMessage(t, f.session.ID, "cmd-stop", playback.RealtimeResultStatusCompleted)); err != nil {
+					t.Fatal(err)
+				}
+				synctest.Wait()
+				if len(admin.history) != 1 {
+					t.Fatalf("admin history = %+v, want one row", admin.history)
+				}
+				if row := admin.history[0]; row.Watch.PlayedSeconds != 907 || row.EndPositionSeconds != 907 {
+					t.Fatalf("played %v s ending at %v, want 907 s ending at 907: measured on from the save", row.Watch.PlayedSeconds, row.EndPositionSeconds)
+				}
+			})
+		})
+	}
+}
+
+// onceSavedWatchAdminStore is a savedWatchAdminStore whose save, with once,
+// can be read only one time.
+type onceSavedWatchAdminStore struct {
+	savedWatchAdminStore
+	once  bool
+	reads int
+}
+
+func (s *onceSavedWatchAdminStore) SessionWatch(ctx context.Context, id string) (playback.WatchTime, bool, error) {
+	s.reads++
+	if s.once && s.reads > 1 {
+		return playback.WatchTime{}, false, nil
+	}
+	return s.savedWatchAdminStore.SessionWatch(ctx, id)
 }
 
 // claimRacePlanStoreV3 runs race just before the first finalization claim,

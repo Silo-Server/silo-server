@@ -1828,8 +1828,10 @@ one exception: the confirmation carries no position, so the server adds the time
 when the session last saw the player playing (a progress report, a confirmed resume, or
 a seek) to when the stop was sent, and moves `end_position_seconds` with it. Nothing is
 added for a paused player, for one last seen more than 12 seconds before the stop, while
-a pause or resume the player confirmed is still being applied, or when another server
-accepted a report whose order against what the session saw since is unknown.
+a pause or resume the player confirmed is still being applied, or when the server can't
+tell whether the session saw the latest report: another server accepted it in an order
+the session can't place, or the session was rebuilt after a restart and has had no report
+since.
 
 The measurement survives the session's live copy. The server holding the session saves
 it with the session's lifecycle state when the session starts and on every live-session
