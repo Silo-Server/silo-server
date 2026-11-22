@@ -41,8 +41,10 @@ const fullMetadataRefreshAdvisoryLock int64 = 0x53494C4F46554C52
 // session of its own, outside the pool. The guarded task runs its queries
 // through the pool, and a lock that pinned one of the pool's connections would
 // leave a pool of database.max_connections=1 nothing for them: the task and
-// every other query on the node would wait forever. Closing the session
-// releases the lock, whatever state a canceled run left it in.
+// every other query on the node would wait forever. Release unlocks before
+// closing the session, so another server trying right after sees the lock
+// free; closing the session also releases it, whatever state a canceled run
+// left it in.
 type advisoryClusterLock struct {
 	pool *pgxpool.Pool
 	key  int64
@@ -50,19 +52,22 @@ type advisoryClusterLock struct {
 	name string
 }
 
-// clusterLockCloseTimeout bounds closing the lock session after the run.
-const clusterLockCloseTimeout = 5 * time.Second
+// clusterLockSessionTimeout bounds opening the lock session, and unlocking
+// and closing it after the run.
+const clusterLockSessionTimeout = 5 * time.Second
 
 func (l advisoryClusterLock) TryAcquire(ctx context.Context) (func(), bool, error) {
 	if l.pool == nil {
 		return nil, false, nil
 	}
-	session, err := pgx.ConnectConfig(ctx, l.pool.Config().ConnConfig)
+	connectCtx, cancel := context.WithTimeout(ctx, clusterLockSessionTimeout)
+	session, err := pgx.ConnectConfig(connectCtx, l.pool.Config().ConnConfig)
+	cancel()
 	if err != nil {
 		return nil, false, fmt.Errorf("opening session for advisory lock %d: %w", l.key, err)
 	}
 	closeSession := func() error {
-		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clusterLockCloseTimeout)
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clusterLockSessionTimeout)
 		defer cancel()
 		return session.Close(closeCtx)
 	}
@@ -76,8 +81,11 @@ func (l advisoryClusterLock) TryAcquire(ctx context.Context) (func(), bool, erro
 		return nil, false, nil
 	}
 	return func() {
-		if err := closeSession(); err != nil {
-			slog.WarnContext(ctx, "closing cluster task advisory lock session failed", "component", "taskmanager", "work", l.name, "error", err)
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clusterLockSessionTimeout)
+		_, unlockErr := session.Exec(unlockCtx, `SELECT pg_advisory_unlock($1)`, l.key)
+		cancel()
+		if err := errors.Join(unlockErr, closeSession()); err != nil {
+			slog.WarnContext(ctx, "releasing cluster task advisory lock failed", "component", "taskmanager", "work", l.name, "error", err)
 		}
 	}, true, nil
 }
