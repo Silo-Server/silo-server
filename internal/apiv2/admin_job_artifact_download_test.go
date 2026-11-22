@@ -175,6 +175,7 @@ func (r *slowArtifactReader) Read(p []byte) (int, error) {
 // Accept-Ranges: none, so a download cut off there cannot resume. The stream
 // must roll its write deadline forward while it makes progress.
 func TestAdminJobArtifactDownloadOutlastsServerWriteTimeout(t *testing.T) {
+	t.Parallel()
 	body := &slowArtifactReader{chunks: []string{"ab", "cd", "ef"}, delay: 150 * time.Millisecond}
 	stub := &jobArtifactStub{body: &diagnosticTestBody{Reader: body}}
 	h, signer := jobArtifactHandler(t, stub)

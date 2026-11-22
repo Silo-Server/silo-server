@@ -287,7 +287,7 @@ func carryLiveState(ctx context.Context, ctl ControlDB, live string, loader Data
 	if !sameDeployment {
 		carryFrom = ""
 	}
-	if err := post.carry(ctx, loader, restoredURL, carryFrom); err != nil {
+	if err := post.carry(ctx, loader, restoredURL, carryFrom, opts.LiveURL); err != nil {
 		return err
 	}
 	// This server's own settings describe it whichever deployment the

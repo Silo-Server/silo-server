@@ -143,6 +143,25 @@ func waitState(t *testing.T, service *Service, id int, what string, pred func(Ru
 
 func running(state RuntimeState, ok bool) bool { return ok && state.State == ResidentRunning }
 
+func TestResidentClientRefreshesStaleInstallation(t *testing.T) {
+	f := newResidentFixture(t, ResidentOptions{})
+	ctx := t.Context()
+	f.service.StartResidents(ctx)
+	waitState(t, f.service, 5, "initial process", running)
+	if _, err := f.service.ensureClient(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Update(ctx, 5, UpdateInstallationInput{Restart: true}); err != nil {
+		t.Fatal(err)
+	}
+	// The supervisor can see the new row before the lifecycle poll refreshes the cache.
+	f.service.Residents().Reconcile(ctx)
+	waitState(t, f.service, 5, "replacement process", running)
+	if _, err := f.service.ensureClient(ctx, 5); err != nil {
+		t.Fatalf("RPC could not use the current resident: %v", err)
+	}
+}
+
 func TestResidentSupervisorStartsAtReconcileAndStopsOnDisable(t *testing.T) {
 	f := newResidentFixture(t, ResidentOptions{})
 	ctx := context.Background()
@@ -550,7 +569,9 @@ func TestResidentRestartReturnsWhenCallerCancels(t *testing.T) {
 	store := newFakeServiceInstallationStore(&Installation{ID: 5, PluginID: manifest.PluginId, Version: manifest.Version, InstallPath: path, Enabled: true, Kind: KindPlugin})
 	service := &Service{host: host, installations: store}
 	service.resident = newResidentSupervisor(service, ResidentOptions{})
-	service.resident.entries[5] = &residentEntry{id: 5, state: ResidentRunning}
+	service.resident.entries[5] = &residentEntry{
+		id: 5, state: ResidentRunning, desired: residentRuntime{installation: runtimeOf(store.byID[5])},
+	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)

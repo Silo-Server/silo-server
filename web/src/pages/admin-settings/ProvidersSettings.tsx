@@ -53,6 +53,7 @@ import { FieldGroup } from "./FieldGroup";
 import { MarkerProviderTiles } from "./MarkerProviderTiles";
 import { SettingField } from "./SettingField";
 import { WatchProviderTiles } from "./WatchProviderTiles";
+import { leadingGraphemes } from "@/lib/text";
 
 /**
  * MDBList is the only provider on this page whose credential is a server
@@ -104,7 +105,7 @@ function DisconnectButton({
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
               onClick={() => {
                 onConfirm();
                 setOpen(false);
@@ -156,7 +157,7 @@ function presentationFor(providerName: string): SubtitleProviderPresentation {
     SUBTITLE_PROVIDERS[providerName] ?? {
       name: providerName,
       tagline: "web.admin.settings.providers.subtitles.taglineGeneric",
-      monogram: providerName.slice(0, 2),
+      monogram: leadingGraphemes(providerName, 2),
       monogramClass: "bg-muted text-muted-foreground",
     }
   );
@@ -452,6 +453,7 @@ function SubtitleProviderTile({
 
 function MDBListTile({
   sensitiveConfigured,
+  managedByEnv,
   restartKeys,
   expanded,
   onExpand,
@@ -460,6 +462,8 @@ function MDBListTile({
   onTested,
 }: {
   sensitiveConfigured: string[];
+  /** The variable that sets the key from the server's environment, if any. */
+  managedByEnv?: string;
   restartKeys: RestartKeyMatcher;
   expanded: boolean;
   onExpand: () => void;
@@ -474,7 +478,11 @@ function MDBListTile({
   const [testing, setTesting] = useState(false);
 
   const configured = sensitiveConfigured.includes("mdblist.api_key");
-  const hasDraft = apiKey.trim() !== "";
+  const managed = managedByEnv != null;
+  // A key typed before the environment took it over is ignored where it is
+  // read, so the field, Test and the unsaved guard all use the environment's.
+  const draft = managed ? "" : apiKey;
+  const hasDraft = draft.trim() !== "";
   useReportUnsavedChanges(hasDraft);
 
   async function save() {
@@ -483,7 +491,7 @@ function MDBListTile({
       return;
     }
     try {
-      await updateSettings.mutateAsync({ "mdblist.api_key": apiKey });
+      await updateSettings.mutateAsync({ "mdblist.api_key": draft });
       setApiKey("");
       onTested(undefined);
       toast.success(t("web.admin.settings.providers.mdblist.saved"));
@@ -510,7 +518,7 @@ function MDBListTile({
         checkConnection.mutateAsync({
           kind: "mdblist",
           body: {
-            values: { "mdblist.api_key": apiKey },
+            values: { "mdblist.api_key": draft },
             dirty_keys: hasDraft ? ["mdblist.api_key"] : [],
           },
         }),
@@ -572,7 +580,7 @@ function MDBListTile({
       </p>
       <SecretField
         label={t("web.admin.settings.providers.mdblist.apiKey")}
-        value={apiKey}
+        value={draft}
         configured={configured}
         onChange={(next) => {
           // The failure describes the key that was tested, not the new one.
@@ -580,18 +588,21 @@ function MDBListTile({
           setApiKey(next);
         }}
         restartRequired={restartKeys.has("mdblist.api_key")}
+        managedByEnv={managedByEnv}
       />
       <ProviderPanelActions test={test}>
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => void save()}
-          disabled={updateSettings.isPending}
-        >
-          {updateSettings.isPending
-            ? t("web.admin.settings.providers.mdblist.saving")
-            : t("common.save")}
-        </Button>
+        {managed ? null : (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => void save()}
+            disabled={updateSettings.isPending}
+          >
+            {updateSettings.isPending
+              ? t("web.admin.settings.providers.mdblist.saving")
+              : t("common.save")}
+          </Button>
+        )}
         <Button
           type="button"
           size="sm"
@@ -603,7 +614,7 @@ function MDBListTile({
             ? t("web.admin.settings.providers.mdblist.testing")
             : t("web.admin.settings.providers.mdblist.testConnection")}
         </Button>
-        {configured ? (
+        {configured && !managed ? (
           <DisconnectButton
             title={t("web.admin.settings.providers.mdblist.clearTitle")}
             description={t("web.admin.settings.providers.mdblist.clearDescription")}
@@ -683,6 +694,7 @@ export default function ProvidersSettings() {
           <ProviderTileGrid>
             <MDBListTile
               sensitiveConfigured={form.sensitiveConfigured}
+              managedByEnv={form.envVar("mdblist.api_key")}
               restartKeys={restartKeys}
               expanded={expandedTile === "mdblist"}
               onExpand={() => setExpandedTile("mdblist")}

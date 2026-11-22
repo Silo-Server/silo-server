@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Ingesteld door de omgeving van de node. Wijzig het daar en herstart de node."
+      "value": "Ingesteld door de omgeving. Wijzig het daar en herstart de betreffende dienst."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "Log in via de aanmelding van je netwerk om door te gaan."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Deze node is ingesteld door de implementatieconfiguratie van de server. Verwijder hem daar en herstart de API-servers om hem hier te beheren."
     }
   ],
   "error.not_acceptable": [
@@ -13624,7 +13630,7 @@
             },
             {
               "type": 0,
-              "value": " kan niet worden hersteld — de toegang zou ruimer worden, dus deze server houdt zijn strengere waarden aan"
+              "value": " kan niet worden hersteld — het zou de toegang verruimen, dus deze server houdt zijn eigen strengere waarden aan"
             }
           ]
         },
@@ -13636,7 +13642,7 @@
             },
             {
               "type": 0,
-              "value": " kunnen niet worden hersteld — de toegang zou ruimer worden, dus deze server houdt zijn strengere waarden aan"
+              "value": " kunnen niet worden hersteld — ze zouden de toegang verruimen, dus deze server houdt zijn strengere waarden aan"
             }
           ]
         }
@@ -13739,6 +13745,40 @@
             {
               "type": 0,
               "value": " kunnen niet worden hersteld — een ander account hier meldt zich aan met die gebruikersnaam of dat e-mailadres"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan niet worden hersteld — de omgeving van deze server stelt de afwijkende instellingen in, of een deel van de verbinding waar ze bij horen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kunnen niet worden hersteld — de omgeving van deze server stelt de afwijkende instellingen in, of een deel van de verbinding waar ze bij horen"
             }
           ]
         }
@@ -13998,7 +14038,7 @@
             },
             {
               "type": 0,
-              "value": " kan niet worden hersteld — deze server zou het meer toegang geven dan de back-up deed"
+              "value": " kan niet worden hersteld — deze server zou het meer toegang geven dan de back-up"
             }
           ]
         },
@@ -14010,7 +14050,7 @@
             },
             {
               "type": 0,
-              "value": " kunnen niet worden hersteld — deze server zou ze meer toegang geven dan de back-up deed"
+              "value": " kunnen niet worden hersteld — deze server zou ze meer toegang geven dan de back-up"
             }
           ]
         }
@@ -14269,6 +14309,40 @@
     {
       "type": 0,
       "value": "Het adres van een dienst verandert zonder de inloggegevens in de back-up, dus bij het herstellen worden ze hier gewist en wordt de dienst uitgeschakeld tot ze opnieuw zijn ingevoerd."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " instelling behoudt de huidige waarde omdat de omgeving van deze server die instelt, of een deel van de verbinding waar die bij hoort."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " instellingen behouden hun huidige waarden omdat de omgeving van deze server ze instelt, of een deel van de verbinding waar ze bij horen."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14723,8 +14797,28 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Verbergen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Verbergen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Verbergen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14873,8 +14967,28 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Tonen"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tonen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tonen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17037,6 +17151,12 @@
       "value": "Een ander account hier meldt zich aan met dezelfde gebruikersnaam of hetzelfde e-mailadres."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "De omgeving van deze server stelt de afwijkende instellingen in, of een deel van de verbinding waar ze bij horen, dus deze server behoudt de huidige waarden."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -17569,6 +17689,154 @@
     {
       "type": 0,
       "value": " niet openen."
+    }
+  ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Achtergrond"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " collectie-item"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " collectie-items"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Collectie vervangen"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Configuratie"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Beschrijving"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Ingeschakeld"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Uitgelicht"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Maximumaantal items"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Sortering van items"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Bibliotheken"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Positie"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Poster"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Sorteervolgorde"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Bron"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Synchronisatieplanning"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Titel"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Titelvertaling"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Type"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Zichtbaarheid"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Alleen web"
     }
   ],
   "web.admin.backups.restore.rows.changes": [
@@ -18111,6 +18379,16 @@
     {
       "type": 0,
       "value": " (behouden: strenger)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (behouden: omgeving)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -19203,6 +19481,20 @@
       "value": "In de tijdzone van de server."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "In de tijdzone van de server. Dat is "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " in jouw tijdzone."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -20171,20 +20463,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "De accounts verbergen"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Het account verbergen"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "De accounts verbergen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "De accounts verbergen"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "De bestanden verbergen"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Het bestand verbergen"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "De bestanden verbergen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "De bestanden verbergen"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Bestanden verbergen"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bestand verbergen"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bestanden verbergen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bestanden verbergen"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -20549,8 +20919,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "De accounts tonen"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Het account tonen"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "De accounts tonen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "De accounts tonen"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -20597,14 +20993,66 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "De bestanden tonen"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Het bestand tonen"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "De bestanden tonen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "De bestanden tonen"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Bestanden tonen"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bestand tonen"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bestanden tonen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bestanden tonen"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -28383,6 +28831,12 @@
       "value": "mislukt"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Taak mislukt. Bekijk de beheerdersdiagnostiek voor details."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -30366,7 +30820,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Overzicht van recent gestarte afspeelsessies"
+      "value": "Meest recente weergaven van alle accounts"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -31991,6 +32445,80 @@
     {
       "type": 0,
       "value": "Kan de activiteit niet laden."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " heeft "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " afgespeeld"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " heeft "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " afgespeeld"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -49172,6 +49700,12 @@
       "value": "Voer het serveradres in om de instellingen te voltooien."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Sleutel ingesteld door de implementatieconfiguratie van de server"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50088,6 +50622,12 @@
     {
       "type": 0,
       "value": " verwijderen"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ingesteld door de implementatieconfiguratie van de server. Verwijder hem daar en herstart de API-servers om hem hier te kunnen verwijderen."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -51863,6 +52403,68 @@
       "value": "Plug-ins"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Toegepast"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Aangehouden"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Kan de provisioningstatus van plug-ins niet laden."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Beheerd door de omgeving"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "In behandeling"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Geweigerd"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "De deployment bepaalt de pakketbron en het verwijderen."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Provisioningstatus"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "De deployment zet deze plug-in vast op "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -52615,6 +53217,106 @@
       "value": "Het genereren is gestopt. Opgeslagen aanbevelingen blijven zichtbaar in Ontdek totdat de server opnieuw wordt opgestart."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Profielen rangschikken ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDB-lijsten ophalen ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Titels opzoeken en embeddings maken ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " verlopen titel gewist"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " verlopen titels gewist"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -52647,6 +53349,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Los het conflict met de embeddingvergrendeling hieronder op voordat je Ontdekken-aanbevelingen opbouwt."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Voer eerst de job Embeddings uit, zodat Silo bibliotheekvectoren heeft om mee te vergelijken."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Verbind een embeddingprovider in AI-services voordat je Ontdekken-aanbevelingen opbouwt."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Nog geen enkel profiel heeft een smaakprofiel. Voer Smaakprofielen uit zodra iemand titels heeft bekeken of beoordeeld."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54485,6 +55211,32 @@
       "value": "Blijft leeg totdat Ontdekken-aanbevelingen zijn ingeschakeld in Beheer → Aanbevelingen."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Rijen met aanbevelingen blijven leeg totdat Ontdekken-aanbevelingen zijn ingeschakeld in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Beheer → Aanbevelingen"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Uit in Aanbevelingen"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -55963,6 +56715,12 @@
       "value": "Nieuwe rijen komen onderaan Ontdekken"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Instellingen voor Aanbevelingen openen"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -55975,6 +56733,12 @@
       "value": "De feed van MDBList bevat niet de sortering die op de pagina van de lijst is opgeslagen. Kies de sortering die daar wordt getoond."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Je profiel heeft nog geen Ontdekken-aanbevelingen. Voer Ontdekken-aanbevelingen uit of bekijk en beoordeel een paar titels om een voorbeeld van deze rij te zien."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -55985,6 +56749,12 @@
     {
       "type": 0,
       "value": "Kies een lijst of plak de link om de titels te zien."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Schakel Ontdekken-aanbevelingen in via Beheer → Aanbevelingen om een voorbeeld van deze rij te zien."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -56783,6 +57553,12 @@
     {
       "type": 0,
       "value": "Bericht verzonden"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "De speler heeft het bericht niet bevestigd. Het kan later of helemaal niet verschijnen."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -59657,6 +60433,12 @@
       "value": "Verbindingscontrole mislukt."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Kan niet controleren of de omgeving van de server dit instelt. Laad de pagina opnieuw om dit te bewerken."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60211,6 +60993,30 @@
     {
       "type": 0,
       "value": "Kan kanaal niet bijwerken"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Laad opnieuw om de huidige waarden te zien. Als er iets op deze pagina is veranderd, of als je een opgeslagen wachtwoord of sleutel hebt bewerkt, worden al je wijzigingen ongedaan gemaakt; anders blijven ze behouden."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Opnieuw laden"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Kan de instellingen niet opnieuw laden. Probeer het opnieuw."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Instellingen elders gewijzigd"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -63297,136 +64103,10 @@
       "value": "Kan meldingsinstellingen niet laden"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Nieuwe content wordt niet geregistreerd, dus er kan niets worden verstuurd. Zet het weer aan onder Verwerking."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Versturen is gepauzeerd; nieuwe content wacht in de wachtrij. Zet het weer aan onder Verwerking."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Bij Uit krijgen ze in plaats daarvan de dagelijkse samenvatting."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Hoe Silo nieuwe content opmerkt, in berichten groepeert en hoelang het ze bewaart."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Bepalen wie het wil"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Elk item vergelijken met ieders voorkeuren."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Groeperen en floodcontrole"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Verwerking"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Maximale leeftijd van content"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Oudere items worden weggegooid in plaats van als verouderd nieuws binnen te komen."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Maximaal aantal berichten per serie"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Alles daarboven wordt voor die batch overgeslagen."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Nieuwe content opmerken"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Nieuwe items registreren tijdens bibliotheekscans."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Pipeline"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Gelezen meldingen"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Bewaartermijn"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Verzendgeschiedenis"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Overzicht van waarover Silo al een melding heeft gestuurd."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Wachtvenster"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Items die samen klaar zijn met scannen, komen binnen als één melding."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Ongelezen meldingen"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64331,18 +65011,6 @@
     {
       "type": 0,
       "value": "Meldingen"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dagen"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "uren"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -65803,6 +66471,24 @@
       "value": "Overschakelen naar een ander model vereist het resetten van de embeddings, waarbij ze allemaal worden verwijderd. Een andere provider die hetzelfde model levert, wordt na een herstart toegepast."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Toevoegen aan Ontdek"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Kan rijen met aanbevelingen niet toevoegen aan de pagina Ontdek."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Rijen met aanbevelingen toegevoegd aan de pagina Ontdek."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -65825,6 +66511,44 @@
     {
       "type": 0,
       "value": "Hoeveel titels die niet in de bibliotheek staan de server bewaart om uit aan te bevelen. Elke titel wordt opgezocht op TMDB en krijgt een embedding. Een embedding maken is meestal goedkoop, maar een hoger aantal kan meer kosten of langer duren, afhankelijk van je embedding-provider, en gebruikt meer opslag."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Je pagina Ontdek toont nog geen rijen met aanbevelingen."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Zet Aanbevelingen inschakelen hierboven aan en start de server opnieuw op voordat Ontdekken-aanbevelingen kunnen worden uitgevoerd."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Aanvragen staan momenteel uit. Zet ze aan in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Aanvraaginstellingen"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " zodat kijkers de pagina Ontdek kunnen zien."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Pagina Ontdek openen"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -70900,7 +71624,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Bezorgkanalen, serverkanalen en hoe nieuwe content tot meldingen leidt."
+      "value": "Bezorgkanalen en serverkanalen."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -70999,12 +71723,6 @@
       "value": "E-mail"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Groeperen en floodbeveiliging"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -71023,28 +71741,10 @@
       "value": "Mensen een e-mail per aflevering laten kiezen"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Maximale leeftijd van content"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Maximumaantal berichten per serie"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Aanvrager vermelden op Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Nieuwe content opmerken"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -71053,46 +71753,16 @@
       "value": "Persoonlijke webhooks"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Verwerking"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Gelezen meldingen"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Relay-URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Bewaartermijn"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Verzendgeschiedenis"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Serverkanalen"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Stabilisatievenster"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71107,12 +71777,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Ongelezen meldingen"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71123,12 +71787,6 @@
     {
       "type": 0,
       "value": "Webhooks per persoon"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Bepalen wie het wil"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -75009,6 +75667,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Opslag kan hier niet worden verplaatst zolang de omgeving opslaginstellingen vastlegt ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Verwijder eerst die variabelen en start elke API-server opnieuw."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76145,6 +76817,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Deze planning komt uit de back-upinstellingen. Wijzig die in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Back-ups"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -76455,10 +77147,66 @@
       "value": "Recente fouten"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Vernieuwen mislukt. Bekijk de beheerdersdiagnostiek voor details."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Huidige planning bekijken"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -76903,6 +77651,18 @@
     {
       "type": 0,
       "value": "Autoscan-webhook opnieuw proberen"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Leest opnieuw de header van MKV-bestanden met ASS-ondertitels die zijn gescand voordat Silo ingesloten lettertypen niet meer meetelde in de bitrate, zodat ze niet worden getranscodeerd voor een bitrate die ze niet streamen."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Bitrate van bestanden met ingesloten lettertypen corrigeren"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -86366,25 +87126,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Inloggen van de tv is mislukt. Probeer het opnieuw."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Controleer of je app dit toont"
+      "value": "Kan het inloggen niet goedkeuren. Probeer het opnieuw."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Controleer of je tv dit toont"
+      "value": "Controleer of deze code overeenkomt"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Voer de code van je tv of app in"
+      "value": "Voer de code in die op je apparaat staat"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86396,13 +87150,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Log een tv of ander apparaat in met je account."
+      "value": "Meld een tv, app of ander apparaat aan."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Een tv inloggen"
+      "value": "Inloggen goedkeuren"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86422,13 +87176,13 @@
     },
     {
       "type": 0,
-      "value": " om een tv goed te keuren. Alleen het account zelf kan een tv inloggen."
+      "value": " om deze inlogpoging goed te keuren. Alleen het account zelf kan apparaten goedkeuren."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Stop met bekijken als deze gebruiker om een tv goed te keuren. Alleen het account zelf kan een tv inloggen."
+      "value": "Stop met bekijken als deze gebruiker om deze inlogpoging goed te keuren. Alleen het account zelf kan apparaten goedkeuren."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86446,39 +87200,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "We kunnen die code niet vinden. Controleer de code op je tv."
+      "value": "We kunnen die code niet vinden. Controleer de code en probeer het opnieuw."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Niet nu"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Oudere tv-apps tonen in plaats daarvan "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Keur alleen een apparaat goed dat nu voor je staat."
+      "value": "Weigeren"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Keur alleen een tv goed die nu voor je staat."
+      "value": "Keur dit alleen goed als je zelf bent begonnen met inloggen."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86504,7 +87238,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Iedereen die deze tv gebruikt, kan uit je profielen kiezen. Profielen met een PIN blijven vergrendeld."
+      "value": "Het apparaat krijgt zo toegang tot je profielen. Profielen met een PIN blijven vergrendeld."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86551,6 +87285,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Aangevraagd "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86564,7 +87308,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Deze tv wacht niet meer. Begin opnieuw op de tv."
+      "value": "Dit apparaat wacht niet meer. Begin op het apparaat opnieuw met inloggen."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86573,10 +87317,34 @@
       "value": "Deze inlogpoging is geweigerd."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Klaar. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " logt in."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " is ingelogd."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Deze code is verlopen. Je tv toont een nieuwe. Gebruik die code."
+      "value": "Deze code is verlopen. Vraag op het apparaat een nieuwe code aan en probeer het opnieuw."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86660,25 +87428,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Die tv is al ingelogd."
+      "value": "Dit apparaat is al ingelogd."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Deze tv is goedgekeurd en rondt het inloggen af."
+      "value": "Dit apparaat is goedgekeurd en rondt het inloggen af."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Klaar. Je tv logt in."
+      "value": "Klaar. Je apparaat logt in."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Je tv is ingelogd."
+      "value": "Je apparaat is ingelogd."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86726,13 +87494,13 @@
     },
     {
       "type": 0,
-      "value": " inloggen?"
+      "value": " laten inloggen?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Dit apparaat inloggen?"
+      "value": "Dit apparaat laten inloggen?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86752,13 +87520,13 @@
     },
     {
       "type": 0,
-      "value": " om deze tv goed te keuren."
+      "value": " om deze inlogpoging goed te keuren."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Tv inloggen"
+      "value": "Inloggen goedkeuren"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -87804,7 +88572,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Kan het apparaat niet aanmelden. Probeer het opnieuw."
+      "value": "Kan het inloggen niet goedkeuren. Probeer het opnieuw."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -108478,6 +109246,12 @@
       "value": "Toont"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Beheerd door deze server. Wat de rij toont, kun je hier niet wijzigen; voeg zelf een rij toe om te kiezen wat die toont."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -108788,6 +109562,12 @@
       "value": "Vertalen…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Serverrijen verbergen die sinds deze export zijn toegevoegd:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -108806,6 +109586,12 @@
     {
       "type": 0,
       "value": ", ter vervanging van secties die je hier eerder hebt toegevoegd. Je wijzigingen aan de secties van deze server blijven behouden."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "De rijen van deze server zijn gewijzigd sinds dit bestand is geëxporteerd. Kies hieronder welke rijen je wilt verbergen."
     }
   ],
   "web.home.layout.checking": [
@@ -108856,6 +109642,26 @@
     {
       "type": 0,
       "value": "Zet “Bekeken items verbergen” aan."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Verbergt geselecteerde rijen op: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " zonder je andere rijen daar te wijzigen."
     }
   ],
   "web.home.layout.import": [
@@ -108960,6 +109766,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109168,6 +109992,12 @@
     {
       "type": 0,
       "value": "Naamloze sectie"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Serverrijen verbergen die niet in dit bestand staan:"
     }
   ],
   "web.home.page.customize": [
@@ -112091,6 +112921,12 @@
     {
       "type": 0,
       "value": "Herobanner · Alleen web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Server"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

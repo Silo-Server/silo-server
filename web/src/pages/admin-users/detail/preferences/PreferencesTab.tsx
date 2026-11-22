@@ -179,7 +179,18 @@ export function PreferencesTab({ user }: { user: AdminUser }) {
                   <span className="text-muted-foreground">
                     <LevelIcon level={level} />
                   </span>
-                  <span className="min-w-0 flex-1 truncate">{level.name}</span>
+                  {/* A device level's name is whatever the device reported, so it reads
+                      in its own direction. Other levels are translated labels: an Arabic
+                      library name would turn "{library} library" around on an English page.
+                      The outer span keeps the count at the end. */}
+                  <span className="min-w-0 flex-1">
+                    <span
+                      dir={level.kind === "device" ? "auto" : undefined}
+                      className="block w-fit max-w-full truncate"
+                    >
+                      {level.name}
+                    </span>
+                  </span>
                   <span className="text-muted-foreground text-xs tabular-nums">
                     {level.entries.length}
                   </span>

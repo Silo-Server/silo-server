@@ -7,14 +7,35 @@ import { cn } from "@/lib/utils";
 function Tabs({
   className,
   orientation = "horizontal",
+  onValueChange,
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.Root>) {
+  // Radix selects a tab on mousedown and again on the focus that the same press
+  // causes. A parent that applies the value in a transition (react-router's
+  // setSearchParams does) has not re-rendered in between, so the trigger still
+  // reads as unselected and the parent would get the change twice, pushing the
+  // same URL twice. Both calls run in one task, so drop a repeat until the next.
+  const lastValueRef = React.useRef<string | null>(null);
+  const handleValueChange = onValueChange
+    ? (value: string) => {
+        if (lastValueRef.current === value) {
+          return;
+        }
+        lastValueRef.current = value;
+        setTimeout(() => {
+          lastValueRef.current = null;
+        }, 0);
+        onValueChange(value);
+      }
+    : undefined;
+
   return (
     <TabsPrimitive.Root
       data-slot="tabs"
       data-orientation={orientation}
       orientation={orientation}
       className={cn("group/tabs flex gap-2 data-[orientation=horizontal]:flex-col", className)}
+      onValueChange={handleValueChange}
       {...props}
     />
   );

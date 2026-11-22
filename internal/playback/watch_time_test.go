@@ -57,6 +57,14 @@ func TestWatchTimeObserve(t *testing.T) {
 			wantPaused: 32,
 		},
 		{
+			// A detached stop replays the attempt's latest report at the
+			// time it arrived, which can be before a pause confirmed since.
+			name:       "a report from before a confirmed pause keeps the pause",
+			samples:    []sample{{0, 0, false, false}, {10, 0, true, true}, {5, 5, false, false}, {100, 10, true, false}},
+			wantPlayed: 10,
+			wantPaused: 90,
+		},
+		{
 			name:       "a seek while paused after a confirmed pause is not watched",
 			samples:    []sample{{0, 0, false, false}, {10, 0, true, true}, {100, 100, true, false}},
 			wantPaused: 90,
@@ -94,6 +102,32 @@ func TestWatchTimeObserve(t *testing.T) {
 				if math.Abs(c.got-c.want) > 1e-9 {
 					t.Errorf("%s = %v, want %v", c.field, c.got, c.want)
 				}
+			}
+		})
+	}
+}
+
+// TestWatchTimeClose covers an end with no newer sample closing the
+// measurement: time paused, or after a confirmed pause, runs to the end, and
+// no advance is credited.
+func TestWatchTimeClose(t *testing.T) {
+	start := time.Unix(1_000_000, 0)
+	at := func(s float64) time.Time { return start.Add(time.Duration(s * float64(time.Second))) }
+	for _, tc := range []struct {
+		name                   string
+		build                  func(w *WatchTime)
+		wantPlayed, wantPaused float64
+	}{
+		{"playing", func(w *WatchTime) { w.Observe(0, false, at(0)); w.Observe(10, false, at(10)) }, 10, 0},
+		{"paused", func(w *WatchTime) { w.Observe(0, false, at(0)); w.Observe(10, true, at(10)) }, 10, 90},
+		{"after a confirmed pause", func(w *WatchTime) { w.Observe(0, false, at(0)); w.Pause(at(10)) }, 0, 90},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var w WatchTime
+			tc.build(&w)
+			w.Close(at(100))
+			if w.PlayedSeconds != tc.wantPlayed || w.PausedSeconds != tc.wantPaused || !w.Until.Equal(at(100)) {
+				t.Fatalf("played %v paused %v until %v, want %v, %v, %v", w.PlayedSeconds, w.PausedSeconds, w.Until, tc.wantPlayed, tc.wantPaused, at(100))
 			}
 		})
 	}

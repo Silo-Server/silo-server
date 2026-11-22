@@ -9,6 +9,7 @@ import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useT } from "@/i18n";
 import type { CollectionPageAccess } from "@/hooks/useCollectionPageAccess";
 import type { CollectionPageHeader } from "@/hooks/useCollectionPageHeader";
+import { hasArabicScript } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 import DetailOverview from "@/pages/ItemDetail/components/DetailOverview";
 
@@ -85,6 +86,7 @@ export function CollectionPageHero({
         </p>
         <h1
           className="font-display text-4xl font-extrabold tracking-[-0.04em] text-balance sm:text-5xl lg:text-6xl"
+          data-cursive={hasArabicScript(title) || undefined}
           style={backdrop ? { textShadow: "var(--hero-text-shadow, none)" } : undefined}
         >
           {title}

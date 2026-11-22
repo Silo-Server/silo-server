@@ -43,10 +43,12 @@ const (
 // wrapper repoints each one that names the template.
 var databaseURLEnvs = []string{"SILO_TEST_DATABASE_URL", "SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL"}
 
-// setUpClones returns the -exec value that runs each test binary through
-// this command and the run's token. It copies the template once first, so a
-// database that cannot be copied fails here rather than once per package.
-func setUpClones(template string) (execPath, run string, err error) {
+// setUpClones returns the -exec value that runs each test binary through this
+// command and the run's token. It copies the template once first, so a database
+// that cannot be copied fails here rather than once per package. When preflight
+// fails after generating a run token, it still returns the token so the caller
+// can sweep any partially created copy.
+func setUpClones(ctx context.Context, template string) (execPath, run string, err error) {
 	self, err := os.Executable()
 	if err != nil {
 		return "", "", err
@@ -57,13 +59,12 @@ func setUpClones(template string) (execPath, run string, err error) {
 	if run, err = newRunToken(); err != nil {
 		return "", "", err
 	}
-	ctx := context.Background()
 	name, _, err := cloneDatabase(ctx, template, run, "preflight")
 	if err != nil {
-		return "", "", err
+		return "", run, err
 	}
-	if err := dropDatabase(ctx, template, name); err != nil {
-		return "", "", err
+	if err := dropDatabase(context.Background(), template, name); err != nil {
+		return "", run, err
 	}
 	return execPath, run, nil
 }

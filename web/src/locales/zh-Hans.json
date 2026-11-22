@@ -338,7 +338,7 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "由节点的环境设置。请在环境中更改，然后重启节点。"
+      "value": "由环境设置。请在环境中更改，然后重启受影响的服务。"
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +447,12 @@
     {
       "type": 0,
       "value": "请通过你所在网络的登录方式登录以继续。"
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "此节点由服务器的部署配置设置。请在部署配置中移除它，然后重启API服务器，即可在此处管理它。"
     }
   ],
   "error.not_acceptable": [
@@ -12929,7 +12935,7 @@
             },
             {
               "type": 0,
-              "value": "项无法恢复——恢复会扩大访问权限，因此此服务器保留其更严格的值"
+              "value": "项无法恢复——恢复会扩大访问权限，因此此服务器保留自身更严格的值"
             }
           ]
         }
@@ -12996,6 +13002,28 @@
             {
               "type": 0,
               "value": "项无法恢复——此处另一个账户已使用该用户名或电子邮件登录"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "项无法恢复——此服务器的环境设置了存在差异的设置项或其所属连接的一部分"
             }
           ]
         }
@@ -13360,6 +13388,28 @@
       "value": "某个服务的地址发生变化，但备份中没有其凭据，因此恢复会清除此处的凭据并关闭该服务，直到重新输入凭据。"
     }
   ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "项设置保留当前值，因为此服务器的环境设置了这些项或其所属连接的一部分。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.caveat.filesMissing": [
     {
       "type": 6,
@@ -13700,8 +13750,20 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "隐藏"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隐藏"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13814,8 +13876,20 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "显示"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "显示"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -15702,6 +15776,12 @@
       "value": "此处另一个账户已使用其用户名或电子邮件登录。"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "此服务器的环境设置了存在差异的设置项或其所属连接的一部分，因此此服务器保留当前值。"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16154,6 +16234,142 @@
     {
       "type": 0,
       "value": "。"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "背景图"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "个合集项目"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "替换合集"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "配置"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "描述"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "启用状态"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "精选"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "项目数量上限"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "项目排序"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "媒体库"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "位置"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "海报"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "排列顺序"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "来源"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "同步计划"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "标题"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "标题翻译"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "类型"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "可见性"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "仅限网页版"
     }
   ],
   "web.admin.backups.restore.rows.changes": [
@@ -16660,6 +16876,16 @@
     {
       "type": 0,
       "value": "（已保留：更严格）"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "（已保留：环境）"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -17622,6 +17848,20 @@
       "value": "使用服务器的时区。"
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "按服务器的时区计算。在你的时区为"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -18514,20 +18754,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "隐藏账户"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隐藏账户"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隐藏账户"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隐藏账户"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "隐藏文件"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隐藏文件"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隐藏文件"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隐藏文件"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "隐藏文件"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隐藏文件"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隐藏文件"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隐藏文件"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -18776,8 +19094,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "显示账户"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "显示账户"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "显示账户"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "显示账户"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -18808,14 +19152,66 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "显示文件"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "显示文件"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "显示文件"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "显示文件"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "显示文件"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "显示文件"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "显示文件"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "显示文件"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
@@ -25906,6 +26302,12 @@
       "value": "失败"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "任务失败。请查看管理员诊断信息了解详情。"
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -27684,7 +28086,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "最近启动的播放会话动态"
+      "value": "所有账户中最近的播放记录"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -29134,6 +29536,72 @@
     {
       "type": 0,
       "value": "无法加载活动。"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "播放了"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "播放了"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -44184,6 +44652,12 @@
       "value": "请输入服务器地址以完成设置。"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "密钥由服务器的部署配置设置"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 1,
@@ -45100,6 +45574,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "由服务器的部署配置设置。请在部署配置中移除它并重启API服务器，即可在此处删除。"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -46706,6 +47186,68 @@
       "value": "插件"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "已应用"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "已暂缓"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "无法加载插件预配状态。"
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "由环境管理"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "待处理"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "已拒绝"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "部署控制此插件的软件包来源和移除。"
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "预配状态"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "部署已将此插件固定为"
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "版本。"
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -47462,6 +48004,98 @@
       "value": "生成已停止。在服务器重启之前，已存储的推荐仍会显示在发现中。"
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "正在为个人资料排序（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "正在获取TMDB列表（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "正在查询并嵌入作品（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "已清除"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "部过期作品"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -47486,6 +48120,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "请先解决下方的嵌入锁定冲突，再构建发现推荐。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "请先运行嵌入作业，让Silo有可供比较的媒体库向量。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "请先在AI服务中连接嵌入提供商，再构建发现推荐。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "还没有任何个人资料拥有口味画像。有人观看或评分作品后，请运行口味画像。"
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -48976,6 +49634,32 @@
       "value": "在管理 → 推荐中开启发现推荐之前，此行会保持为空。"
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "管理 → 推荐"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中开启发现推荐之前，推荐行会保持为空。"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "已在推荐中关闭"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -50349,6 +51033,12 @@
       "value": "新行将添加到发现底部"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "打开推荐设置"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -50361,6 +51051,12 @@
       "value": "MDBList的订阅源不包含列表页面上保存的排序方式。请选择列表页面显示的排序。"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "你的个人资料还没有发现推荐。请运行发现推荐，或观看并评分几部作品，以预览此行。"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -50371,6 +51067,12 @@
     {
       "type": 0,
       "value": "选择一个列表或粘贴其链接以查看其中的作品。"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "在管理 → 推荐中开启发现推荐，即可预览此行。"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -51133,6 +51835,12 @@
     {
       "type": 0,
       "value": "消息已发送"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "播放器未确认收到该消息。消息可能稍后显示，也可能完全不显示。"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -53956,6 +54664,12 @@
       "value": "连接检查失败。"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "无法检查服务器的环境是否设置了此项。请重新加载页面后再编辑。"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -54494,6 +55208,30 @@
     {
       "type": 0,
       "value": "更新渠道失败"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "重新加载以查看当前值。如果此页面上有内容已更改，或你编辑了已保存的密码或密钥，你的所有编辑都将被撤销；否则会保留。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "重新加载"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "无法重新加载设置。请重试。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "设置已在别处更改"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -57540,136 +58278,10 @@
       "value": "无法加载通知设置"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "未记录新内容，因此无法发送任何通知。请在处理下重新开启。"
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "发送已暂停；新内容在队列中等待。请在处理下重新开启。"
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "关闭时改为发送每日摘要。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Silo如何发现新内容、将其合并为消息，以及保留多长时间。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "确定接收者"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "将每个项目与所有人的偏好进行匹配。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "合并与防刷屏"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "处理"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "最长内容时效"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "更早的项目会被丢弃，不会作为过时消息送达。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "每部剧集最多消息数"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "超出部分将在该批次中跳过。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "发现新内容"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "在媒体库扫描时记录新项目。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "流程"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "已读通知"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "保留"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "发送历史"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Silo已发送通知的记录。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "合并等待时间"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "一起完成扫描的项目会合并为一条通知。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "未读通知"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -58534,18 +59146,6 @@
     {
       "type": 0,
       "value": "通知"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "天"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "小时"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -60002,6 +60602,24 @@
       "value": "切换到其他模型需要重置嵌入，这会删除所有嵌入。改用提供相同模型的其他提供商会在重启后生效。"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "添加到发现"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "无法将推荐行添加到发现页面。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "已将推荐行添加到发现页面。"
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -60024,6 +60642,44 @@
     {
       "type": 0,
       "value": "服务器保留多少部不在媒体库中的作品用于推荐。每部作品都会在TMDB上查询并进行嵌入。嵌入通常成本很低，但数值越高，视你的嵌入提供商而定，可能花费更多或耗时更长，并占用更多存储空间。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "你的发现页面还没有显示任何推荐行。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "请先开启上方的启用推荐并重启服务器，发现推荐才能运行。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "请求目前已关闭。请在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "请求设置"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中开启，让观众可以看到发现页面。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "打开发现页面"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -65120,7 +65776,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "推送渠道、服务器频道，以及新内容如何生成通知。"
+      "value": "推送渠道和服务器频道。"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -65219,12 +65875,6 @@
       "value": "电子邮件"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "分组和防刷屏"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -65243,28 +65893,10 @@
       "value": "允许用户选择每集发送邮件"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "内容最长时间"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "每部剧集最多消息数"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "在Discord上提及请求者"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "发现新内容"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -65273,46 +65905,16 @@
       "value": "个人Webhook"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "处理"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "已读通知"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "中继URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "保留期限"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "发送记录"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "服务器频道"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "稳定等待时间"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -65327,12 +65929,6 @@
       "value": "Silo推送中继"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "未读通知"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -65343,12 +65939,6 @@
     {
       "type": 0,
       "value": "每人Webhook数"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "确定通知对象"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -69178,6 +69768,20 @@
       "value": "）。"
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "环境变量设置了存储选项（"
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "）时，无法在此处迁移存储。请先取消设置这些变量，然后重启所有API服务器。"
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -70256,6 +70860,26 @@
       "value": "次"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "此计划来自备份设置。请在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "服务器 › 备份"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中更改。"
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -70546,10 +71170,66 @@
       "value": "最近的错误"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "刷新失败。请查看管理员诊断信息了解详情。"
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "查看当前计划"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -70982,6 +71662,18 @@
     {
       "type": 0,
       "value": "Autoscan webhook重试"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "对于在Silo将内嵌字体排除在比特率计算之外之前扫描的含ASS字幕的MKV文件，重新读取其文件头，使这些文件不会因实际不会串流的比特率而被转码。"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "修正含内嵌字体文件的比特率"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -79667,25 +80359,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "无法登录电视。请重试。"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "请确认你的应用显示"
+      "value": "无法批准登录。请重试。"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "请确认你的电视显示"
+      "value": "请确认此代码一致"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "输入电视或应用上显示的代码"
+      "value": "输入你的设备上显示的代码"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -79697,13 +80383,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "使用你的账户登录电视或其他设备。"
+      "value": "登录电视、应用或其他设备。"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "登录电视"
+      "value": "批准登录"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -79723,13 +80409,13 @@
     },
     {
       "type": 0,
-      "value": "身份查看，然后再批准电视。只有该账户本人才能登录电视。"
+      "value": "身份查看，然后再批准此次登录。只有该账户本人才能批准设备。"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "请停止以此用户身份查看，然后再批准电视。只有该账户本人才能登录电视。"
+      "value": "请停止以此用户身份查看，然后再批准此次登录。只有该账户本人才能批准设备。"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -79747,39 +80433,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "找不到该代码。请检查电视上显示的代码。"
+      "value": "找不到该代码。请检查代码并重试。"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "暂不"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "旧版电视应用会改为显示"
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "。"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "只批准此刻就在你面前的设备。"
+      "value": "拒绝"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "只批准此刻就在你面前的电视。"
+      "value": "仅在登录是你本人发起时才批准。"
     }
   ],
   "web.auth.activate.playOn": [
@@ -79805,7 +80471,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "使用这台电视的任何人都可以选择你的个人资料。设有PIN的个人资料仍保持锁定。"
+      "value": "这会让它访问你的个人资料。设有PIN的个人资料将保持锁定。"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -79852,6 +80518,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "请求于"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -79865,7 +80541,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "这台电视已停止等待。请在电视上重新开始。"
+      "value": "此设备已停止等待。请在该设备上重新开始登录。"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -79874,10 +80550,34 @@
       "value": "此登录已被拒绝。"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "完成。"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "正在登录。"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "已登录。"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "此代码已过期。你的电视正在显示新代码，请改用该代码。"
+      "value": "此代码已过期。请在设备上获取新代码，然后重试。"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -79961,25 +80661,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "该电视已登录。"
+      "value": "此设备已登录。"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "这台电视已获批准，正在完成登录。"
+      "value": "此设备已获批准，正在完成登录。"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "完成。你的电视正在登录。"
+      "value": "完成。你的设备正在登录。"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "你的电视已登录。"
+      "value": "你的设备已登录。"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -80023,7 +80723,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "登录"
+      "value": "要允许"
     },
     {
       "type": 1,
@@ -80031,13 +80731,13 @@
     },
     {
       "type": 0,
-      "value": "？"
+      "value": "登录吗？"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "登录此设备？"
+      "value": "要允许此设备登录吗？"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -80057,13 +80757,13 @@
     },
     {
       "type": 0,
-      "value": "以批准这台电视。"
+      "value": "以批准此次登录。"
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "登录电视"
+      "value": "批准登录"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -81117,7 +81817,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "无法登录该设备。请重试。"
+      "value": "无法批准登录。请重试。"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -99963,6 +100663,12 @@
       "value": "显示内容"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "由此服务器管理。无法在此处更改它显示的内容；要自行选择显示内容，请添加你自己的行。"
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -100289,6 +100995,12 @@
       "value": "正在翻译……"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "隐藏此导出后新增的服务器行："
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -100307,6 +101019,12 @@
     {
       "type": 0,
       "value": "，并替换你之前在此添加的版块。你对此服务器版块所做的更改会保留。"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "自导出此文件以来，此服务器的行已更改，请在下方选择要隐藏的行。"
     }
   ],
   "web.home.layout.checking": [
@@ -100357,6 +101075,26 @@
     {
       "type": 0,
       "value": "开启隐藏已观看项目。"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "在以下页面隐藏所选行："
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "，不更改你在那里的其他行。"
     }
   ],
   "web.home.layout.import": [
@@ -100461,6 +101199,24 @@
     {
       "type": 0,
       "value": "。"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": "（"
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "）"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -100662,6 +101418,12 @@
     {
       "type": 0,
       "value": "未命名版块"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "隐藏此文件中没有的服务器行："
     }
   ],
   "web.home.page.customize": [
@@ -103426,6 +104188,12 @@
     {
       "type": 0,
       "value": "主横幅 · 仅网页版"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "服务器"
     }
   ],
   "web.home.rows.line.webOnlyHero": [

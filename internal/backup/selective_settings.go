@@ -14,9 +14,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 func readStoredSettings(ctx context.Context, q queryer) (map[string]string, error) {
@@ -66,7 +66,7 @@ func (p *planner) planSettings(ctx context.Context) ([]settingPlan, error) {
 			continue
 		}
 		plan := settingPlan{page: rule.page, live: liveValue(stored, cipher, e.Key), preview: PreviewSetting{Key: e.Key, Class: rule.class, RestartRequired: config.RestartRequired(e.Key),
-			Masked: e.Encrypted || catalog.SensitiveSettingKeys[e.Key]}}
+			Masked: e.Encrypted || serversettings.SensitiveSettingKeys[e.Key]}}
 		// Where an outside service connects, and with what, comes only from
 		// a backup this server verified.
 		if rule.class == SettingExternalService && !p.authenticated {

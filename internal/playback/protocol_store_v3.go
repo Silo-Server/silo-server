@@ -161,8 +161,8 @@ type AttemptRecordV3 struct {
 	StopID string
 	// SampleAcceptedAt is when the row accepted LastSample, a progress report
 	// or a stop's final sample, by the accepting server's clock. Unlike
-	// LastSampleAt, no other write moves it. Samples accepted before it was
-	// recorded read LastSampleAt instead.
+	// LastSampleAt, no other write moves it. Zero when the row has no sample,
+	// or accepted it before this time was recorded.
 	SampleAcceptedAt time.Time
 	// LastSampleAt is when the row last accepted a progress sample or a stop.
 	// A replica reaping a stale local copy compares it with its own activity
