@@ -77,20 +77,26 @@ export function RedisGroup({
           // while a save is in flight, like the URL field below.
           if (secrets.disabled) return;
           if (value === "true") {
-            setEnabledOverride(true);
+            // With a URL saved, taking back the switch-off leaves the switch
+            // following the stored URL, so a URL removed elsewhere later shows.
+            // With none saved, only the override keeps the empty fields open.
+            setEnabledOverride(configured ? null : true);
             // Takes back a staged switch-off, which cleared the number too.
             form.resetValue("redis.url");
             form.resetValue("redis.db");
             return;
           }
-          setEnabledOverride(false);
           // With no saved URL there is nothing to switch off: drop what was
-          // typed, since the fields that showed it are about to hide.
+          // typed, since the fields that showed it are about to hide. The
+          // switch then follows what is saved again, so a URL saved elsewhere
+          // later still shows.
           if (!configured) {
+            setEnabledOverride(null);
             form.resetValue("redis.url");
             form.resetValue("redis.db");
             return;
           }
+          setEnabledOverride(false);
           stageRedisUrl(form, "");
         }}
         disabled={secrets.disabled}
