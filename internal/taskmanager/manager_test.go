@@ -777,3 +777,25 @@ func TestCanceledStartContextRecordsTheScheduledRunAsInterrupted(t *testing.T) {
 		t.Fatal("canceled scheduled run was not recorded")
 	}
 }
+
+// A task whose recent runs were all interrupted counts its interval from
+// when the oldest of them started, not from the restart.
+func TestStartSchedulesFromTheOldestInterruptedRunWhenNoneFinished(t *testing.T) {
+	hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)}
+	now := time.Now()
+	newer := taskmanager.ExecutionResult{TaskKey: "scan", Status: "failed", ErrorMessage: interruptedMessage, StartedAt: now.Add(-10 * time.Minute), CompletedAt: now.Add(-9 * time.Minute)}
+	older := taskmanager.ExecutionResult{TaskKey: "scan", Status: "failed", ErrorMessage: interruptedMessage, StartedAt: now.Add(-3 * time.Hour), CompletedAt: now.Add(-2 * time.Hour)}
+	history := &recordingExecutionRepository{latest: &newer, recent: []taskmanager.ExecutionResult{newer, older}}
+	manager := taskmanager.New(&fakeTriggerRepository{}, history, newFakeTrigger, slog.New(slog.DiscardHandler))
+	manager.Register(stubTask{key: "scan", triggers: []taskmanager.TriggerConfig{hourly}})
+	manager.Start(context.Background())
+	defer manager.Stop()
+
+	tasks := manager.ListTasks(true)
+	if len(tasks) != 1 || tasks[0].NextRunAt == nil {
+		t.Fatalf("tasks = %#v, want one scheduled task", tasks)
+	}
+	if want := older.StartedAt.Add(time.Hour); !tasks[0].NextRunAt.Equal(want) {
+		t.Fatalf("next run = %v, want %v (an hour after the oldest interrupted run started)", tasks[0].NextRunAt, want)
+	}
+}

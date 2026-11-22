@@ -249,7 +249,9 @@ func (m *TaskManager) loadWorker(ctx context.Context, w *taskWorker) error {
 // scheduleBase is the run a task's interval counts from at startup: its
 // latest run, unless that run was interrupted, in which case the latest one
 // before it that wasn't. A run cut off by a restart then runs again as soon
-// as it is due rather than a full interval after the restart.
+// as it is due rather than a full interval after the restart. When every
+// recent run was interrupted, the interval counts from when the oldest of
+// them started, so repeated restarts can't keep postponing the task.
 func (m *TaskManager) scheduleBase(ctx context.Context, key string, latest *ExecutionResult) *ExecutionResult {
 	if !latest.IsInterrupted() {
 		return latest
@@ -264,7 +266,10 @@ func (m *TaskManager) scheduleBase(ctx context.Context, key string, latest *Exec
 			return &recent[i]
 		}
 	}
-	return nil
+	if len(recent) == 0 {
+		return latest
+	}
+	return &ExecutionResult{TaskKey: key, CompletedAt: recent[len(recent)-1].StartedAt}
 }
 
 // savedSchedule reads a task's saved schedule. With none, it is the task's
