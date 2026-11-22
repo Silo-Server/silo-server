@@ -17,7 +17,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
@@ -72,6 +74,9 @@ type Dependencies struct {
 	// control-plane recipe store (Redis) so a restarted transcode node can rebuild
 	// a jellycompat session. Optional; nil disables the handoff.
 	RecipeNodeStore recipeNodePutter
+	// StreamDeny is the shared playback deny marker store the relays to
+	// transcode nodes check. Nil denies nothing.
+	StreamDeny *playback.StreamDeny
 	// EventBus carries cluster events. The playback handler subscribes to
 	// proxies' requests to move a transcode off a node they cannot reach. Nil
 	// leaves proxy-egress transcodes without that failover.
@@ -149,7 +154,13 @@ type Dependencies struct {
 	// admin live-session table right after compat playback starts/stops, so
 	// the activity dashboard doesn't wait for the periodic reconciler tick.
 	// Optional.
-	SessionSyncer     PlaybackSessionSyncer
+	SessionSyncer PlaybackSessionSyncer
+
+	// RestoreReconstructedWatch returns the watch-time measurement saved for
+	// a native session, so one this server rebuilds after a restart keeps
+	// measuring the same play. Optional.
+	RestoreReconstructedWatch func(ctx context.Context, sessionID string) (playback.WatchTime, bool)
+
 	MarkerPopulation  MarkerPopulationService
 	FileResolver      FilePathResolver
 	MediaSourceOwners MediaSourceOwnerLookup // optional; resolves media-source ids sent as item ids
@@ -165,8 +176,12 @@ type Dependencies struct {
 	PlaybackScopeResolver  ScopeResolver
 	NodePlanner            nodepool.SessionPlanner
 	JWTSecret              string
-	Recommender            recommendations.Recommender
-	RecWorker              *recommendations.Worker
+	// NodeKeys signs calls to transcode nodes; see nodeauth.Keyring.
+	NodeKeys nodeauth.Keyring
+	// SourceGrants grants transcode nodes the sources they start on.
+	SourceGrants *nodesource.Grants
+	Recommender  recommendations.Recommender
+	RecWorker    *recommendations.Worker
 	// RecommendationReader serves /Movies/Recommendations from the cached
 	// rows the native API reads; nil answers an empty list.
 	RecommendationReader RecommendationRowReader

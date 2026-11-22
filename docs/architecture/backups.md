@@ -134,7 +134,8 @@ the drill for that.
 The check value is HKDF-SHA256 over `SECRET_KEY` with info
 `silo/backup-key-check/v1`, 8 bytes, written as 16 hex digits in groups of 4
 (`secret.KeyCheckValue`, beside the data key derivation in
-`internal/secret/cipher.go`). `silo secret check` reads a key on stdin and
+`internal/secret/cipher.go`). `silo secret check` reads a key from the first line
+of stdin, or with `--file` from a key file read as `SECRET_KEY_FILE` is, and
 prints the value, so an operator can tell which key a backup needs without
 showing either key.
 
@@ -413,9 +414,10 @@ the deletion of a complete upload, and the restore job.
   same daily trigger; one backs up and the others record the skip. A
   scheduled run that takes the lock after another server already backed up
   its slot skips too ("skipped: tonight's backup already ran on another
-  server"): a successful nightly records its slot, the latest `backup.time`
-  at or before it started in its server's local time zone, in
-  `backup_status.last_nightly_slot`, and a scheduled run skips when the
+  server"): a successful nightly records the slot it took the lock for, the
+  latest `backup.time` at or before that moment in its server's local time
+  zone, in `backup_status.last_nightly_slot`; a `backup.time` change while
+  it runs does not move it. A scheduled run skips when the
   recorded slot is later than its own previous slot (the same wall-clock
   time a calendar day earlier, so each night across a daylight saving
   change backs up once). Servers in different time zones, or a
@@ -598,9 +600,11 @@ previous release left:
   deleted after it was taken: artwork, avatars, or branding replaced or
   removed since stay as they are now, and a restored row may name a file
   that is gone.
-- It reads only `server_settings` rows, with defaults for keys the old
+- It reads the `server_settings` rows, with defaults for keys the old
   release never wrote: the first upgrade to a release with backups finds no
-  `backup.*` rows and backs up to the default destination. Blob storage comes
+  `backup.*` rows and backs up to the default destination. The one
+  setting it takes from the environment is `SILO_BACKUP_ENABLED`, over
+  `backup.enabled`. Blob storage comes
   from the stored settings, as at startup, opened without recording anything.
 - The core inventory checks each table with `to_regclass`, so tables the old
   schema lacks are recorded as absent. `pg_dump` excludes the same table data
@@ -620,7 +624,11 @@ lock still held through `Up`, when:
 - `SILO_SKIP_BACKUP_BEFORE_MIGRATE=true` is set. It applies to the process it
   is set on; remove it after that start. A value that is not a boolean does
   not skip;
-- `backup.enabled` is `false`;
+- the effective `backup.enabled` is `false`: `SILO_BACKUP_ENABLED` when it is
+  set, as it will be once startup stores it, otherwise the stored value. Every
+  server that migrates reads that variable, `--migrate-only` included; the
+  other `SILO_BACKUP_*` variables wait for startup, so a lower
+  `SILO_BACKUP_KEEP` rotates nothing away before the migrations succeed;
 - the user store is SQLite (backups refuse there, and the upgrade that imports
   it must not be blocked; the warning tells the admin to back up the database
   and the SQLite file themselves);
@@ -700,13 +708,14 @@ users/<account id>.json           version 2 and later
 blobs/<object key>
 ```
 
-`restore-set.json` has `format: "silo-restore-set"`, `version` (5: version 2
+`restore-set.json` has `format: "silo-restore-set"`, `version` (7: version 2
 added the users section; version 3 the home sections section, template
 collections in `collections.json`, and an omitted item's `cause` and
 `error`; version 4 a home section's `web_only`; version 5 no new field, but a
 server smart collection's rules now draw from their own `library_ids`, so a
 restore pins an older set's smart collection rules to the collection's
-libraries; version 6 a home section's `title_key` and `title_args`), the source
+libraries; version 6 a home section's `title_key` and `title_args`; version 7
+a rating's `score`, 1 to 10, in place of its whole stars), the source
 server id and name, Silo version, creation time, `SECRET_KEY` check value, and
 a section index: for each section its item count, each of its files with
 size and SHA-256, and the blob keys its documents reference. Plugin archive
@@ -736,7 +745,7 @@ section. A restore never takes a key away: replacing a section with a title
 that has no key leaves the key the section already has when the title is the
 same text, because the two then show the same English, and a set written
 before version 6 cannot say whether its title was typed. The restore preview
-reports a section that differs only by its key as changed. Readers accept versions 1 to 6; version 6 is always written.
+reports a section that differs only by its key as changed. Readers accept versions 1 to 7; version 7 is always written.
 
 | Section | Holds | Blob prefixes |
 |---|---|---|
@@ -958,6 +967,20 @@ grouped by the admin page that edits each key: a key or prefix with its class.
   it and turns the service off (`email.enabled`) instead of sending this
   server's secret to the backup's address. The preview marks those settings
   `cleared`, and the secrets are expected unchanged under the settings lock.
+- A setting this server's environment sets (`internal/config/env_settings.go`)
+  is never written: the admin settings write path refuses it
+  (`managed_by_environment`, `AdminHandler.EnvironmentSetting`). A stored
+  one gets the environment's value back at the next start anyway; a
+  process one (`scanner.workers`, `matcher.workers`) is never stored, so
+  the row stays as other API servers read it. The preview compares the
+  backup with the environment's value (`RestoreTargets.EnvironmentValue`),
+  marks a difference `managed_by_environment`, and restores the rest of the
+  page. An outside-service connection the environment sets any setting of
+  (`outboundBundles`, the units the full restore carries) keeps every
+  setting of it as it is (`keepEnvironmentBundles`), so a restore never
+  pairs the environment's SMTP transport, address, or password with the
+  backup's. The server that runs the restore job plans it again with its own
+  environment, so the report says what that server did.
 - A backup this server cannot authenticate restores no setting that
   connects to an outside service (class `external_service`) and no plugin
   configuration, whatever the admin confirmed: the preview marks them
@@ -1109,12 +1132,13 @@ is ambiguous, and so is any candidate when two of the backup's sections
 share that page, type, and title, since the title then identifies neither.
 So two such sections restore as two, and a re-run finds each by its id. A matched section that differs lists what a restore replaces
 (title, position, featured, item limit, enabled, web only, configuration,
-and missing items of its managed collection), and a restore replaces its
+and missing items of its managed collection) as change codes, which clients
+show in the interface language, and a restore replaces its
 configuration as an admin save would. A restore writes `web_only` as the
 backup has it on a featured row, whether it creates or replaces the
 section, so a web-only hero row never comes back on the apps. Only a collection the section manages stands for the
 carried one: a managed section pointed at an ordinary collection since the
-backup lists "collection replaced", whatever that collection holds, and the
+backup lists `collection_replaced`, whatever that collection holds, and the
 restore points it back at its managed collection (the one still here with
 its management key, or a new one). The key's section id and each
 `library:<id>` it names are this server's (`remapManagementKey`), and a
@@ -1330,12 +1354,12 @@ nothing.
 | Data type | Owner | Tables | Merge rule |
 |---|---|---|---|
 | `watch_history` | `watchstate` | `user_watch_progress`, `user_watch_history`, `user_history_hidden_items` | progress: one upsert takes the backup's row only when it is newer (`updated_at`) than the row as committed, so a playback heartbeat landing meanwhile wins; plays: added unless the profile has a play of the item at the same second, whatever its source; a play's source is a fixed one (`playback`, `import`, …) or a watch-sync plugin's, `plugin:<installation id>:<capability id>` (`userstore.ParsePluginWatchSource`; the capability id a lowercase slug of at most 128 characters), which stays on the server that wrote it, elsewhere names the one installation here of the same plugin (from the restore set's plugins section) with that capability, and otherwise becomes `import`, as does any source the reader would refuse when it is exported; history hides: `hidden_before` and `removed_before` each keep the later cutoff, independently (a legacy NULL `removed_before` reads as its `hidden_before`), and `-infinity`/`infinity` cutoffs round-trip as those strings. Plays and hides merge under the profile's history lock (`userstore.LockImportedHistory`) |
-| `ratings` | `catalog` | `user_ratings` | only where the profile has no rating |
+| `ratings` | `catalog` | `user_ratings` | only where the profile has no rating; an entry's `score` is 1 to 10, and an entry from a restore set before version 7 or a profile export before version 2 carries whole stars as `rating`, restored at twice the stars |
 | `favorites` | `watchlist` | `user_favorites`, `user_watchlist`, `user_watchlist_titles` | added where missing; restored watchlist entries sort as local additions; a watchlisted title outside the library travels by its TMDB, IMDb, and TVDB ids and display snapshot and is attached as the watchlist adds one (`watchlist.AddSnapshotInTx`): to the title here holding its TMDB id, current or former, or a new title the watchlist's TMDB checks then refresh |
 | `collections` | `usercollections` | `user_personal_collections`, `user_personal_collection_items`, `user_personal_collection_profiles`, `user_collection_groups` | by name among the profile's own collections: none creates it (new id, uploaded poster copied under it, in its shelf group, found by slug or label or created), one gains missing items, sharing, and its group when ungrouped here, several leave it out. The smart query, display filter, and sync source are all remapped to this server's libraries (`userdata.RemapQueryLibraries`); a definition that would lose its whole library scope leaves the collection out, never widened to every library |
 | `dismissals` | `userstore/pgstore` | `user_home_item_dismissals`, `user_not_interested`, `user_dropped_series` | added where missing |
 | `preferences` | `userstore/pgstore` | `user_setting_values` (profile, client-family, library, and series scopes), `user_audio_preferences`, `user_subtitle_preferences`, `user_library_playback_preferences`, `user_series_playback_preferences`, `user_collection_sort_preferences`, the home and library page layout (`user_settings` section overrides), and the preference columns of `user_profiles` | each differing value overwritten, under the account's preference-settings lock; setting keys, scopes, and values checked against this server's settings contract, others left out. A page layout replaces the profile's overrides of that page: the library is mapped, an admin section found by id (on another server only one of the same type, as a restore creates a section with its backup id) or else by type and title with one candidate, and library ids in section configuration remapped, and so are the collections it names (`library_collection_id`, `user_collection_id`, in `config` and `user_config`) through `Target.Collection`: an admin collection as the restore's collections and sections match it (a carried or template collection, a section-managed one through its section, and on the server that wrote the backup any collection still here by its id), a personal one as the account's personal collection import matches it (on the same server the account's collection by its id, else the one native collection with its name of its creator's profile here); an override with no counterpart is left out and counted, never written with a dangling id. Overrides are JSON no schema constrains, so an export leaves out one the reader would refuse, and one naming a section or collection that is gone, rather than make the document unreadable; a comparison leaves the same ones out of the layout here |
-| `notifications` | `notifications` | `notification_preferences`, `profile_series_notification_mutes` | preferences overwritten; mutes added |
+| `notifications` | `notifications` | `notification_preferences`, `profile_series_notification_mutes` | preferences (`enabled`, `notify_next_up`) overwritten; mutes added. An older backup's `notify_favorites`, `notify_watchlist` and `notify_continue_watching` are accepted and ignored, and an export does not write them |
 
 Never carried: login sessions, API keys, push and device registrations,
 device-scoped settings, watch-provider and history-import credentials,
@@ -1345,8 +1369,8 @@ state (aggregates, recommendation caches, collages, series interest),
 onboarding tours, and beta Books data. **`TestUserTablesCoveredDB` fails for any table with a
 `user_id` or `profile_id` column that no data type or account field set
 claims and `excludedUserTables` does not list with a reason**, so a new
-per-user table must be classified. No user-scoped value carried today is
-encrypted.
+per-user table must be classified. No user-scoped value the backup carries
+is encrypted.
 
 **Lock order.** Both import entrypoints, a selective restore's account item
 and a profile import, take their locks in one order before writing any data
@@ -1445,8 +1469,8 @@ notes that a new one must be set.
 After an account's item or a profile import commits, the restore tells the
 notification system which items each profile's data now names
 (`ItemsChanged`, the interest recompute the user store's own writes
-trigger), so new-episode notifications follow the restored favorites,
-watchlist, and progress without waiting for the nightly repair.
+trigger), so new-episode notifications follow the restored progress and
+watch history without waiting for the nightly repair.
 
 **Access never loosens.** A library id with no library here is dropped from
 an account's library list and from a profile's allowed libraries; a list
@@ -1507,11 +1531,9 @@ history documents, the large ones, are decoded ahead on a bounded number of
 goroutines (`PreparePending`, a split of `Pending` into decoding and
 comparing) while the comparison queries the connection, and the per-type
 counts come from the restore-set reader's validation rather than a second
-decode. On a local seed shaped like shared dev (184 accounts, 245 profiles,
-about 445,000 plays with one account at 105,000, 350,000 progress rows, and
-29,000 hides) the comparison takes about 1.6 seconds; one INFO line
-("compared the backup's accounts with this server") records its time per
-phase and data type, and a DEBUG line names the preference columns, setting
+decode. The comparison's time grows with the size of the watch history the
+backup and this server hold. One INFO line ("compared the backup's accounts
+with this server") records its time per phase and data type, and a DEBUG line names the preference columns, setting
 keys, and kinds of preference that differ per profile (never values).
 
 A matched profile with nothing pending is `on_this_server` (`same`, not
@@ -1535,7 +1557,8 @@ the merged data on their next request.
 ### Profile export
 
 A signed-in profile downloads and imports its own data as a
-`silo-profile-export` document, version 1 (`internal/backup/profile_transfer.go`):
+`silo-profile-export` document, version 2 (`internal/backup/profile_transfer.go`;
+version 2 carries a rating's `score` in place of version 1's whole stars):
 `format`, `version`, `server_id`, `exported_at`, `profile_name`, `data` (each
 data type's document, as in a user document), and `items`. It never holds
 account fields, password or PIN hashes, access fields, or allowed libraries.
@@ -1602,9 +1625,10 @@ verify, personal collections get no sync schedule either
 (`userdata.Target.Unverified`). Once an import or restore commits, a
 profile's notification interest is rebuilt once
 (`InterestUpdater.QueueProfileRebuild`, coalesced, at most 1,000 queued)
-rather than recomputed per item, and its recommendations refreshed once. `TestImportsReadInBatchesDB` drives each list and each sort
-kind with 100,000 and 1,000 distinct entries, every reference mapping,
-and requires a bounded number of statements.
+rather than recomputed per item, and its recommendations refreshed once.
+`TestImportsReadInBatchesDB` bounds the statement count for each import
+list, with fixtures that cross the watch history write and item resolver
+lookup batch boundaries.
 
 An import writes only the profile of the session, never one the document
 names, in one transaction, with the merge rules above. It refuses a document
@@ -1772,8 +1796,10 @@ create and list, so it does not depend on nightly backups running.
 ## Full restore
 
 Full restore is the offline `silo backup restore` command, never an API
-operation. `SECRET_KEY`, `DATABASE_URL`, and bucket credentials come from the
-environment (or `-env`); nothing comes from the database being replaced.
+operation. `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL` and bucket credentials
+come from the environment (or `-env`), each from the file its `_FILE` variant
+names when that is set, as the server reads them; nothing comes from the
+database being replaced.
 `--from` is a local backup folder (the folder at a local destination, or a
 downloaded copy), or a bucket folder,
 `s3://<bucket>/<key prefix>/backups/<server-id>/<id>`, reached with
@@ -1865,9 +1891,17 @@ from it whole, so an SMTP host and password changed since the backup stay
 changed. A unit the live server lacks, and every unit of another
 deployment's backup or a separate restore, keeps the backup's other values
 with its secrets cleared and its switch off, and the command lists it for
-re-entry. `TestEveryCredentialSettingIsDecided` fails on an encrypted
-setting that is neither in a unit nor this server's own (signing keys,
-storage, Redis, the web push key pair).
+re-entry. When the AI providers' unit is cleared, the job bindings
+(`config.AIProviderBindingKeys`), which name entries of the provider list,
+go with it, and the list is left empty at the current conversion version
+(encrypted when the restore has this server's key), so the next start
+builds no provider from the backup's legacy endpoint settings or the
+Ollama default (`config.PlanAIProviderConversion`). A binding left without
+its list, as a restore with another key leaves it, clears the unit too. A
+full restore then takes the list and bindings from the live server with its
+server-specific settings (below). `TestEveryCredentialSettingIsDecided`
+fails on an encrypted setting that is neither in a unit nor this server's
+own (signing keys, storage, Redis, the web push key pair).
 
 A full restore also keeps every server-specific setting (`SettingKindServerSpecific`:
 the server's identity and public URL, storage, Redis, search, AI
@@ -1908,7 +1942,7 @@ queue search index events through triggers, as every other write does.
 
 A full restore is a rollback of the accounts, by maintainer decision: every
 account, role, and password goes back to the backup's, an admin demoted or a
-password changed since included. Keeping today's accounts beside the backup's
+password changed since included. Keeping this server's current accounts beside the backup's
 data would restore neither state, and the backup is the state the operator
 chose. Only what `secretTables` carries and the stricter switches
 (`stricterFlags`) stay the live server's. Before the swap the restore says
@@ -1970,6 +2004,21 @@ that holds a bearer secret or a public capability, each one way:
   every installation of another deployment's backup or a separate
   restore, comes back off and is listed; one only the backup has is off
   by its stricter switch. The trusted proxies are a stricter-of setting.
+- Plugin config, sign-in credentials, and deployment ownership
+  (`plugin_provision_ownership`) carry only when the live and restored
+  installation IDs and plugin IDs match. Sign-in bindings carry their
+  live callback mode and retain the stricter account creation decision.
+  Restore prepares the ownership table and callback column for an older
+  schema when it needs to carry live values. Transient provisioning
+  status is excluded from the dump and cleared during full restore.
+- A full restore that restricts a plugin release or sign-in authority
+  writes a fresh deployment-wide hold to `server_settings` before the
+  restored database takes over. A current destination hold also gets
+  a fresh ID. The declarative writer checks the hold at startup and in
+  its commit transaction. A writer that observes a hold stays held for the
+  lifetime of that process. Acknowledgment clears only the matching hold ID.
+  The [user manual](https://siloserver.org/docs/restore#resume-plugin-provisioning-after-a-restore)
+  covers recovery.
 - Custom access policies only tighten decisions, so a newer one lost to
   the backup would widen access: their documents and versions
   (`liveTables`) are taken from the live server as one unit, with the
@@ -2007,7 +2056,7 @@ fails on one in no list or in two, and on a listed name that is not a table,
 so a new table needs a decision before it ships; a layer that adds one
 classifies it.
 
-Sensitive settings (`catalog.SensitiveSettingKeys`) are classified the same
+Sensitive settings (`serversettings.SensitiveSettingKeys`) are classified the same
 way in `internal/backup/settings_secrets.go`. The signing keys Silo
 generates for the tokens it issues (`auth.jwt_secret`, which signs sessions,
 download and artwork links, backup object links, OAuth state, and cursors,

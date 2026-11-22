@@ -24,9 +24,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -1382,9 +1384,12 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 	if dl.Status == StatusPreparing {
 		return fmt.Errorf("download is preparing: %w", ErrDownloadNotActive)
 	}
+	// A HEAD probe sends no bytes, so it leaves the row alone: it neither
+	// starts a transfer nor renews or fails one.
+	probe := r.Method == http.MethodHead
 	// Atomically transition queued → downloading for original rows. Artifact
 	// (remux/transcode) rows are already ready by the time bytes are served.
-	if dl.Format == FormatOriginal && dl.Status == StatusQueued {
+	if dl.Format == FormatOriginal && dl.Status == StatusQueued && !probe {
 		if err := s.repo.TransitionStatus(ctx, dl.ID, StatusQueued, StatusDownloading, 0, nil); err != nil {
 			if errors.Is(err, ErrStatusConflict) {
 				return fmt.Errorf("download already in progress: %w", ErrDownloadNotActive)
@@ -1392,17 +1397,21 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 			slog.WarnContext(ctx, "failed to transition download to downloading", "component", "downloads", "download_id", dl.ID, "error", err)
 		}
 	}
-	if dl.Format == FormatOriginal && dl.Status == StatusDownloading {
+	if dl.Format == FormatOriginal && dl.Status == StatusDownloading && !probe {
 		if err := s.continueTransfer(ctx, dl.ID); err != nil {
 			return err
 		}
 	}
 
-	stopRenewing := s.renewTransferLease(ctx, dl)
-	err = s.serveDownloadBytes(ctx, w, r, dl, userID, filter)
+	stopRenewing := func() {}
+	if !probe {
+		stopRenewing = s.renewTransferLease(ctx, dl)
+	}
+	response := &observedDownloadResponse{ResponseWriter: w}
+	err = s.serveDownloadBytes(ctx, response, r, dl, userID, filter)
 	stopRenewing()
 	if err != nil {
-		if dl.Format == FormatOriginal {
+		if dl.Format == FormatOriginal && !probe {
 			failureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			updateErr := s.repo.TransitionStatus(failureCtx, dl.ID, StatusDownloading, StatusFailed, 0, nil)
 			cancel()
@@ -1412,9 +1421,19 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 		}
 		return err
 	}
+	// A HEAD, a partial range or a bodyless answer (304, 416) proves nothing
+	// was downloaded; the row stays as it is until a response delivers the
+	// whole file.
+	if !response.deliveredWholeFile(r) {
+		return nil
+	}
 
+	// The client may hang up as soon as it has the last byte; the file was
+	// still delivered, so the row is finalized after the request ends.
+	completionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	now := time.Now()
-	if err := s.repo.UpdateStatus(ctx, dl.ID, StatusCompleted, dl.FileSize, &now); err != nil {
+	if err := s.repo.UpdateStatus(completionCtx, dl.ID, StatusCompleted, dl.FileSize, &now); err != nil {
 		slog.ErrorContext(ctx, "failed to mark download as completed", "component", "downloads", "download_id", dl.ID, "error", err)
 	}
 	return nil
@@ -1492,7 +1511,29 @@ func (s *Service) ResolveManagedFile(ctx context.Context, userID int, profileID,
 		return nil, err
 	}
 	proxyEligible := proxyDeliveryAllowed(cfg)
-	return s.resolveDownloadBytesTarget(ctx, dl, filter, proxyEligible, proxyEligible)
+	target, err := s.resolveDownloadBytesTarget(ctx, dl, filter, proxyEligible, proxyEligible)
+	if err != nil {
+		return nil, err
+	}
+	// Only a request that will be served counts as seeing the device.
+	s.recordFileRequestAddress(ctx, dl)
+	return target, nil
+}
+
+// recordFileRequestAddress records where an authorized file request came
+// from as the entry's last_client_ip. Every delivery path authorizes here on
+// the API server, including the one that redirects the bytes to a node, so the
+// address is the device's as the trusted proxies resolve it, never a node's.
+// It writes only when staleLastClientIP says so: range requests from the
+// same address cost no write. A failed write never fails the transfer.
+func (s *Service) recordFileRequestAddress(ctx context.Context, dl *Download) {
+	ip := clientAddress(ctx)
+	if !staleLastClientIP(dl, ip, time.Now()) {
+		return
+	}
+	if err := s.repo.RecordLastClientIP(ctx, dl.ID, ip); err != nil && ctx.Err() == nil {
+		slog.WarnContext(ctx, "failed to record a download's client address", "component", "downloads", "download_id", dl.ID, "error", err)
+	}
 }
 
 // PatchStatus lets a client confirm a managed entry's local state
@@ -1825,6 +1866,25 @@ func (w *observedDownloadResponse) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// deliveredWholeFile reports whether a GET's response carried the entire file:
+// a complete 200 body, or a 206 whose single range spans every byte.
+func (w *observedDownloadResponse) deliveredWholeFile(r *http.Request) bool {
+	if r.Method != http.MethodGet || w.err != nil {
+		return false
+	}
+	switch w.status {
+	case http.StatusOK:
+		return w.expected < 0 || w.written == w.expected
+	case http.StatusPartialContent:
+		var first, last, size int64
+		if _, err := fmt.Sscanf(w.Header().Get("Content-Range"), "bytes %d-%d/%d", &first, &last, &size); err != nil {
+			return false
+		}
+		return first == 0 && last == size-1 && w.written == size
+	}
+	return false
+}
+
 // attachmentDisposition names the saved file in the header form proxy nodes
 // use. A non-ASCII name goes out in the RFC 2231 filename* form rather than
 // as raw UTF-8 in filename, which clients may misread.
@@ -1839,21 +1899,31 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 	if target.OriginArtifactID == "" {
 		return s.serveLocalFile(ctx, w, r, target.Path, s.AttachmentName(ctx, target), userID)
 	}
-	secret := ""
-	if s.artifacts != nil && s.artifacts.liveCfg != nil {
-		if cfg := s.artifacts.liveCfg(); cfg != nil {
-			secret = strings.TrimSpace(cfg.Auth.JWTSecret)
-		}
+	var keys nodeauth.Keyring
+	if s.artifacts != nil {
+		keys = s.artifacts.nodeKeys
 	}
-	if secret == "" {
+	if keys == nil {
 		return errors.New("remote artifact credentials unavailable")
 	}
 	client := downloadprepare.HTTPPreparer{}
-	resp, err := client.Open(ctx, target.OriginNodeURL, secret, target.OriginArtifactID, r.Method, r.Header)
+	resp, err := client.Open(ctx, target.OriginNodeURL, keys, target.OriginArtifactID, r.Method, r.Header)
 	if err != nil {
+		if transcodeproxy.NodeUnsignable(err) {
+			// The node that holds the artifact has no key, or is no longer
+			// registered at its URL: it is unavailable, not this server.
+			transcodeproxy.WarnNodeUnsignable(ctx, "downloads", target.OriginNodeURL, err)
+			return fmt.Errorf("%w: %w", ErrAssetUnavailable, err)
+		}
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
+		// The client authenticated with this server; the node refused this
+		// server's signature.
+		transcodeproxy.WarnNodeRefusedRelay(ctx, "downloads", target.OriginNodeURL, resp.StatusCode, keys)
+		return fmt.Errorf("%w: remote artifact node refused the relay", ErrAssetUnavailable)
+	}
 	if resp.StatusCode == http.StatusNotFound {
 		artifact := &Artifact{
 			ID:               target.ArtifactID,

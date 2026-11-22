@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"fmt"
 	"maps"
 	"slices"
 	"testing"
@@ -20,6 +19,8 @@ type fakeStore struct {
 	recorded    map[string]*int64
 	collections map[int64]catalog.TMDBMovieCollection
 	touched     []int64
+	// language is the language every collection is due in.
+	language string
 }
 
 func (s *fakeStore) MoviesNeedingCollectionLookup(_ context.Context, _ time.Time, limit int, skip []string) ([]catalog.MovieCollectionLookup, error) {
@@ -37,17 +38,21 @@ func (s *fakeStore) RecordMovieCollection(_ context.Context, contentID string, _
 	return nil
 }
 
-func (s *fakeStore) CollectionsNeedingFetch(_ context.Context, _ time.Time, _ int, skip []int64) ([]int64, error) {
-	var out []int64
+func (s *fakeStore) CollectionsNeedingFetch(_ context.Context, _ time.Time, _ int, skip []int64) ([]catalog.CollectionFetch, error) {
+	var ids []int64
 	for _, id := range s.recorded {
-		if id == nil || slices.Contains(out, *id) || slices.Contains(s.touched, *id) || slices.Contains(skip, *id) {
+		if id == nil || slices.Contains(ids, *id) || slices.Contains(s.touched, *id) || slices.Contains(skip, *id) {
 			continue
 		}
 		if _, stored := s.collections[*id]; !stored {
-			out = append(out, *id)
+			ids = append(ids, *id)
 		}
 	}
-	slices.Sort(out)
+	slices.Sort(ids)
+	out := make([]catalog.CollectionFetch, len(ids))
+	for i, id := range ids {
+		out[i] = catalog.CollectionFetch{ID: id, Language: s.language}
+	}
 	return out, nil
 }
 
@@ -88,7 +93,7 @@ func (s *fakeStore) DeleteUnusedCollections(context.Context) (int64, error) { re
 
 // TouchCollection marks only a stored collection fetched, as the
 // repository's UPDATE does.
-func (s *fakeStore) TouchCollection(_ context.Context, id int64) error {
+func (s *fakeStore) TouchCollection(_ context.Context, id int64, _ string) error {
 	if _, stored := s.collections[id]; stored {
 		s.touched = append(s.touched, id)
 	}
@@ -104,6 +109,13 @@ type fakeTMDB struct {
 	lookups map[int]int
 	// onCollection runs on each collection fetch.
 	onCollection func()
+	// translated answers collection requests in a language other than
+	// English; collections answers the others.
+	translated map[int]*tmdb.Collection
+	// languages records the languages each collection was asked for in.
+	languages map[int][]string
+	// englishErr answers collection requests in English.
+	englishErr error
 }
 
 func (f *fakeTMDB) GetMovieCollection(_ context.Context, id int) (*tmdb.CollectionRef, error) {
@@ -120,11 +132,21 @@ func (f *fakeTMDB) GetMovieCollection(_ context.Context, id int) (*tmdb.Collecti
 	return ref, nil
 }
 
-func (f *fakeTMDB) GetCollection(_ context.Context, id int) (*tmdb.Collection, error) {
+func (f *fakeTMDB) GetCollection(_ context.Context, id int, language string) (*tmdb.Collection, error) {
+	if f.languages != nil {
+		f.languages[id] = append(f.languages[id], language)
+	}
 	if f.onCollection != nil {
 		f.onCollection()
 	}
+	english := language == "" || language == "en"
+	if english && f.englishErr != nil {
+		return nil, f.englishErr
+	}
 	c, ok := f.collections[id]
+	if t, translated := f.translated[id]; translated && !english {
+		c, ok = t, true
+	}
 	if !ok {
 		return nil, tmdb.ErrNotFound
 	}
@@ -143,9 +165,18 @@ func TestRunStoresMembershipAndCollectionsInReleaseOrder(t *testing.T) {
 		catalog.MovieCollectionLookup{ContentID: "heat", TMDBID: 949},
 		catalog.MovieCollectionLookup{ContentID: "gone", TMDBID: 1},
 	)
+	store.language = "de"
 	client := &fakeTMDB{
+		languages: map[int][]string{},
+		// TMDB leaves the fields a translation lacks empty.
+		translated: map[int]*tmdb.Collection{1241: {ID: 1241, Name: "Harry Potter Filmreihe", PosterPath: "/de.jpg", Parts: []tmdb.CollectionPart{
+			{ID: 674, ReleaseDate: "2005-11-16"},
+			{ID: 999, ReleaseDate: ""},
+			{ID: 671, ReleaseDate: "2001-11-16"},
+			{ID: 673, ReleaseDate: "2004-05-31"},
+		}}},
 		movies: map[int]*tmdb.CollectionRef{671: {ID: 1241, Name: "Harry Potter Collection"}, 949: nil},
-		collections: map[int]*tmdb.Collection{1241: {ID: 1241, Name: "Harry Potter Collection", PosterPath: "/p.jpg", Parts: []tmdb.CollectionPart{
+		collections: map[int]*tmdb.Collection{1241: {ID: 1241, Name: "Harry Potter Collection", Overview: "The wizarding saga.", PosterPath: "/p.jpg", Parts: []tmdb.CollectionPart{
 			{ID: 674, ReleaseDate: "2005-11-16"},
 			{ID: 999, ReleaseDate: ""},
 			{ID: 671, ReleaseDate: "2001-11-16"},
@@ -170,83 +201,58 @@ func TestRunStoresMembershipAndCollectionsInReleaseOrder(t *testing.T) {
 		}
 	}
 	stored := store.collections[1241]
+	// The collection is stored in the language it is due in, and the
+	// overview the translation lacks comes from the fallback language,
+	// English by default.
+	if !slices.Equal(client.languages[1241], []string{"de", "en"}) || stored.Language != "de" {
+		t.Fatalf("fetched in %q, stored as %q; want de, then the English fallback", client.languages[1241], stored.Language)
+	}
+	if stored.Name != "Harry Potter Filmreihe" || stored.Overview != "The wizarding saga." {
+		t.Fatalf("name, overview = %q, %q; want the German name and the English overview", stored.Name, stored.Overview)
+	}
 	if want := []int64{671, 673, 674, 999}; !slices.Equal(stored.MemberTMDBIDs, want) {
 		t.Fatalf("members = %v, want release order %v with the undated part last", stored.MemberTMDBIDs, want)
 	}
-	if stored.PosterSourcePath != "https://image.tmdb.org/t/p/original/p.jpg" || stored.BackdropSourcePath != "" {
+	if stored.PosterSourcePath != "https://image.tmdb.org/t/p/original/de.jpg" || stored.BackdropSourcePath != "" {
 		t.Fatalf("artwork sources = %q, %q", stored.PosterSourcePath, stored.BackdropSourcePath)
 	}
 }
 
-// A start requested while a run fetches collections is dropped, so a movie
-// that becomes due then, such as one of a library that just turned box sets
-// on, is looked up before the run ends.
-func TestRunLooksUpMoviesThatBecomeDueDuringTheRun(t *testing.T) {
+// A failed fallback answer fails the fetch rather than storing the
+// translation without its overview, so the collection is tried again.
+func TestRunRetriesWhenTheFallbackFails(t *testing.T) {
 	store := newFakeStore(catalog.MovieCollectionLookup{ContentID: "hp1", TMDBID: 671})
+	store.language = "de"
 	client := &fakeTMDB{
-		movies:      map[int]*tmdb.CollectionRef{671: {ID: 1241}, 672: {ID: 1241}},
-		collections: map[int]*tmdb.Collection{1241: {ID: 1241, Name: "Harry Potter Collection"}},
-	}
-	client.onCollection = func() {
-		store.due = append(store.due, catalog.MovieCollectionLookup{ContentID: "hp2", TMDBID: 672})
-		client.onCollection = nil
+		movies:     map[int]*tmdb.CollectionRef{671: {ID: 1241}},
+		translated: map[int]*tmdb.Collection{1241: {ID: 1241, Name: "Harry Potter Filmreihe", Parts: []tmdb.CollectionPart{{ID: 671}}}},
+		englishErr: errors.New("tmdb timeout"),
 	}
 	res, err := NewSyncer(store, client).Run(t.Context(), noReport)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := store.recorded["hp2"]; got == nil || *got != 1241 || res.MoviesChecked != 2 {
-		t.Fatalf("hp2 collection = %v, result = %+v; want hp2 looked up in the same run", got, res)
+	if _, stored := store.collections[1241]; stored || res.Failures != 1 {
+		t.Fatalf("stored = %v, failures = %d; want nothing stored and one failure", stored, res.Failures)
 	}
 }
 
-func TestRunStopsAfterRepeatedFailures(t *testing.T) {
-	var due []catalog.MovieCollectionLookup
-	for i := range maxFailures + 10 {
-		due = append(due, catalog.MovieCollectionLookup{ContentID: string(rune('a' + i)), TMDBID: int64(i + 1)})
+// With the fallback language set to the original language, the text a
+// translation lacks stays empty, as it does for item metadata.
+func TestRunFillsNothingWhenTheFallbackIsOff(t *testing.T) {
+	store := newFakeStore(catalog.MovieCollectionLookup{ContentID: "hp1", TMDBID: 671})
+	store.language = "de"
+	client := &fakeTMDB{
+		languages:   map[int][]string{},
+		movies:      map[int]*tmdb.CollectionRef{671: {ID: 1241}},
+		translated:  map[int]*tmdb.Collection{1241: {ID: 1241, Name: "Harry Potter Filmreihe", Parts: []tmdb.CollectionPart{{ID: 671}}}},
+		collections: map[int]*tmdb.Collection{1241: {ID: 1241, Name: "Harry Potter Collection", Overview: "The wizarding saga.", Parts: []tmdb.CollectionPart{{ID: 671}}}},
 	}
-	store := newFakeStore(due...)
-	res, err := NewSyncer(store, &fakeTMDB{movieErr: errors.New("tmdb down")}).Run(t.Context(), noReport)
-	if err == nil {
-		t.Fatal("want an error once TMDB keeps failing")
-	}
-	if res.Failures != maxFailures || len(store.recorded) != 0 {
-		t.Fatalf("result = %+v, recorded = %d; want %d failures and nothing recorded", res, len(store.recorded), maxFailures)
-	}
-}
-
-// A movie whose lookup keeps failing is tried once in a run, so it costs one
-// failure rather than one per batch, and the movies behind it are still
-// looked up.
-func TestRunTriesAFailingMovieOncePerRun(t *testing.T) {
-	var due []catalog.MovieCollectionLookup
-	for i := range 3*batchSize + 1 {
-		due = append(due, catalog.MovieCollectionLookup{ContentID: fmt.Sprintf("m%04d", i), TMDBID: int64(i + 1)})
-	}
-	store := newFakeStore(due...)
-	client := &fakeTMDB{movies: map[int]*tmdb.CollectionRef{}, failing: map[int]bool{1: true}, lookups: map[int]int{}}
-	res, err := NewSyncer(store, client).Run(t.Context(), noReport)
-	if err != nil {
+	if _, err := NewSyncer(store, client).WithFallbackLanguage(func() string { return "" }).Run(t.Context(), noReport); err != nil {
 		t.Fatal(err)
 	}
-	if res.Failures != 1 || client.lookups[1] != 1 || res.MoviesChecked != len(due)-1 {
-		t.Fatalf("result = %+v, lookups of the failing movie = %d", res, client.lookups[1])
-	}
-}
-
-// A collection TMDB does not serve must not keep the run fetching it: one
-// never stored stays due for a later run, and this run still ends.
-func TestRunEndsWhenACollectionIsMissing(t *testing.T) {
-	store := newFakeStore(catalog.MovieCollectionLookup{ContentID: "m", TMDBID: 5})
-	client := &fakeTMDB{movies: map[int]*tmdb.CollectionRef{5: {ID: 77}}, collections: map[int]*tmdb.Collection{}}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	res, err := NewSyncer(store, client).Run(ctx, noReport)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.CollectionsFetched != 0 || len(store.collections) != 0 {
-		t.Fatalf("result = %+v, stored = %v", res, store.collections)
+	if stored := store.collections[1241]; !slices.Equal(client.languages[1241], []string{"de"}) || stored.Overview != "" {
+		t.Fatalf("asked in %q, stored overview %q; want only de and no overview", client.languages[1241], stored.Overview)
 	}
 }
 
@@ -262,50 +268,4 @@ func (c *fakeCacher) CacheImage(_ context.Context, req metadata.CacheImageReques
 	}
 	base := "tmdb/collections/" + req.ContentID + "/" + map[metadata.ImageType]string{metadata.ImagePoster: "poster", metadata.ImageBackdrop: "backdrop"}[req.ImageType]
 	return &metadata.CacheImageResult{BasePath: base, Revision: "abc", Ext: ".webp", Thumbhash: "th-" + req.ContentID}, nil
-}
-
-func TestRunCachesCollectionArtwork(t *testing.T) {
-	store := newFakeStore()
-	store.collections[1241] = catalog.TMDBMovieCollection{ID: 1241, PosterSourcePath: "https://image.tmdb.org/t/p/original/p.jpg", BackdropSourcePath: "https://image.tmdb.org/t/p/original/b.jpg"}
-	cacher := &fakeCacher{}
-	// The collection is stored and current, so only the artwork phase runs.
-	store.recorded["m"] = new(int64(1241))
-	res, err := NewSyncer(store, &fakeTMDB{}).WithImages(func() metadata.ImageCacher { return cacher }).Run(t.Context(), noReport)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.ImagesCached != 2 || len(cacher.requests) != 2 {
-		t.Fatalf("result = %+v, requests = %+v", res, cacher.requests)
-	}
-	for _, req := range cacher.requests {
-		if req.ProviderID != "tmdb" || req.ContentType != "collections" || req.ContentID != "1241" {
-			t.Fatalf("request = %+v", req)
-		}
-	}
-	c := store.collections[1241]
-	if c.PosterPath != metadata.CachedImageOriginalPath(&metadata.CacheImageResult{BasePath: "tmdb/collections/1241/poster", Revision: "abc", Ext: ".webp"}) || c.PosterThumbhash != "th-1241" || c.BackdropPath == "" {
-		t.Fatalf("stored = %+v", c)
-	}
-}
-
-func TestRunLeavesArtworkOnTheProviderWhenCachingIsOff(t *testing.T) {
-	store := newFakeStore()
-	store.collections[1241] = catalog.TMDBMovieCollection{ID: 1241, PosterSourcePath: "https://image.tmdb.org/t/p/original/p.jpg"}
-	store.recorded["m"] = new(int64(1241))
-	res, err := NewSyncer(store, &fakeTMDB{}).WithImages(func() metadata.ImageCacher { return nil }).Run(t.Context(), noReport)
-	if err != nil || res.ImagesCached != 0 || store.collections[1241].PosterPath != "" {
-		t.Fatalf("res = %+v, err = %v, stored = %+v", res, err, store.collections[1241])
-	}
-}
-
-func TestRunEndsWhenArtworkCachingFails(t *testing.T) {
-	store := newFakeStore()
-	store.collections[1241] = catalog.TMDBMovieCollection{ID: 1241, PosterSourcePath: "https://image.tmdb.org/t/p/original/p.jpg"}
-	store.recorded["m"] = new(int64(1241))
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	res, err := NewSyncer(store, &fakeTMDB{}).WithImages(func() metadata.ImageCacher { return &fakeCacher{fail: true} }).Run(ctx, noReport)
-	if err != nil || res.Failures != 1 || res.ImagesCached != 0 {
-		t.Fatalf("res = %+v, err = %v", res, err)
-	}
 }

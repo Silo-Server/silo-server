@@ -180,6 +180,24 @@ func TestHandlerRedactsSecretAssignmentsInErrorText(t *testing.T) {
 	}
 }
 
+// A remote address is recorded as its IP: the client_ip column is an inet, and
+// a value it refuses fails the insert of the whole batch the entry is in.
+func TestHandlerRecordsARemoteAddressAsItsIP(t *testing.T) {
+	for attr, want := range map[string]string{
+		"192.0.2.7:51234":    "192.0.2.7",
+		"[2001:db8::7]:8080": "2001:db8::7",
+		"192.0.2.7":          "192.0.2.7",
+		"not an address":     "",
+	} {
+		entry := logEntry(t, func(logger *slog.Logger) {
+			logger.Warn("refused a request", "remote_addr", attr)
+		})
+		if entry.ClientIP != want {
+			t.Errorf("remote_addr %q recorded as client_ip %q, want %q", attr, entry.ClientIP, want)
+		}
+	}
+}
+
 // logEntry logs through a fresh handler and returns the entry it recorded.
 func logEntry(t *testing.T, log func(*slog.Logger)) Entry {
 	t.Helper()

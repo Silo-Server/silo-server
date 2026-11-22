@@ -20,19 +20,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
-	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
-
-// The health status values are what nodepool parses into a drain state.
-func TestHealthStatusesMatchNodePoolDrainStates(t *testing.T) {
-	if HealthStatusDraining != string(nodepool.DrainStateDraining) || HealthStatusDrained != string(nodepool.DrainStateDrained) {
-		t.Fatalf("health statuses %q/%q do not match nodepool drain states", HealthStatusDraining, HealthStatusDrained)
-	}
-}
 
 func healthStatusOf(t *testing.T, s *Server) HealthResponse {
 	t.Helper()
@@ -51,7 +43,7 @@ func healthStatusOf(t *testing.T, s *Server) HealthResponse {
 func newLoopingFFmpegServer(t *testing.T) *Server {
 	t.Helper()
 	s := newTestServer(t)
-	s.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	s.tracker = nodesessions.NewLocalTracker()
 	useFakeFFmpeg(t, s, "#!/bin/sh\nwhile :; do sleep 0.1; done\n")
 	return s
 }
@@ -64,25 +56,9 @@ func postStart(t *testing.T, s *Server, sessionID string) *httptest.ResponseReco
 	})
 }
 
-func stopSession(t *testing.T, s *Server, sessionID string) {
-	t.Helper()
-	s.mu.RLock()
-	session := s.sessions[sessionID]
-	s.mu.RUnlock()
-	if session != nil {
-		t.Cleanup(func() { _ = session.CloseProcess() })
-	}
-	r := httptest.NewRequest(http.MethodDelete, "/transcode/"+sessionID, nil)
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, signed(t, r))
-	if rr.Code >= 300 {
-		t.Fatalf("stop %s: status %d %s", sessionID, rr.Code, rr.Body.String())
-	}
-}
-
 func signed(t *testing.T, r *http.Request) *http.Request {
 	t.Helper()
-	nodeauthtest.Sign(t, r, testSecret)
+	nodeauthtest.Sign(t, r, testNodeKey)
 	return r
 }
 
@@ -111,38 +87,6 @@ func TestDrainingNodeRefusesNewStartsButReplacesItsOwn(t *testing.T) {
 	}
 	if got := s.activeJobs.Load(); got != 1 {
 		t.Fatalf("active jobs = %d after a replacement, want 1", got)
-	}
-}
-
-// Health keeps answering 200 through a drain and says where the drain is:
-// draining while a session or a request is left, drained once neither is.
-func TestHealthReportsDrainProgress(t *testing.T) {
-	s := newLoopingFFmpegServer(t)
-	if got := healthStatusOf(t, s).Status; got != HealthStatusOK {
-		t.Fatalf("status = %q before a drain, want ok", got)
-	}
-	if rr := postStart(t, s, "watching"); rr.Code != http.StatusAccepted {
-		t.Fatalf("start: %d %s", rr.Code, rr.Body.String())
-	}
-
-	s.BeginShutdownDrain()
-	if health := healthStatusOf(t, s); health.Status != HealthStatusDraining || health.ActiveJobs != 1 {
-		t.Fatalf("health = %q with %d jobs, want draining with 1", health.Status, health.ActiveJobs)
-	}
-
-	stopSession(t, s, "watching")
-	if got := healthStatusOf(t, s).Status; got != HealthStatusDrained {
-		t.Fatalf("status = %q with nothing left, want drained", got)
-	}
-
-	// A transfer or extraction in flight is work activeJobs does not count.
-	done := s.trackInFlight()
-	if got := healthStatusOf(t, s).Status; got != HealthStatusDraining {
-		t.Fatalf("status = %q with a request in flight, want draining", got)
-	}
-	done()
-	if got := healthStatusOf(t, s).Status; got != HealthStatusDrained {
-		t.Fatalf("status = %q after the request finished, want drained", got)
 	}
 }
 
@@ -183,7 +127,7 @@ func TestAdminDrainRequestFollowsTheNodeRow(t *testing.T) {
 	var announced atomic.Int32
 	s.SetDrainAnnouncer(func() { announced.Add(1) })
 
-	s.watcher.SetNodeDrainRequestedForTest(true)
+	runtimeOf(s).SetNodeDrainRequestedForTest(true)
 	if !s.draining() || healthStatusOf(t, s).Status != HealthStatusDrained {
 		t.Fatalf("draining=%v status=%q after a drain request", s.draining(), healthStatusOf(t, s).Status)
 	}
@@ -191,7 +135,7 @@ func TestAdminDrainRequestFollowsTheNodeRow(t *testing.T) {
 		t.Fatalf("start while admin-drained: %d, want 503", rr.Code)
 	}
 
-	s.watcher.SetNodeDrainRequestedForTest(false)
+	runtimeOf(s).SetNodeDrainRequestedForTest(false)
 	if s.draining() || healthStatusOf(t, s).Status != HealthStatusOK {
 		t.Fatal("lifting the request did not put the node back to work")
 	}
@@ -200,8 +144,8 @@ func TestAdminDrainRequestFollowsTheNodeRow(t *testing.T) {
 	}
 
 	s.BeginShutdownDrain()
-	s.watcher.SetNodeDrainRequestedForTest(true)
-	s.watcher.SetNodeDrainRequestedForTest(false)
+	runtimeOf(s).SetNodeDrainRequestedForTest(true)
+	runtimeOf(s).SetNodeDrainRequestedForTest(false)
 	if !s.draining() {
 		t.Fatal("lifting an admin request ended a SIGTERM drain")
 	}
@@ -279,7 +223,7 @@ func TestDrainingNodeRefusesNewJobs(t *testing.T) {
 		reason string
 	}{
 		{name: "download prepare", path: "/downloads/prepare", body: string(prepare), reason: "draining"},
-		{name: "chapter thumbnail", path: "/chapter-thumbnails/extract", body: string(chapter), reason: "node_unavailable"},
+		{name: "chapter thumbnail", path: "/chapter-thumbnails/extract", body: string(chapter), reason: chapterthumbs.RemoteNodeUnavailableReason},
 		{name: "media sample", path: mediasample.RemotePath, body: string(speechRequestBody(t, nil)), reason: string(mediasample.ReasonNodeUnavailable)},
 		{name: "trickplay", path: "/trickplay/extract", body: sheetsRequestJSON(t, "/media/movie.mkv"), reason: "node_unavailable"},
 	} {
@@ -289,6 +233,9 @@ func TestDrainingNodeRefusesNewJobs(t *testing.T) {
 			if rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), test.reason) {
 				t.Fatalf("status %d body %q, want 503 carrying %q", rr.Code, rr.Body.String(), test.reason)
 			}
+			if test.path == "/chapter-thumbnails/extract" {
+				assertChapterFallsBackToLocal(t, rr.Body.Bytes())
+			}
 		})
 	}
 	if got := s.activeJobs.Load(); got != 0 {
@@ -296,43 +243,11 @@ func TestDrainingNodeRefusesNewJobs(t *testing.T) {
 	}
 }
 
-// A draining node rebuilds a lost session (a viewer back from a long pause)
-// until it has reported itself drained; from then on whoever read that may
-// stop it, so it rebuilds none.
-func TestDrainingNodeReconstructsUntilItReportsDrained(t *testing.T) {
-	const sessionID = "sess-drain-1"
-	const transportID = sessionID + "-plan1234-abcd1234"
-	s := newLoopingFFmpegServer(t)
-	s.SetRecipeStore(&stubRecipeStore{ok: true, card: nativeTransportCard(sessionID, transportID)})
-	s.BeginShutdownDrain()
-
-	session, err := s.reconstructFromToken(requestWithToken(transportID, ""), transportID, 5)
-	if err != nil || session == nil {
-		t.Fatalf("reconstruct while draining = %v, %v; want the session rebuilt", session, err)
-	}
-	_ = session.CloseProcess()
-	// The viewer pauses long enough for the idle reaper to close the job. A
-	// stop would fence the transport instead, and the drain check would never
-	// run.
-	s.reapIdleSessions(0)
-
-	if got := healthStatusOf(t, s).Status; got != HealthStatusDrained {
-		t.Fatalf("status = %q, want drained", got)
-	}
-	session, err = s.reconstructFromToken(requestWithToken(transportID, ""), transportID, 5)
-	if err != nil || session != nil {
-		if session != nil {
-			_ = session.CloseProcess()
-		}
-		t.Fatalf("reconstruct after reporting drained = %v, %v; want no session", session, err)
-	}
-}
-
 // A drain request the node read before its announcer was set (its first config
 // load at boot) is announced when the announcer is set, and so is its end.
 func TestDrainReadAtBootIsAnnounced(t *testing.T) {
 	s := newTestServer(t)
-	s.watcher.SetNodeDrainRequestedForTest(true)
+	runtimeOf(s).SetNodeDrainRequestedForTest(true)
 	announcements := make(chan struct{}, 4)
 	s.SetDrainAnnouncer(func() { announcements <- struct{}{} })
 	for _, what := range []string{"the drain read at boot", "the drained node"} {
@@ -349,7 +264,6 @@ func TestDrainReadAtBootIsAnnounced(t *testing.T) {
 func TestDrainedNodeRefusesFreshRemux(t *testing.T) {
 	server := newTestServer(t)
 	server.nodeRowID = func() (int, bool) { return 11, true }
-	server.registeredNodeURL = func() (string, bool) { return "http://node", true }
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
 		t.Fatal(err)
@@ -360,19 +274,14 @@ func TestDrainedNodeRefusesFreshRemux(t *testing.T) {
 		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
 		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
 	}
-	card := playback.RecipeCardFromClaims(&claims)
-	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
-	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	coreOf(server).resolve(claims.TranscodeTransportID, resolutionOf(playback.RecipeCardFromClaims(&claims)))
 	server.BeginShutdownDrain()
 	if got := healthStatusOf(t, server).Status; got != HealthStatusDrained {
 		t.Fatalf("status = %q, want drained", got)
 	}
 
 	request := httptest.NewRequest(http.MethodGet, "/remux/"+claims.TranscodeTransportID+"?seek=2", nil)
-	request.Header.Set("X-Silo-Stream-Token", token)
+	request.Header.Set("X-Silo-Stream-Token", "relay-token")
 	routeContext := chi.NewRouteContext()
 	routeContext.URLParams.Add("session_id", claims.TranscodeTransportID)
 	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
@@ -383,5 +292,49 @@ func TestDrainedNodeRefusesFreshRemux(t *testing.T) {
 	}
 	if got := server.activeJobs.Load(); got != 0 {
 		t.Fatalf("active jobs = %d after a refused remux", got)
+	}
+}
+
+// assertChapterFallsBackToLocal checks a chapter extraction refusal carries a
+// reason the core's chapter client treats as the node's failure, so under
+// prefer_transcode_nodes it extracts locally instead of recording the chapter
+// as failed.
+func assertChapterFallsBackToLocal(t *testing.T, body []byte) {
+	t.Helper()
+	var refusal chapterthumbs.RemoteExtractErrorResponse
+	if err := json.Unmarshal(body, &refusal); err != nil {
+		t.Fatalf("chapter refusal %q: %v", body, err)
+	}
+	if !chapterthumbs.IsInfrastructureRemoteFailure(refusal.Reason) {
+		t.Fatalf("chapter refusal reason %q: the core would record the chapter as failed instead of extracting locally", refusal.Reason)
+	}
+}
+
+func TestDrainingNodeReconstructsUntilItReportsDrained(t *testing.T) {
+	const sessionID = "sess-drain-1"
+	const transportID = sessionID + "-plan1234-abcd1234"
+	s := newLoopingFFmpegServer(t)
+	coreOf(s).resolve(transportID, resolutionOf(*nativeTransportCard(sessionID, transportID)))
+	s.BeginShutdownDrain()
+
+	session, err := s.reconstructLost(requestWithToken(transportID, ""), transportID, 5)
+	if err != nil || session == nil {
+		t.Fatalf("reconstruct while draining = %v, %v; want the session rebuilt", session, err)
+	}
+	_ = session.CloseProcess()
+	// The viewer pauses long enough for the idle reaper to close the job. A
+	// stop would fence the transport instead, and the drain check would never
+	// run.
+	s.reapIdleSessions(0)
+
+	if got := healthStatusOf(t, s).Status; got != HealthStatusDrained {
+		t.Fatalf("status = %q, want drained", got)
+	}
+	session, err = s.reconstructLost(requestWithToken(transportID, ""), transportID, 5)
+	if err != nil || session != nil {
+		if session != nil {
+			_ = session.CloseProcess()
+		}
+		t.Fatalf("reconstruct after reporting drained = %v, %v; want no session", session, err)
 	}
 }

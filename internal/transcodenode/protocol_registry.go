@@ -30,7 +30,16 @@ func ProtocolReads(schemas huma.Registry) []workerprotocol.Operation {
 		workerprotocol.JSONRead[playback.HWAccelInfo](schemas, "transcode_node", "/hw-capabilities", "(*internal/transcodenode.Server).handleHWCapabilities", 401, 503),
 		workerprotocol.JSONRead[statusResponse](schemas, "transcode_node", "/status", "(*internal/transcodenode.Server).handleStatus", 401, 503),
 		artifactListOperation(schemas),
+		outputBoundOperation(schemas),
 	}
+}
+
+func outputBoundOperation(schemas huma.Registry) workerprotocol.Operation {
+	const pathParameter = "path"
+	op := workerprotocol.JSONRead[outputBoundResponse](schemas, "transcode_node", "/transcode/{session_id}/output-bound", "(*internal/transcodenode.Server).handleOutputBound", 401, 404)
+	op.Description = "Say whether the client of a transport this node runs is waiting on the encoder: output_bound is true while a restart replaces FFmpeg, or while FFmpeg runs (or has failed) and the client has fetched every produced segment but at most the newest. A progressive remux answers false. A transport the node does not run is 404; the read reconstructs nothing and does not count as client activity. The core calls it before it learns a bandwidth limit from a reported stall."
+	op.Parameters = []*huma.Param{{Name: "session_id", In: pathParameter, Required: true, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Transport identifier."}}
+	return op
 }
 
 func artifactListOperation(schemas huma.Registry) workerprotocol.Operation {
@@ -46,8 +55,8 @@ func ProtocolControls(schemas huma.Registry) []workerprotocol.Operation {
 	reprobe.RetrySafety = "non_retryable"
 	reprobe.Description = "Rebuild the capability snapshot. Active jobs or probes refuse with 409; an incomplete probe retains the prior published hash. No durable replay receipt."
 	return []workerprotocol.Operation{
-		workerprotocol.EmptyCommand("transcode_node", "/admin/force-reload", "(*internal/transcodenode.Server).handleForceReload", "Reload configuration and tear down active sessions and delivery authority. Failure can follow partial effects.", 503),
-		workerprotocol.EmptyCommand("transcode_node", "/admin/reload-config", "(*internal/transcodenode.Server).handleReloadConfig", "Reload configuration without tearing down active sessions. No durable replay receipt.", 503),
+		workerprotocol.EmptyCommand("transcode_node", "/admin/force-reload", "(*internal/transcodenode.Server).handleForceReload", "Reread configuration from the core, ask the core to revoke this node's recipes (POST /api/internal/nodes/self/revoke-recipes), and tear down active sessions. A failed revocation fails the command after the teardown. Failure can follow partial effects."),
+		workerprotocol.EmptyCommand("transcode_node", "/admin/reload-config", "(*internal/transcodenode.Server).handleReloadConfig", "Reread configuration from the core without tearing down active sessions; the core calls it after an admin change to this node. No durable replay receipt."),
 		reprobe,
 	}
 }

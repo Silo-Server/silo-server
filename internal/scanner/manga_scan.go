@@ -38,6 +38,7 @@ func (s *Scanner) scanMangaPaths(ctx context.Context, folder *models.MediaFolder
 	if s == nil || folder == nil {
 		return fmt.Errorf("scanMangaPaths: nil scanner or folder")
 	}
+	ctx = withScopedScan(ctx, fullScan)
 	warning, err := s.scanWarningBeforeWalk(ctx, folder.ID, fullScan)
 	if err != nil {
 		return err
@@ -250,7 +251,7 @@ func (s *Scanner) reconcileMangaFile(ctx context.Context, folder *models.MediaFo
 			"path", filePath,
 			"error", skipErr,
 		)
-	} else if isUnchanged {
+	} else if isUnchanged && s.confirmUnchangedFiles(ctx, folder.ID, []string{filePath}) {
 		atomic.AddInt64(skipped, 1)
 		return nil
 	}

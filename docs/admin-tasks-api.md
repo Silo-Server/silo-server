@@ -1,9 +1,6 @@
 # Administrator tasks and jobs
 
-The v2 administrator task surface uses generated web bindings. Apple and Android
-have no task or administrator-job HTTP calls in their checked source trees; the
-migration inventory also records only web consumers. Jellyfin compatibility has
-no equivalent management surface.
+Scheduled tasks, their schedules and history, and retained administrator jobs.
 
 ## Execution and schedules
 
@@ -77,12 +74,27 @@ ignored at startup. The web page lists them in a separate "On demand" group.
 and a strong caller-bound ETag. `PUT` on that resource requires `If-Match` and a
 `triggers` array, including an empty array to disable scheduling. The database
 compares the original revision under the schedule parent lock, and every
-schedule writer advances the revision. A mismatch returns 412 with the
-observed validator, without rereading or retrying the write. An empty schedule
-remains configured across restarts rather than restoring task defaults.
+schedule writer advances the revision. A mismatch returns 412 with the current
+validator in `ETag` and does not retry the write. When the conflicting schedule
+is unsaved (revision zero), its validator also covers the default triggers, so
+the server reads the schedule again to build it; if that read fails, the 412
+carries no `ETag` and the client reads the schedule itself. An empty schedule
+remains configured across restarts rather than restoring task defaults. A plugin
+task without a persisted schedule reports the default it runs (binding trigger,
+else manifest default, else startup) at revision zero, under a validator that
+also changes when that default changes; the first `PUT` saves a schedule that
+then outranks the default. Only an administrator's edit saves one now, but a
+plugin task can still hold a schedule an earlier release saved from a binding
+trigger, which `GET` reports with its nonzero revision
+([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)).
 
-Successful edits apply to the responding process. Other running processes load
-the persisted configuration when they restart. Runtime state and persisted
+Successful edits apply to the responding process. If the task is running, its
+replacement timers arm after the current execution finishes. Other processes
+load the persisted configuration when they restart, except for plugin tasks: every
+API server installs a plugin task's saved schedule at its next successful plugin
+task sync. A task-page edit announces nothing, so other servers pick it up at
+the periodic sync, which runs every minute
+([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)). Runtime state and persisted
 schedule state are separate reads. The web editor captures the persisted schedule
 when editing begins, keeps the draft and original validator after conflicts, and
 requires explicit review and revision adoption before another submission. It
@@ -114,9 +126,22 @@ New completions appear after restarting history; loaded pages do not silently
 expand into a whole-history read. Live last-execution summaries have no saved ID;
 persisted history entries have opaque string IDs.
 
+History holds finished runs only. While a run is in progress its server holds
+a lease on it in `task_execution_leases` and renews it every 30 seconds. When a
+lease goes three minutes without renewal by the database clock (the server
+crashed or was killed), any API server records the run as `failed` with the
+message `Interrupted: the server stopped before the task finished`, ending at
+its last renewal. A graceful shutdown cancels runs in progress, records them
+the same way, and waits up to five seconds for those writes. The admin API
+reports these as ordinary failures. A task's interval counts from its last run
+that wasn't interrupted, so a run cut off by a restart runs again once due.
+
 `GET /api/v2/admin/tasks/refresh_metadata/metrics` returns typed queue counters
-and at most ten entries per sample list. Other tasks return 404. Raw diagnostic
-errors are replaced with safe failure summaries. Task history does not expose
+and at most ten entries per sample list. Other tasks return 404. A sample's
+`title` is its target's own title as stored; a season or episode that still
+exists also carries `series_title`, `season_number` and, for an episode,
+`episode_number`, so a client names it in its own language. Raw diagnostic errors are replaced with
+safe failure summaries. Task history does not expose
 arbitrary internal result JSON; marker contribution counts have a typed result.
 Detailed operational diagnostics remain available through their existing surface.
 
@@ -179,6 +204,4 @@ images already deleted stay deleted and any not yet deleted remain in storage.
 The canceled job reports the totals it reached in `library_result`:
 `deleted_prefixes` counts fully deleted prefixes and `deleted_s3_objects` counts
 every deleted object, including any from the prefix the cancel interrupted. A
-cleanup canceled before it deleted anything reports zeros. The administrator
-task section does not add a generic durable scheduler or change
-the retention and dispatch guarantees of existing job owners.
+cleanup canceled before it deleted anything reports zeros.

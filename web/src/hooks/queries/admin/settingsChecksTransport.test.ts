@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
+import { createAppIntl, setAppIntl } from "@/i18n/format";
 import { useCheckAdminSettingsConnection } from "./settings";
 
 afterEach(() => {
@@ -11,6 +12,7 @@ afterEach(() => {
   setProfileId(null);
   setProfileToken(null);
   vi.unstubAllGlobals();
+  setAppIntl(createAppIntl("en", {}));
 });
 
 it("does not refresh or replay a connection-check POST after 401", async () => {
@@ -44,4 +46,52 @@ it("does not refresh or replay a connection-check POST after 401", async () => {
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/api/v2/admin/settings/check/redis");
   expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+});
+
+it("shows a keyed check result in the interface language and unkeyed text as sent", async () => {
+  setAccessToken("synthetic-token");
+  const results = [
+    {
+      success: true,
+      message: "Embedding connection successful. The model returns 1024 dimensions.",
+      message_key: "web.admin.common.connectionCheck.result.embeddingConnected",
+      message_args: { dimensions: "1024" },
+    },
+    { success: false, message: "Server text without a key." },
+  ];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify(results.shift()), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ),
+  );
+  setAppIntl(
+    createAppIntl("de", {
+      "web.admin.common.connectionCheck.result.embeddingConnected": [
+        { type: 0, value: "Verbunden: " },
+        { type: 1, value: "dimensions" },
+        { type: 0, value: " Dimensionen." },
+      ],
+    }),
+  );
+  const client = new QueryClient();
+  function wrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client }, children);
+  }
+  const { result } = renderHook(() => useCheckAdminSettingsConnection(), { wrapper });
+  const request = { kind: "recommendations_embedding", body: { values: {}, dirty_keys: [] } };
+  await act(async () => {
+    await expect(result.current.mutateAsync(request)).resolves.toMatchObject({
+      success: true,
+      message: "Verbunden: 1024 Dimensionen.",
+    });
+    await expect(result.current.mutateAsync(request)).resolves.toMatchObject({
+      success: false,
+      message: "Server text without a key.",
+    });
+  });
 });

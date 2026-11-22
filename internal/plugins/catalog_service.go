@@ -5,17 +5,21 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"golang.org/x/mod/semver"
 )
 
 type PlatformBinary struct {
@@ -32,10 +36,30 @@ type CatalogPackage struct {
 	// BundleURL is the release's Sigstore bundle (plugin.sigstore.json),
 	// which attests every binary in Binaries.
 	BundleURL string `json:"bundle_url,omitempty"`
+	Tag       string `json:"tag,omitempty"`
 }
 
 type RepositoryIndex struct {
-	Plugins []CatalogPackage `json:"plugins"`
+	Plugins     []CatalogPackage    `json:"plugins"`
+	Withdrawals []CatalogWithdrawal `json:"withdrawals,omitempty"`
+}
+
+type CatalogWithdrawal struct {
+	PluginID string `json:"plugin_id"`
+	Version  string `json:"version"`
+}
+
+type catalogSnapshot struct {
+	entries     []CatalogEntry
+	withdrawals map[int][]CatalogWithdrawal
+}
+
+func (s catalogSnapshot) withdrawn(repositoryID int, pluginID, version string) bool {
+	return slices.Contains(s.withdrawals[repositoryID], CatalogWithdrawal{PluginID: pluginID, Version: version})
+}
+
+func (i *RepositoryIndex) withdrawn(pluginID, version string) bool {
+	return slices.Contains(i.Withdrawals, CatalogWithdrawal{PluginID: pluginID, Version: version})
 }
 
 type CatalogEntry struct {
@@ -55,6 +79,7 @@ type InstallCatalogRequest struct {
 }
 
 type ResolvedCatalogInstall struct {
+	automatic     bool
 	RepositoryID  int
 	PluginID      string
 	Version       string
@@ -71,11 +96,23 @@ type ResolvedCatalogInstall struct {
 	RepoURL string
 }
 
+// forAutomaticInstall marks the request for restore admission without changing
+// the target shared with catalog readers or manual callers.
+func (t *ResolvedCatalogInstall) forAutomaticInstall() *ResolvedCatalogInstall {
+	if t == nil {
+		return nil
+	}
+	automatic := *t
+	automatic.automatic = true
+	return &automatic
+}
+
 // ArchiveRequest is the installer request for a legacy archive target, with
 // the same catalog identity as BinaryRequest.
 func (t *ResolvedCatalogInstall) ArchiveRequest() InstallArchiveRequest {
 	repositoryID := t.RepositoryID
 	return InstallArchiveRequest{
+		automatic:    t.automatic,
 		ArchiveURL:   t.ArchiveURL,
 		RepositoryID: &repositoryID,
 		PluginID:     t.PluginID,
@@ -90,6 +127,7 @@ func (t *ResolvedCatalogInstall) ArchiveRequest() InstallArchiveRequest {
 func (t *ResolvedCatalogInstall) BinaryRequest() InstallBinaryRequest {
 	repositoryID := t.RepositoryID
 	return InstallBinaryRequest{
+		automatic:     t.automatic,
 		BinaryURL:     t.ArchiveURL,
 		Checksum:      t.Checksum,
 		BundleURL:     t.BundleURL,
@@ -151,11 +189,17 @@ func NewCatalogService(repositories *RepositoryStore, opts CatalogServiceOptions
 }
 
 func (s *CatalogService) Fetch(ctx context.Context) ([]CatalogEntry, error) {
+	snapshot, err := s.fetchSnapshot(ctx)
+	return snapshot.entries, err
+}
+
+func (s *CatalogService) fetchSnapshot(ctx context.Context) (catalogSnapshot, error) {
 	repositories, err := s.repositories.List(ctx)
 	if err != nil {
-		return nil, err
+		return catalogSnapshot{}, err
 	}
 
+	snapshot := catalogSnapshot{withdrawals: make(map[int][]CatalogWithdrawal)}
 	catalogByVersion := make(map[string]CatalogEntry)
 	for _, repository := range repositories {
 		if !repository.Enabled {
@@ -174,10 +218,16 @@ func (s *CatalogService) Fetch(ctx context.Context) ([]CatalogEntry, error) {
 
 		now := time.Now().UTC()
 		if err := s.repositories.Update(ctx, repository.ID, UpdateRepositoryInput{LastFetchedAt: &now}); err != nil {
-			return nil, err
+			return catalogSnapshot{}, err
+		}
+		if isManagedOfficialRepository(repository) {
+			snapshot.withdrawals[repository.ID] = index.Withdrawals
 		}
 
 		for _, pkg := range index.Plugins {
+			if snapshot.withdrawn(repository.ID, manifestPluginID(pkg.Manifest), manifestVersion(pkg.Manifest)) {
+				continue
+			}
 			entry, ok, err := s.catalogEntryFromPackage(repository, pkg)
 			if err != nil {
 				slog.WarnContext(ctx, "skipping invalid plugin catalog entry", "component", "plugins",
@@ -220,7 +270,8 @@ func (s *CatalogService) Fetch(ctx context.Context) ([]CatalogEntry, error) {
 		}
 	})
 
-	return entries, nil
+	snapshot.entries = entries
+	return snapshot, nil
 }
 
 func (s *CatalogService) ResolveInstall(ctx context.Context, req InstallCatalogRequest) (*ResolvedCatalogInstall, error) {
@@ -253,6 +304,10 @@ func (s *CatalogService) ResolveInstall(ctx context.Context, req InstallCatalogR
 		return nil, err
 	}
 
+	if isManagedOfficialRepository(repository) && index.withdrawn(req.PluginID, req.Version) {
+		return nil, withdrawnCatalogRelease(req.PluginID, req.Version)
+	}
+
 	for _, pkg := range index.Plugins {
 		if pkg.Manifest == nil {
 			continue
@@ -274,10 +329,170 @@ func (s *CatalogService) ResolveInstall(ctx context.Context, req InstallCatalogR
 		"The %s catalog no longer lists %s %s. Refresh the catalog and try again.", repository.DisplayName, req.PluginID, req.Version)
 }
 
+var officialVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$`)
+
+func validateOfficialReleaseRequest(pluginID, version string) (string, error) {
+	repoURL, ok := officialPluginRepository(pluginID)
+	if !ok {
+		return "", packageError(nil, "The requested plugin is outside the official catalog.")
+	}
+	if version != "" && (len(version) > 128 || !officialVersionPattern.MatchString(version) || !semver.IsValid("v"+version)) {
+		return "", packageError(nil, "The requested version is not a valid official plugin release.")
+	}
+	return repoURL, nil
+}
+
+func isManagedOfficialRepository(repository *Repository) bool {
+	return repository != nil && repository.ManagedKey != nil &&
+		*repository.ManagedKey == OfficialRepositoryManagedKey &&
+		repository.SourceKind == RepositorySourceSilo && repository.URL == DefaultRepositoryURL
+}
+
+func (s *CatalogService) OfficialRepository(ctx context.Context) (*Repository, error) {
+	repository, err := s.repositories.getByManagedKey(ctx, OfficialRepositoryManagedKey)
+	if err != nil {
+		return nil, err
+	}
+	if !isManagedOfficialRepository(repository) || !repository.Enabled {
+		return nil, errors.New("the managed official plugin catalog is unavailable")
+	}
+	return repository, nil
+}
+
+func withdrawnCatalogRelease(pluginID, version string) error {
+	return packageError(fmt.Errorf("official plugin %s %s has been withdrawn", pluginID, version),
+		"The Silo catalog has withdrawn this plugin release.")
+}
+
+// ResolveOfficialInstall resolves the current official release for an empty
+// version or an immutable release descriptor for an exact version.
+func (s *CatalogService) ResolveOfficialInstall(ctx context.Context, pluginID, version string) (*ResolvedCatalogInstall, error) {
+	if _, err := validateOfficialReleaseRequest(pluginID, version); err != nil {
+		return nil, err
+	}
+	repository, err := s.OfficialRepository(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.resolveOfficialInstall(ctx, repository, pluginID, version)
+}
+
+func (s *CatalogService) resolveOfficialInstall(ctx context.Context, repository *Repository, pluginID, version string) (*ResolvedCatalogInstall, error) {
+	repoURL, err := validateOfficialReleaseRequest(pluginID, version)
+	if err != nil {
+		return nil, err
+	}
+	const maxCatalogMetadata = 4 << 20
+	index, err := s.fetchRepositoryIndexLimited(ctx, repository.URL, "the Silo catalog", maxCatalogMetadata)
+	if err != nil {
+		return nil, err
+	}
+	var pkg CatalogPackage
+	historical := version != ""
+	if !historical {
+		match := slices.IndexFunc(index.Plugins, func(current CatalogPackage) bool {
+			return current.Manifest.GetPluginId() == pluginID
+		})
+		if match < 0 {
+			return nil, packageError(fmt.Errorf("plugin %s is not listed", pluginID), "The Silo catalog doesn't list this plugin.")
+		}
+		pkg = index.Plugins[match]
+		version = pkg.Manifest.GetVersion()
+		if _, err := validateOfficialReleaseRequest(pluginID, version); err != nil {
+			return nil, err
+		}
+	}
+	if index.withdrawn(pluginID, version) {
+		return nil, withdrawnCatalogRelease(pluginID, version)
+	}
+	if historical {
+		pkg, err = s.fetchOfficialDescriptor(ctx, repository, pluginID, version, maxCatalogMetadata)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := validateOfficialPackage(pkg, pluginID, version, repoURL, historical); err != nil {
+		return nil, packageError(err, "The official plugin release metadata is invalid.")
+	}
+	// The current catalog can predate the per-binary checksum fields.
+	platform := s.currentOS + "/" + s.currentArch
+	if binary, ok := pkg.Binaries[platform]; ok && binary.Checksum == "" && pkg.ChecksumsURL != "" {
+		data, err := s.fetchCatalogMetadata(ctx, pkg.ChecksumsURL, "the plugin's checksums", 64<<10)
+		if err != nil {
+			return nil, err
+		}
+		binary.Checksum, err = checksumForBinary(string(data), binary.URL)
+		if err != nil {
+			return nil, packageError(err, "The catalog lists no valid SHA-256 checksum for this plugin.")
+		}
+		pkg.Binaries[platform] = binary
+	}
+	target, err := s.installTargetFromPackage(ctx, repository, pkg)
+	if err != nil {
+		return nil, err
+	}
+	target.PluginID, target.Version = pluginID, version
+	return target, nil
+}
+
+func (s *CatalogService) fetchOfficialDescriptor(ctx context.Context, repository *Repository, pluginID, version string, limit int64) (CatalogPackage, error) {
+	descriptorURL, err := resolveRepositoryURL(repository.URL, "releases/"+pluginID+"/"+version+".json")
+	if err != nil {
+		return CatalogPackage{}, err
+	}
+	data, err := s.fetchCatalogMetadata(ctx, descriptorURL, "the official plugin release", limit)
+	if err != nil {
+		return CatalogPackage{}, err
+	}
+	var pkg CatalogPackage
+	if err := jsonv2.Unmarshal(data, &pkg); err != nil {
+		return CatalogPackage{}, packageError(err, "Silo couldn't read the official plugin release.")
+	}
+	return pkg, nil
+}
+
+func validateOfficialPackage(pkg CatalogPackage, pluginID, version, repoURL string, historical bool) error {
+	tag := "v" + version
+	if version == "" || pkg.Manifest.GetPluginId() != pluginID || pkg.Manifest.GetVersion() != version ||
+		pkg.RepoURL != repoURL || (historical || pkg.Tag != "") && pkg.Tag != tag {
+		return fmt.Errorf("official release identity does not match %s %s", pluginID, version)
+	}
+	prefix := repoURL + "/releases/download/" + tag + "/"
+	if len(pkg.Binaries) == 0 || pkg.BundleURL != prefix+"plugin.sigstore.json" || pkg.ArchiveURL != "" {
+		return errors.New("official release must contain binaries and a signature bundle")
+	}
+	if pkg.ChecksumsURL != "" && pkg.ChecksumsURL != prefix+"checksums.txt" {
+		return errors.New("official release checksum URL does not match its repository and tag")
+	}
+	for platform, binary := range pkg.Binaries {
+		osName, arch, ok := strings.Cut(platform, "/")
+		if !ok || !validOfficialPlatformPart(osName) || !validOfficialPlatformPart(arch) ||
+			binary.URL != prefix+"plugin-"+osName+"-"+arch {
+			return errors.New("official release binary URL does not match its repository, tag and platform")
+		}
+		if historical || pkg.Tag != "" || binary.Checksum != "" {
+			if _, err := normalizeSHA256Checksum(binary.Checksum); err != nil {
+				return fmt.Errorf("invalid official release binary checksum: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func validOfficialPlatformPart(value string) bool {
+	return value != "" && !strings.ContainsFunc(value, func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	})
+}
+
 // fetchRepositoryIndex reads a catalog index. subject names the catalog for
 // the admin in the PackageError a failure returns.
 func (s *CatalogService) fetchRepositoryIndex(ctx context.Context, repositoryURL, subject string) (*RepositoryIndex, error) {
-	data, err := fetchPackageResource(ctx, s.httpClient, repositoryURL, subject)
+	return s.fetchRepositoryIndexLimited(ctx, repositoryURL, subject, 0)
+}
+
+func (s *CatalogService) fetchRepositoryIndexLimited(ctx context.Context, repositoryURL, subject string, limit int64) (*RepositoryIndex, error) {
+	data, err := s.fetchCatalogMetadata(ctx, repositoryURL, subject, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -286,6 +501,14 @@ func (s *CatalogService) fetchRepositoryIndex(ctx context.Context, repositoryURL
 		return nil, packageError(fmt.Errorf("decode repository index %q: %w", repositoryURL, err), "Silo couldn't read %s: it isn't a valid plugin catalog.", subject)
 	}
 	return &index, nil
+}
+
+func (s *CatalogService) fetchCatalogMetadata(ctx context.Context, rawURL, subject string, limit int64) ([]byte, error) {
+	data, err := fetchPackageResourceLimited(ctx, s.httpClient, rawURL, subject, limit)
+	if errors.Is(err, errPackageResourceTooLarge) {
+		return nil, packageError(err, "Silo couldn't read %s because it exceeds the size limit.", subject)
+	}
+	return data, err
 }
 
 func supportsPlatform(manifest *pluginv1.PluginManifest, osName, arch string) bool {

@@ -72,7 +72,7 @@ func TestLibraryRefreshSkipsIgnoredItemsDB(t *testing.T) {
 		want []string
 	}{
 		{LibraryRefreshModeQuick, []string{unmatchedID}},
-		{LibraryRefreshModeFull, []string{audiobookID + " tags-only", unmatchedID}},
+		{LibraryRefreshModeFull, []string{audiobookID + " audiobook", unmatchedID}},
 	} {
 		items, err := lister.ListLibraryItems(ctx, folderID, tc.mode)
 		if err != nil {
@@ -80,8 +80,8 @@ func TestLibraryRefreshSkipsIgnoredItemsDB(t *testing.T) {
 		}
 		var got []string
 		for _, item := range items {
-			if item.TagsOnly {
-				got = append(got, item.ContentID+" tags-only")
+			if item.Audiobook {
+				got = append(got, item.ContentID+" audiobook")
 			} else {
 				got = append(got, item.ContentID)
 			}

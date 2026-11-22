@@ -135,7 +135,7 @@ export function useRequestDiscoverySection(section: string) {
  * is ignored as the end. A page without one read a single source page, so
  * page + 1 follows, up to TMDB's cap.
  */
-export function nextDiscoverySectionPage(
+function nextDiscoverySectionPage(
   lastPage: RequestDiscoverySection,
   _allPages: RequestDiscoverySection[],
   lastPageParam: number,
@@ -205,7 +205,7 @@ export function useRequestBrowse({ kind, slug, mediaType, sort }: UseRequestBrow
  * TMDB one page at a time (the server does no rating backfill here), so
  * page + 1 is the next page, up to TMDB's cap.
  */
-export function nextBrowsePage(
+function nextBrowsePage(
   lastPage: DiscoverBrowseResponse,
   _allPages: DiscoverBrowseResponse[],
   lastPageParam: number,

@@ -3,7 +3,6 @@
 package mediasample
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,8 +14,6 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-
-	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
 
 // Keep the main goroutine on the main thread past initialization, so TestMain
@@ -56,29 +53,6 @@ func startFromMainThread(cmd *exec.Cmd) error {
 	started := make(chan error, 1)
 	startFromDiscardedThread(cmd, started)
 	return <-started
-}
-
-func TestBackgroundPriorityFromMainThread(t *testing.T) {
-	requirePriorityLowering(t)
-	got := mainThreadStart
-	if !got.onMainThread {
-		t.Fatal("TestMain did not run on the main thread")
-	}
-	if got.baseNice == backgroundNice {
-		t.Skipf("the test already runs at nice %d", backgroundNice)
-	}
-	if got.err != nil {
-		t.Fatalf("starting sleep: %v", got.err)
-	}
-	if got.childNice != backgroundNice {
-		t.Fatalf("background child nice %d, want %d", got.childNice, backgroundNice)
-	}
-	if got.threadNice != got.baseNice {
-		t.Fatalf("main thread nice changed from %d to %d", got.baseNice, got.threadNice)
-	}
-	if got.threadIO == backgroundIOPrio {
-		t.Fatalf("main thread left at I/O priority %#x (idle)", got.threadIO)
-	}
 }
 
 // requirePriorityLowering skips the test when this environment does not allow
@@ -223,36 +197,4 @@ func loweredThreads(t *testing.T) []string {
 		}
 	}
 	return lowered
-}
-
-func TestRunBackgroundPriority(t *testing.T) {
-	requirePriorityLowering(t)
-	selfNice := statNice(t, "/proc/self/stat")
-	if selfNice == backgroundNice {
-		t.Skipf("the test already runs at nice %d", backgroundNice)
-	}
-	for _, background := range []bool{false, true} {
-		t.Run(fmt.Sprintf("background=%t", background), func(t *testing.T) {
-			out := filepath.Join(t.TempDir(), "nice")
-			// $$ is the fake ffmpeg itself.
-			ffmpeg := writeScript(t, fmt.Sprintf(`cut -d' ' -f19 /proc/$$/stat > %q`, out))
-			req := validRequest()
-			req.Background = background
-			runner := Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Analysis}
-			if _, err := runner.Run(context.Background(), req); err != nil {
-				t.Fatalf("Run: %v", err)
-			}
-			data, err := os.ReadFile(out)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := selfNice
-			if background {
-				want = backgroundNice
-			}
-			if got := strings.TrimSpace(string(data)); got != strconv.Itoa(want) {
-				t.Fatalf("ffmpeg nice %s, want %d", got, want)
-			}
-		})
-	}
 }

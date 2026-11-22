@@ -36,8 +36,8 @@ func (s *MetadataService) SetFallbackLanguage(language string) {
 	s.fallbackLanguage.Store(baseMetadataLanguage(language))
 }
 
-// configuredFallbackLanguage is metadata.fallback_language, empty when off.
-func (s *MetadataService) configuredFallbackLanguage() string {
+// FallbackLanguage is metadata.fallback_language, empty when off.
+func (s *MetadataService) FallbackLanguage() string {
 	language, _ := s.fallbackLanguage.Load().(string)
 	return language
 }
@@ -45,7 +45,7 @@ func (s *MetadataService) configuredFallbackLanguage() string {
 // fallbackLanguageFor is the language a refresh in requested fetches gaps in,
 // or empty when the fallback is off or is the requested language itself.
 func (s *MetadataService) fallbackLanguageFor(requested string) string {
-	fallback := s.configuredFallbackLanguage()
+	fallback := s.FallbackLanguage()
 	requested = baseMetadataLanguage(requested)
 	if fallback == "" || requested == "" || fallback == requested {
 		return ""

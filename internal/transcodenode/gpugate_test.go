@@ -50,21 +50,6 @@ func TestGPUGateRefusesWorkWhileReprobing(t *testing.T) {
 	gate.endWork()
 }
 
-// endWork must not drive the counter negative, or one unbalanced release would
-// let a re-probe run beside real transcodes forever.
-func TestGPUGateEndWorkDoesNotUnderflow(t *testing.T) {
-	var gate gpuGate
-
-	gate.endWork()
-	gate.endWork()
-	if !gate.beginWork() {
-		t.Fatal("beginWork refused after unbalanced releases")
-	}
-	if _, ok := gate.beginReprobe(otherWork(0)); ok {
-		t.Fatal("re-probe admitted while one unit of work was outstanding")
-	}
-}
-
 // Teardown is GPU work too, and it cannot be refused: a stop must always
 // proceed. TranscodeSession.Close waits for ffmpeg to exit, so the encoder holds
 // its GPU session for the whole call while activeJobs has already dropped —

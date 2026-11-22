@@ -129,6 +129,28 @@ func TestPostgresPersonalListPage(t *testing.T) {
 	storetest.RunNotInterested(t, newListStore)
 }
 
+// TestPostgresCompletedHistoryPage runs the completed-history keyset walk
+// against the Postgres backend, whose key must keep watched_at's sub-second
+// precision. Skips unless SILO_TEST_DATABASE_URL is set.
+func TestPostgresCompletedHistoryPage(t *testing.T) {
+	pool := testPool(t)
+	storetest.RunCompletedHistoryPage(t, func(t *testing.T) userstore.UserStore {
+		// Deleting the user cascades to every user-scoped table.
+		return newStore(pool, seedTestUser(t, pool, "conf-completedpage"))
+	})
+}
+
+// TestPostgresProgressPage runs the progress keyset, completed-since and
+// unpaged item listings against the Postgres backend. Skips unless
+// SILO_TEST_DATABASE_URL is set.
+func TestPostgresProgressPage(t *testing.T) {
+	pool := testPool(t)
+	storetest.RunProgressPage(t, func(t *testing.T) userstore.UserStore {
+		// Deleting the user cascades to every user-scoped table.
+		return newStore(pool, seedTestUser(t, pool, "conf-progresspage"))
+	})
+}
+
 // TestPostgresDeleteProfileRemovesProfileState runs the profile-deletion
 // conformance test against the Postgres backend. Skips unless
 // SILO_TEST_DATABASE_URL is set.
@@ -350,5 +372,31 @@ func TestPostgresConcurrentProfileDeleteAndCollectionReorder(t *testing.T) {
 		if errors.As(reorderErr, &pgErr) && pgErr.Code == "40P01" {
 			t.Fatalf("round %d: ReorderCollections deadlocked: %v", round, reorderErr)
 		}
+	}
+}
+
+// TestPostgresCollectionsHolding runs the "Also in" membership conformance
+// test against the Postgres backend, then checks that another account's
+// collection holding the same title is never reported. The SQLite backend
+// runs the suite in internal/userdb.
+func TestPostgresCollectionsHolding(t *testing.T) {
+	pool := testPool(t)
+	store := newStore(pool, seedTestUser(t, pool, "conf-holding"))
+	storetest.RunCollectionsHolding(t, store)
+
+	other := newStore(pool, seedTestUser(t, pool, "conf-holding-other"))
+	c, err := other.CreateCollection(t.Context(), userstore.CreateCollectionInput{CreatorProfileID: "owner", Name: "Other account's", CollectionType: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.AddCollectionItem(t.Context(), c.ID, "title", 0); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.CollectionsHolding(t.Context(), "title")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(got, c.ID) {
+		t.Fatalf("collections holding title = %v, includes another account's %s", got, c.ID)
 	}
 }

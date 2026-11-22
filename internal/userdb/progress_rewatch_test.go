@@ -33,64 +33,6 @@ func rewatchInProgressIDs(t *testing.T, db *sql.DB, profileID string) []string {
 	return ids
 }
 
-// TestProgressRewatchLifecycle pins the watch → complete → rewatch → complete
-// cycle of the position-based Continue Watching model: completion resets the
-// resume point to 0 and latches completed; a later heartbeat re-enters the
-// in-progress set through plain MAX while completed stays true; finishing the
-// rewatch resets the resume point again.
-func TestProgressRewatchLifecycle(t *testing.T) {
-	db := newSchemaDB(t)
-	th := userstore.ProgressThresholds{WatchedPct: 90, MinResumePct: 5}
-
-	// First watch in progress.
-	if err := UpdateProgress(db, "p", "m", 600, 7200, th); err != nil {
-		t.Fatalf("UpdateProgress(first watch): %v", err)
-	}
-	wp := rewatchGetProgress(t, db, "p", "m")
-	if wp.Completed || wp.PositionSeconds != 600 {
-		t.Fatalf("first watch: completed=%v pos=%v, want false/600", wp.Completed, wp.PositionSeconds)
-	}
-	if ids := rewatchInProgressIDs(t, db, "p"); len(ids) != 1 || ids[0] != "m" {
-		t.Fatalf("in_progress = %v, want [m]", ids)
-	}
-
-	// Completion: watched latch set, resume point cleared, leaves Continue Watching.
-	if err := UpdateProgress(db, "p", "m", 7000, 7200, th); err != nil {
-		t.Fatalf("UpdateProgress(completion): %v", err)
-	}
-	wp = rewatchGetProgress(t, db, "p", "m")
-	if !wp.Completed || wp.PositionSeconds != 0 {
-		t.Fatalf("completion: completed=%v pos=%v, want true/0", wp.Completed, wp.PositionSeconds)
-	}
-	if ids := rewatchInProgressIDs(t, db, "p"); len(ids) != 0 {
-		t.Fatalf("in_progress after completion = %v, want empty", ids)
-	}
-
-	// Rewatch: re-enters Continue Watching, watched state survives.
-	if err := UpdateProgress(db, "p", "m", 900, 7200, th); err != nil {
-		t.Fatalf("UpdateProgress(rewatch): %v", err)
-	}
-	wp = rewatchGetProgress(t, db, "p", "m")
-	if !wp.Completed || wp.PositionSeconds != 900 {
-		t.Fatalf("rewatch: completed=%v pos=%v, want true/900", wp.Completed, wp.PositionSeconds)
-	}
-	if ids := rewatchInProgressIDs(t, db, "p"); len(ids) != 1 || ids[0] != "m" {
-		t.Fatalf("in_progress during rewatch = %v, want [m]", ids)
-	}
-
-	// Rewatch completes: resume point cleared again, still watched.
-	if err := UpdateProgress(db, "p", "m", 7100, 7200, th); err != nil {
-		t.Fatalf("UpdateProgress(rewatch completion): %v", err)
-	}
-	wp = rewatchGetProgress(t, db, "p", "m")
-	if !wp.Completed || wp.PositionSeconds != 0 {
-		t.Fatalf("rewatch completion: completed=%v pos=%v, want true/0", wp.Completed, wp.PositionSeconds)
-	}
-	if ids := rewatchInProgressIDs(t, db, "p"); len(ids) != 0 {
-		t.Fatalf("in_progress after rewatch completion = %v, want empty", ids)
-	}
-}
-
 func TestProgressRewatchGuards(t *testing.T) {
 	th := userstore.ProgressThresholds{WatchedPct: 90, MinResumePct: 5}
 

@@ -26,6 +26,7 @@ import type {
   JellyfinCompatStatus,
   JellyfinCompatWebInstallRequest,
 } from "@/api/types";
+import { serverText } from "@/i18n";
 import { adminKeys, compatKeys, settingsKeys, themeKeys } from "../keys";
 import { invalidateAdminDefaultQueries } from "../settingValues";
 import { adminDefaultSettingFor } from "@/lib/settingsAdminDefaults";
@@ -210,18 +211,20 @@ export function useAdminRestartKeys() {
   });
 }
 
+/** Reads server status from whichever process answers, bypassing the query cache. */
+export async function fetchAdminServerStatus(): Promise<AdminServerStatus> {
+  const profileContext = captureProfileRequestContext();
+  if (!profileContext) throw new StaleApiRequestContextError();
+  const status = await v2("GET /api/v2/admin/server/status", { profileContext });
+  if (!isCapturedProfileAuthorityActive(profileContext)) throw new StaleApiRequestContextError();
+  return status;
+}
+
 export function useAdminServerStatus(enabled = true) {
   return useQuery({
     queryKey: adminKeys.serverStatus(),
     enabled,
-    queryFn: async (): Promise<AdminServerStatus> => {
-      const profileContext = captureProfileRequestContext();
-      if (!profileContext) throw new StaleApiRequestContextError();
-      const status = await v2("GET /api/v2/admin/server/status", { profileContext });
-      if (!isCapturedProfileAuthorityActive(profileContext))
-        throw new StaleApiRequestContextError();
-      return status;
-    },
+    queryFn: fetchAdminServerStatus,
     staleTime: 15_000,
   });
 }
@@ -302,6 +305,12 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
       toast.error(
         err instanceof Error ? err.message : t("web.admin.settings.hooks.settings.updateFailed"),
       );
+      // A validation refusal can mean a restart left one of these keys set by
+      // the environment. Read the list again so the form drops that draft and
+      // the next save can go through.
+      if (err instanceof V2ProblemError && err.problemType === "validation_failed") {
+        void queryClient.invalidateQueries({ queryKey: ADMIN_SENSITIVE_STATUS_QUERY.queryKey });
+      }
     },
   });
   const capture = (values: SettingsValues) => ({
@@ -468,14 +477,30 @@ export function useAdminSensitiveStatus() {
   return useQuery(ADMIN_SENSITIVE_STATUS_QUERY);
 }
 
+/**
+ * Runs one server-side connection check. The result's `message` is already in
+ * the interface language: the catalog's text for `message_key` when this
+ * language has it, else the server's English.
+ */
 export function useCheckAdminSettingsConnection() {
   return useMutation({
-    mutationFn: ({ kind, body }: { kind: string; body: AdminSettingsConnectionCheckRequest }) =>
-      v2("POST /api/v2/admin/settings/check/{kind}", {
+    mutationFn: async ({
+      kind,
+      body,
+    }: {
+      kind: string;
+      body: AdminSettingsConnectionCheckRequest;
+    }) => {
+      const result = await v2("POST /api/v2/admin/settings/check/{kind}", {
         path: { kind },
         body,
         retryAuthentication: false,
-      }),
+      });
+      return {
+        ...result,
+        message: serverText(result.message_key, result.message_args, result.message),
+      };
+    },
     retry: false,
   });
 }

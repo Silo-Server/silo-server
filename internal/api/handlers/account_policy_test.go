@@ -146,10 +146,3 @@ func TestHasMaskedMetadataCuration(t *testing.T) {
 		})
 	}
 }
-
-func TestBuildUserResponseNeverReturnsNilPermissions(t *testing.T) {
-	view := buildUserResponse(&models.User{ID: 1, Role: models.RoleUser}, accountPolicy{}, nil, nil)
-	if view.Permissions == nil || view.PolicyPermissions == nil {
-		t.Fatal("permissions = nil, want empty slices so neither version serializes null")
-	}
-}

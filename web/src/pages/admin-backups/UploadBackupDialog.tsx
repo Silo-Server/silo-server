@@ -302,7 +302,9 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
       body = (
         <div className="space-y-2" role="status">
           <div className="flex items-baseline justify-between gap-3 text-sm">
-            <span className="min-w-0 truncate">{chosenFile?.name}</span>
+            <span dir="auto" className="min-w-0 truncate">
+              {chosenFile?.name}
+            </span>
             <span className="text-muted-foreground shrink-0 tabular-nums">
               {progressLabel(sent, total)}
             </span>
@@ -325,8 +327,10 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
     }
     case "checking":
       body = (
-        <p className="flex items-center gap-2 text-sm" role="status">
-          <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />
+        <p className="flex items-start gap-2 text-sm" role="status">
+          <span className="flex h-lh shrink-0 items-center">
+            <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />
+          </span>
           {t("web.admin.backups.upload.checking")}
         </p>
       );

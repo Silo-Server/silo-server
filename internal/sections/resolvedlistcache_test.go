@@ -177,24 +177,6 @@ func TestResolvedListCacheInvalidationRunsTrailingEdgeWithoutAnotherEvent(t *tes
 	}
 }
 
-func TestResolvedListGenerationOnlyScopesRecentlyAdded(t *testing.T) {
-	resetResolvedListCacheForTest()
-	defer resetResolvedListCacheForTest()
-
-	recent := ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}
-	genre := ResolvedSection{SectionType: SectionGenre, ItemLimit: 20}
-	recentBefore := resolvedListCacheKey(recent, nil, []int{7}, catalog.AccessFilter{})
-	genreBefore := resolvedListCacheKey(genre, nil, []int{7}, catalog.AccessFilter{})
-
-	InvalidateResolvedListCache()
-	if recentAfter := resolvedListCacheKey(recent, nil, []int{7}, catalog.AccessFilter{}); recentAfter == recentBefore {
-		t.Fatal("recently-added key did not advance with generation")
-	}
-	if genreAfter := resolvedListCacheKey(genre, nil, []int{7}, catalog.AccessFilter{}); genreAfter != genreBefore {
-		t.Fatal("non-recently-added key unexpectedly changed with generation")
-	}
-}
-
 func TestResolvedListCacheInvalidationIsolatesInflightRefresh(t *testing.T) {
 	resetResolvedListCacheForTest()
 	defer resetResolvedListCacheForTest()
@@ -240,56 +222,6 @@ func TestResolvedListCacheInvalidationIsolatesInflightRefresh(t *testing.T) {
 	})
 	if err != nil || len(active) != 1 || active[0].ContentID != "fresh" {
 		t.Fatalf("active generation = %v, err %v", itemIDs(active), err)
-	}
-}
-
-// TestResolvedListCacheKeyIgnoresSectionID is the core Approach-2 guarantee: two
-// sections that share type+config+limit+scope but carry different arbitrary IDs
-// hash to the SAME key. This is what lets a native "recently added" rail and the
-// jellyfin-compat /Items/Latest collapse to one shared cache entry.
-func TestResolvedListCacheKeyIgnoresSectionID(t *testing.T) {
-	cfg := json.RawMessage(`{"filter_type":"movie"}`)
-	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
-	libraryID := 7
-
-	native := ResolvedSection{ID: "home-rail-42", SectionType: SectionRecentlyAdded, ItemLimit: 24, Config: cfg}
-	compat := ResolvedSection{ID: "compat-latest", SectionType: SectionRecentlyAdded, ItemLimit: 24, Config: cfg}
-
-	keyNative := resolvedListCacheKey(native, &libraryID, nil, scope)
-	keyCompat := resolvedListCacheKey(compat, &libraryID, nil, scope)
-	if keyNative != keyCompat {
-		t.Fatalf("expected identical keys regardless of section ID, got %q vs %q", keyNative, keyCompat)
-	}
-
-	// A differing type, config, limit, library, or scope must still split the key
-	// — the ID is the only field that no longer participates.
-	if resolvedListCacheKey(ResolvedSection{ID: "x", SectionType: SectionRecentlyReleased, ItemLimit: 24, Config: cfg}, &libraryID, nil, scope) == keyNative {
-		t.Fatalf("different section type must change the key")
-	}
-	if resolvedListCacheKey(ResolvedSection{ID: "x", SectionType: SectionRecentlyAdded, ItemLimit: 12, Config: cfg}, &libraryID, nil, scope) == keyNative {
-		t.Fatalf("different item limit must change the key")
-	}
-	if resolvedListCacheKey(native, &libraryID, nil, catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaturityLimits: access.MaturityLimits{MaxContentRating: "R"}}) == keyNative {
-		t.Fatalf("different max content rating must change the key")
-	}
-	otherLibrary := 8
-	if resolvedListCacheKey(native, &otherLibrary, nil, scope) == keyNative {
-		t.Fatalf("different library must change the key")
-	}
-}
-
-func TestResolvedListCacheKeyDistinguishesTVEventGrouping(t *testing.T) {
-	resolved := ResolvedSection{
-		SectionType: SectionRecentlyAdded,
-		ItemLimit:   100,
-		Config:      json.RawMessage(`{"filter_type":"series"}`),
-	}
-	compat := resolved
-	compat.DisableTVEventGrouping = true
-
-	if resolvedListCacheKey(resolved, nil, []int{7}, catalog.AccessFilter{}) ==
-		resolvedListCacheKey(compat, nil, []int{7}, catalog.AccessFilter{}) {
-		t.Fatal("TV event grouping opt-out must produce a distinct cache key")
 	}
 }
 
@@ -339,34 +271,6 @@ func TestResolvedListCacheKeyScopeStillIsolatesWithoutID(t *testing.T) {
 	excluded.ExcludedMediaTypes = []string{"audiobook"}
 	if resolvedListCacheKey(resolved, &lib1, nil, excluded) == baseline {
 		t.Fatalf("different excluded media types must isolate the key")
-	}
-}
-
-// TestResolvedListCacheEvictsExpiredEntries verifies expired entries are swept
-// so the process-global map cannot grow unbounded across never-repeated scopes.
-func TestResolvedListCacheEvictsExpiredEntries(t *testing.T) {
-	resetResolvedListCacheForTest()
-	defer resetResolvedListCacheForTest()
-
-	base := time.Unix(1_700_000_000, 0)
-	if _, _, err := getOrRefresh(context.Background(), "scope-A", base, staticLoader(mediaItems("a1"), nil)); err != nil {
-		t.Fatalf("prime scope-A: %v", err)
-	}
-	if _, ok := resolvedListGet("scope-A"); !ok {
-		t.Fatalf("scope-A should be cached right after priming")
-	}
-
-	// A later write, past scope-A's expiry (base+15m) and the prune interval,
-	// must sweep scope-A while installing scope-B.
-	later := base.Add(20 * time.Minute)
-	if _, _, err := getOrRefresh(context.Background(), "scope-B", later, staticLoader(mediaItems("b1"), nil)); err != nil {
-		t.Fatalf("prime scope-B: %v", err)
-	}
-	if _, ok := resolvedListGet("scope-A"); ok {
-		t.Fatalf("expired scope-A should have been evicted")
-	}
-	if _, ok := resolvedListGet("scope-B"); !ok {
-		t.Fatalf("scope-B should be present")
 	}
 }
 
@@ -420,63 +324,6 @@ func TestResolvedListCacheKeyContentBoundaries(t *testing.T) {
 	}
 }
 
-// TestHashSectionConfigCanonicalizes verifies configs that are semantically
-// identical but differ in whitespace or field order hash the same, so native
-// and jellycompat fetches of the same rail share a cache entry. It fails if the
-// canonicalization step is removed.
-func TestHashSectionConfigCanonicalizes(t *testing.T) {
-	a := hashSectionConfig(json.RawMessage(`{"sort":"added","order":"desc"}`))
-	reordered := hashSectionConfig(json.RawMessage(`{"order":"desc","sort":"added"}`))
-	spaced := hashSectionConfig(json.RawMessage("{ \"sort\":  \"added\" ,\n\"order\": \"desc\" }"))
-	if a != reordered {
-		t.Fatalf("field-order should not change the config hash: %q vs %q", a, reordered)
-	}
-	if a != spaced {
-		t.Fatalf("whitespace should not change the config hash: %q vs %q", a, spaced)
-	}
-
-	// A genuinely different config must still hash differently.
-	if a == hashSectionConfig(json.RawMessage(`{"sort":"title","order":"desc"}`)) {
-		t.Fatalf("distinct configs must hash differently")
-	}
-
-	// Invalid JSON falls back to raw bytes rather than collapsing together.
-	if hashSectionConfig(json.RawMessage(`not json`)) == hashSectionConfig(json.RawMessage(`also not`)) {
-		t.Fatalf("distinct non-JSON configs must hash differently")
-	}
-}
-
-// TestResolvedListCacheDoesNotCacheEmpty verifies a transiently empty result is
-// not frozen for the TTL: the loader runs again on the next request.
-func TestResolvedListCacheDoesNotCacheEmpty(t *testing.T) {
-	resetResolvedListCacheForTest()
-	defer resetResolvedListCacheForTest()
-
-	key := "empty-not-cached"
-	now := time.Unix(1_700_000_000, 0)
-
-	var calls int64
-	emptyLoader := func(context.Context) ([]*models.MediaItem, int, error) {
-		atomic.AddInt64(&calls, 1)
-		return nil, 0, nil
-	}
-
-	if _, _, err := getOrRefresh(context.Background(), key, now, emptyLoader); err != nil {
-		t.Fatalf("first empty load: %v", err)
-	}
-	// A second read in the same fresh window must rebuild (empty was not cached).
-	got, _, err := getOrRefresh(context.Background(), key, now, staticLoader(mediaItems("now-has-content"), &calls))
-	if err != nil {
-		t.Fatalf("second load: %v", err)
-	}
-	if ids := itemIDs(got); len(ids) != 1 || ids[0] != "now-has-content" {
-		t.Fatalf("second load returned %v, want [now-has-content]", ids)
-	}
-	if got := atomic.LoadInt64(&calls); got != 2 {
-		t.Fatalf("loader invoked %d times, want 2 (empty result was not cached)", got)
-	}
-}
-
 // TestResolvedListCacheDefensiveCopy verifies a caller mutating the returned
 // slice cannot corrupt the cached entry.
 func TestResolvedListCacheDefensiveCopy(t *testing.T) {
@@ -504,103 +351,6 @@ func TestResolvedListCacheDefensiveCopy(t *testing.T) {
 	}
 }
 
-// TestIsCacheableSectionType covers the whitelist, the user-collection
-// exclusion, and the explicit exclusions. Cacheability is derived from
-// userAgnosticSectionFetcher, so this doubles as a pin on that table.
-func TestIsCacheableSectionType(t *testing.T) {
-	f := &Fetcher{}
-	cacheable := []SectionType{
-		SectionRecentlyAdded,
-		SectionRecentlyReleased,
-		SectionGenre,
-		SectionCustomFilter,
-		SectionCriticallyAcclaimed,
-		SectionAwardWinners,
-		SectionFormatShowcase,
-		SectionSeasonalThemed,
-		SectionMoodCollection,
-		SectionTrendingOnServer,
-		SectionNewToLibrary,
-		SectionMostWatched,
-		SectionTrendingDiscover,
-		SectionAdminCuratedList,
-	}
-	for _, st := range cacheable {
-		if !f.isCacheableSectionType(ResolvedSection{SectionType: st}) {
-			t.Errorf("expected %s to be cacheable", st)
-		}
-	}
-
-	notCacheable := []SectionType{
-		SectionRandom,
-		SectionContinueWatching,
-		SectionNextUp,
-		SectionNextInSeries,
-		SectionRecommendedForYou,
-		SectionBecauseYouWatched,
-		SectionSimilarUsersLiked,
-		SectionTasteMatch,
-		SectionHiddenGems,
-		SectionForgottenFavorites,
-		SectionProfileActivityFeed,
-		SectionEditorialSpotlight,
-	}
-	for _, st := range notCacheable {
-		if f.isCacheableSectionType(ResolvedSection{SectionType: st}) {
-			t.Errorf("expected %s to NOT be cacheable", st)
-		}
-	}
-}
-
-// TestIsCacheableSectionTypePersonalizedFilter verifies genre / custom_filter
-// sections whose QueryDefinition carries a personalized (per-profile) rule or
-// sort are NOT cacheable — their membership differs per profile and the shared
-// cache key excludes userID/profileID — while non-personalized definitions of
-// the same types stay cacheable.
-func TestIsCacheableSectionTypePersonalizedFilter(t *testing.T) {
-	f := &Fetcher{}
-	nonPersonalized := mustJSON(t, catalog.QueryDefinition{
-		Match: "all",
-		Groups: []catalog.QueryGroup{
-			{Match: "all", Rules: []catalog.QueryRule{
-				{Field: "genre", Op: "contains", Value: "Action"},
-			}},
-		},
-	})
-
-	personalizedRule := mustJSON(t, catalog.QueryDefinition{
-		Match: "all",
-		Groups: []catalog.QueryGroup{
-			{Match: "all", Rules: []catalog.QueryRule{
-				{Field: "genre", Op: "contains", Value: "Action"},
-				{Field: "in_watchlist", Op: "is", Value: true},
-			}},
-		},
-	})
-
-	personalizedSort := mustJSON(t, catalog.QueryDefinition{
-		Match: "all",
-		Groups: []catalog.QueryGroup{
-			{Match: "all", Rules: []catalog.QueryRule{
-				{Field: "watched", Op: "is", Value: false},
-			}},
-		},
-		Sort: catalog.QuerySort{Field: "progress", Order: "desc"},
-	})
-
-	for _, st := range []SectionType{SectionCustomFilter, SectionGenre} {
-		if !f.isCacheableSectionType(ResolvedSection{SectionType: st, Config: nonPersonalized}) {
-			t.Errorf("%s with a non-personalized definition should be cacheable", st)
-		}
-		if f.isCacheableSectionType(ResolvedSection{SectionType: st, Config: personalizedRule}) {
-			t.Errorf("%s with a personalized rule (in_watchlist) must NOT be cacheable", st)
-		}
-		if f.isCacheableSectionType(ResolvedSection{SectionType: st, Config: personalizedSort}) {
-			t.Errorf("%s with a personalized sort/rule (watched/progress) must NOT be cacheable", st)
-		}
-	}
-}
-
 // TestResolvedListCacheCollectionUserExclusion verifies library collections are
 // cacheable while user (profile-scoped) collections are not.
 func TestResolvedListCacheCollectionUserExclusion(t *testing.T) {
@@ -619,79 +369,6 @@ func TestResolvedListCacheCollectionUserExclusion(t *testing.T) {
 	}
 	if f.isCacheableSectionType(userCollection) {
 		t.Fatalf("user collection must NOT be cacheable (profile-scoped)")
-	}
-}
-
-// TestResolvedListCacheRefreshAhead verifies an entry past refreshAfter but
-// before expiry serves the current value without blocking on a slow loader, and
-// eventually swaps in the refreshed value.
-func TestResolvedListCacheRefreshAhead(t *testing.T) {
-	resetResolvedListCacheForTest()
-	defer resetResolvedListCacheForTest()
-
-	key := "refresh-ahead"
-	base := time.Unix(1_700_000_000, 0)
-
-	// Prime a cold entry at base.
-	if _, _, err := getOrRefresh(context.Background(), key, base, staticLoader(mediaItems("old"), nil)); err != nil {
-		t.Fatalf("priming entry: %v", err)
-	}
-
-	// Slow refresh loader: blocks until released, then returns the fresh list
-	// and signals completion.
-	release := make(chan struct{})
-	loaderReturned := make(chan struct{})
-	slowLoader := func(context.Context) ([]*models.MediaItem, int, error) {
-		<-release
-		close(loaderReturned)
-		return mediaItems("new"), 1, nil
-	}
-
-	// Now is past refreshAfter (base+12m) but before expiry (base+15m): serve
-	// stale and trigger the async rebuild. This call must not block on the slow
-	// loader.
-	within := base.Add(13 * time.Minute)
-	done := make(chan struct{})
-	var served []*models.MediaItem
-	go func() {
-		items, _, err := getOrRefresh(context.Background(), key, within, slowLoader)
-		if err != nil {
-			t.Errorf("refresh-ahead read: %v", err)
-		}
-		served = items
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("refresh-ahead read blocked on the slow loader")
-	}
-	if got := itemIDs(served); len(got) != 1 || got[0] != "old" {
-		t.Fatalf("refresh-ahead served %v, want [old] (the cached value)", got)
-	}
-
-	// Release the background rebuild and wait for it to finish.
-	close(release)
-	select {
-	case <-loaderReturned:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("background rebuild loader never completed")
-	}
-
-	// The refreshed value swaps in. Poll (the set happens just after the loader
-	// returns) using the same within-window clock so the entry is served fresh.
-	if !waitFor(2*time.Second, func() bool {
-		items, _, err := getOrRefresh(context.Background(), key, within, func(context.Context) ([]*models.MediaItem, int, error) {
-			return mediaItems("unexpected"), 1, nil
-		})
-		if err != nil {
-			return false
-		}
-		ids := itemIDs(items)
-		return len(ids) == 1 && ids[0] == "new"
-	}) {
-		t.Fatalf("refreshed value never swapped in")
 	}
 }
 

@@ -2,14 +2,14 @@ package metadata
 
 import (
 	"context"
+	"maps"
 	"reflect"
 	"testing"
 
-	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/bookid"
 )
 
 const (
@@ -68,272 +68,6 @@ func (f *fakePluginMetadataClient) ResolveImageURL(context.Context, *pluginv1.Re
 
 func (f *fakePluginMetadataClient) ResolveImageURLs(context.Context, *pluginv1.ResolveImageURLsRequest) (*pluginv1.ResolveImageURLsResponse, error) {
 	return nil, nil
-}
-
-func setPluginMetadataItemReleaseDate(t *testing.T, item *pluginv1.MetadataItem, value string) {
-	t.Helper()
-
-	field := item.ProtoReflect().Descriptor().Fields().ByName("release_date")
-	if field == nil {
-		t.Fatal("MetadataItem descriptor is missing release_date")
-	}
-
-	item.ProtoReflect().Set(field, protoreflect.ValueOfString(value))
-}
-
-//nolint:goconst // Keep the production-shaped protobuf fixture readable in place.
-func TestPluginProviderSearch_MapsLocalizedTitlesAndCrossReferences(t *testing.T) {
-	const localizedJapanesePrimaryTitle = "十兵衛ちゃん -ラブリー眼帯の秘密-"
-	client := &fakePluginMetadataClient{
-		searchResponse: &pluginv1.SearchMetadataResponse{Results: []*pluginv1.ProviderSearchResult{
-			{
-				ProviderId:       localizedTVDBID,
-				ItemType:         anchoredItemTypeSeries,
-				Title:            localizedJapanesePrimaryTitle,
-				OriginalTitle:    localizedOriginalTitle,
-				Year:             1999,
-				TitleLanguage:    "ja",
-				TitleIsFallback:  true,
-				OriginalLanguage: "ja",
-				TitleAliases: []*pluginv1.TitleAlias{
-					{Title: localizedEnglishTitle, Language: "en", Kind: testAlternateAliasKind},
-				},
-				ProviderIds: mustStructFromStringMap(t, map[string]string{
-					testTMDBProvider: localizedTMDBID,
-					testIMDBProvider: "tt0213338",
-				}),
-			},
-		}},
-	}
-
-	provider, err := NewPluginProviderWithClientFactory(map[string]string{
-		pluginInstallationIDSetting: "1",
-		capabilityIDSetting:         testTVDBProvider,
-	}, func(context.Context, int, string) (pluginMetadataClient, error) {
-		return client, nil
-	})
-	if err != nil {
-		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
-	}
-
-	results, err := provider.Search(context.Background(), SearchQuery{
-		Title:       localizedEnglishTitle,
-		ContentType: anchoredItemTypeSeries,
-		Language:    "en",
-	})
-	if err != nil {
-		t.Fatalf("Search() error = %v", err)
-	}
-	if client.searchReq == nil || client.searchReq.GetQuery() != localizedEnglishTitle || client.searchReq.GetItemType() != anchoredItemTypeSeries || client.searchReq.GetLanguage() != "en" {
-		t.Fatalf("captured search request = %+v", client.searchReq)
-	}
-	if len(results) != 1 {
-		t.Fatalf("Search() returned %d results, want 1", len(results))
-	}
-	got := results[0]
-	if got.Name != localizedJapanesePrimaryTitle || got.OriginalTitle != localizedOriginalTitle || got.Year != 1999 {
-		t.Fatalf("localized identity fields = %+v", got)
-	}
-	if got.TitleLanguage != "ja" || !got.TitleIsFallback || got.OriginalLanguage != "ja" {
-		t.Fatalf("language/fallback fields = language:%q fallback:%v original:%q", got.TitleLanguage, got.TitleIsFallback, got.OriginalLanguage)
-	}
-	wantAliases := []TitleAlias{{Title: localizedEnglishTitle, Language: "en", Kind: testAlternateAliasKind, Provider: testTVDBProvider}}
-	if !reflect.DeepEqual(got.TitleAliases, wantAliases) {
-		t.Fatalf("TitleAliases = %#v, want %#v", got.TitleAliases, wantAliases)
-	}
-	if !reflect.DeepEqual(got.ProviderIDs, map[string]string{
-		testTVDBProvider: localizedTVDBID,
-		testTMDBProvider: localizedTMDBID,
-		testIMDBProvider: "tt0213338",
-	}) {
-		t.Fatalf("ProviderIDs = %#v", got.ProviderIDs)
-	}
-}
-
-func TestPluginProviderGetMetadata_MapsReleaseDate(t *testing.T) {
-	item := &pluginv1.MetadataItem{
-		ProviderId: "provider-1",
-		ItemType:   "movie",
-		Title:      "Example Movie",
-		ProviderIds: mustStructFromStringMap(t, map[string]string{
-			"tmdb": "123",
-		}),
-	}
-	setPluginMetadataItemReleaseDate(t, item, "2024-01-02")
-
-	provider, err := NewPluginProviderWithClientFactory(map[string]string{
-		"plugin_installation_id": "1",
-		"capability_id":          "tmdb",
-	}, func(context.Context, int, string) (pluginMetadataClient, error) {
-		return &fakePluginMetadataClient{
-			response: &pluginv1.GetMetadataResponse{Item: item},
-		}, nil
-	})
-	if err != nil {
-		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
-	}
-
-	result, err := provider.GetMetadata(context.Background(), MetadataRequest{
-		ProviderIDs: map[string]string{"tmdb": "provider-1"},
-		ContentType: "movie",
-	})
-	if err != nil {
-		t.Fatalf("GetMetadata() error = %v", err)
-	}
-	if result == nil {
-		t.Fatal("expected metadata result")
-	}
-	if result.ReleaseDate != "2024-01-02" {
-		t.Fatalf("ReleaseDate = %q, want 2024-01-02", result.ReleaseDate)
-	}
-}
-
-// The home release dates ride the plugin's metadata Struct and decide the day
-// the calendar lists a movie on, so only a real movie date is kept.
-func TestPluginProviderGetMetadata_MapsHomeReleaseDates(t *testing.T) {
-	tests := []struct {
-		name         string
-		contentType  string
-		value        any
-		wantDigital  string
-		wantPhysical string
-	}{
-		{"movie dates", "movie", "2024-03-12", "2024-03-12", "2024-03-12"},
-		{"timestamp is not a date", "movie", "2024-03-12T00:00:00.000Z", "", ""},
-		{"number", "movie", 20240312, "", ""},
-		{"series ignore them", "series", "2024-03-12", "", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			metadata, err := structpb.NewStruct(map[string]any{
-				"digital_release_date":  tt.value,
-				"physical_release_date": tt.value,
-			})
-			if err != nil {
-				t.Fatalf("structpb.NewStruct() error = %v", err)
-			}
-			provider, err := NewPluginProviderWithClientFactory(map[string]string{
-				"plugin_installation_id": "1",
-				"capability_id":          "tmdb",
-			}, func(context.Context, int, string) (pluginMetadataClient, error) {
-				return &fakePluginMetadataClient{
-					response: &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{
-						ItemType: tt.contentType, Title: "Example", Metadata: metadata,
-					}},
-				}, nil
-			})
-			if err != nil {
-				t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
-			}
-
-			result, err := provider.GetMetadata(context.Background(), MetadataRequest{
-				ProviderIDs: map[string]string{"tmdb": "123"},
-				ContentType: tt.contentType,
-			})
-			if err != nil || result == nil {
-				t.Fatalf("GetMetadata() = %v, %v", result, err)
-			}
-			if result.DigitalReleaseDate != tt.wantDigital || result.PhysicalReleaseDate != tt.wantPhysical {
-				t.Fatalf("home release dates = (%q, %q), want (%q, %q)",
-					result.DigitalReleaseDate, result.PhysicalReleaseDate, tt.wantDigital, tt.wantPhysical)
-			}
-		})
-	}
-}
-
-func TestPluginProviderGetMetadata_MapsKeywordsFromMetadata(t *testing.T) {
-	metadata, err := structpb.NewStruct(map[string]any{
-		"keywords": []any{"time loop", "heist", "time loop", "", 42},
-	})
-	if err != nil {
-		t.Fatalf("structpb.NewStruct() error = %v", err)
-	}
-	item := &pluginv1.MetadataItem{
-		ProviderId: "provider-1",
-		ItemType:   "movie",
-		Title:      "Example Movie",
-		Metadata:   metadata,
-		ProviderIds: mustStructFromStringMap(t, map[string]string{
-			"tmdb": "123",
-		}),
-	}
-
-	provider, err := NewPluginProviderWithClientFactory(map[string]string{
-		"plugin_installation_id": "1",
-		"capability_id":          "tmdb",
-	}, func(context.Context, int, string) (pluginMetadataClient, error) {
-		return &fakePluginMetadataClient{
-			response: &pluginv1.GetMetadataResponse{Item: item},
-		}, nil
-	})
-	if err != nil {
-		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
-	}
-
-	result, err := provider.GetMetadata(context.Background(), MetadataRequest{
-		ProviderIDs: map[string]string{"tmdb": "provider-1"},
-		ContentType: "movie",
-	})
-	if err != nil {
-		t.Fatalf("GetMetadata() error = %v", err)
-	}
-	if result == nil {
-		t.Fatal("expected metadata result")
-	}
-	want := []string{"time loop", "heist"}
-	if !reflect.DeepEqual(result.Keywords, want) {
-		t.Fatalf("Keywords = %#v, want %#v", result.Keywords, want)
-	}
-}
-
-func TestPluginProviderGetMetadata_ForwardsRequestContext(t *testing.T) {
-	client := &fakePluginMetadataClient{
-		response: &pluginv1.GetMetadataResponse{
-			Item: &pluginv1.MetadataItem{ProviderId: "provider-1"},
-		},
-	}
-
-	provider, err := NewPluginProviderWithClientFactory(map[string]string{
-		"plugin_installation_id": "1",
-		"capability_id":          "tmdb",
-	}, func(context.Context, int, string) (pluginMetadataClient, error) {
-		return client, nil
-	})
-	if err != nil {
-		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
-	}
-
-	_, err = provider.GetMetadata(context.Background(), MetadataRequest{
-		ProviderIDs: map[string]string{
-			"tmdb": "provider-1",
-			"imdb": "tt1234567",
-		},
-		ContentType: "movie",
-		Language:    "fr",
-		FilePath:    "/media/movies/example.mkv",
-	})
-	if err != nil {
-		t.Fatalf("GetMetadata() error = %v", err)
-	}
-	if client.getMetadataReq == nil {
-		t.Fatal("expected GetMetadata request to be captured")
-	}
-	if client.getMetadataReq.GetProviderId() != "provider-1" {
-		t.Fatalf("ProviderId = %q, want provider-1", client.getMetadataReq.GetProviderId())
-	}
-	if client.getMetadataReq.GetItemType() != "movie" {
-		t.Fatalf("ItemType = %q, want movie", client.getMetadataReq.GetItemType())
-	}
-	if client.getMetadataReq.GetLanguage() != "fr" {
-		t.Fatalf("Language = %q, want fr", client.getMetadataReq.GetLanguage())
-	}
-	if client.getMetadataReq.GetFilePath() != "/media/movies/example.mkv" {
-		t.Fatalf("FilePath = %q, want /media/movies/example.mkv", client.getMetadataReq.GetFilePath())
-	}
-	assertStructStringMap(t, client.getMetadataReq.GetProviderIds(), map[string]string{
-		"tmdb": "provider-1",
-		"imdb": "tt1234567",
-	})
 }
 
 func TestPluginProviderAssetRequests_ForwardProviderContext(t *testing.T) {
@@ -423,73 +157,6 @@ func TestPluginProviderAssetRequests_ForwardProviderContext(t *testing.T) {
 	})
 }
 
-func TestPluginProviderGetImages_MapsIncludesTextMetadata(t *testing.T) {
-	metadata, err := structpb.NewStruct(map[string]any{
-		"rating":        8.5,
-		"includes_text": false,
-	})
-	if err != nil {
-		t.Fatalf("structpb.NewStruct() error = %v", err)
-	}
-	specials := int32(0)
-	client := &fakePluginMetadataClient{
-		imagesResponse: &pluginv1.GetImagesResponse{Images: []*pluginv1.ImageRecord{
-			{
-				Url:          "https://artworks.thetvdb.com/example.jpg",
-				Kind:         "poster",
-				Language:     "en",
-				Metadata:     metadata,
-				SeasonNumber: &specials,
-			},
-		}},
-	}
-	provider, err := NewPluginProviderWithClientFactory(map[string]string{
-		pluginInstallationIDSetting: "1",
-		capabilityIDSetting:         "tvdb",
-	}, func(context.Context, int, string) (pluginMetadataClient, error) {
-		return client, nil
-	})
-	if err != nil {
-		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
-	}
-
-	images, err := provider.GetImages(context.Background(), ImageRequest{
-		ProviderIDs: map[string]string{"tvdb": "series-1"},
-		ContentType: "series",
-		Language:    "en",
-	})
-	if err != nil {
-		t.Fatalf("GetImages() error = %v", err)
-	}
-	if len(images) != 1 {
-		t.Fatalf("GetImages() returned %d images, want 1", len(images))
-	}
-	if images[0].Rating != 8.5 {
-		t.Fatalf("Rating = %v, want 8.5", images[0].Rating)
-	}
-	if images[0].IncludesText == nil || *images[0].IncludesText {
-		t.Fatalf("IncludesText = %v, want explicit false", images[0].IncludesText)
-	}
-	if images[0].SeasonNumber == nil || *images[0].SeasonNumber != 0 {
-		t.Fatalf("SeasonNumber = %v, want present Specials value 0", images[0].SeasonNumber)
-	}
-}
-
-func mustStructFromStringMap(t *testing.T, values map[string]string) *structpb.Struct {
-	t.Helper()
-
-	asAny := make(map[string]any, len(values))
-	for key, value := range values {
-		asAny[key] = value
-	}
-
-	result, err := structpb.NewStruct(asAny)
-	if err != nil {
-		t.Fatalf("structpb.NewStruct() error = %v", err)
-	}
-	return result
-}
-
 func assertStructStringMap(t *testing.T, value *structpb.Struct, want map[string]string) {
 	t.Helper()
 
@@ -509,160 +176,6 @@ func assertStructStringMap(t *testing.T, value *structpb.Struct, want map[string
 	for key, wantValue := range want {
 		if got[key] != wantValue {
 			t.Fatalf("struct map[%q] = %q, want %q", key, got[key], wantValue)
-		}
-	}
-}
-
-// TestPluginProviderGetMetadata_LookupProviderIDsGate covers when an
-// enrichment-only provider, one that never assigns an ID of its own, is called.
-func TestPluginProviderGetMetadata_LookupProviderIDsGate(t *testing.T) {
-	cases := []struct {
-		name           string
-		lookupIDs      []string
-		providerIDs    map[string]string
-		wantCalled     bool
-		wantProviderID string
-	}{
-		{"own id", nil, map[string]string{"mdblist": "m-1", "imdb": "tt1"}, true, "m-1"},
-		{"own id wins alongside lookup keys", []string{"imdb"}, map[string]string{"mdblist": "m-1", "imdb": "tt1"}, true, "m-1"},
-		{"declared lookup key present", []string{"imdb", "tmdb"}, map[string]string{"tmdb": "578"}, true, ""},
-		{"no own id and nothing declared", nil, map[string]string{"imdb": "tt1", "tmdb": "578"}, false, ""},
-		{"declared keys absent", []string{"imdb", "tmdb"}, map[string]string{"tvdb": "81189"}, false, ""},
-		{"declared key present but empty", []string{"imdb"}, map[string]string{"imdb": ""}, false, ""},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			client := &fakePluginMetadataClient{
-				response: &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{ContentRating: "PG"}},
-			}
-			factoryCalls := 0
-			provider, err := NewPluginProviderWithClientFactory(map[string]string{
-				pluginInstallationIDSetting: "1",
-				capabilityIDSetting:         "mdblist",
-			}, func(context.Context, int, string) (pluginMetadataClient, error) {
-				factoryCalls++
-				return client, nil
-			})
-			if err != nil {
-				t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
-			}
-			provider.lookupProviderIDs = tc.lookupIDs
-
-			result, err := provider.GetMetadata(context.Background(), MetadataRequest{
-				ProviderIDs: tc.providerIDs,
-				ContentType: "movie",
-			})
-			if err != nil {
-				t.Fatalf("GetMetadata() error = %v", err)
-			}
-
-			if !tc.wantCalled {
-				if factoryCalls != 0 || client.getMetadataReq != nil || result != nil {
-					t.Fatalf("expected no plugin call, got factory calls %d, request %v, result %v",
-						factoryCalls, client.getMetadataReq, result)
-				}
-				return
-			}
-			if client.getMetadataReq == nil {
-				t.Fatal("expected the plugin to be called")
-			}
-			if got := client.getMetadataReq.GetProviderId(); got != tc.wantProviderID {
-				t.Fatalf("ProviderId = %q, want %q", got, tc.wantProviderID)
-			}
-			assertStructStringMap(t, client.getMetadataReq.GetProviderIds(), tc.providerIDs)
-		})
-	}
-}
-
-// TestPluginProviderGetImages_IgnoresLookupProviderIDs pins that declared
-// lookup keys alone open GetMetadata only. Without lookup_images, image,
-// season and episode calls address the provider's own catalog and stay gated
-// on its own ID.
-func TestPluginProviderGetImages_IgnoresLookupProviderIDs(t *testing.T) {
-	client := &fakePluginMetadataClient{imagesResponse: &pluginv1.GetImagesResponse{}}
-	provider, err := NewPluginProviderWithClientFactory(map[string]string{
-		pluginInstallationIDSetting: "1",
-		capabilityIDSetting:         "mdblist",
-	}, func(context.Context, int, string) (pluginMetadataClient, error) {
-		return client, nil
-	})
-	if err != nil {
-		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
-	}
-	provider.lookupProviderIDs = []string{"imdb"}
-
-	images, err := provider.GetImages(context.Background(), ImageRequest{
-		ProviderIDs: map[string]string{"imdb": "tt0073195"},
-		ContentType: "movie",
-	})
-	if err != nil {
-		t.Fatalf("GetImages() error = %v", err)
-	}
-	if images != nil || client.getImagesReq != nil {
-		t.Fatalf("expected no image call, got request %v", client.getImagesReq)
-	}
-}
-
-// TestPluginProviderGetImages_LookupImagesGate covers an artwork source that
-// declared lookup_images: its declared lookup keys open GetImages, as they open
-// GetMetadata.
-func TestPluginProviderGetImages_LookupImagesGate(t *testing.T) {
-	cases := []struct {
-		name           string
-		providerIDs    map[string]string
-		wantCalled     bool
-		wantProviderID string
-	}{
-		{"declared lookup key opens images", map[string]string{"tmdb": "550"}, true, ""},
-		{"own id still wins", map[string]string{"fanarttv": "f-1", "tmdb": "550"}, true, "f-1"},
-		{"declared keys absent", map[string]string{"tvdb": "81189"}, false, ""},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			client := &fakePluginMetadataClient{imagesResponse: &pluginv1.GetImagesResponse{
-				Images: []*pluginv1.ImageRecord{{Kind: "logo", Url: "https://assets.example.com/logo.png"}},
-			}}
-			provider, err := NewPluginProviderWithClientFactory(map[string]string{
-				pluginInstallationIDSetting: "1",
-				capabilityIDSetting:         "fanarttv",
-			}, func(context.Context, int, string) (pluginMetadataClient, error) {
-				return client, nil
-			})
-			if err != nil {
-				t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
-			}
-			provider.lookupProviderIDs = []string{"tmdb", "imdb"}
-			provider.lookupImages = true
-
-			images, err := provider.GetImages(context.Background(), ImageRequest{
-				ProviderIDs: tc.providerIDs,
-				ContentType: "movie",
-			})
-			if err != nil {
-				t.Fatalf("GetImages() error = %v", err)
-			}
-			if !tc.wantCalled {
-				if images != nil || client.getImagesReq != nil {
-					t.Fatalf("expected no image call, got request %v", client.getImagesReq)
-				}
-				return
-			}
-			if client.getImagesReq == nil || len(images) != 1 {
-				t.Fatalf("expected the plugin's image, got request %v and images %+v", client.getImagesReq, images)
-			}
-			if got := client.getImagesReq.GetProviderId(); got != tc.wantProviderID {
-				t.Fatalf("ProviderId = %q, want %q", got, tc.wantProviderID)
-			}
-		})
-	}
-}
-
-func TestPersonKindFromStringMapsCreator(t *testing.T) {
-	for _, value := range []string{"Creator", "creator", " CREATOR "} {
-		if got := personKindFromString(value); got != models.PersonKindCreator {
-			t.Errorf("personKindFromString(%q) = %v, want PersonKindCreator", value, got)
 		}
 	}
 }
@@ -768,5 +281,114 @@ func TestPluginProvider_DropsLocalArtworkSources(t *testing.T) {
 	}
 	if person == nil || person.PhotoPath != "" {
 		t.Fatalf("person detail = %+v, want the local photo dropped", person)
+	}
+}
+
+// A book's work-level keys never reach a plugin, and come back from
+// GetMetadata as the capability's work claims, with their evidence and the
+// catalogs that could not be asked; a search result carries none, and an
+// artwork request sends none.
+func TestPluginProviderKeepsBookWorkIDsOutOfProviderIDs(t *testing.T) {
+	item, err := structpb.NewStruct(map[string]any{
+		"work_evidence":      map[string]any{"openlibrary_work": "isbn"},
+		"work_lookup_failed": []any{"Hardcover"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	returned, err := structpb.NewStruct(map[string]any{"isbn": "9780306406157", "openlibrary_work": "OL2W", "hardcover": "9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakePluginMetadataClient{
+		response: &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{
+			ProviderId: "openlibrary:OL1M", ProviderIds: returned, Metadata: item,
+		}},
+		searchResponse: &pluginv1.SearchMetadataResponse{Results: []*pluginv1.ProviderSearchResult{{
+			ProviderId: "openlibrary:OL1M", ProviderIds: returned,
+		}}},
+	}
+	provider, err := NewPluginProviderWithClientFactory(map[string]string{
+		pluginInstallationIDSetting: "1",
+		capabilityIDSetting:         "books-metadata",
+	}, func(context.Context, int, string) (pluginMetadataClient, error) { return client, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := map[string]string{"isbn": "9780306406157", "books-metadata": "openlibrary:OL1M", "Hardcover": "9", "openlibrary_work": "OL2W"}
+	edition := map[string]string{"isbn": "9780306406157", "books-metadata": "openlibrary:OL1M"}
+
+	result, err := provider.GetMetadata(t.Context(), MetadataRequest{ProviderIDs: stored, ContentType: "ebook"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStructStringMap(t, client.getMetadataReq.GetProviderIds(), edition)
+	if !maps.Equal(result.ProviderIDs, edition) {
+		t.Fatalf("ProviderIDs = %v, want %v", result.ProviderIDs, edition)
+	}
+	want := []bookid.WorkClaims{{
+		Source: "books-metadata",
+		Claims: []bookid.WorkClaim{
+			{Provider: "hardcover", ProviderID: "9", Evidence: "unknown"},
+			{Provider: "openlibrary_work", ProviderID: "OL2W", Evidence: "isbn"},
+		},
+		LookupFailed: []string{"hardcover"},
+	}}
+	if !reflect.DeepEqual(result.WorkClaims, want) {
+		t.Fatalf("WorkClaims = %+v, want %+v", result.WorkClaims, want)
+	}
+
+	results, err := provider.Search(t.Context(), SearchQuery{Title: "Book", ProviderIDs: stored, ContentType: "audiobook"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStructStringMap(t, client.searchReq.GetProviderIds(), edition)
+	if len(results) != 1 || !maps.Equal(results[0].ProviderIDs, edition) {
+		t.Fatalf("search results = %+v, want one with %v", results, edition)
+	}
+	// Identify can carry an admin-typed work id into the artwork phase.
+	if _, err := provider.GetImages(t.Context(), ImageRequest{ProviderIDs: stored, ContentType: "ebook"}); err != nil {
+		t.Fatal(err)
+	}
+	assertStructStringMap(t, client.getImagesReq.GetProviderIds(), edition)
+}
+
+func TestPluginProviderSendsAndReadsISBNsAsISBN13(t *testing.T) {
+	ids, err := structpb.NewStruct(map[string]any{"isbn": "978-0-306-40615-7", "openlibrary": "OL1M"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakePluginMetadataClient{
+		searchResponse: &pluginv1.SearchMetadataResponse{Results: []*pluginv1.ProviderSearchResult{{Title: "Book", ProviderIds: ids}}},
+		response:       &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{Title: "Book", ProviderIds: ids}},
+	}
+	provider, err := NewPluginProviderWithClientFactory(map[string]string{
+		"plugin_installation_id": "1",
+		"capability_id":          "openlibrary",
+	}, func(context.Context, int, string) (pluginMetadataClient, error) {
+		return client, nil
+	})
+	if err != nil {
+		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
+	}
+	stored := map[string]string{"openlibrary": "OL1M", "isbn": "ISBN 0-306-40615-2"}
+	sent := map[string]string{"openlibrary": "OL1M", "isbn": "9780306406157"}
+
+	results, err := provider.Search(context.Background(), SearchQuery{Title: "Book", ContentType: "ebook", ProviderIDs: stored})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	assertStructStringMap(t, client.searchReq.GetProviderIds(), sent)
+	if len(results) != 1 || results[0].ProviderIDs["isbn"] != "9780306406157" {
+		t.Fatalf("Search() results = %+v, want the ISBN-13", results)
+	}
+
+	result, err := provider.GetMetadata(context.Background(), MetadataRequest{ContentType: "ebook", ProviderIDs: stored})
+	if err != nil {
+		t.Fatalf("GetMetadata() error = %v", err)
+	}
+	assertStructStringMap(t, client.getMetadataReq.GetProviderIds(), sent)
+	if result == nil || result.ProviderIDs["isbn"] != "9780306406157" {
+		t.Fatalf("GetMetadata() result = %+v, want the ISBN-13", result)
 	}
 }

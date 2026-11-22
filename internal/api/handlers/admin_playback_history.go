@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 // AdminPlaybackHistoryFilter narrows the finalized playback log the same way
@@ -41,21 +43,22 @@ type AdminPlaybackHistoryPageKey struct {
 // AdminPlaybackHistoryRow is one finalized playback attempt as an
 // administrator sees it.
 type AdminPlaybackHistoryRow struct {
-	SessionID       string
-	UserID          int
-	Username        string
-	ProfileID       string
-	ProfileName     string
-	MediaItemID     string
-	MediaFileID     int
-	MediaTitle      string
-	MediaType       string
-	PlayMethod      string
-	StartedAt       time.Time
-	EndedAt         time.Time
-	WatchedSeconds  float64
-	DurationSeconds *float64
-	Completed       bool
+	SessionID   string
+	UserID      int
+	Username    string
+	ProfileID   string
+	ProfileName string
+	MediaItemID string
+	MediaFileID int
+	MediaTitle  string
+	MediaType   string
+	PlayMethod  string
+	StartedAt   time.Time
+	EndedAt     time.Time
+	// EndPositionSeconds is where the play ended (the watched_seconds column).
+	EndPositionSeconds float64
+	DurationSeconds    *float64
+	Completed          bool
 	// PlayedSeconds is the measured watch time (see playback.WatchTime); nil
 	// when the play has no measurement, which includes every row written
 	// before it was recorded. StartPositionSeconds, PausedSeconds and the
@@ -82,6 +85,9 @@ type AdminPlaybackHistoryRow struct {
 	SeriesTitle   string
 	SeasonNumber  *int
 	EpisodeNumber *int
+	// Subtitle is the subtitle the play ended on; nil when it showed none or
+	// the row predates the record.
+	Subtitle *playback.SessionSubtitle
 }
 
 // AdminPlaybackHistoryPage is one keyset page plus whether more rows follow.
@@ -167,7 +173,8 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 			h.lifecycle_seq,
 			COALESCE(sm.title, ''),
 			ep.season_number,
-			ep.episode_number
+			ep.episode_number,
+			h.subtitle
 		FROM admin_playback_history h
 		LEFT JOIN users u ON u.id = h.user_id
 		LEFT JOIN media_items mi ON mi.content_id = h.media_item_id
@@ -193,12 +200,12 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 		if err = rows.Scan(
 			&row.SessionID, &row.UserID, &row.Username, &row.ProfileID, &row.ProfileName,
 			&row.MediaItemID, &row.MediaFileID, &row.MediaTitle, &row.MediaType, &row.PlayMethod,
-			&row.StartedAt, &row.EndedAt, &row.WatchedSeconds, &row.DurationSeconds, &row.Completed,
+			&row.StartedAt, &row.EndedAt, &row.EndPositionSeconds, &row.DurationSeconds, &row.Completed,
 			&row.PlayedSeconds, &row.Measured, &row.StartPositionSeconds, &row.PausedSeconds,
 			&row.MeasuredSince, &row.MeasuredUntil, &row.ClientIP,
 			&row.DeviceID, &row.DevicePlatform, &row.ClientName, &row.ClientVersion,
 			&row.VideoDecision, &row.AudioDecision, &row.EndReason, &row.LifecycleSeq,
-			&row.SeriesTitle, &row.SeasonNumber, &row.EpisodeNumber,
+			&row.SeriesTitle, &row.SeasonNumber, &row.EpisodeNumber, &row.Subtitle,
 		); err != nil {
 			rows.Close()
 			return out, err

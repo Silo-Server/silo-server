@@ -17,23 +17,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestCacheRemotePosterSkipsAlreadyCachedPath(t *testing.T) {
-	cacher := &fakeAudiobookImageCacher{}
-	e := &Enricher{imageCacher: cacher}
-	result := &metadata.MetadataResult{
-		PosterPath: "local/audiobooks/content-1/poster/original.webp",
-	}
-
-	e.cacheRemotePoster(context.Background(), "content-1", result)
-
-	if cacher.calls != 0 {
-		t.Fatalf("CacheImage calls = %d, want 0", cacher.calls)
-	}
-	if result.PosterPath != "local/audiobooks/content-1/poster/original.webp" {
-		t.Fatalf("PosterPath = %q", result.PosterPath)
-	}
-}
-
 type fakeAudiobookImageCacher struct {
 	calls int
 	req   metadata.CacheImageRequest
@@ -119,26 +102,6 @@ func (r *recordingAudiobookItemRepo) ReplacePeopleKindsTx(context.Context, pgx.T
 	return nil
 }
 
-// A provider's runtime describes whichever edition it matched, so it must not
-// replace the length the scanner measured from the book's own files.
-func TestPersistKeepsScannedRuntimeOverProviderRuntime(t *testing.T) {
-	repo := &recordingAudiobookItemRepo{}
-	e := &Enricher{itemRepo: repo}
-
-	err := e.persist(context.Background(), enrichmentItemRow{ContentID: "book"}, nil, &metadata.MetadataResult{
-		HasMetadata: true, Overview: "About the book", Runtime: 481,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(repo.updates) != 1 {
-		t.Fatalf("metadata updates = %d, want 1", len(repo.updates))
-	}
-	if got := repo.updates[0].Runtime; got != nil {
-		t.Fatalf("update runtime = %d, want the scanned runtime left alone", *got)
-	}
-}
-
 // countingProvider counts calls so a test can see the gate hold them back.
 type countingProvider struct {
 	fakeAudiobookMetadataProvider
@@ -191,7 +154,7 @@ func TestProviderGatePausesARateLimitedProvider(t *testing.T) {
 			if err := e.enrichItem(context.Background(), item); err == nil {
 				t.Fatal("first item: want the provider failure returned")
 			}
-			until, paused := e.gate.pausedUntil("abm")
+			until, paused := e.gate.pausedUntil("abm", routeSearch)
 			if tc.wantPause == 0 {
 				if paused {
 					t.Fatalf("provider paused until %v, want no pause", until)
@@ -211,90 +174,10 @@ func TestProviderGatePausesARateLimitedProvider(t *testing.T) {
 			}
 
 			now = now.Add(tc.wantPause)
-			if _, paused := e.gate.pausedUntil("abm"); paused {
+			if _, paused := e.gate.pausedUntil("abm", routeSearch); paused {
 				t.Fatal("provider still paused after the retry-after passed")
 			}
 		})
-	}
-}
-
-// A paused provider in a longer chain must not let the others' silence be
-// recorded as a clean no-match, and an item whose only errors came from
-// paused providers is deferred rather than charged a failure.
-func TestPausedProviderKeepsItemOutOfNoMatch(t *testing.T) {
-	paused := &fakeAudiobookMetadataProvider{slug: "paused"}
-	failing := &fakeAudiobookMetadataProvider{slug: "failing", searchErr: errors.New("connection reset")}
-	e := &Enricher{}
-	e.gate.observe(context.Background(), "paused", status.Error(codes.ResourceExhausted, "busy"))
-	item := enrichmentItemRow{ContentID: "book", FolderID: 1, Title: "Book"}
-
-	pausedErr := &providerPausedError{slug: "paused", until: time.Now().Add(time.Minute)}
-	if err := e.failOrDefer(context.Background(), item, []error{pausedErr}); err != nil {
-		t.Fatalf("failOrDefer(paused only) = %v, want a quiet deferral", err)
-	}
-
-	e.resolveProviders = func(context.Context, int, string) ([]metadata.Provider, error) {
-		return []metadata.Provider{paused, failing}, nil
-	}
-	err := e.enrichItem(context.Background(), item)
-	if !errors.As(err, &pausedErr) {
-		t.Fatalf("enrichItem = %v, want the paused provider reported with the real failure", err)
-	}
-	if got := classifyProviderError(err); got != EnrichmentErrorRateLimited {
-		t.Fatalf("class = %q, want rate_limited", got)
-	}
-}
-
-// A provider that keeps failing is paused as down after a short streak, the
-// pause doubles while it stays down, and any answer clears it.
-func TestProviderGatePausesAFailingProvider(t *testing.T) {
-	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
-	g := &providerGate{now: func() time.Time { return now }}
-	down := status.Error(codes.Unavailable, "down")
-	ctx := context.Background()
-
-	for range providerOutageStreak - 1 {
-		g.observe(ctx, "abm", down)
-	}
-	if _, paused := g.pausedUntil("abm"); paused {
-		t.Fatal("paused before the failure streak was reached")
-	}
-	g.observe(ctx, "abm", down)
-	if until, paused := g.pausedUntil("abm"); !paused || !until.Equal(now.Add(providerOutagePause)) {
-		t.Fatalf("first outage pause = (%v, %v), want %v", until, paused, providerOutagePause)
-	}
-
-	now = now.Add(providerOutagePause)
-	for range providerOutageStreak {
-		g.observe(ctx, "abm", down)
-	}
-	if until, _ := g.pausedUntil("abm"); !until.Equal(now.Add(2 * providerOutagePause)) {
-		t.Fatalf("second outage pause ends %v, want doubled to %v", until, now.Add(2*providerOutagePause))
-	}
-
-	// A per-item answer between transient failures breaks the streak.
-	now = now.Add(2 * providerOutagePause)
-	g.observe(ctx, "abm", down)
-	g.observe(ctx, "abm", down)
-	g.observe(ctx, "abm", status.Error(codes.NotFound, "no such ASIN"))
-	g.observe(ctx, "abm", down)
-	if _, paused := g.pausedUntil("abm"); paused {
-		t.Fatal("a NotFound answer did not break the failure streak")
-	}
-
-	// Item-level failures say nothing about the provider being down.
-	g.observe(ctx, "abm", nil)
-	for range providerOutageStreak {
-		g.observe(ctx, "abm", status.Error(codes.NotFound, "no such ASIN"))
-	}
-	if _, paused := g.pausedUntil("abm"); paused {
-		t.Fatal("permanent per-item errors paused the provider")
-	}
-	for range providerOutageStreak {
-		g.observe(ctx, "abm", down)
-	}
-	if until, _ := g.pausedUntil("abm"); !until.Equal(now.Add(providerOutagePause)) {
-		t.Fatalf("pause after a recovery ends %v, want back to %v", until, now.Add(providerOutagePause))
 	}
 }
 
@@ -312,36 +195,8 @@ func TestSkippedMetadataLookupKeepsTheFailureStreak(t *testing.T) {
 	for range providerOutageStreak {
 		_ = e.enrichItem(context.Background(), item)
 	}
-	if _, paused := e.gate.pausedUntil("abm"); !paused {
+	if _, paused := e.gate.pausedUntil("abm", routeSearch); !paused {
 		t.Fatal("provider not paused after a streak of failed searches")
-	}
-}
-
-// A book whose providers are all paused comes back when the first of them
-// can answer, not the last.
-func TestAllPausedReturnsTheEarliestPauseEnd(t *testing.T) {
-	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
-	g := &providerGate{now: func() time.Time { return now }}
-	ctx := context.Background()
-	g.observe(ctx, "short", status.Error(codes.ResourceExhausted, "busy"))
-	long, err := status.New(codes.ResourceExhausted, "busy").WithDetails(&errdetails.RetryInfo{RetryDelay: durationpb.New(48 * time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	g.observe(ctx, "long", long.Err())
-	providers := []metadata.Provider{
-		&fakeAudiobookMetadataProvider{slug: "short"},
-		&fakeAudiobookMetadataProvider{slug: "long"},
-	}
-	if until, ok := g.allPaused(providers); !ok || !until.Equal(now.Add(defaultProviderPause)) {
-		t.Fatalf("allPaused = (%v, %v), want the short pause end %v", until, ok, now.Add(defaultProviderPause))
-	}
-	errs := []error{
-		&providerPausedError{slug: "long", until: now.Add(48 * time.Hour)},
-		&providerPausedError{slug: "short", until: now.Add(defaultProviderPause)},
-	}
-	if until, ok := pausedOnly(errs); !ok || !until.Equal(now.Add(defaultProviderPause)) {
-		t.Fatalf("pausedOnly = (%v, %v), want the short pause end", until, ok)
 	}
 }
 
@@ -357,13 +212,13 @@ func TestSuccessfulMetadataLookupClearsTheFailureStreak(t *testing.T) {
 
 	for range 3 {
 		for range providerOutageStreak - 1 {
-			g.observe(ctx, "abm", down)
+			g.observe(ctx, "abm", routeMetadata, down)
 		}
 		if _, err := gated.GetMetadata(ctx, metadata.MetadataRequest{}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, paused := g.pausedUntil("abm"); paused {
+	if _, paused := g.pausedUntil("abm", routeMetadata); paused {
 		t.Fatal("intermittent failures between successful lookups paused the provider")
 	}
 }

@@ -188,7 +188,7 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 			if parsed.Error != nil && parsed.Error.Message != "" {
 				// 200 with an upstream error object — transient on gateways,
 				// so it reads as an unavailable upstream once retries run out.
-				return &HTTPError{StatusCode: http.StatusBadGateway, message: "chat API error: " + parsed.Error.Message}
+				return &HTTPError{StatusCode: http.StatusBadGateway, InResponse: true, message: "chat API error: " + parsed.Error.Message}
 			}
 			if len(parsed.Choices) == 0 || parsed.Choices[0].Message.Content == "" {
 				slog.WarnContext(ctx, "AI chat returned no choices, retrying", "component", "ai",
@@ -226,6 +226,12 @@ func (e *permanentError) Unwrap() error { return e.err }
 type HTTPError struct {
 	StatusCode int
 	Code       string
+	// Param is the request field an OpenAI-style error names, if any.
+	Param string
+	// InResponse marks a failure the provider reported inside a successful
+	// response, such as a failed stream event. StatusCode is then the status
+	// Silo files it under, not one the provider sent.
+	InResponse bool
 	message    string
 }
 
@@ -313,7 +319,8 @@ func (c *Client) doReaderWithRetry(ctx context.Context, httpClient *http.Client,
 			continue
 		case resp.StatusCode != http.StatusOK:
 			// 4xx other than 429: not retryable.
-			return &HTTPError{StatusCode: resp.StatusCode, Code: responseErrorCode(respBody), message: fmt.Sprintf("%s returned %d: %s", label, resp.StatusCode, Truncate(string(respBody), 300))}
+			code, param := responseErrorFields(respBody)
+			return &HTTPError{StatusCode: resp.StatusCode, Code: code, Param: param, message: fmt.Sprintf("%s returned %d: %s", label, resp.StatusCode, Truncate(string(respBody), 300))}
 		}
 	}
 
@@ -323,14 +330,16 @@ func (c *Client) doReaderWithRetry(ctx context.Context, httpClient *http.Client,
 	return lastErr
 }
 
-func responseErrorCode(body []byte) string {
+// responseErrorFields returns the code and param of an OpenAI-style error body.
+func responseErrorFields(body []byte) (code, param string) {
 	var response struct {
 		Error struct {
-			Code string `json:"code"`
+			Code  string `json:"code"`
+			Param string `json:"param"`
 		} `json:"error"`
 	}
 	_ = json.Unmarshal(body, &response)
-	return response.Error.Code
+	return response.Error.Code, response.Error.Param
 }
 
 func isExhaustedQuota(body []byte) bool {

@@ -228,6 +228,77 @@ function isInert(markup: string, type: DOMParserSupportedType, requirePolicy: bo
   return true;
 }
 
+// Elements inside which an HTML parser does not read a <style> start tag as
+// the start of raw-text CSS. An HTML parser lowercases tag names, so an XHTML
+// <TITLE> is a title there.
+const NON_STYLE_CONTEXT = new Set([
+  "frameset",
+  "iframe",
+  "noembed",
+  "noframes",
+  "noscript",
+  "optgroup",
+  "option",
+  "plaintext",
+  "script",
+  "select",
+  "style",
+  "textarea",
+  "title",
+  "xmp",
+]);
+
+function isRawTextStyle(el: Element): boolean {
+  for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+    if (parent.namespaceURI !== XHTML_NS || NON_STYLE_CONTEXT.has(parent.localName.toLowerCase())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// The serializer escapes `>` and `&` in text, which an XML parser decodes but
+// an HTML parser keeps inside <style> (raw text), so `body > p` would reach
+// the frame as `body &gt; p` and the rule would be dropped. Frames read the
+// markup as HTML (srcdoc) or XML (a blob), so each style's CSS is written
+// unescaped inside `/*<![CDATA[*/ … /*]]>*/`, which both parsers read as the
+// same CSS. CSS that could end either the CDATA section or the HTML raw text
+// early keeps the escaped form. An HTML parser reads a prefixed `<h:style>`
+// as an unknown element, and some serializers keep the prefix, so such a
+// style is first replaced by an unprefixed one.
+function serializeDocument(doc: Document): string | null {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  const token = `silo-style-${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+  const styles: string[] = [];
+  for (let el of Array.from(doc.getElementsByTagNameNS(XHTML_NS, "style"))) {
+    const css = el.textContent ?? "";
+    if (!isRawTextStyle(el) || /\]\]>|<\/style/i.test(css)) continue;
+    if (el.prefix) {
+      const style = doc.createElementNS(XHTML_NS, "style");
+      for (const attr of Array.from(el.attributes)) {
+        style.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
+      }
+      el.replaceWith(style);
+      el = style;
+    }
+    el.textContent = `${token}-${styles.length}-`;
+    styles.push(`/*<![CDATA[*/${css}\n/*]]>*/`);
+  }
+  const markup = new XMLSerializer().serializeToString(doc);
+  // Each placeholder must close an unprefixed <style> (a serializer may write
+  // a prefix the DOM does not report) and appear once, in order, or the
+  // markup is not used.
+  const pieces = markup.split(new RegExp(`${token}-(\\d+)-(?=</style>)`));
+  if (pieces.length !== styles.length * 2 + 1) return null;
+  let result = "";
+  for (const [i, piece] of pieces.entries()) {
+    if (i % 2 === 0) result += piece;
+    else if (Number(piece) === (i - 1) / 2) result += styles[Number(piece)];
+    else return null;
+  }
+  return result;
+}
+
 const EMPTY_XHTML =
   `<html xmlns="${XHTML_NS}"><head><meta charset="utf-8"/>` +
   `<meta http-equiv="Content-Security-Policy" content="${BOOK_DOCUMENT_CSP}"/></head><body></body></html>`;
@@ -245,10 +316,11 @@ export function sanitizeBookDocument(markup: string, type: string): string {
   addDocumentPolicy(doc);
   // The markup is re-encoded as UTF-8; drop a declaration that names another
   // encoding, which a frame rendering it as XML would honour.
-  const result = new XMLSerializer().serializeToString(doc).replace(/^<\?xml\s[^>]*\?>/, "");
+  const result = serializeDocument(doc)?.replace(/^<\?xml\s[^>]*\?>/, "");
   const isXHTML = doc.documentElement?.namespaceURI === XHTML_NS;
   const asHTML = rendersAsHTML(essence);
   if (
+    result === undefined ||
     ((isXHTML || asHTML) && !isInert(result, "text/html", isXHTML)) ||
     // Other XML types render from a blob, through an XML parser.
     (!asHTML && !isInert(result, parserType(essence), false))

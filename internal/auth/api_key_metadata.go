@@ -44,10 +44,10 @@ type APIKeyPageKey struct {
 }
 
 // Neither bearer nor verifier is part of a management projection.
-const apiKeyMetadataColumns = `ak.id,ak.user_id,ak.label,ak.key_prefix,ak.rate_tier,COALESCE(ak.scopes,'{}'::text[]),ak.created_at,ak.revision` //nolint:gosec // SQL column names, not credentials.
+const apiKeyMetadataColumns = `ak.id,ak.user_id,ak.label,ak.key_prefix,ak.rate_tier,COALESCE(ak.scopes,'{}'::text[]),COALESCE(ak.profile_id,''),ak.created_at,ak.revision` //nolint:gosec // SQL column names, not credentials.
 
 func apiKeyMetadataFields(k *models.APIKeyMetadata) []any {
-	return []any{&k.ID, &k.UserID, &k.Label, &k.KeyPrefix, &k.RateTier, &k.Scopes, &k.CreatedAt, &k.Revision}
+	return []any{&k.ID, &k.UserID, &k.Label, &k.KeyPrefix, &k.RateTier, &k.Scopes, &k.ProfileID, &k.CreatedAt, &k.Revision}
 }
 func scanAPIKeyMetadata(row interface{ Scan(...any) error }) (*models.APIKeyMetadata, error) {
 	k := new(models.APIKeyMetadata)
@@ -213,7 +213,11 @@ func apiKeyAuditValues(key *models.APIKeyMetadata) map[string]any {
 	if scopes == nil {
 		scopes = []string{}
 	}
-	return map[string]any{"user_id": key.UserID, "label": key.Label, "rate_tier": key.RateTier, "scopes": scopes}
+	values := map[string]any{"user_id": key.UserID, "label": key.Label, "rate_tier": key.RateTier, "scopes": scopes}
+	if key.ProfileID != "" {
+		values["profile_id"] = key.ProfileID
+	}
+	return values
 }
 
 // recordAPIKeyMutation records an API key creation (nil before), deletion
@@ -233,6 +237,12 @@ func recordAPIKeyMutation(ctx context.Context, tx pgx.Tx, before, after *models.
 
 // ListByUserAdminPage is a bounded metadata-only account projection.
 func (r *APIKeyRepository) ListByUserAdminPage(ctx context.Context, userID int, after *APIKeyPageKey, limit int) ([]*models.APIKeyMetadataWithUser, bool, error) {
+	return r.ListByUserProfilePage(ctx, userID, "", after, limit)
+}
+
+// ListByUserProfilePage is ListByUserAdminPage narrowed, when profileID is
+// set, to the keys bound to that profile.
+func (r *APIKeyRepository) ListByUserProfilePage(ctx context.Context, userID int, profileID string, after *APIKeyPageKey, limit int) ([]*models.APIKeyMetadataWithUser, bool, error) {
 	limit = max(1, min(limit, 200))
 	var stamp *time.Time
 	var id int64
@@ -240,7 +250,7 @@ func (r *APIKeyRepository) ListByUserAdminPage(ctx context.Context, userID int, 
 		stamp = &after.CreatedAt
 		id = after.ID
 	}
-	rows, err := r.pool.Query(ctx, `SELECT `+apiKeyMetadataColumns+`,ak.last_used_at,COALESCE(u.username,'') FROM api_keys ak JOIN users u ON u.id=ak.user_id WHERE ak.user_id=$1 AND ($2::timestamptz IS NULL OR (ak.created_at,ak.id)<($2,$3)) ORDER BY ak.created_at DESC,ak.id DESC LIMIT $4`, userID, stamp, id, limit+1)
+	rows, err := r.pool.Query(ctx, `SELECT `+apiKeyMetadataColumns+`,ak.last_used_at,COALESCE(u.username,'') FROM api_keys ak JOIN users u ON u.id=ak.user_id WHERE ak.user_id=$1 AND ($5='' OR ak.profile_id=$5) AND ($2::timestamptz IS NULL OR (ak.created_at,ak.id)<($2,$3)) ORDER BY ak.created_at DESC,ak.id DESC LIMIT $4`, userID, stamp, id, limit+1, profileID)
 	if err != nil {
 		return nil, false, err
 	}

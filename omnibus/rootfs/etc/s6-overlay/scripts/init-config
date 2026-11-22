@@ -65,13 +65,22 @@ elif [[ -d "$ebook_cache" ]]; then
 fi
 install -d -o silo -g silo -m 0700 "$ebook_cache"
 
-# Proxy and transcode nodes run against the main server's PostgreSQL and
-# Redis and start none of the bundled services.
+# Proxy nodes run against the main server's PostgreSQL and Redis, and
+# transcode nodes take everything from the main server (SILO_CORE_URL and
+# SILO_NODE_KEY, which silo itself checks). Neither starts a bundled service.
 case "${MODE:-integrated}" in
   integrated|api) ;;
+  transcode)
+    for name in ENABLE_REDIS ENABLE_MEILISEARCH ENABLE_NODE_ACCESS; do
+      if truthy "${!name:-false}"; then warn "$name has no effect with MODE=$MODE"; fi
+    done
+    log "mode: $MODE, configured by the main server at SILO_CORE_URL"
+    exit 0
+    ;;
   *)
-    if [[ -z "${DATABASE_URL:-}" || -z "${REDIS_URL:-}" ]]; then
-      echo "MODE=$MODE needs DATABASE_URL and REDIS_URL pointing at the main server's PostgreSQL and Redis" >&2
+    # Silo reads either variable from the file its _FILE variant names.
+    if [[ -z "${DATABASE_URL:-}${DATABASE_URL_FILE:-}" || -z "${REDIS_URL:-}${REDIS_URL_FILE:-}" ]]; then
+      echo "MODE=$MODE needs DATABASE_URL and REDIS_URL (or DATABASE_URL_FILE and REDIS_URL_FILE) pointing at the main server's PostgreSQL and Redis" >&2
       exit 1
     fi
     for name in ENABLE_REDIS ENABLE_MEILISEARCH ENABLE_NODE_ACCESS; do
@@ -82,14 +91,15 @@ case "${MODE:-integrated}" in
     ;;
 esac
 
-# ENABLE_NODE_ACCESS opens the bundled PostgreSQL and Redis to proxy and
-# transcode nodes on other hosts, behind passwords. Silo itself keeps using the
-# socket and loopback.
+# ENABLE_NODE_ACCESS opens the bundled PostgreSQL and Redis to proxy nodes on
+# other hosts, behind passwords. Silo itself keeps using the socket and
+# loopback.
 node_access=false
 if truthy "${ENABLE_NODE_ACCESS:-false}"; then node_access=true; fi
 
-# PostgreSQL: bundled unless the deployment points DATABASE_URL elsewhere.
-if [[ -z "${DATABASE_URL:-}" ]]; then
+# PostgreSQL: bundled unless the deployment points DATABASE_URL elsewhere,
+# directly or through the file DATABASE_URL_FILE names, which Silo reads.
+if [[ -z "${DATABASE_URL:-}${DATABASE_URL_FILE:-}" ]]; then
   : > "$STATE_DIR/postgres.enabled"
   export_env DATABASE_URL "postgres://silo@/silo?host=/run/postgresql&sslmode=disable"
   postgres_state="bundled"
@@ -120,7 +130,7 @@ fi
 # choosing Meilisearch turns the bundled Redis on too. Silo trims and
 # lowercases the provider, so compare it the same way.
 env_provider="$(printf '%s' "${SILO_SEARCH_PROVIDER:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
-if [[ -n "${REDIS_URL:-}" ]]; then
+if [[ -n "${REDIS_URL:-}${REDIS_URL_FILE:-}" ]]; then
   redis_state="external"
   if [[ "$node_access" == true ]]; then
     warn "ENABLE_NODE_ACCESS opens only the bundled Redis; nodes reach the one REDIS_URL names directly"
@@ -170,7 +180,7 @@ if truthy "${ENABLE_MEILISEARCH:-false}"; then
     : > "$SEARCH_MARKER"
   fi
   [[ -n "${SILO_MEILISEARCH_URL:-}" ]] || export_env SILO_MEILISEARCH_URL "http://${MEILI_HTTP_ADDR:-127.0.0.1:7700}"
-  [[ -n "${SILO_MEILISEARCH_API_KEY:-}" ]] || export_env SILO_MEILISEARCH_API_KEY "$key"
+  [[ -n "${SILO_MEILISEARCH_API_KEY:-}${SILO_MEILISEARCH_API_KEY_FILE:-}" ]] || export_env SILO_MEILISEARCH_API_KEY "$key"
   meilisearch_state="bundled"
 else
   # Turning the bundle off moves search back to PostgreSQL. The marker says

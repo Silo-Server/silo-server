@@ -15,9 +15,8 @@ A book is provider-matched when any of these holds:
 - its last enrichment outcome in `audiobook_enrichment_state` is `success`,
   which covers an automatic match that stored only the ASIN, such as a lookup
   by the tagged ASIN or a match whose provider ID another item already owns;
-- its `status` is `matched`, which Match Item and Refresh Metadata write
-  through the metadata pipeline in the same transaction as the match,
-  whatever IDs it carries.
+- its `status` is `matched`, which Match Item writes through the metadata
+  pipeline in the same transaction as the match, whatever IDs it carries.
 
 `catalog.AudiobookProviderMatchedWhere` is the one predicate; the scanner and
 the admin unmatched list both use it.
@@ -58,9 +57,9 @@ Rename detection still depends on the stored author and narrator matching
 the tags, so a matched book whose provider spells them differently gets a new
 item when its folder is renamed.
 
-The enricher does not run again on a matched book. A book whose fields were
-mixed before this rule existed stays that way until an admin runs Refresh
-Metadata or Match Item.
+The sweep does not run again on a matched book. A book whose fields were
+mixed before this rule existed stays that way until an admin runs an item's
+Refresh Metadata in `reset` mode or Match Item.
 
 ## Reading the tags
 
@@ -74,9 +73,28 @@ write are in `internal/scanner/audiobook_tags.go`:
   The prefix, followed by `-` or `:`, is the book's series tag with an
   optional position; a book without a series tag accepts any text ending in a
   number. A "subtitle" that names the series or ends in a position is not
-  one. Otherwise `title` stays, because a single file's `album` may name its
+  one. Behind a series tag's prefix the tags may agree less exactly. `album`
+  also wins when it differs from the rest of `title` only in punctuation,
+  when `title` repeats the series or `album` after it
+  (`Saga Name 2 - Book Title Saga Name`), or when it adds a subtitle. When
+  `album` instead goes on to name the series or a position
+  (`Book Title: Saga Name 2`, `Book Title, Part 2`), `title` without its
+  prefix wins. A numbered prefix that names the series among other words
+  (`The Saga Name 2`) counts when `album` follows it. A prefix carrying the
+  series position tag's number, in digits or as a Roman numeral, was composed
+  from the two tags, so `title` without it wins whatever `album` says, and
+  when there is no `album`. Otherwise `title` stays, because a single file's `album` may name its
   series or a collection. A multi-file book whose part titles name the parts
   uses `album`.
+- Authors: the `artist` tag, as in Audiobookshelf. `album_artist` is read when
+  `artist` is empty, or when it names some of the people in `artist` and no
+  one else (`artist` then also lists the narrator). inAudible writes the
+  series to `album_artist`, so it never wins over an `artist` naming someone
+  else. `composer` is the last resort.
+- Series without a position: a `grouping` tag counts only when it ends in a
+  position, because it often holds a category or a work name, or when
+  `album_artist` repeats it and no author's name appears in it, as inAudible
+  writes a series.
 - Narrators: an explicit narrator tag (`narrator`, the MP4 `©nrt` atom, or
   `narratedby`) when present. Otherwise the first of `performer` and
   `composer` that names someone other than the tagged authors: some files put
@@ -94,40 +112,81 @@ the tags or a provider's record fills each field.
 An unchanged book is skipped on rescan, so a change to these rules reaches a
 book only when its files change or a metadata refresh reads its tags again in
 place: the library Refresh Metadata in `full` mode, or an item's Refresh
-Metadata in `quick` or `reset` mode, as the next section describes.
+Metadata, as the next section describes.
 
 ## Reading the tags again
 
 A scan skips a book whose files match their stored size and modification
 time (`audiobookFolderShouldSkip`), so a change to how tags are read reaches
 an unchanged book only when someone asks for it. A metadata refresh marks its
-scan with `scanner.WithAudiobookTagReread` and the content ID it refreshes;
-the scan then parses that book as if its files had changed and skips every
+scan so the scanner reads books again as if their files had changed:
+`scanner.WithAudiobookTagReread` names one book, and the scan skips every
 other unchanged book it reaches, such as loose books beside it at the library
-root. The mark is set by:
-
-- the library Refresh Metadata job (`library_refresh`) in `full` mode, for
-  each item it refreshes, and the manual Refresh All Library Metadata task,
-  which runs that mode for each library. An audiobook whose match an admin
-  ignored (`match_ignored_at`) is included for the tag read alone; no
-  provider is asked about it;
-- an item's Refresh Metadata in `quick` mode, which an admin or a metadata
-  curator can start, before the provider refresh;
-- an item's Refresh Metadata in `reset` mode, after the reset. The reset
-  writes the provider's values and clears the fields and credits the
-  provider leaves out; the second read lets the tags fill what is still
-  empty, as on any scan of a matched book. The job fails when that read
-  fails or the scan did not read the book (`scanner.AudiobookTagRereadDone`),
-  since a scan of a path shared with other books succeeds when only one of
-  them failed.
+root; `scanner.WithAudiobookLibraryTagReread` covers every book the scan
+reaches. Scheduled and library scans, real-time monitoring, and autoscan
+never set either mark.
 
 The book keeps its item: the scan finds it by the root path of its stored
 files, so the content ID, file rows, series row, progress, and favorites
-stay, and the ownership rules above decide which fields the tags write.
-Scheduled and library scans, real-time monitoring, and autoscan never set
-the mark, and neither does a `complete` item refresh. A `complete` refresh
-clears the files' content links before it scans, so the book gets a new item.
-Ebook scans ignore the mark.
+stay, and the ownership rules above and admin field locks decide which
+fields the tags write. Ebook scans ignore the mark.
+
+## Admin Refresh Metadata
+
+An admin refresh never sends an audiobook to the general metadata service
+(`metadata.MetadataService`): its matching and its item rebinding know none
+of the rules here, so it could retitle a book, replace tagged credits, match
+another edition, match an untagged book by title alone, or fold a book into
+another library's item. Provider work on an audiobook goes through the
+enricher (`internal/audiobooks/enrichment_refresh.go`).
+
+- Library Refresh Metadata in `full` mode (`library_refresh`, and the manual
+  Refresh All Library Metadata task, which runs it for each library) on an
+  audiobook library runs one library scan under
+  `WithAudiobookLibraryTagReread`. The job runs it directly, as one scan run
+  with the `admin_library_refresh` trigger, so the scanner's worker pool reads
+  every book and the walk, grouping, held folders, and missing-file
+  reconciliation are those of any library scan. The job reports the scan's
+  own progress, and the scan stops when its scan run is canceled or failed
+  elsewhere. When a library scan of the library is already accepted or
+  running (`idx_scan_runs_active_scope`), the job fails with
+  `ErrLibraryScanInProgress` instead of starting a second scan. After the
+  scan, `Enricher.RequeueUnmatchedInLibrary` makes every unmatched book due
+  in one statement: its
+  `no_match`, `failed`, or `skipped` outcome and retry counts are cleared, so
+  the next sweep tries it under these rules. A matched book keeps its match
+  and provider-owned fields; a book whose match an admin ignored
+  (`match_ignored_at`) stays as it is. The job asks no provider. `quick` mode
+  leaves audiobooks out.
+- An item's Refresh Metadata first claims the book (`Enricher.ClaimRefresh`)
+  and holds the claim until it ends, so the sweep cannot take the book
+  between its tag read and its provider step. A delegated curator's refresh
+  claims, and writes, only while every library holding the book is in the
+  curator's scope (`catalog.GuardMetadataCurationItems`, checked again inside
+  each write transaction).
+- `quick` mode reads the book's tags again in its scan, then calls
+  `Enricher.Refresh`. A matched book fetches the records its stored IDs name,
+  without searching, and they pass the same admission checks as a sweep
+  match; when no provider returns them the book keeps its match and fields
+  and the job fails. An unmatched book is matched as one sweep item would be.
+  An ignored book is left alone.
+- `reset` mode clears the match (`Enricher.ResetMatchTx`): provider IDs, work
+  ids, author and narrator credits, the fields a match owns, artwork a provider
+  supplied, the field locks, and the enrichment state. It does so inside the
+  scanner transaction that writes the book's re-read tags
+  (`scanner.WithAudiobookTagRereadReset`), after the files were read, so a
+  scan that fails or is canceled leaves the book as it was. A cleared cached
+  poster is queued for collection by `media_items_artwork_revision_gc_update`
+  in that transaction. `Refresh` then matches the book again. The job fails
+  when the scan did not read the book (`scanner.AudiobookTagRereadDone`),
+  since a scan of a path shared with other books succeeds when only one of
+  them failed; the cache invalidation still runs.
+- `complete` mode runs as `reset` for an audiobook. A complete refresh clears
+  its scope's content links before it scans, which would give the book a new
+  content ID and orphan its progress and favorites.
+
+None of these changes a book's content ID, files, library membership,
+progress, or favorites, or merges it into another item.
 
 ## The enrichment sweep
 
@@ -148,6 +207,56 @@ own limiter allows rather than one batch per scheduled run. It stops when:
 A batch that still matched books while one provider was paused goes on; the
 gate keeps calls away from the paused provider. Books a pause deferred come
 due when the pause ends and the next scheduled run takes them.
+
+The gate (`internal/audiobooks/enrichment_gate.go`) pauses a provider that
+answers rate limited, for every call. It counts outages separately for the
+provider's two routes, search and metadata: three transient failures in a row
+on one route pause that route, for 15 minutes at first and twice as long each
+time it is still failing. A paused search leaves lookups by a tagged ASIN
+running, so those books keep matching while a book that needs the search is
+deferred. A paused metadata route stops searches too, since a search result
+could not be fetched.
+
+The sweep never claims a book whose match an admin ignored
+(`match_ignored_at`).
+
+## Work ids
+
+This section applies to ebooks as well. A work id (`bookid.KeyOpenLibraryWork`,
+`bookid.KeyHardcover`) names the book an edition belongs to, so every edition
+of one book holds the same value. For audiobook and ebook items these keys
+never live in `media_item_provider_ids`, where a value names one item of a
+type: the table's `media_item_provider_ids_book_work_ids_check` rejects them,
+and `ReplaceByContentIDTx` drops them. They live in `media_item_work_ids`, one
+claim per item and key, which many items may share.
+
+`PluginProvider` takes them out of a book's provider IDs at the boundary and
+never sends them to a plugin. A `GetMetadata` answer becomes
+`MetadataResult.WorkClaims`, with each id's evidence from the plugin's
+`work_evidence` and the catalogs its `work_lookup_failed` names; a search
+result carries none. `catalog.ApplyWorkClaimsTx` writes them in the
+transaction that writes the item's provider IDs, from the audiobook enricher,
+the ebook enricher, and the metadata service. An answer replaces the claims of
+the capability that gave it: keys it holds are upserted, and its other keys are
+deleted unless the catalog behind them could not be asked. An answer that holds
+a work id or names a failed catalog also replaces, under the same rule, the
+claims with no capability (`source` empty, the rows the migration moved); an
+answer that says nothing about works leaves those alone. Claims from other
+capabilities stay. An item holds one claim per key, so when two capabilities
+answer for the same key, the last answer wins. In the metadata service, an
+answer whose edition ids contradict the item's (same key, different value)
+names another edition: its claims are dropped, and it neither stores nor
+deletes any. A reset, an Identify (the admin naming the book; the answers it
+fetches supply the claims again), and the clearing of a provisional item's
+provider IDs remove every claim; an item merge moves the source's claims for
+keys the target lacks.
+
+Because work keys never reach a plugin, an admin can no longer search for or
+look up a book by a Hardcover id.
+
+Literary work linking scores a shared work id at 0.90 (link source
+`external_id`), below a shared edition id and a shared series, and above an
+author conflict. The evidence is shown in the candidate, not scored.
 
 ## Unmatched audiobooks and `status`
 

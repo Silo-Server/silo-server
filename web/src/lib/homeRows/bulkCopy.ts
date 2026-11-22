@@ -12,6 +12,7 @@ export const BULK_LIBRARY_LIMIT = 100;
  */
 const PAGE_BOUND_TYPES: ReadonlySet<string> = new Set([
   "collection",
+  "collection_posters",
   "custom_filter",
   "admin_curated_list",
   "genre",

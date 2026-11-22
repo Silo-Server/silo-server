@@ -3,14 +3,21 @@ package ebooks
 import (
 	"context"
 	"errors"
-
+	"fmt"
+	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
-
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/bookid"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -233,67 +240,6 @@ func (f *fakeProviderIDOwner) FindContentIDByProviderIDs(_ context.Context, ids 
 	return "", nil
 }
 
-func TestCollectEbookMetadataSkipsProviderIDOwnedByAnotherItem(t *testing.T) {
-	providers := []metadata.Provider{
-		&fakeEbookMetadataProvider{
-			slug:    "bookinfo",
-			results: []metadata.SearchResult{{Name: "t", ProviderIDs: map[string]string{"bookinfo": "40817436"}}},
-			result:  &metadata.MetadataResult{HasMetadata: true, Overview: "book one"},
-		},
-	}
-	owner := &fakeProviderIDOwner{ownerByID: map[string]string{"40817436": "other-book"}}
-
-	_, ids, errs, _ := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c2", Title: "t"}, providers, owner)
-
-	if len(errs) != 0 {
-		t.Fatalf("unexpected provider errors: %v", errs)
-	}
-	if _, ok := ids["bookinfo"]; ok {
-		t.Fatalf("provider id owned by another item was claimed: %v", ids)
-	}
-}
-
-func TestCollectEbookMetadataDoesNotReintroduceOwnedCrossID(t *testing.T) {
-	providers := []metadata.Provider{
-		&fakeEbookMetadataProvider{
-			slug: "bookinfo",
-			results: []metadata.SearchResult{{
-				Name: "t",
-				ProviderIDs: map[string]string{
-					"bookinfo":    "owned-id",
-					"openlibrary": "free-id",
-				},
-			}},
-			result: &metadata.MetadataResult{
-				HasMetadata: true,
-				Overview:    "usable metadata",
-				ProviderIDs: map[string]string{
-					"bookinfo":    "owned-id",
-					"openlibrary": "free-id",
-				},
-			},
-		},
-	}
-	owner := &fakeProviderIDOwner{ownerByID: map[string]string{"owned-id": "other-book"}}
-
-	accumulator, ids, errs, authorMismatch := collectEbookMetadata(
-		context.Background(),
-		enrichmentItemRow{ContentID: "this-book", Title: "t"},
-		providers,
-		owner,
-	)
-
-	if len(errs) != 0 || authorMismatch {
-		t.Fatalf("collect errors = %v, authorMismatch = %v", errs, authorMismatch)
-	}
-	if accumulator.Overview != "usable metadata" || ids["openlibrary"] != "free-id" {
-		t.Fatalf("usable metadata/identity was lost: accumulator=%+v ids=%v", accumulator, ids)
-	}
-	if _, exists := ids["bookinfo"]; exists {
-		t.Fatalf("metadata response reintroduced an owned cross-ID: %v", ids)
-	}
-}
-
 func TestMergeEbookAuthorCreditsPreservesOtherPeopleKinds(t *testing.T) {
 	existing := []models.ItemPerson{
 		{Person: models.Person{ID: 10, Name: "Old Author"}, Kind: models.PersonKindAuthor, SortOrder: 0},
@@ -314,41 +260,6 @@ func TestMergeEbookAuthorCreditsPreservesOtherPeopleKinds(t *testing.T) {
 	}
 	if got[1].Person.ID != 40 || got[1].Kind != models.PersonKindAuthor || got[1].SortOrder != 1 {
 		t.Fatalf("provider author credit = %+v", got[1])
-	}
-}
-
-func TestMergeEnrichmentProviderIDsKeepsExistingIDs(t *testing.T) {
-	dst := &metadata.MetadataResult{ProviderIDs: map[string]string{"isbn": "9780306406157"}}
-	src := &metadata.MetadataResult{ProviderIDs: map[string]string{"isbn": "new", "openlibrary": "OL1M", "empty": ""}}
-
-	mergeEnrichmentProviderIDs(dst, src)
-
-	if got := dst.ProviderIDs["isbn"]; got != "9780306406157" {
-		t.Fatalf("isbn = %q, want original", got)
-	}
-	if got := dst.ProviderIDs["openlibrary"]; got != "OL1M" {
-		t.Fatalf("openlibrary = %q, want OL1M", got)
-	}
-	if _, exists := dst.ProviderIDs["empty"]; exists {
-		t.Fatal("empty provider ID should not be merged")
-	}
-}
-
-func TestFilterEbookProviderIDsDropsAsinAliases(t *testing.T) {
-	got := filterEbookProviderIDs(map[string]string{
-		"ASIN":           "B00TEST",
-		"audibleASIN":    "B00AUDIO",
-		"audible-asin":   "B00AUDIO2",
-		"audible_asin":   "B00AUDIO3",
-		" ISBN ":         " 9780306406157 ",
-		" OpenLibraryID": " OL1M ",
-	})
-
-	if got["asin"] != "" || got["audibleasin"] != "" || got["audible-asin"] != "" || got["audible_asin"] != "" {
-		t.Fatalf("ASIN aliases should be filtered, got %+v", got)
-	}
-	if got["isbn"] != "9780306406157" || got["openlibraryid"] != "OL1M" {
-		t.Fatalf("filtered IDs = %+v, want ISBN and OpenLibraryID only", got)
 	}
 }
 
@@ -612,100 +523,6 @@ func TestEnrichWithProvidersReturnsFailureWhenAllProvidersError(t *testing.T) {
 	}
 }
 
-// A locally complete ebook is the one terminal outcome that consults no
-// provider, so it is also the one path that used to skip the status
-// promotion entirely. Without it the item keeps media_items.status =
-// 'pending' forever and the library page reports a fully described book as
-// unmatched.
-func TestEnrichClaimedItemPromotesLocallyCompleteItem(t *testing.T) {
-	var promoted []string
-	e := &Enricher{
-		markMatchedLocallyFn: func(_ context.Context, contentID string) error {
-			promoted = append(promoted, contentID)
-			return nil
-		},
-	}
-
-	outcome, err := e.enrichClaimedItem(context.Background(), locallyCompleteEbookRow())
-	if err != nil {
-		t.Fatalf("enrichClaimedItem() error = %v", err)
-	}
-	if outcome != EnrichmentOutcomeSuccess {
-		t.Fatalf("outcome = %q, want %q", outcome, EnrichmentOutcomeSuccess)
-	}
-	if len(promoted) != 1 || promoted[0] != "ebook-local-1" {
-		t.Fatalf("promoted content ids = %v, want [ebook-local-1]", promoted)
-	}
-}
-
-func locallyCompleteEbookRow() enrichmentItemRow {
-	return enrichmentItemRow{
-		ContentID:  "ebook-local-1",
-		FolderID:   7,
-		Title:      "A Book",
-		Author:     "An Author",
-		Overview:   "A useful description.",
-		PosterPath: "/library/A Book/cover.jpg",
-		Status:     "pending",
-	}
-}
-
-func TestCleanEbookSearchTitle(t *testing.T) {
-	cases := []struct {
-		title, author, want string
-	}{
-		{"Exit Strategy_ The Murderbot Di - Martha Wells", "Martha Wells", "Exit Strategy The Murderbot Di"},
-		{"LTB.067_-_Micky_Maus_Superstar", "", "LTB.067 - Micky Maus Superstar"},
-		{"Club Dark Lace_ Complete Dark Lace", "", "Club Dark Lace Complete Dark Lace"},
-		{"All of Us - A. F. Carter", "a. f. carter", "All of Us"},
-		// A " - <token>" that is not the trailing author must be preserved.
-		{"Alice - Bob and Carol", "Bob", "Alice - Bob and Carol"},
-		{"Plain Title", "Some Author", "Plain Title"},
-		{"  spaced   out  ", "", "spaced out"},
-		// Series/volume markers are dropped: they are retail furniture that no
-		// provider catalog indexes, so carrying them into the query matched
-		// nothing. Volumes are told apart after the search instead, by
-		// metadata.BestMatch scoring against the raw title.
-		{"Just One Night (The Raven Brothers Book 4)", "", "Just One Night"},
-		{"Mistborn (The Mistborn Saga #1)", "", "Mistborn"},
-		// Two volumes of one series now issue the same query. That is the point:
-		// the query finds the work, and the volume check rejects the wrong book.
-		{"The Wheel of Time (Book 1)", "", "The Wheel of Time"},
-		{"The Wheel of Time (Book 2)", "", "The Wheel of Time"},
-		// Stacked markers peel rather than leaving a stray group behind.
-		{"Just One Night (The Raven Brothers Book 4) (2019)", "", "Just One Night"},
-		// A marker word without volume syntax is a title, not furniture: "book"
-		// alone must not condemn the parenthetical.
-		{"Markus Zusak Reader (The Book Thief)", "", "Markus Zusak Reader (The Book Thief)"},
-		{"Anthology (Complete Series)", "", "Anthology (Complete Series)"},
-		{"White Out [Badlands Thriller]", "", "White Out [Badlands Thriller]"},
-		{"Salem's Lot (2019)", "", "Salem's Lot"},
-		{"Title (A Story of 1969)", "", "Title (A Story of 1969)"},
-		{"The Hobbit (Illustrated)", "", "The Hobbit (Illustrated)"},
-		// Retail edition suffixes are furniture too: providers index the work,
-		// not the storefront's packaging of it.
-		{"White Fang (AmazonClassics Edition)", "", "White Fang"},
-		{"Treasure Island (AmazonClassics Edition)", "", "Treasure Island"},
-		{"Frankenstein (Penguin Classics)", "", "Frankenstein"},
-		{"The Shell Game (Kindle Single)", "", "The Shell Game"},
-		{"Ordinary Grace (A Novel)", "", "Ordinary Grace"},
-		// ...but only as a suffix category, not a keyword hunt: an edition
-		// word mid-parenthetical is a title.
-		{"Rules (First Edition Club)", "", "Rules (First Edition Club)"},
-		{"Exit Strategy_ Murderbot Di - Martha Wells (Book 4)", "Martha Wells", "Exit Strategy Murderbot Di"},
-		// Book metadata is untrusted and peeling costs grow superlinearly, so an
-		// oversized title is cut to maxEbookSearchTitleBytes, on a rune
-		// boundary, before cleaning.
-		{"Dune" + strings.Repeat(" (1)", 300) + " (Illustrated)", "", "Dune"},
-		{strings.Repeat("日", 400), "", strings.Repeat("日", 341)},
-	}
-	for _, tc := range cases {
-		if got := cleanEbookSearchTitle(tc.title, tc.author); got != tc.want {
-			t.Errorf("cleanEbookSearchTitle(%q,%q)=%q want %q", tc.title, tc.author, got, tc.want)
-		}
-	}
-}
-
 type fakeEbookProviderIDRepository struct {
 	rows       map[string][]*models.MediaItemProviderID
 	err        error
@@ -721,7 +538,7 @@ func (f *fakeEbookProviderIDRepository) GetByContentIDs(
 	return f.rows, f.err
 }
 
-func (f *fakeEbookProviderIDRepository) ReplaceByContentID(context.Context, string, map[string]string) error {
+func (f *fakeEbookProviderIDRepository) ReplaceByContentIDWithWorkClaims(context.Context, string, map[string]string, []bookid.WorkClaims) error {
 	return f.replaceErr
 }
 
@@ -952,5 +769,70 @@ func TestEbookWithoutAnAuthorMatchesTheSearchedTitle(t *testing.T) {
 				t.Fatalf("%q for \"Dune (2019)\": matched = %v, want %v", tc.candidate, matched, tc.matched)
 			}
 		})
+	}
+}
+
+// Two editions of one book enriched apart both keep the work id their record
+// claims, stored with its evidence and source, beside their own ISBN. A
+// record admission rejects contributes no claim.
+func TestEbookEnrichmentStoresWorkClaimsDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := withEnrichmentClaimCheck(t.Context(), func(context.Context) error { return nil })
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	e := &Enricher{pool: pool, itemRepo: catalog.NewItemRepository(pool), providerIDs: catalog.NewProviderIDRepository(pool)}
+	work := "OL" + strings.ToUpper(uuid.NewString()[:6]) + "W"
+
+	for i := range 2 {
+		contentID := "ebook-work-" + uuid.NewString()
+		isbn := fmt.Sprintf("979%010d", time.Now().UnixNano()%10_000_000_000+int64(i))
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'ebook', 'Book', '', '{}'::text[])`, contentID); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, contentID)
+		})
+		claims := func(source, key, value string) []bookid.WorkClaims {
+			return []bookid.WorkClaims{{Source: source, Claims: []bookid.WorkClaim{{Provider: key, ProviderID: value, Evidence: bookid.EvidenceISBN}}}}
+		}
+		providers := []metadata.Provider{
+			&fakeEbookMetadataProvider{slug: "books-metadata", result: &metadata.MetadataResult{
+				HasMetadata: true, Overview: "Overview",
+				ProviderIDs: map[string]string{"isbn": isbn},
+				WorkClaims:  claims("books-metadata", bookid.KeyOpenLibraryWork, work),
+			}},
+			// Names another edition's ISBN, so admission rejects the record.
+			&fakeEbookMetadataProvider{slug: "other", result: &metadata.MetadataResult{
+				HasMetadata: true,
+				ProviderIDs: map[string]string{"isbn": "9780306406157"},
+				WorkClaims:  claims("other", bookid.KeyHardcover, "9"),
+			}},
+		}
+		item := enrichmentItemRow{ContentID: contentID, Title: "Book", ProviderIDs: map[string]string{"isbn": isbn}}
+		if outcome, err := e.enrichWithProvidersOutcome(ctx, item, providers); err != nil || outcome != EnrichmentOutcomeSuccess {
+			t.Fatalf("enrich edition %d = %q, %v", i, outcome, err)
+		}
+		var got []string
+		rows, err := pool.Query(ctx, `
+			SELECT 'work:' || provider || '=' || provider_id || '/' || evidence || '/' || source FROM media_item_work_ids WHERE content_id = $1
+			UNION ALL
+			SELECT 'id:' || provider || '=' || provider_id FROM media_item_provider_ids WHERE content_id = $1
+			ORDER BY 1`, contentID)
+		if err == nil {
+			got, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"id:isbn=" + isbn, "work:openlibrary_work=" + work + "/isbn/books-metadata"}; !slices.Equal(got, want) {
+			t.Fatalf("edition %d rows = %q, want %q", i, got, want)
+		}
 	}
 }

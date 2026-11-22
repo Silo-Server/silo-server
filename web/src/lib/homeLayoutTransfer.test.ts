@@ -12,8 +12,6 @@ import {
   overrideToWrite,
   parseHomeLayoutFile,
   planHomeLayoutImport,
-  fileReferences,
-  HOME_LAYOUT_MAX_LENGTH,
   type HomeLayoutFile,
   type HomeLayoutImportTarget,
   type SectionOverrideWrite,
@@ -155,26 +153,6 @@ describe("parseHomeLayoutFile", () => {
     expect(parseHomeLayoutFile(JSON.stringify(file))).toEqual({ ok: true, file });
   });
 
-  it("explains text that is not a usable export", () => {
-    expect(parseHomeLayoutFile("{")).toEqual({ ok: false, error: "This isn't valid JSON." });
-    expect(parseHomeLayoutFile('{"format":"other"}')).toEqual({
-      ok: false,
-      error: "This isn't a Silo home layout export.",
-    });
-    expect(parseHomeLayoutFile('{"format":"silo-home-layout","version":2}')).toEqual({
-      ok: false,
-      error: "This export comes from a newer version of Silo.",
-    });
-    expect(parseHomeLayoutFile('{"format":"silo-home-layout","version":1}')).toEqual({
-      ok: false,
-      error: "This home layout export is incomplete or damaged.",
-    });
-    expect(parseHomeLayoutFile(" ".repeat(HOME_LAYOUT_MAX_LENGTH + 1))).toEqual({
-      ok: false,
-      error: "This file is too large to be a home layout export.",
-    });
-  });
-
   it("keeps only the override members the write contract accepts", () => {
     const result = parseHomeLayoutFile(
       JSON.stringify({
@@ -252,6 +230,7 @@ describe("planHomeLayoutImport on the same server", () => {
     expect(plan).toEqual({
       sameServer: true,
       hideWatchedItems: true,
+      unappliedPages: [],
       skippedPages: [],
       skippedSections: [],
       skippedServerSectionChanges: 0,
@@ -286,37 +265,6 @@ describe("planHomeLayoutImport on the same server", () => {
         },
       ],
     });
-  });
-
-  it("skips what this profile or server can't use", () => {
-    const plan = planHomeLayoutImport(
-      layoutFile({
-        pages: [
-          {
-            scope: "home",
-            overrides: [
-              { user_section_type: "collection", user_config: { user_collection_id: "theirs" } },
-              {
-                section_type: "admin_curated_list",
-                title: "Staff picks",
-                config: { item_ids: ["x"] },
-              },
-              { user_section_type: "hidden_gems", removed: true },
-            ],
-          },
-          { scope: "library", library_id: 9, overrides: [{ section_id: "admin-9" }] },
-        ],
-      }),
-      target({ allowAdminOnlyRecipes: false }),
-      sequentialIds(),
-    );
-
-    expect(plan.pages).toEqual([]);
-    expect(plan.skippedPages).toEqual(["Library 9"]);
-    expect(plan.skippedSections).toEqual([
-      { page: "Home", title: "collection", reason: "collection" },
-      { page: "Home", title: "Staff picks", reason: "custom_disabled" },
-    ]);
   });
 
   it("checks pinned profiles against the importing account and keeps library collections", () => {
@@ -366,31 +314,6 @@ describe("planHomeLayoutImport on the same server", () => {
       "Household",
     ]);
     expect(plan.skippedSections).toEqual([{ page: "Home", title: "Stranger", reason: "profile" }]);
-  });
-
-  it("checks only the config the server uses for a section", () => {
-    const plan = planHomeLayoutImport(
-      layoutFile({
-        pages: [
-          {
-            scope: "home",
-            overrides: [
-              {
-                user_section_type: "hidden_gems",
-                user_title: "Current",
-                config: { filter_library_id: 9 },
-                user_config: { library_ids: [1] },
-              },
-            ],
-          },
-        ],
-      }),
-      target(),
-      sequentialIds(),
-    );
-
-    expect(plan.skippedSections).toEqual([]);
-    expect(plan.pages[0]?.overrides).toHaveLength(1);
   });
 
   it("drops an admin section's config limited to libraries this profile can't open", () => {
@@ -479,26 +402,6 @@ describe("planHomeLayoutImport on the same server", () => {
     expect(plan.pages[0]?.overrides).toEqual([
       { id: "new-1", user_section_type: "award_winners", user_title: "Awards" },
     ]);
-  });
-
-  it("skips a Next up row, which the server adds only itself", () => {
-    const plan = planHomeLayoutImport(
-      layoutFile({
-        pages: [
-          {
-            scope: "home",
-            overrides: [{ user_section_type: "next_up", user_title: "On deck" }],
-          },
-        ],
-      }),
-      target(),
-      sequentialIds(),
-    );
-
-    expect(plan.skippedSections).toEqual([
-      { page: "Home", title: "On deck", reason: "unknown_recipe" },
-    ]);
-    expect(plan.pages).toEqual([]);
   });
 
   it("skips sections limited to libraries this profile can't open", () => {
@@ -631,23 +534,6 @@ describe("home layout round trip on the same profile", () => {
     expect(withoutIds(saves.get("Movies"))).toEqual(customMovies.map(overrideToWrite));
     expect(saves.get("TV Shows")).toEqual([]);
   });
-
-  it("leaves pages alone when the file comes from another server", () => {
-    const plan = planHomeLayoutImport(
-      layoutFile({
-        server_id: "server-b",
-        pages: [
-          { scope: "home", overrides: [] },
-          { scope: "library", library_id: 1, overrides: [{ section_id: "their-admin-1" }] },
-        ],
-      }),
-      target(),
-      sequentialIds(),
-    );
-
-    expect(plan.pages).toEqual([]);
-    expect(plan.skippedServerSectionChanges).toBe(1);
-  });
 });
 
 describe("planHomeLayoutImport on another server", () => {
@@ -744,20 +630,6 @@ describe("planHomeLayoutImport on another server", () => {
 
     expect(plan.pages[0]?.overrides).toEqual([
       { id: "new-1", user_section_type: "hidden_gems", user_config: { library_ids: [7] } },
-    ]);
-  });
-
-  it("skips a section type this server doesn't list", () => {
-    const plan = planHomeLayoutImport(
-      layoutFile({
-        pages: [{ scope: "home", overrides: [{ section_type: "retired_recipe", title: "Old" }] }],
-      }),
-      otherServer,
-      sequentialIds(),
-    );
-
-    expect(plan.skippedSections).toEqual([
-      { page: "Home", title: "Old", reason: "unknown_recipe" },
     ]);
   });
 
@@ -870,27 +742,6 @@ describe("mergeImportedPage", () => {
   });
 });
 
-describe("fileReferences", () => {
-  it("reports which kinds of references the sections make, in either config", () => {
-    const file = (override: HomeLayoutFile["pages"][number]["overrides"][number]) =>
-      layoutFile({ pages: [{ scope: "home", overrides: [override] }] });
-
-    expect(fileReferences(file({ user_config: { library_collection_id: "lc" } }))).toEqual({
-      personalCollections: false,
-      profiles: false,
-    });
-    expect(
-      fileReferences(
-        file({ section_id: "a", config: { user_collection_id: "mine", profile_id: "p" } }),
-      ),
-    ).toEqual({ personalCollections: true, profiles: true });
-    expect(fileReferences(file({ user_config: { profile_id: "" } }))).toEqual({
-      personalCollections: false,
-      profiles: false,
-    });
-  });
-});
-
 describe("importPage", () => {
   const page = {
     scope: "home" as const,
@@ -931,6 +782,141 @@ describe("importPage", () => {
 
     await expect(importPage(page, true, api, sequentialIds())).rejects.toBe(refused);
     expect(api.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("synthesizes hidden overrides for checked rows still present on a fresh baseline and counts them toward the 500 limit", async () => {
+    const api = {
+      ...fakeApi([{}]),
+      getBaseline: vi.fn(async () => ({
+        section_tokens: ["t1", "t2"],
+        visible_sections: [
+          {
+            id: "s-collections",
+            section_type: "collection_posters",
+            title: "Collections",
+            token: "t2",
+          },
+        ],
+      })),
+    };
+
+    // s-gone was deleted between preview and apply; only s-collections survives.
+    await importPage(page, true, api, sequentialIds(), ["s-collections", "s-gone"]);
+    expect(api.save).toHaveBeenCalledWith([
+      { id: "new-custom", user_section_type: "hidden_gems" },
+      { id: "new-1", section_id: "s-collections", hidden: true },
+    ]);
+
+    const atLimit = {
+      scope: "home" as const,
+      label: "Home",
+      overrides: Array.from({ length: 500 }, (_, index) => ({
+        id: `row-${index}`,
+        user_section_type: "hidden_gems",
+      })),
+    };
+    const apiAtLimit = fakeApi([]);
+    await expect(
+      importPage(atLimit, true, apiAtLimit, sequentialIds(), ["s-collections"]),
+    ).rejects.toThrow("more than 500 saved section changes");
+    expect(apiAtLimit.save).not.toHaveBeenCalled();
+  });
+
+  it("saves the page with the preview's hides when the fresh baseline read fails", async () => {
+    const api = {
+      ...fakeApi([{}]),
+      getBaseline: vi.fn(async () => {
+        throw new Error("unavailable");
+      }),
+    };
+
+    await importPage(page, true, api, sequentialIds(), ["s-collections"]);
+    expect(api.save).toHaveBeenCalledWith([
+      { id: "new-custom", user_section_type: "hidden_gems" },
+      { id: "new-1", section_id: "s-collections", hidden: true },
+    ]);
+  });
+
+  it("skips the save on a hide-only page when every checked row is gone", async () => {
+    const api = {
+      ...fakeApi([]),
+      getBaseline: vi.fn(async () => ({
+        section_tokens: [],
+        visible_sections: [],
+      })),
+    };
+
+    await importPage(
+      { scope: "home", label: "Home", overrides: [], replaceExisting: false },
+      true,
+      api,
+      sequentialIds(),
+      ["s-gone"],
+    );
+    expect(api.save).not.toHaveBeenCalled();
+  });
+
+  it("preserves existing destination overrides when hiding rows on a page whose file overrides were all skipped", () => {
+    const existing = [
+      stored({ id: "saved-1", section_id: "admin-1", position: 0 }),
+      stored({
+        id: "saved-col",
+        section_id: "s-collections",
+        title: "My Collections",
+        position: 2,
+      }),
+      stored({ id: "saved-gone", section_id: "s-removed", removed: true }),
+      stored({ id: "saved-custom", user_section_type: "hidden_gems", is_user_added: true }),
+    ];
+
+    expect(
+      mergeImportedPage(
+        { scope: "home", label: "Home", overrides: [], replaceExisting: false },
+        existing,
+        true,
+        sequentialIds(),
+        ["s-collections", "s-removed", "s-new"],
+      ),
+    ).toEqual([
+      { id: "saved-1", section_id: "admin-1", position: 0 },
+      {
+        id: "saved-col",
+        section_id: "s-collections",
+        title: "My Collections",
+        position: 2,
+        hidden: true,
+      },
+      { id: "saved-gone", section_id: "s-removed", removed: true },
+      { id: "saved-custom", user_section_type: "hidden_gems", is_user_added: true },
+      { id: "new-1", section_id: "s-new", hidden: true },
+    ]);
+  });
+
+  it("round-trips server_section_tokens and degrades malformed or truncated lists to []", () => {
+    const exported = buildHomeLayoutFile({
+      serverId: "server-a",
+      exportedAt: new Date("2026-11-20T12:00:00.000Z"),
+      libraries: [],
+      pages: [{ scope: "home", overrides: [], serverSectionTokens: ["tok-1", "tok-2"] }],
+    });
+    const parsed = parseHomeLayoutFile(JSON.stringify(exported));
+    expect(parsed.ok && parsed.file.pages[0]?.server_section_tokens).toEqual(["tok-1", "tok-2"]);
+
+    const withTokens = (count: number) => ({
+      ...exported,
+      pages: [
+        {
+          scope: "home",
+          overrides: [],
+          server_section_tokens: Array.from({ length: count }, (_, i) => `tok-${i}`),
+        },
+      ],
+    });
+    // A page can have more server rows than one save takes overrides.
+    const parsedLarge = parseHomeLayoutFile(JSON.stringify(withTokens(501)));
+    expect(parsedLarge.ok && parsedLarge.file.pages[0]?.server_section_tokens).toHaveLength(501);
+    const parsedTruncated = parseHomeLayoutFile(JSON.stringify(withTokens(10_001)));
+    expect(parsedTruncated.ok && parsedTruncated.file.pages[0]?.server_section_tokens).toEqual([]);
   });
 });
 

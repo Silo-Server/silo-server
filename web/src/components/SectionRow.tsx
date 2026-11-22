@@ -1,4 +1,5 @@
 import { memo, useCallback, useId, useMemo } from "react";
+import { CollectionsRow } from "@/components/CollectionsRow";
 import { ContinueWatchingRowCard } from "@/components/ContinueWatchingCard";
 import MediaCarousel, { type MediaCarouselWindowing } from "@/components/MediaCarousel";
 import SectionItemCard from "@/components/SectionItemCard";
@@ -14,6 +15,7 @@ import { useSectionTitle } from "@/lib/sectionTitle";
 import { useT } from "@/i18n";
 import {
   carouselCardWidthClasses,
+  squarePosterSize,
   shortcutLabel,
   WIDE_CAROUSEL_CARD_WIDTH_CLASSES,
 } from "@/lib/uiCustomization";
@@ -65,12 +67,17 @@ function SectionPinButton({
       <span id={labelId} hidden>
         {rowTitle}
       </span>
+      {/* Unpinned, `pointer-reveal` hides the button only under a mouse, so it
+          stays visible on touch screens and appears on keyboard focus. The
+          carousel isn't a `group/row`, so the group-hover class reveals it
+          when the row is hovered. The `after:` inset makes the 28px button a
+          44px touch target without changing its look. */}
       <button
         onClick={() => togglePin(libraryId, { type: "section", id: sectionId, label })}
-        className={`rounded-full p-1.5 transition-colors ${
+        className={`relative rounded-full p-1.5 transition-colors after:absolute after:-inset-2 ${
           pinned
             ? "text-primary hover:text-primary/80"
-            : "text-muted-foreground/40 hover:bg-accent/60 hover:text-muted-foreground opacity-0 group-hover/carousel:opacity-100"
+            : "text-muted-foreground/70 hover:bg-accent/60 hover:text-muted-foreground pointer-reveal group-hover/carousel:opacity-100"
         }`}
         title={pinned ? t("web.home.sectionRow.unpin") : t("web.home.sectionRow.pin")}
         aria-label={pinned ? t("web.home.sectionRow.unpin") : t("web.home.sectionRow.pin")}
@@ -107,7 +114,11 @@ export default memo(function SectionRow({
   );
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
-  const posterSize = cardPresentation.poster_size;
+  // A row of audiobooks draws its square covers a size down (squarePosterSize).
+  const posterSize =
+    section.items.length > 0 && section.items.every((it) => it.type === "audiobook")
+      ? squarePosterSize(cardPresentation.poster_size)
+      : cardPresentation.poster_size;
   const posterWidthClasses = carouselCardWidthClasses(posterSize);
   const isProgressRow = isProgressSectionType(section.section_type);
   // One spoiler lookup per row rather than one per card.
@@ -139,6 +150,7 @@ export default memo(function SectionRow({
   const sectionId = section.id;
   const handleNearEnd = useCallback(() => onNearEnd?.(sectionId), [onNearEnd, sectionId]);
 
+  if (section.collections?.length) return <CollectionsRow section={section} />;
   if (section.items.length === 0) return null;
 
   const headerActions = libraryId ? (

@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	sdkmanifest "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/manifest"
 	sdkruntime "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/runtime"
 )
 
@@ -73,6 +74,14 @@ type EventConsumerClient struct {
 	timeout time.Duration
 }
 
+// NotificationChannelClient drives one plugin's notification_channel.v1
+// capabilities. The caller bounds each call; the notification system sets
+// the timeouts the SDK documents.
+type NotificationChannelClient struct {
+	client       pluginv1.NotificationChannelClient
+	capabilityID string
+}
+
 type AuthProviderClient struct {
 	client  pluginv1.AuthProviderClient
 	checks  pluginv1.AuthProviderChecksClient
@@ -96,6 +105,18 @@ type NetworkAccessProviderClient struct {
 	ingressToken string
 	client       pluginv1.NetworkAccessProviderClient
 	timeout      time.Duration
+}
+
+// ConfigurationChecksClient drives a plugin's ConfigurationChecks service.
+type ConfigurationChecksClient struct {
+	client  pluginv1.ConfigurationChecksClient
+	timeout time.Duration
+}
+
+// NewConfigurationChecksClient wraps a configuration checks connection with
+// the default timeout for tests outside pluginhost.
+func NewConfigurationChecksClient(client pluginv1.ConfigurationChecksClient) *ConfigurationChecksClient {
+	return &ConfigurationChecksClient{client: client, timeout: DefaultConfigurationCheckTimeout}
 }
 
 // IngressToken identifies the process that answers these provider RPCs.
@@ -217,6 +238,13 @@ func (c *Client) EventConsumer(capabilityID string) (*EventConsumerClient, error
 	}, nil
 }
 
+func (c *Client) NotificationChannel(capabilityID string) (*NotificationChannelClient, error) {
+	if err := c.requireCapability("notification_channel.v1", capabilityID); err != nil {
+		return nil, err
+	}
+	return &NotificationChannelClient{client: c.rpc.NotificationChannel(), capabilityID: capabilityID}, nil
+}
+
 func (c *Client) AuthProvider(capabilityID string) (*AuthProviderClient, error) {
 	if err := c.requireCapability("auth_provider.v1", capabilityID); err != nil {
 		return nil, err
@@ -261,6 +289,31 @@ func (c *Client) NetworkAccessProvider(capabilityID string) (*NetworkAccessProvi
 		ingressToken: c.ingressToken,
 		timeout:      DefaultNetworkAccessTimeout,
 	}, nil
+}
+
+// ConfigurationChecks returns the typed client for the plugin's
+// ConfigurationChecks service when its manifest declares support.
+func (c *Client) ConfigurationChecks() (*ConfigurationChecksClient, error) {
+	c.mu.RLock()
+	unhealthy := c.unhealthy
+	c.mu.RUnlock()
+	if unhealthy {
+		return nil, ErrPluginUnhealthy
+	}
+	if !sdkmanifest.SupportsConfigurationCheck(c.manifest) {
+		return nil, fmt.Errorf("%w: %s", ErrCapabilityNotFound, sdkmanifest.ConfigurationCheckKey)
+	}
+	return &ConfigurationChecksClient{
+		client:  c.rpc.ConfigurationChecks(),
+		timeout: DefaultConfigurationCheckTimeout,
+	}, nil
+}
+
+// TestConfiguration asks the plugin to validate staged global configuration.
+func (c *ConfigurationChecksClient) TestConfiguration(ctx context.Context, req *pluginv1.TestConfigurationRequest) (*pluginv1.TestConfigurationResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.TestConfiguration(callCtx, req)
 }
 
 func (c *Client) markUnhealthy() {
@@ -418,6 +471,20 @@ func (c *RequestRouterClient) Validate(ctx context.Context, req *pluginv1.Valida
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()
 	return c.client.Validate(callCtx, req)
+}
+
+// ValidateDestination asks the plugin whether a destination's settings
+// work. The request names this client's capability.
+func (c *NotificationChannelClient) ValidateDestination(ctx context.Context, req *pluginv1.ValidateNotificationDestinationRequest) (*pluginv1.ValidateNotificationDestinationResponse, error) {
+	req.CapabilityId = c.capabilityID
+	return c.client.ValidateDestination(ctx, req)
+}
+
+// SendNotification asks the plugin to deliver one message. The request
+// names this client's capability.
+func (c *NotificationChannelClient) SendNotification(ctx context.Context, req *pluginv1.SendNotificationRequest) (*pluginv1.SendNotificationResponse, error) {
+	req.CapabilityId = c.capabilityID
+	return c.client.SendNotification(ctx, req)
 }
 
 func (c *EventConsumerClient) HandleEvent(ctx context.Context, req *pluginv1.HandleEventRequest) (*pluginv1.HandleEventResponse, error) {

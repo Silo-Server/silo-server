@@ -19,55 +19,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
-func TestServiceEnsureClientRestartsOnManifestDrift(t *testing.T) {
-	ctx := context.Background()
-	manifest := testPluginManifest(t, "silo.metadb", "0.0.36")
-	installPath := writeInstalledPluginManifest(t, manifest)
-
-	store := newFakeServiceInstallationStore(&Installation{
-		ID:          3,
-		PluginID:    manifest.GetPluginId(),
-		Version:     manifest.GetVersion(),
-		InstallPath: installPath,
-		Enabled:     true,
-	})
-	host := &fakeServiceHost{
-		clientResult: &fakePluginClient{manifest: testPluginManifest(t, "silo.metadb", "0.0.34")},
-		startResult:  &fakePluginClient{manifest: manifest},
-	}
-	service := &Service{
-		installations: store,
-		host:          host,
-	}
-
-	got, err := service.MetadataProviderClient(ctx, 3, "metadb")
-	if err != nil {
-		t.Fatalf("MetadataProviderClient() returned error: %v", err)
-	}
-	if got != nil {
-		t.Fatalf("MetadataProviderClient() = %#v, want nil fake client", got)
-	}
-	if calls := host.startResult.(*fakePluginClient).metadataProviderCalls; calls != 1 {
-		t.Fatalf("restarted client metadata provider calls = %d, want 1", calls)
-	}
-	if len(host.stopped) != 1 || host.stopped[0] != 3 {
-		t.Fatalf("stopped installations = %#v, want [3]", host.stopped)
-	}
-	if len(host.started) != 1 {
-		t.Fatalf("start calls = %d, want 1", len(host.started))
-	}
-	startReq := host.started[0]
-	if startReq.InstallationID != 3 {
-		t.Fatalf("start installation id = %d, want 3", startReq.InstallationID)
-	}
-	if startReq.BinaryPath != installPath {
-		t.Fatalf("start binary path = %q, want %q", startReq.BinaryPath, installPath)
-	}
-	if startReq.Manifest.GetVersion() != "0.0.36" {
-		t.Fatalf("start manifest version = %q, want 0.0.36", startReq.Manifest.GetVersion())
-	}
-}
-
 // A plugin built on a newer SDK may use an enum value this server doesn't
 // know; its installed manifest.json keeps it as a number, while the running
 // client's copy dropped it at start. That is not drift, so the client stays.
@@ -174,8 +125,6 @@ func (f *fakeServiceHost) Stop(installationID int) error {
 	return nil
 }
 
-func (f *fakeServiceHost) NextStartSeq() uint64 { return 0 }
-
 func (f *fakeServiceHost) Shutdown(context.Context) error {
 	return nil
 }
@@ -184,6 +133,8 @@ type fakePluginClient struct {
 	manifest              *pluginv1.PluginManifest
 	metadataProviderCalls int
 	markerProvider        *pluginhost.MarkerProviderClient
+	configurationChecks   *pluginhost.ConfigurationChecksClient
+	configurationCheckErr error
 }
 
 func (f *fakePluginClient) Manifest() *pluginv1.PluginManifest {
@@ -239,6 +190,17 @@ func (f *fakePluginClient) NetworkAccessProvider(string) (*pluginhost.NetworkAcc
 	return nil, nil
 }
 
+func (f *fakePluginClient) NotificationChannel(string) (*pluginhost.NotificationChannelClient, error) {
+	return nil, nil
+}
+
+func (f *fakePluginClient) ConfigurationChecks() (*pluginhost.ConfigurationChecksClient, error) {
+	if f.configurationCheckErr != nil {
+		return nil, f.configurationCheckErr
+	}
+	return f.configurationChecks, nil
+}
+
 type fakeServiceInstallationStore struct {
 	byID map[int]*Installation
 	// mu guards every field: the resident supervisor reads the store from
@@ -252,6 +214,9 @@ type fakeServiceInstallationStore struct {
 	saveArchiveIDs   []int
 	saveArchiveErr   error
 	listCapabilities []*Capability
+	// capabilitiesByID, when set, gives each installation its own
+	// capabilities in place of listCapabilities.
+	capabilitiesByID map[int][]*Capability
 	events           *[]string
 	// archives, when set, backs GetArchive for the archive cache; unset ids
 	// report ErrArchiveNotFound.
@@ -326,10 +291,11 @@ func (s *fakeServiceInstallationStore) Update(_ context.Context, id int, input U
 	if input.InstallPath != nil {
 		installation.InstallPath = *input.InstallPath
 	}
+	enablementChanged := input.Enabled != nil && *input.Enabled != installation.Enabled
 	if input.Enabled != nil {
 		installation.Enabled = *input.Enabled
 	}
-	if input.Restart {
+	if input.Restart || enablementChanged {
 		installation.RuntimeGeneration++
 	}
 	return nil
@@ -393,15 +359,26 @@ func (s *fakeServiceInstallationStore) ListByPluginID(_ context.Context, pluginI
 	return result, nil
 }
 
-func (s *fakeServiceInstallationStore) ListCapabilities(context.Context, int) ([]*Capability, error) {
+func (s *fakeServiceInstallationStore) ListCapabilities(_ context.Context, id int) ([]*Capability, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.capabilitiesByID != nil {
+		return s.capabilitiesByID[id], nil
+	}
 	return s.listCapabilities, nil
 }
 
 // ListEnabledWithCapabilityTypes mirrors ListCapabilities, whose fixed
 // capability list applies to every installation in the fake.
 func (s *fakeServiceInstallationStore) ListEnabledWithCapabilityTypes(ctx context.Context, capabilityTypes []string) ([]*Installation, error) {
+	if s.capabilitiesByID != nil {
+		enabled, err := s.ListEnabled(ctx)
+		return slices.DeleteFunc(enabled, func(installation *Installation) bool {
+			return !slices.ContainsFunc(s.capabilitiesByID[installation.ID], func(record *Capability) bool {
+				return slices.Contains(capabilityTypes, record.Type)
+			})
+		}), err
+	}
 	matches := false
 	for _, record := range s.listCapabilities {
 		if record == nil {

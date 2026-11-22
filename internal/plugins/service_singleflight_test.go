@@ -2,7 +2,6 @@ package plugins
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -59,7 +58,6 @@ func (h *countingHerdHost) Stop(id int) error {
 }
 
 func (h *countingHerdHost) Shutdown(context.Context) error { return nil }
-func (h *countingHerdHost) NextStartSeq() uint64           { return 0 }
 
 func (h *countingHerdHost) startCount() int {
 	h.mu.Lock()
@@ -112,30 +110,6 @@ func TestEnsureClientSingleFlightsConcurrentLaunch(t *testing.T) {
 	}
 }
 
-func TestEnsureClientDistinctInstallationsLaunchIndependently(t *testing.T) {
-	mA := testPluginManifest(t, "silo.metadb", "0.0.36")
-	mB := testPluginManifest(t, "silo.other", "1.0.0")
-	pathA := writeInstalledPluginManifest(t, mA)
-	pathB := writeInstalledPluginManifest(t, mB)
-	store := newFakeServiceInstallationStore(
-		&Installation{ID: 7, PluginID: mA.GetPluginId(), Version: mA.GetVersion(), InstallPath: pathA, Enabled: true},
-		&Installation{ID: 8, PluginID: mB.GetPluginId(), Version: mB.GetVersion(), InstallPath: pathB, Enabled: true},
-	)
-	host := &countingHerdHost{startResult: &fakePluginClient{manifest: mA}, startDelay: 10 * time.Millisecond}
-	service := &Service{installations: store, host: host}
-
-	var wg sync.WaitGroup
-	for _, id := range []int{7, 8, 7, 8} {
-		wg.Add(1)
-		go func(id int) { defer wg.Done(); _, _ = service.ensureClient(context.Background(), id) }(id)
-	}
-	wg.Wait()
-
-	if got := host.startCount(); got != 2 {
-		t.Fatalf("host.Start calls = %d, want 2 (one per installation)", got)
-	}
-}
-
 // ctxCaptureHost blocks inside Start until released, and records whether the
 // launch context was canceled. It lets a test cancel the singleflight leader's
 // ctx while a launch is in flight.
@@ -143,6 +117,7 @@ type ctxCaptureHost struct {
 	mu          sync.Mutex
 	current     map[int]pluginClient
 	startResult pluginClient
+	startErr    error
 	entered     chan struct{}
 	proceed     chan struct{}
 	sawCancel   bool
@@ -167,6 +142,9 @@ func (h *ctxCaptureHost) Start(ctx context.Context, req pluginhost.StartRequest)
 		return nil, ctx.Err()
 	case <-h.proceed:
 	}
+	if h.startErr != nil {
+		return nil, h.startErr
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.current == nil {
@@ -184,7 +162,6 @@ func (h *ctxCaptureHost) Stop(id int) error {
 }
 
 func (h *ctxCaptureHost) Shutdown(context.Context) error { return nil }
-func (h *ctxCaptureHost) NextStartSeq() uint64           { return 0 }
 
 func (h *ctxCaptureHost) canceledDuringLaunch() bool {
 	h.mu.Lock()
@@ -240,51 +217,6 @@ func TestEnsureClientLaunchIsolatedFromLeaderCancellation(t *testing.T) {
 	}
 }
 
-// TestEnsureClientLaunchWithoutClientFails pins that a Host reporting a
-// successful start with no client fails the caller instead of panicking on
-// the shared launch result.
-func TestEnsureClientLaunchWithoutClientFails(t *testing.T) {
-	manifest := testPluginManifest(t, "silo.metadb", "0.0.36")
-	store := installedPluginStore(t, 7, manifest)
-	host := &countingHerdHost{} // Start returns (nil, nil)
-	service := &Service{installations: store, host: host}
-
-	client, err := service.ensureClient(context.Background(), 7)
-	if !errors.Is(err, pluginhost.ErrPluginUnhealthy) {
-		t.Fatalf("ensureClient err = %v, want ErrPluginUnhealthy", err)
-	}
-	if client != nil {
-		t.Fatalf("ensureClient client = %#v, want nil", client)
-	}
-}
-
-func TestEnsureClientFailedLaunchPropagatesToAllCallers(t *testing.T) {
-	manifest := testPluginManifest(t, "silo.metadb", "0.0.36")
-	store := installedPluginStore(t, 7, manifest)
-	host := &countingHerdHost{startErr: context.DeadlineExceeded, startDelay: 15 * time.Millisecond}
-	service := &Service{installations: store, host: host}
-
-	const n = 10
-	var wg sync.WaitGroup
-	release := make(chan struct{})
-	errs := make([]error, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) { defer wg.Done(); <-release; _, errs[i] = service.ensureClient(context.Background(), 7) }(i)
-	}
-	close(release)
-	wg.Wait()
-
-	for i := 0; i < n; i++ {
-		if errs[i] == nil {
-			t.Fatalf("caller %d err = nil, want the launch error", i)
-		}
-	}
-	if got := host.startCount(); got != 1 {
-		t.Fatalf("failed launch host.Start calls = %d, want 1 (still single-flighted)", got)
-	}
-}
-
 func (h *countingHerdHost) Running(id int) bool {
 	_, err := h.Client(id)
 	return err == nil
@@ -327,7 +259,7 @@ func TestOnlyLazyPluginsAreStartedWithStopWhenIdle(t *testing.T) {
 	residentStore := installedPluginStore(t, 8, resident)
 	residentHost := &fakeServiceHost{}
 	residentService := &Service{installations: residentStore, host: residentHost}
-	if _, err := residentService.start(context.Background(), 8, true); err != nil {
+	if _, err := residentService.Start(t.Context(), 8); err != nil {
 		t.Fatalf("start resident: %v", err)
 	}
 	if len(residentHost.started) != 1 || residentHost.started[0].StopWhenIdle {

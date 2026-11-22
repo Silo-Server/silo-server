@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,7 @@ import (
 
 type CatalogSeedArtifactStore interface {
 	AdminJobArtifactStore
-	GetObject(ctx context.Context, bucket, key string) ([]byte, error)
+	GetObjectStream(ctx context.Context, bucket, key string) (io.ReadCloser, error)
 	ListObjectInfos(ctx context.Context, bucket, prefix string) ([]s3client.ObjectInfo, error)
 }
 
@@ -53,7 +54,7 @@ func (h *CatalogSeedHandler) localImportDirectory() string {
 	return defaultLocalImportDir
 }
 
-func readLocalImportFile(localPath string) ([]byte, error) {
+func openLocalImportFile(localPath string) (io.ReadCloser, error) {
 	cleaned := filepath.Clean(localPath)
 	abs, err := filepath.Abs(cleaned)
 	if err != nil {
@@ -66,30 +67,26 @@ func readLocalImportFile(localPath string) ([]byte, error) {
 	if err != nil || !info.Mode().IsRegular() {
 		return nil, errCatalogSeedImportInvalidLocalPath
 	}
-	data, err := os.ReadFile(abs)
+	file, err := os.Open(abs) //nolint:gosec // G304: the .json.gz file an admin chose to import, checked above
 	if err != nil {
 		return nil, fmt.Errorf("reading local import file: %w", err)
 	}
-	return data, nil
+	return file, nil
 }
 
-func (h *CatalogSeedHandler) readImportDataFromExportJob(ctx context.Context, jobID string) ([]byte, error) {
+func (h *CatalogSeedHandler) openImportDataFromExportJob(ctx context.Context, jobID string) (io.ReadCloser, error) {
 	bucket, key, err := h.resolveExportJobArtifactRef(ctx, jobID)
 	if err != nil {
 		return nil, err
 	}
-	data, err := h.store.GetObject(ctx, bucket, key)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
+	return h.store.GetObjectStream(ctx, bucket, key)
 }
 
-func (h *CatalogSeedHandler) readImportDataFromArtifactKey(ctx context.Context, artifactKey string) ([]byte, error) {
+func (h *CatalogSeedHandler) openImportDataFromArtifactKey(ctx context.Context, artifactKey string) (io.ReadCloser, error) {
 	if h.store == nil {
 		return nil, errCatalogSeedImportSourceUnavailable
 	}
-	return h.store.GetObject(ctx, h.store.Bucket(), artifactKey)
+	return h.store.GetObjectStream(ctx, h.store.Bucket(), artifactKey)
 }
 
 func (h *CatalogSeedHandler) resolveExportJobArtifactRef(ctx context.Context, jobID string) (string, string, error) {

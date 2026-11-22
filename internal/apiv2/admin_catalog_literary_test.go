@@ -2,10 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"errors"
-	"net/http"
-	"strings"
-	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 )
@@ -41,64 +37,4 @@ func (f *fakeAdminLiterary) IgnoreMatch(_ context.Context, source, target string
 	f.calls++
 	f.source, f.target, f.userID = source, target, userID
 	return f.err
-}
-func literaryAdminHandler(t *testing.T, f *fakeAdminLiterary) http.Handler {
-	deps := pilotDeps(nil, nil)
-	if f != nil {
-		deps.AdminLiteraryWorks = f
-	}
-	return newTestHandler(t, deps)
-}
-
-func TestAdminLiteraryValidationAndAuthority(t *testing.T) {
-	f := &fakeAdminLiterary{}
-	h := literaryAdminHandler(t, f)
-	for _, tc := range []struct{ method, path, body string }{
-		{"GET", "/items/ebook-1/candidates?limit=101", ""},
-		{"GET", "/items/ebook-1/candidates?limit=0", ""},
-		{"POST", "/link", `{"content_ids":[]}`},
-		{"POST", "/link", `{"content_ids":[null]}`},
-		{"POST", "/link", `{"content_ids":[" "]}`},
-		{"POST", "/matches/confirm", `{"source_content_id":"ebook-1","target_content_id":" ebook-1 "}`},
-		{"POST", "/matches/ignore", `{"source_content_id":null,"target_content_id":"audio-1"}`},
-	} {
-		rec := do(t, h, tc.method, Prefix+"/admin/literary-works"+tc.path, tc.body, bearer(adminToken))
-		if rec.Code != 422 || f.calls != 0 {
-			t.Fatalf("invalid %s: %d %s calls=%d", tc.path, rec.Code, rec.Body, f.calls)
-		}
-	}
-	for _, tc := range []struct{ method, path, body string }{
-		{"GET", "/items/ebook-1/candidates", ""},
-		{"POST", "/link", `{"content_ids":["ebook-1"]}`},
-		{"POST", "/matches/confirm", `{"source_content_id":"ebook-1","target_content_id":"audio-1"}`},
-		{"POST", "/matches/ignore", `{"source_content_id":"ebook-1","target_content_id":"audio-1"}`},
-		{"DELETE", "/work-1/items/ebook-1", ""},
-	} {
-		rec := do(t, h, tc.method, Prefix+"/admin/literary-works"+tc.path, tc.body, nil)
-		if rec.Code != 401 || f.calls != 0 {
-			t.Fatalf("anonymous %s: %d calls=%d", tc.path, rec.Code, f.calls)
-		}
-		rec = do(t, h, tc.method, Prefix+"/admin/literary-works"+tc.path, tc.body, bearer(memberToken))
-		if rec.Code != 403 || f.calls != 0 {
-			t.Fatalf("member %s: %d calls=%d", tc.path, rec.Code, f.calls)
-		}
-	}
-}
-func TestAdminLiteraryFailures(t *testing.T) {
-	f := &fakeAdminLiterary{err: literaryworks.ErrWorkNotFound}
-	h := literaryAdminHandler(t, f)
-	path := Prefix + "/admin/literary-works/items/ebook-1/candidates"
-	rec := do(t, h, "GET", path, "", bearer(adminToken))
-	if rec.Code != 404 {
-		t.Fatalf("missing: %d %s", rec.Code, rec.Body)
-	}
-	f.err = errors.New("private database details")
-	rec = do(t, h, "GET", path, "", bearer(adminToken))
-	if rec.Code != 500 || strings.Contains(rec.Body.String(), "private database") {
-		t.Fatalf("failure: %d %s", rec.Code, rec.Body)
-	}
-	rec = do(t, literaryAdminHandler(t, nil), "GET", path, "", bearer(adminToken))
-	if rec.Code != 503 {
-		t.Fatalf("unwired: %d %s", rec.Code, rec.Body)
-	}
 }

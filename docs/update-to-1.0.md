@@ -67,7 +67,7 @@ Existing probe configuration keeps working.
 ## Beta Books functionality
 
 Silo 1.0 supports Movies and Series. Audiobooks, ebooks, and Audiobookshelf
-compatibility remain available on 1.0 builds exactly as they work today, labeled
+compatibility remain available and unchanged on 1.0 builds, labeled
 **beta** and outside the 1.0 support promise. A consolidated Books effort will
 replace them later, with no assigned release date. See the
 [scope decision](architecture/v1-scope.md#library-scope-books-deferred).
@@ -129,7 +129,8 @@ unavailable.
 2. Stop or drain the entire alpha deployment according to the release-specific instructions,
    including every API replica and remote playback/transcode node.
 3. Deploy the matching Silo 1.0 API, proxy, and worker components and run only the documented
-   database migration procedure. An incompatible node must remain unschedulable.
+   database migration procedure. An incompatible node must remain unschedulable. Remote
+   transcode nodes start with new settings; follow [Transcode nodes](#transcode-nodes).
 4. Keep operational checks on `GET /api/v1/health` and `GET /api/v1/ready` (and node
    `GET /api/v1/health`); these probes are retained unversioned and are not redirected or
    tombstoned.
@@ -152,6 +153,125 @@ the pre-1.0 release that retired `/api/v1` skips them here; otherwise run them n
 10. Restart downloads and playback instead of attempting to resume an alpha-issued URL.
 11. Resend any pre-1.0 tokenized email action that still needs to be completed.
 
+## Transcode nodes
+
+Remote transcode nodes (`MODE=transcode`) no longer connect to PostgreSQL or Redis and no longer
+use the shared `SECRET_KEY`. Each node starts with two settings, `SILO_CORE_URL` and
+`SILO_NODE_KEY`, and takes everything else from the main server. The update is coordinated: a
+transcode node from an earlier release cannot work with an updated main server, and an updated
+node cannot work with an earlier main server. Proxy nodes keep their current settings.
+
+1. Stop every transcode node. Drain it first if it still runs playback (see
+   [node drain](architecture/node-drain.md)).
+2. Update the main server, every API replica, and every proxy node, and let the migrations finish.
+3. Issue each transcode node a key: on the nodes page of the administration UI, or with
+   `POST /api/v2/admin/nodes/{id}/key`. The key is shown once. Issuing again replaces it, and the
+   previous key stops working at once. A node still running with the replaced key shuts down at
+   once on SIGTERM instead of waiting for its sessions, which the main server can no longer reach,
+   so restarting it with the new key does not wait for the drain timeout.
+
+   A deployment managed from configuration can then hand these keys to its configuration: keep
+   each issued key in your secret store, list the nodes in the main server's
+   `SILO_TRANSCODE_NODES` or `SILO_TRANSCODE_NODES_FILE` with a reference to that key, and restart
+   the main server and every API replica. Each listed node is adopted, and from then on its key
+   comes from the configuration. A node added later skips the administration UI: write its key
+   with `silo node-key generate --id <n>` for an id above every node id the server has handed
+   out, and list it the same way; the API servers create it when they start. An existing node
+   needs its key from the administration UI, because a node that exists with no key or another
+   key stops the API server.
+   See [declared nodes](architecture/transcode-nodes.md#declared-nodes).
+4. Update each transcode node and start it with:
+   - `MODE=transcode`;
+   - `SILO_CORE_URL`, the main server's URL as the node reaches it (the load-balanced address when
+     there are several API replicas);
+   - `SILO_NODE_KEY`, the key from step 3.
+
+   Optionally, the node can declare its own name, URL, group, transcode limit, source access,
+   acceleration and download storage with `SILO_NODE_*` variables; the nodes page then shows those
+   fields read-only. See
+   [node-declared configuration](admin-api.md#node-declared-configuration). Set
+   `SILO_NODE_URL` and `SILO_NODE_NAME` for each node separately: unlike `NODE_URL` and
+   `NODE_NAME` below, a transcode node acts on them, so a value copied from a proxy's `.env`
+   would point the transcode node's entry at the proxy.
+
+   The node ignores `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY`, `NODE_URL`, and `NODE_NAME`, with
+   one warning at startup, so they can stay in a shared `.env`. The shipped `docker-compose.yml`
+   still asks for a `SECRET_KEY` value; the node does not use it. A node on the bundled image no
+   longer needs the main server's PostgreSQL or Redis ports; turn node access off once no proxy
+   uses them.
+
+The network between the main server and its transcode nodes must allow both directions: the
+node calls the API at `SILO_CORE_URL`, and the API servers and proxies call the node at its
+registered URL. The node takes its FFmpeg path, directories, and input paths from the main
+server's answers, so the link must be a trusted network or `SILO_CORE_URL` must use `https://`; the
+node logs a warning at startup for a plain-HTTP URL that is not loopback. A reverse proxy in front
+of the API must pass `/api/internal/nodes/` with the path, query, body, and `Authorization` and
+`X-Silo-Source-Grant` headers unchanged (it may strip a path prefix that is part of
+`SILO_CORE_URL`). These requests are small JSON documents of at most 1 MiB that complete within 10
+seconds, except `/api/internal/nodes/sources`, which streams source media to nodes that read
+through the main server (below). The clocks of the
+nodes and the API servers must agree within 30 seconds: a node whose clock is further off has every
+request refused and reports its key as rejected, which a new key does not fix.
+
+Every API server must see each library file at the same path with the same size and modification
+time, as they already had to see the same paths. A transcode node that reads its own library mount
+must see each file at the same path with the same size; its mount may report other modification
+times. A node whose mount lacks the file or shows another size refuses the job and logs both sides.
+
+### Source access
+
+Each transcode node has a source access setting, on the nodes page or as `source_access` in
+`PUT /api/v2/admin/nodes/{id}`:
+
+- `local`, the default, reads media from the node's own library mount, as above.
+- `core` reads media over HTTP from the API servers. The node needs no library mount, which suits
+  a GPU machine that cannot mount the library. Every byte the node reads passes through the API
+  servers, so they need that bandwidth on top of what they already serve: a node transcoding a
+  remux reads its full bitrate for every session. `silo_node_source_bytes_sent_total{node}` on
+  each API server shows what each node costs. The node applies a change to the jobs it starts
+  afterwards; running jobs keep their mode.
+
+A node host with `http_proxy` set needs nothing special for `core`: the node reads source bytes
+from the API servers without a proxy, and FFmpeg reads from the node's own loopback relay without
+one.
+
+Choose `core` when mounting the library on the node is impractical, and `local` when it is easy
+or the API servers' network is the bottleneck. A text subtitle burn-in that cannot be staged from
+the file's index does not run on a `core` node; the start moves to a `local` node or the main
+server.
+
+A reverse proxy in front of the API must not buffer `/api/internal/nodes/sources` responses and
+needs long read and send timeouts on that location: a response streams for as long as FFmpeg
+reads, and the node resumes a cut one. It must pass `Range` and `If-Match` through and must not
+compress the response. Each API server serves one node at most 512 of these streams at once and
+answers `429` past that, which the node retries. For nginx:
+
+```nginx
+location /api/internal/nodes/sources {
+    proxy_pass http://silo_api;
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_read_timeout 1h;
+    proxy_send_timeout 1h;
+    gzip off;
+}
+```
+
+A node that cannot reach the API servers for 30 seconds or more fails the reads in progress, and
+those jobs fail as they would on a lost network mount.
+
+Check afterwards:
+
+- [ ] Each transcode node shows as healthy on the nodes page and reports that it has a key.
+- [ ] A transcode node without a key, or running with a key that was replaced, takes no new work:
+  it stays listed, marked keyless or unhealthy, until it is issued a key or restarted with its
+  current one.
+- [ ] A transcode started on each node plays, seeks, and stops.
+- [ ] On a node set to `core`, a transcode plays without a library mount, and
+  `silo_node_source_bytes_sent_total` grows for that node.
+
+[Transcode nodes](architecture/transcode-nodes.md) describes the design.
+
 ## Integration checklist
 
 Receiver paths come from the v2 contract. The release owner still fills the exact 1.0
@@ -164,7 +284,7 @@ administration-UI location for each row before the release candidate is promoted
 | Webhook sync | `/api/v1/webhook-sync/webhooks/{secret}` | `POST /api/v2/webhook-sync/webhooks/{secret}` | Replace the external receiver URL, rotating the secret with `rotateWebhookConnection` (`POST /api/v2/webhook-sync/connections/{id}/webhook/rotate`) | Confirm delivery and profile mapping |
 | OAuth/auth plugin | `/api/v1/auth/oauth/{install_id}/callback` | `GET /api/v2/auth/oauth/{install_id}/callback` | Register the 1.0 callback with the identity provider and reconnect | Complete a new authorization and sign-in flow |
 | Discord link | `/api/v1/notifications/discord/link/callback` | `GET /api/v2/notifications/discord/link/callback` | Start a new link operation from 1.0 | Complete the callback and send a test notification |
-| Tokenized email | `/api/v1/notifications/email/verify`, `/api/v1/notifications/email/unsubscribe` | `GET /api/v2/notifications/email/verify`, `GET` and `POST /api/v2/notifications/email/unsubscribe` | Resend the action from 1.0; pre-upgrade links stop working | Open the newly sent link successfully |
+| Tokenized email | `/api/v1/notifications/email/verify`, `/api/v1/notifications/email/unsubscribe` | `GET /api/v2/notifications/email/verify`, `GET` and `POST /api/v2/notifications/email/unsubscribe` | Resend the action from 1.0; pre-upgrade links stop working | Open the newly sent link successfully. An unsubscribe link only shows a confirmation page: submit it, then check that the profile's email setting is off |
 | Downloads | `/api/v1/downloads/...` control plus `/downloads/file/{token}` and node artifact paths | `/api/v2/downloads/...` control; the node listener keeps `/downloads/file/{token}` at its version-neutral path | Restart unfinished downloads and use only URLs issued by 1.0 | Verify `HEAD`, ranged transfer, manifest, artwork, and subtitles |
 | Playback | `/api/v1/playback/...` control plus `/api/v1/stream/...` media delivery | `/api/v2/playback/...` control plus `/api/v2/stream/...` media delivery | Start a new playback session and use only URLs issued by 1.0 | Verify start, seek/resume, subtitles, and stop reporting |
 | Plugins | `/api/v1/plugins/{installation_id}/...` and `/api/v1/plugin-assets/{installation_id}/...` | `/api/v2/plugin-content/plugins/{installation_id}/...` and `/api/v2/plugin-content/plugin-assets/{installation_id}/...` | Reopen through the 1.0 UI and update the plugin if required. A plugin that emits absolute links or redirects needs its own compatibility check; Silo does not rewrite them | Verify plugin page, assets, authorization, and one core action |
@@ -184,6 +304,7 @@ individually, and a retired one does not answer `410`.
   report progress, stop playback, and sign out.
 - [ ] A new download completes and its offline manifest, artwork, subtitles, integrity checks, and
   playback work.
+- [ ] Every remote transcode node passes the checks under [Transcode nodes](#transcode-nodes).
 - [ ] Every external webhook or callback receives a fresh test event.
 - [ ] OAuth-backed integrations complete a new authorization flow.
 - [ ] Installed plugin pages and static assets load without `/api/v1` requests.
@@ -193,30 +314,34 @@ individually, and a retired one does not answer `410`.
   receive only the upgrade tombstone; separately retired version-neutral paths never execute old
   business behavior.
 
-## Pending Apple and Android contract follow-up
+## Apple and Android contract follow-up
 
-Native implementation is deferred. Every item below remains pending for both
-`silo-apple` (iOS, tvOS and macOS) and `silo-android` (phone and TV); this checklist
-records required work, not completed changes or filed issues. Complete and validate
-these changes against the same server contract before native migration ratification.
+Both native clients call only `/api/v2` (apart from the retained health probe) and decode
+it with handwritten models. The table lists each contract change the clients must handle and
+where `silo-apple` (iOS, tvOS and macOS) and `silo-android` (phone and TV) stand on their main
+branches. Validate both against the same server contract before release.
 
-| Contract change | Required native adaptation |
-| --- | --- |
-| Optional-domain capability documents, including `getRequestStatus`, `getSubtitleProviderStatus` and `getSubtitleAIStatus` | Decode `revision` as an opaque string, `state` as an extensible value and scoped `allowed` as a boolean. Treat unknown states as unavailable. Revisions reflect the runtime document and caller scope; do not parse them as numbers or use route presence as feature detection. |
-| Conditional capability reads | Store the document with its `ETag`, send `If-None-Match`, and reuse the matching body on bodyless `304`. Respect private cache directives. Partition caches by server, account, profile and relevant device/security context; revalidate after authority or configuration changes. |
-| `getCatalogSearchCapabilities` | Allow `provider` to be absent when search is not configured. Use `state` before interpreting provider-specific limits or starting a search. |
-| `getSettingsContractCapabilities` | Move the previous numeric `revision` consumer to `manifest_revision`; reserve string `revision` for the capability document. Other settings contract and row revisions retain their documented numeric meaning. |
-| `getPlaybackSubtitleFonts` | Decode `CollectionPlaybackSubtitleFont`, an object with `items: [{name, data}]`, instead of a bare array. Each item uses `PlaybackSubtitleFont`; `data` remains base64 font bytes. Empty results are `{"items":[]}`. |
-| Native download operations | Handle validly encoded but invalid domain input as `422 validation_failed`. Malformed JSON and invalid cursors remain `400`. Keep conflict and retry handling separate from validation failures. |
-| Diagnostics upload and chunk operations | Handle `409 capability_disabled` and `409 capability_not_configured` as availability failures. Re-read `getDiagnosticsCapabilities`; do not automatically replay an uncertain upload or completion. |
-| Positive decimal string identifiers | Preserve string IDs on the wire. Send canonical values such as `"7"`; `"007"`, `"+7"`, zero and negative values are rejected where a positive decimal ID is required. UUID and other opaque identifier formats retain their own contracts. |
-| `effective_policy.library_ids` | Preserve `null` for unrestricted access and `[]` for deny-all. Never normalize both to an empty list or interpret an empty list as unrestricted. |
-| Stored timestamps and dates | Handle a `500` Problem when persisted data cannot be represented by the declared date/time contract. Do not depend on malformed stored values becoming empty, omitted or fabricated dates. |
-| Mutation receipts | Do not require an `ETag` on a historical receipt. Read the canonical resource before an edit that requires a current validator; a receipt is not proof of its current version. |
+| Contract change | Required native adaptation | Apple | Android |
+| --- | --- | --- | --- |
+| Optional-domain capability documents, including `getRequestStatus`, `getSubtitleProviderStatus` and `getSubtitleAIStatus` | Decode `revision` as an opaque string, `state` as an extensible value and scoped `allowed` as a boolean. Treat unknown states as unavailable. Revisions reflect the runtime document and caller scope; do not parse them as numbers or use route presence as feature detection. | Done | Done for request and subtitle-provider status; pending for `getSubtitleAIStatus`, which decodes none of the three fields |
+| Conditional capability reads | Store the document with its `ETag`, send `If-None-Match`, and reuse the matching body on bodyless `304`. Respect private cache directives. Partition caches by server, account, profile and relevant device/security context; revalidate after authority or configuration changes. | Pending | Pending |
+| `getCatalogSearchCapabilities` | Allow `provider` to be absent when search is not configured. Use `state` before interpreting provider-specific limits or starting a search. | Done | Pending: `provider` is required and `state` is not checked |
+| `getSettingsContractCapabilities` | Move the previous numeric `revision` consumer to `manifest_revision`; reserve string `revision` for the capability document. Other settings contract and row revisions retain their documented numeric meaning. | Done | Done |
+| `getPlaybackSubtitleFonts` | Decode `CollectionPlaybackSubtitleFont`, an object with `items: [{name, data}]`, instead of a bare array. Each item uses `PlaybackSubtitleFont`; `data` remains base64 font bytes. Empty results are `{"items":[]}`. | Done | Not used: the client reads fonts embedded in the file |
+| Native download operations | Handle schema validation failures (a missing or out-of-range member, a value outside an enum, a missing or malformed device or profile header) as `422 validation_failed`. Malformed JSON, invalid cursors, a malformed subtitle ref, and the creation handler's own checks (non-canonical `media_file_id`, invalid `caps.video_decode`, malformed or oversized `expected_entries`, inconsistent revision guards) are `400 malformed_request`. A bitrate preset the server cannot prepare is `501 capability_unsupported`, transcoding the account or server does not allow is `403 permission_denied`, and missing preparation capacity is a retryable `503`. Keep conflict and retry handling separate from validation failures; see [the downloads error reference](downloads-api.md#12-error-reference). | Done: conflicts are separate, and `400` and `422` are both definite refusals | Pending: status reports retry `400` and `422` like transient failures |
+| Diagnostics upload and chunk operations | Handle `409 capability_disabled` and `409 capability_not_configured` as availability failures. Re-read `getDiagnosticsCapabilities`; do not automatically replay an uncertain upload or completion. | Done | Pending: a `409` marks the report permanently failed |
+| Positive decimal string identifiers | Preserve string IDs on the wire. Send canonical values such as `"7"`; `"007"`, `"+7"`, zero and negative values are rejected where a positive decimal ID is required. UUID and other opaque identifier formats retain their own contracts. | Done | Done, except that reads accept leading zeros |
+| `effective_policy.library_ids` | Preserve `null` for unrestricted access and `[]` for deny-all. Never normalize both to an empty list or interpret an empty list as unrestricted. | Pending: not read | Pending: not read |
+| Stored timestamps and dates | Handle a `500` Problem when persisted data cannot be represented by the declared date/time contract. Do not depend on malformed stored values becoming empty, omitted or fabricated dates. | Pending: no specific handling found | Pending: no specific handling found |
+| Mutation receipts | Do not require an `ETag` on a historical receipt. Read the canonical resource before an edit that requires a current validator; a receipt is not proof of its current version. | Done | Done for playback receipts; the onboarding update still requires an `ETag` on its response |
 
-Regenerate native clients from the final OpenAPI document, then update handwritten
-adapters and decoding fixtures. The schema names below replace ambiguous domain
-names; operation IDs remain unchanged.
+Regenerate OpenAPI-generated clients (such as the web app's
+`web/src/api/v2/schema.ts` and third-party generated clients) from the final
+OpenAPI document. For the handwritten Apple and Android clients
+([api-contract.md](architecture/api-contract.md#apple-and-android)), sync their
+decoding fixtures and update any affected handwritten models or adapters. The
+schema names below replace ambiguous domain names; operation IDs remain
+unchanged.
 
 | Previous schema | Native schema | Affected operation or representation |
 | --- | --- | --- |
@@ -246,7 +371,7 @@ separate generated copies of plugin implementation types. The schema ownership
 allowlist and explicit names live in `internal/apiv2/schema_ownership_test.go` and
 `internal/apiv2/schema_names.go`.
 
-For each native repository, the pending validation is:
+For each native repository, validate:
 
 - [ ] Regenerate and build all supported platform targets; check the complete schema diff
   and every affected operation adapter.
@@ -260,8 +385,8 @@ For each native repository, the pending validation is:
 - [ ] Render shared plugin/watch-provider forms, including empty option and condition
   arrays, and confirm uncertain mutations are not replayed for missing receipt ETags.
 
-These are native v2 changes. Jellyfin compatibility retains its separate protocol;
-this checklist does not require Jellyfin clients to adopt the native schemas.
+Jellyfin compatibility keeps its separate protocol; Jellyfin clients do not adopt
+the native schemas.
 
 ## Recovery preparation
 

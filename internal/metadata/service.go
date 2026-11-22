@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/bookid"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalog/reattribute"
 	"github.com/Silo-Server/silo-server/internal/contentid"
@@ -76,6 +77,7 @@ type metadataItemRepo interface {
 	GetByTitleYearType(ctx context.Context, title string, year int, itemType string) (*models.MediaItem, error)
 	Upsert(ctx context.Context, item *models.MediaItem) error
 	SetStatusUnlessMatched(ctx context.Context, contentID, status string) (bool, error)
+	UpdateProvisionalArtwork(ctx context.Context, read *models.MediaItem, upd *catalog.MetadataUpdate) (bool, error)
 	IncrementRefreshFailure(ctx context.Context, contentID string) error
 	ReplacePeople(ctx context.Context, contentID string, people []models.ItemPerson) error
 	ListUnmatchedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int) ([]string, error)
@@ -2384,6 +2386,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			// failure. The candidate decision remains actionable and deterministic.
 			matchDecision.Outcome = MatchOutcomeProviderPermanent
 		}
+		// Sidecar artwork found above still reaches an unmatched item.
+		s.saveProvisionalLocalArtwork(ctx, req.ContentID, req.Language, allImages)
 		return &ProcessResult{Updated: false, Decision: matchDecision}, nil
 	}
 
@@ -2559,6 +2563,13 @@ func hasTransientMatchError(errs []error) bool {
 // the lists it supplies are not extended by later results (localListFields).
 func foldProviderResult(accumulator, result *MetadataResult, language, providerSlug string, isIdentityHinter bool, quarantined map[string]struct{}) {
 	result.ProviderIDs = sanitizeCandidateProviderIDs(result.ProviderIDs)
+	// A book answer whose edition ids contradict the item's names another
+	// edition, so its work ids do not describe this item. Its claims are
+	// dropped whole, so it neither stores a claim nor clears its capability's
+	// earlier ones. Only book answers carry claims (splitPluginWorkClaims).
+	if len(result.WorkClaims) > 0 && contradictsProviderIDs(accumulator.ProviderIDs, result.ProviderIDs) {
+		result.WorkClaims = nil
+	}
 	if isIdentityHinter {
 		result.ProviderIDs = nil
 		accumulator.localLists.record(result)
@@ -2931,7 +2942,7 @@ func (s *MetadataService) mergeAndPersist(
 	// localization tables like any other non-canonical refresh.
 	canonicalLanguage, isCanonicalWrite := canonicalMetadataLanguage(req, existingItem, locked)
 	// Read once, so artwork and text in this write follow the same setting.
-	fallbackLanguage := s.configuredFallbackLanguage()
+	fallbackLanguage := s.FallbackLanguage()
 	switch {
 	case isCanonicalWrite:
 		// Fallback text belongs to the provider IDs it was fetched with, so it
@@ -3100,6 +3111,9 @@ func (s *MetadataService) mergeAndPersist(
 			// With caching off a stored copy gives way to any provider image,
 			// rated or not; fill-empty would keep it over an unrated one.
 			stored = clearStoredItemArtwork(item)
+		} else {
+			// So does a poster taken from the video.
+			stored = clearFramePoster(item, existingItem)
 		}
 		applyBestImages(item, images, imageMode, req.Language, fallbackLanguage)
 		stored.restoreUnfilled(item)
@@ -3123,9 +3137,10 @@ func (s *MetadataService) mergeAndPersist(
 	}
 
 	if handleArtwork {
-		prepareItemImagesForQueue(item, existingItem, keepStored, req.Mode == ModeIdentify)
+		queuedFrom := withoutReplacedFramePoster(item, existingItem)
+		prepareItemImagesForQueue(item, queuedFrom, keepStored, req.Mode == ModeIdentify)
 		dropGoneItemOnlyArtwork(localArt, item, images)
-		applyLocalArtworkFallback(item, existingItem, images, req.Language, fallbackLanguage)
+		applyLocalArtworkFallback(item, queuedFrom, images, req.Language, fallbackLanguage)
 	}
 
 	if isNew && contentID == "" {
@@ -3143,6 +3158,11 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 	item.ContentID = contentID
+	// A book's work ids came from the match a reset or a correction replaces.
+	// corrected compares only TMDB, TVDB and IMDb ids, which books lack, so an
+	// Identify of a book, the admin naming the book, counts as one too; the
+	// answers it fetches supply the claims again.
+	clearsWorkClaims := resetsRow || corrected || (req.Mode == ModeIdentify && bookid.HasWorkIDs(item.Type))
 	if corrected {
 		if err := s.clearPreviousMatchRows(ctx, contentID, item, locked, mergeLocked); err != nil {
 			return nil, err
@@ -3161,6 +3181,8 @@ func (s *MetadataService) mergeAndPersist(
 			clearChildEdits: replacesShow,
 			resetLocks:      resetsRow,
 			clearCredits:    resetsRow && creditsUnlisted(item, mergeLocked),
+			clearWorkClaims: clearsWorkClaims,
+			workClaims:      accumulator.WorkClaims,
 		},
 	)
 	if err != nil {
@@ -3370,13 +3392,16 @@ func (s *MetadataService) clearUnlistedCredits(ctx context.Context, contentID st
 
 // itemWriteSteps are the extra writes that commit with an item's identity
 // write: an Identify's choice, clearing a replaced show's season and episode
-// edits, and a Reset to Provider dropping the item's locks and the credits its
-// providers no longer list.
+// edits, a Reset to Provider dropping the item's locks and the credits its
+// providers no longer list, a reset, an identity correction or a book's
+// Identify dropping its work ids, and the work ids the providers' answers claim.
 type itemWriteSteps struct {
 	identityChosen  bool
 	clearChildEdits bool
 	resetLocks      bool
 	clearCredits    bool
+	clearWorkClaims bool
+	workClaims      []bookid.WorkClaims
 }
 
 // forRetry is the steps for the write retried after conflict recovery. A row
@@ -3386,6 +3411,7 @@ func (w itemWriteSteps) forRetry(sameRow bool) itemWriteSteps {
 	w.clearChildEdits = w.clearChildEdits && sameRow
 	w.resetLocks = w.resetLocks && sameRow
 	w.clearCredits = w.clearCredits && sameRow
+	w.clearWorkClaims = w.clearWorkClaims && sameRow
 	return w
 }
 
@@ -3506,6 +3532,14 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 		if err := providerRepo.ReplaceByContentIDTx(ctx, tx, item.ContentID, item.Type, providerIDs); err != nil {
 			return err
 		}
+	}
+	if steps.clearWorkClaims {
+		if err := catalog.DeleteWorkClaimsTx(ctx, tx, item.ContentID); err != nil {
+			return err
+		}
+	}
+	if err := catalog.ApplyWorkClaimsTx(ctx, tx, item.ContentID, item.Type, steps.workClaims); err != nil {
+		return err
 	}
 	// An Identify's choice commits with the identity it chose
 	// (identify_sticky.go).
@@ -4798,7 +4832,7 @@ func (s *MetadataService) refreshSeriesChildTarget(
 			if err := s.fillTargetChildText(ctx, series, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx, seasons, episodes, mode, mergeMode, reset); err != nil {
 				return err
 			}
-		} else if s.configuredFallbackLanguage() != "" {
+		} else if s.FallbackLanguage() != "" {
 			// Text a provider marked as another language is no translation.
 			dropForeignChildText(seasons, episodes, language)
 		}
@@ -9007,6 +9041,20 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 			`,
 			args: []any{fromContentID, toContentID},
 		},
+		{
+			name: "move work ids",
+			sql: `
+				UPDATE media_item_work_ids src
+				SET content_id = $2,
+					updated_at = NOW()
+				WHERE src.content_id = $1
+				  AND NOT EXISTS (
+					SELECT 1 FROM media_item_work_ids dest
+					WHERE dest.content_id = $2 AND dest.provider = src.provider
+				  )
+			`,
+			args: []any{fromContentID, toContentID},
+		},
 		// A target with no embedding keeps the source's until the backfill
 		// re-embeds it from the target's own text, as the provider-ID merge
 		// does. The source's row goes with the source item (ON DELETE
@@ -9903,6 +9951,36 @@ func clearStoredItemArtwork(item *models.MediaItem) storedItemArtwork {
 		}
 	}
 	return stored
+}
+
+// clearFramePoster empties a poster slot that serves a frame of the movie's
+// own video (the extras frame task's, marked by catalog.StillSourceFramePrefix
+// on the stored item), so applyBestImages fills it with any provider image.
+// The merged item carries no sources yet, so the stored one decides. A locked
+// slot keeps its frame.
+func clearFramePoster(item, existing *models.MediaItem) storedItemArtwork {
+	var stored storedItemArtwork
+	if existing != nil && !artworkLocked(item) && item.PosterPath != "" && item.PosterPath == existing.PosterPath &&
+		strings.HasPrefix(existing.PosterSourcePath, catalog.StillSourceFramePrefix) {
+		stored.poster, item.PosterPath = item.PosterPath, ""
+	}
+	return stored
+}
+
+// withoutReplacedFramePoster returns existing, or, when the merge replaced its
+// frame poster (clearFramePoster) with another image, a copy without that
+// poster's path and thumbhash. A frame's path only ever goes with its frame
+// source, so it never stands in while another source's copy is pending: the
+// slot serves what a slot with no stored copy would. The frame is left to the
+// artwork revision GC.
+func withoutReplacedFramePoster(item, existing *models.MediaItem) *models.MediaItem {
+	if existing == nil || artworkLocked(item) || item.PosterPath == existing.PosterPath ||
+		!strings.HasPrefix(existing.PosterSourcePath, catalog.StillSourceFramePrefix) {
+		return existing
+	}
+	trimmed := *existing
+	trimmed.PosterPath, trimmed.PosterThumbhash = "", ""
+	return &trimmed
 }
 
 // restoreUnfilled gives each slot no provider image filled its stored copy

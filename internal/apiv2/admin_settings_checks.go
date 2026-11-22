@@ -17,8 +17,10 @@ type AdminSettingsCheckInput struct {
 	}
 }
 type AdminSettingsCheckResult struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
+	Success     bool              `json:"success"`
+	Message     string            `json:"message"`
+	MessageKey  string            `json:"message_key,omitempty" doc:"Key of the shared translation catalog message whose English is message. A client that has the key shows its translation, filling message_args, and otherwise shows message. Absent when message has no catalog entry" example:"web.admin.common.connectionCheck.result.redisConnected"`
+	MessageArgs map[string]string `json:"message_args,omitempty" doc:"Values of the message_key message's placeholders by name; present only with message_key, and absent when the message has none" example:"{\"dimensions\":\"1024\"}"`
 }
 type AdminSettingsCheckOutput struct{ Body AdminSettingsCheckResult }
 
@@ -37,5 +39,5 @@ func (reg *Registry) checkAdminSettingsConnection(ctx context.Context, in *Admin
 	if err != nil {
 		return nil, adminSettingsInspectionProblem(err)
 	}
-	return &AdminSettingsCheckOutput{Body: AdminSettingsCheckResult{Success: result.Success, Message: result.Message}}, nil
+	return &AdminSettingsCheckOutput{Body: AdminSettingsCheckResult{Success: result.Success, Message: result.Message, MessageKey: result.MessageKey, MessageArgs: result.MessageArgs}}, nil
 }

@@ -367,6 +367,11 @@ type itemListResponse struct {
 
 	// ParentArtwork reaches the v2 card only; v1 is frozen.
 	ParentArtwork EpisodeParentArtworkView `json:"-"`
+	// Authors, PositionSeconds and DurationSeconds reach the v2 card only;
+	// catalog browse fills them (listBookAuthors, listInProgressPositions).
+	Authors         []string `json:"-"`
+	PositionSeconds *float64 `json:"-"`
+	DurationSeconds *float64 `json:"-"`
 }
 
 type sortMetricsResponse struct {
@@ -891,6 +896,69 @@ func (h *ItemsHandler) listItemUserStates(ctx context.Context, v ItemViewer, ite
 	return states
 }
 
+// maxCardAuthors caps the author names one browse card carries.
+const maxCardAuthors = 3
+
+// listBookAuthors returns the author names of the audiobooks and ebooks in
+// items, at most maxCardAuthors each, with one query for the page. Other
+// types are not looked up, so a page without books costs nothing.
+func (h *ItemsHandler) listBookAuthors(ctx context.Context, items []*models.MediaItem) map[string][]string {
+	if h == nil || h.browseRepo == nil || h.browseRepo.Pool() == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item != nil && (item.Type == itemTypeAudiobook || item.Type == itemTypeEbook) {
+			ids = append(ids, item.ContentID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	authors, err := catalog.ListBookAuthors(ctx, h.browseRepo.Pool(), ids, maxCardAuthors)
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "listing browse card authors", "component", "api", "error", err)
+		return nil
+	}
+	return authors
+}
+
+// listInProgressPositions returns the profile's visible progress on the items
+// it has started and not finished, with one progress read for the page.
+// Series, seasons, and ebooks have no playback position of their own and are
+// not looked up. The caller still drops items user_state reports played.
+func (h *ItemsHandler) listInProgressPositions(ctx context.Context, v ItemViewer, items []*models.MediaItem) map[string]userstore.WatchProgress {
+	store, profileID, ok := h.viewerUserStore(ctx, v.ProfileID)
+	if !ok {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.ContentID == "" {
+			continue
+		}
+		switch item.Type {
+		case "series", "season", itemTypeEbook:
+			continue
+		}
+		ids = append(ids, item.ContentID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	progress, err := store.ListProgressByMediaItems(ctx, profileID, ids)
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "listing browse card positions", "component", "api", "error", err)
+		return nil
+	}
+	for id, p := range progress {
+		if p.Completed || p.PositionSeconds <= 0 || p.DurationSeconds <= 0 {
+			delete(progress, id)
+		}
+	}
+	return progress
+}
+
 // episodeResponseShell maps an already-localized episode onto the response
 // shape, returning the card-variant still path for the caller to presign.
 func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback, size imagesize.Size) (episodeResponse, string) {
@@ -1323,57 +1391,102 @@ func (h *ItemsHandler) listUserSortMetrics(
 			ratio := ebookProgress.Progress
 			metrics[item.ContentID] = &sortMetricsResponse{ProgressRatio: &ratio}
 		}
-	case "date_viewed", "plays":
+	case "date_viewed":
+		h.listViewedAtSortMetrics(ctx, items, contentIDs, store, profileID, progressMap, ebookProgressMap, metrics)
+	case "plays":
 		history, err := listCompletedHistoryForItems(ctx, store, profileID, contentIDs)
 		if err != nil {
 			return
 		}
 		historyCounts := make(map[string]int, len(contentIDs))
-		historyViewedAt := make(map[string]string, len(contentIDs))
 		for _, entry := range history {
 			if entry.MediaItemID == "" {
 				continue
 			}
 			historyCounts[entry.MediaItemID]++
-			if entry.WatchedAt > historyViewedAt[entry.MediaItemID] {
-				historyViewedAt[entry.MediaItemID] = entry.WatchedAt
-			}
 		}
 		for _, item := range items {
 			if item == nil || item.ContentID == "" {
 				continue
 			}
-			resp := &sortMetricsResponse{}
-			if sortField == "date_viewed" {
-				viewedAt := historyViewedAt[item.ContentID]
-				if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && progress.UpdatedAt > viewedAt {
-					viewedAt = progress.UpdatedAt
-				}
-				if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= models.EbookFinishedProgressThreshold {
-					ebookViewedAt := progress.UpdatedAt.UTC().Format(time.RFC3339)
-					if ebookViewedAt > viewedAt {
-						viewedAt = ebookViewedAt
-					}
-				}
-				if viewedAt == "" {
-					continue
-				}
-				resp.ViewedAt = viewedAt
-			} else {
-				playCount := historyCounts[item.ContentID]
-				if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && playCount < 1 {
-					playCount = 1
-				}
-				if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= models.EbookFinishedProgressThreshold && playCount < 1 {
-					playCount = 1
-				}
-				if playCount <= 0 {
-					continue
-				}
-				resp.PlayCount = &playCount
+			playCount := historyCounts[item.ContentID]
+			if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && playCount < 1 {
+				playCount = 1
 			}
-			metrics[item.ContentID] = resp
+			if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= models.EbookFinishedProgressThreshold && playCount < 1 {
+				playCount = 1
+			}
+			if playCount <= 0 {
+				continue
+			}
+			metrics[item.ContentID] = &sortMetricsResponse{PlayCount: &playCount}
 		}
+	}
+}
+
+// listSeriesViewedAt returns when the profile last finished an episode of
+// each series in items. Without the store's rollup, or when it fails, series
+// go undated but other titles still are.
+func listSeriesViewedAt(ctx context.Context, items []*models.MediaItem, store userstore.UserStore, profileID string) map[string]string {
+	seriesIDs := seriesItemIDs(items)
+	rollup, ok := store.(userstore.SeriesEpisodeRollupStore)
+	if len(seriesIDs) == 0 || !ok {
+		return nil
+	}
+	viewed, err := rollup.SeriesLatestViewedAt(ctx, profileID, seriesIDs)
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "listing series viewed times", "component", "api", "error", err)
+		return nil
+	}
+	return viewed
+}
+
+// listViewedAtSortMetrics sets each item's latest finished play for a date
+// viewed sort. Plays are recorded against episodes, so a series takes the
+// latest of its episodes' plays, as the sort does (#4638).
+func (h *ItemsHandler) listViewedAtSortMetrics(
+	ctx context.Context,
+	items []*models.MediaItem,
+	contentIDs []string,
+	store userstore.UserStore,
+	profileID string,
+	progressMap map[string]userstore.WatchProgress,
+	ebookProgressMap map[string]EbookReaderProgress,
+	metrics map[string]*sortMetricsResponse,
+) {
+	seriesViewedAt := listSeriesViewedAt(ctx, items, store, profileID)
+	// One grouped read gives each item's latest visible play.
+	history, err := store.ListCompletedHistoryItems(ctx, userstore.CompletedHistoryItemQuery{
+		ProfileID:    profileID,
+		MediaItemIDs: contentIDs,
+	})
+	if err != nil {
+		return
+	}
+	historyViewedAt := make(map[string]string, len(history))
+	for _, entry := range history {
+		historyViewedAt[entry.MediaItemID] = entry.WatchedAt
+	}
+	for _, item := range items {
+		if item == nil || item.ContentID == "" {
+			continue
+		}
+		latest := historyViewedAt[item.ContentID]
+		if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && progress.UpdatedAt > latest {
+			latest = progress.UpdatedAt
+		}
+		if seriesLatest := seriesViewedAt[item.ContentID]; seriesLatest > latest {
+			latest = seriesLatest
+		}
+		if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= models.EbookFinishedProgressThreshold {
+			if ebookViewedAt := progress.UpdatedAt.UTC().Format(time.RFC3339); ebookViewedAt > latest {
+				latest = ebookViewedAt
+			}
+		}
+		if latest == "" {
+			continue
+		}
+		metrics[item.ContentID] = &sortMetricsResponse{ViewedAt: latest}
 	}
 }
 
@@ -1626,15 +1739,20 @@ func (h *ItemsHandler) leafUserData(ctx context.Context, userID int, profileID, 
 // marking watched or clearing the resume point moves the progress timestamp
 // without a new version being played. A Jellyfin-protocol play records no
 // choice, so its file shows only for a movie never started natively.
+// A restored choice without a local file ID can supply the edition hint.
 func applyVersionChoice(userData *catalog.SeasonUserData, choice *userstore.SeriesPlaybackPreference) *catalog.SeasonUserData {
-	if choice == nil || choice.FileID == 0 {
+	if choice == nil {
+		return userData
+	}
+	if choice.FileID <= 0 && (choice.EditionKey == "" || userData != nil && userData.LastFileID != nil && *userData.LastFileID > 0) {
 		return userData
 	}
 	if userData == nil {
 		userData = &catalog.SeasonUserData{}
 	}
-	fileID := choice.FileID
-	userData.LastFileID = &fileID
+	if choice.FileID > 0 {
+		userData.LastFileID = new(choice.FileID)
+	}
 	userData.LastResolution = stringPtrOrNil(choice.Resolution)
 	hdr := choice.HDR
 	userData.LastHDR = &hdr
@@ -1724,6 +1842,21 @@ func applyEffectiveEditionPreference(userData *catalog.SeasonUserData, target **
 	}
 	if target != nil && *target == nil {
 		*target = userData.LastEditionKey
+	}
+}
+
+func projectEditionPreference(aliases catalog.EditionAliases, userData *catalog.SeasonUserData, effective **string) {
+	if userData != nil && userData.LastEditionKey != nil {
+		key := *userData.LastEditionKey
+		if grouped := aliases.Key(key); grouped != key {
+			userData.LastEditionKey = new(grouped)
+		}
+	}
+	if *effective != nil {
+		key := **effective
+		if grouped := aliases.Key(key); grouped != key {
+			*effective = new(grouped)
+		}
 	}
 }
 

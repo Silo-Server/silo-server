@@ -154,7 +154,7 @@ var stricterFlags = func() []stricterFlag {
 				describe: fmt.Sprintf(`format('access group %%s kept without %s', t.name)`, what)})
 	}
 	// A profile that turned a notification off keeps it off.
-	for _, column := range []string{columnEnabled, "notify_favorites", "notify_watchlist", "notify_continue_watching", "notify_next_up"} {
+	for _, column := range []string{columnEnabled, "notify_next_up"} {
 		flags = append(flags, stricterFlag{table: "notification_preferences", column: column, stricter: false,
 			id: `t.user_id::text || ':' || t.profile_id`, key: noKey, scope: everyRow,
 			describe: fmt.Sprintf(`format('notifications of profile %%s kept off (%s)', t.profile_id)`, column)})
@@ -238,10 +238,7 @@ var restoredFlagColumns = map[string]string{
 	"page_sections.enabled":                                   whyShown,
 	"page_sections.featured":                                  whyShown,
 	"page_sections.web_only":                                  whyShown,
-	"profile_series_interest.continue_watching":               whyDerived,
-	"profile_series_interest.favorite":                        whyDerived,
 	"profile_series_interest.next_up_candidate":               whyDerived,
-	"profile_series_interest.watchlist":                       whyDerived,
 	"request_routes.is_fallback":                              whyRouting,
 	"request_routes.skip_uhd":                                 whyRouting,
 	"request_routing.id":                                      whyKey,
@@ -303,32 +300,34 @@ func readStricterFlags(ctx context.Context, tx pgx.Tx) ([]liveFlags, error) {
 }
 
 // keepStricterFlags sets, in the restored database, each flag of a row
-// that is also live at its stricter value, and returns what it kept.
-func keepStricterFlags(ctx context.Context, tx pgx.Tx, live []liveFlags) ([]string, error) {
-	var kept []string
+// that is also live at its stricter value, and records what it kept.
+func keepStricterFlags(ctx context.Context, tx pgx.Tx, live []liveFlags, result *CarriedCredentials) error {
 	for i, f := range stricterFlags {
 		// A backup taken before the column existed has nothing to keep;
 		// the restored server adds it with its default when it migrates,
 		// unless the flag adds it here to keep a live restriction.
 		has, err := columnExists(ctx, tx, f.table, f.column)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if !has {
 			if f.addMissing == "" || live[i].stricter == "[]" {
 				continue
 			}
 			if _, err := tx.Exec(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s`, f.table, f.column, f.addMissing)); err != nil {
-				return nil, fmt.Errorf("%s.%s: %w", f.table, f.column, err)
+				return fmt.Errorf("%s.%s: %w", f.table, f.column, err)
 			}
 		}
 		sql := fmt.Sprintf(`UPDATE %[1]s t SET %[2]s = $2 FROM json_to_recordset($1::json) AS l(id text, key text)
 			WHERE %[5]s = l.id AND %[3]s = l.key AND t.%[2]s IS DISTINCT FROM $2 RETURNING %[4]s`, f.table, f.column, f.key, f.describe, f.idOf())
 		names, err := collectKept(ctx, tx, sql, live[i].stricter, f.stricter)
 		if err != nil {
-			return nil, fmt.Errorf("%s.%s: %w", f.table, f.column, err)
+			return fmt.Errorf("%s.%s: %w", f.table, f.column, err)
 		}
-		kept = append(kept, names...)
+		result.Stricter = append(result.Stricter, names...)
+		if f.table == "plugin_installations" && len(names) > 0 {
+			result.pluginProvisionRestricted = true
+		}
 		if !f.absentOff {
 			continue
 		}
@@ -336,11 +335,14 @@ func keepStricterFlags(ctx context.Context, tx pgx.Tx, live []liveFlags) ([]stri
 			SELECT 1 FROM json_to_recordset($1::json) AS l(id text, key text) WHERE %[5]s = l.id AND %[3]s = l.key) RETURNING %[4]s`,
 			f.table, f.column, f.key, f.describeAbsent, f.idOf())
 		if names, err = collectKept(ctx, tx, sql, live[i].present, f.stricter); err != nil {
-			return nil, fmt.Errorf("%s.%s: %w", f.table, f.column, err)
+			return fmt.Errorf("%s.%s: %w", f.table, f.column, err)
 		}
-		kept = append(kept, names...)
+		result.Stricter = append(result.Stricter, names...)
+		if f.table == "plugin_installations" && len(names) > 0 {
+			result.pluginProvisionRestricted = true
+		}
 	}
-	return kept, nil
+	return nil
 }
 
 // collectKept runs an UPDATE … RETURNING a description of each row.

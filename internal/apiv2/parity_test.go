@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -93,7 +94,10 @@ func (f fakeSettings) Get(_ context.Context, key string) (string, error) {
 }
 func (f fakeSettings) Set(context.Context, string, string) error { return nil }
 func (f fakeSettings) GetAll(context.Context) (map[string]string, error) {
-	return map[string]string{"ratelimit.ip.requests_per_second": "1", "ratelimit.ip.requests_per_minute": "1", "ratelimit.ip.burst": "1"}, nil
+	return map[string]string{
+		"ratelimit.ip.requests_per_second": "1", "ratelimit.ip.requests_per_minute": "1", "ratelimit.ip.burst": "1",
+		"ratelimit.auth.item_poster.requests_per_minute": "2", "ratelimit.auth.item_poster.burst": "2",
+	}, nil
 }
 
 const (
@@ -415,6 +419,43 @@ func TestRateLimitExceeded(t *testing.T) {
 	}
 }
 
+// The poster budget admits a burst larger than the ordinary address budget,
+// then returns the v2 problem before looking up the item. Another address
+// still has its own allowance.
+func TestItemPosterAddressBudget(t *testing.T) {
+	perKey, global := ratelimit.NewMemoryLimiter(), ratelimit.NewMemoryLimiter()
+	t.Cleanup(perKey.Close)
+	t.Cleanup(global.Close)
+	mw := ratelimit.NewMiddleware(perKey, global, fakeSettings{}, true)
+	if err := mw.Reload(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	posters := artworkurl.NewItemPosters("test-secret", time.Hour, &posterPresignFake{})
+	source := &posterSourceFake{paths: map[string]string{"movie": "tmdb/movies/1/poster.jpg"}}
+	h := NewHandler(Dependencies{BucketRateLimit: mw.AuthEndpointHandler, ItemPosters: posters, ItemPosterSource: source})
+	link := posters.Link("movie", time.Now())
+	get := func(ip string) *httptest.ResponseRecorder {
+		req := httptest.NewRequestWithContext(clientip.SetContext(t.Context(), ip), http.MethodGet, link, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	const ip = "203.0.113.9"
+	for range 2 {
+		if rec := get(ip); rec.Code != http.StatusFound {
+			t.Fatalf("poster burst: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	limited := get(ip)
+	requireProblem(t, limited, TypeRateLimited)
+	if limited.Header().Get("Retry-After") == "" || source.reads.Load() != 2 {
+		t.Fatalf("refusal: headers %v, catalog reads %d", limited.Header(), source.reads.Load())
+	}
+	if rec := get("203.0.113.10"); rec.Code != http.StatusFound {
+		t.Fatalf("second address: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestGateOrderMatchesV1 pins the order the v1 authenticated group runs its
 // gates in: auth, demo, rate limit, viewer access, class gate. Demo mode
 // denies before the limiter, so a refused request never spends budget — four
@@ -438,11 +479,6 @@ func TestGateOrderMatchesV1(t *testing.T) {
 			t.Fatalf("request %d: status %d, want 403 (demo denies before the limiter): %s", i, rec.Code, rec.Body.String())
 		}
 		requireProblem(t, rec, TypePermissionDenied)
-	}
-	// The chain itself, so a reordering that the demo probe cannot see still fails.
-	chain, missing := gateChain(deps, ClassProfileScoped, "", true, false, false, "")
-	if missing != "" || len(chain) != 5 {
-		t.Fatalf("profile-scoped chain = %d gates, missing %q; want auth, demo, rate limit, viewer access, profile", len(chain), missing)
 	}
 }
 

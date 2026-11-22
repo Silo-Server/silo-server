@@ -192,3 +192,26 @@ func TestEbookProgressAuthorizationBeforeWrite(t *testing.T) {
 		t.Fatalf("future event: %v", err)
 	}
 }
+
+type fakeEbookProgressStore struct {
+	progress *EbookReaderProgress
+	upserted *EbookReaderProgress
+	err      error
+}
+
+func (s *fakeEbookProgressStore) Get(
+	context.Context,
+	int,
+	string,
+	string,
+) (*EbookReaderProgress, error) {
+	return s.progress, s.err
+}
+
+func (s *fakeEbookProgressStore) Upsert(_ context.Context, progress EbookReaderProgress) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.upserted = &progress
+	return nil
+}

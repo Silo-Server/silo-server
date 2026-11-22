@@ -81,6 +81,10 @@ const (
 	// same installations reconcile at once instead of on their next poll, and
 	// every API replica's plugin event dispatcher rebuilds its subscriber index.
 	EventPluginsChanged = "plugins_changed"
+	// EventPluginTasksChanged is published on ChannelAdmin by the API server
+	// after a plugin task binding write, so every API replica re-syncs its
+	// plugin scheduled tasks. Replicas also re-sync on EventPluginsChanged.
+	EventPluginTasksChanged = "plugin_tasks_changed"
 	// EventCatalogItemChanged is published on ChannelCatalog after an admin
 	// changes one catalog item's identity, fields or artwork outside a scan.
 	// The payload is the content ID; every API node evicts the cached home
@@ -111,10 +115,11 @@ const EventUserSessionsRevoked = "user_sessions_revoked"
 // the transcode to another node; the payload is a noderecipe.MoveRequest.
 const EventTranscodeMoveRequested = "transcode_move_requested"
 
-// EventNodeDrainChanged is published on ChannelAdmin by a transcode node when
-// it starts or stops draining, with its stream_nodes id as the payload, so
-// every API server rechecks that node instead of waiting for its next health
-// sweep. Draining means the node takes no new work; see nodepool.DrainState.
+// EventNodeDrainChanged is published on ChannelAdmin by the API server a
+// transcode node tells (its health-changed call) that it started or stopped
+// draining, with the node's stream_nodes id as the payload, so every API
+// server rechecks that node instead of waiting for its next health sweep.
+// Draining means the node takes no new work; see nodepool.DrainState.
 const EventNodeDrainChanged = "node_drain_changed"
 
 // ---------------------------------------------------------------------------

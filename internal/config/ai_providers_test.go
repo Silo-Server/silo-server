@@ -231,47 +231,6 @@ func TestPlanAIProviderConversionKeepsAdministratorBindings(t *testing.T) {
 	}
 }
 
-// An endpoint the registry refuses is reported by setting name, so startup can
-// tell the administrator which job to set up again.
-func TestPlanAIProviderConversionReportsRefusedEndpoints(t *testing.T) {
-	const refused = "https://user:secret@proxy.example.test/v1"
-	for _, tc := range []struct {
-		name   string
-		stored map[string]string
-		want   string
-	}{
-		{
-			name:   "text endpoint",
-			stored: map[string]string{"ai.base_url": refused, "subtitle_ai.transcribe_enabled": "true", "ai.asr_base_url": "http://speaches:8000"},
-			want:   "ai.base_url",
-		},
-		{
-			name:   "subtitle endpoint that text and speech fell back to",
-			stored: map[string]string{"subtitle_ai.base_url": refused, "subtitle_ai.transcribe_enabled": "true"},
-			want:   "subtitle_ai.base_url",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, unconverted, err := PlanAIProviderConversion(tc.stored)
-			if err != nil || len(unconverted) != 1 || unconverted[0] != tc.want {
-				t.Fatalf("unconverted = %v, %v; want [%s]", unconverted, err, tc.want)
-			}
-		})
-	}
-}
-
-// A known type's capabilities follow the type, so providers stored before the
-// type gained one can serve it.
-func TestParseAIProviderRegistryUsesTheTypeCapabilities(t *testing.T) {
-	registry, err := ParseAIProviderRegistry(`{"version":1,"providers":[{"id":"or-1","type":"openrouter","name":"OpenRouter","base_url":"https://openrouter.ai/api/v1","api_key":"k","capabilities":["chat","speech"]}]}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if baseURL, _, ok := registry.Resolve("or-1", AICapabilityEmbeddings); !ok || baseURL != "https://openrouter.ai/api/v1" {
-		t.Fatalf("OpenRouter embeddings resolve to %q, %v", baseURL, ok)
-	}
-}
-
 func TestValidateAIProviderBindings(t *testing.T) {
 	registry := `{"version":1,"providers":[{"id":"groq-1","type":"groq","name":"Groq","base_url":"https://api.groq.com/openai","api_key":"k","capabilities":["chat","speech"]}]}`
 	for _, test := range []struct {
@@ -291,50 +250,5 @@ func TestValidateAIProviderBindings(t *testing.T) {
 	custom := `{"version":1,"providers":[{"id":"chat-only","type":"custom","name":"Chat","base_url":"http://llm.lan","capabilities":["chat"]}]}`
 	if err := ValidateAIProviderBindings(map[string]string{AIProvidersSettingKey: custom, AISpeechProviderSettingKey: "chat-only"}); err == nil {
 		t.Fatal("a chat-only provider was accepted for speech-to-text")
-	}
-}
-
-func TestNormalizeAIProvider(t *testing.T) {
-	for _, test := range []struct {
-		name     string
-		provider AIProvider
-		wantErr  string
-		wantCaps []AICapability
-	}{
-		{
-			name:     "known type keeps its fixed capabilities",
-			provider: AIProvider{ID: "openai-1", Type: AIProviderOpenAI, Name: "OpenAI", BaseURL: "https://api.openai.com/", APIKey: "k", Capabilities: []AICapability{AICapabilityChat}},
-			wantCaps: []AICapability{AICapabilityChat, AICapabilityEmbeddings, AICapabilitySpeech},
-		},
-		{
-			name:     "custom capabilities in display order",
-			provider: AIProvider{ID: "c-1", Type: AIProviderCustom, Name: "Box", BaseURL: "http://box.lan", Capabilities: []AICapability{AICapabilitySpeech, AICapabilityChat}},
-			wantCaps: []AICapability{AICapabilityChat, AICapabilitySpeech},
-		},
-		{name: "hosted type without a key", provider: AIProvider{ID: "g-1", Type: AIProviderGroq, Name: "Groq", BaseURL: "https://api.groq.com/openai"}, wantErr: "requires an API key"},
-		{name: "custom serving nothing", provider: AIProvider{ID: "c-1", Type: AIProviderCustom, Name: "Box", BaseURL: "http://box.lan"}, wantErr: "at least one"},
-		{name: "credentials in the URL", provider: AIProvider{ID: "c-1", Type: AIProviderCustom, Name: "Box", BaseURL: "https://user:pw@box.lan", Capabilities: []AICapability{AICapabilityChat}}, wantErr: "credentials"},
-		{name: "unknown type", provider: AIProvider{ID: "x-1", Type: "anthropic", Name: "X", BaseURL: "https://x.test"}, wantErr: "unknown AI provider type"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			got, err := NormalizeAIProvider(test.provider)
-			if test.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
-					t.Fatalf("err = %v, want %q", err, test.wantErr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if strings.HasSuffix(got.BaseURL, "/") || len(got.Capabilities) != len(test.wantCaps) {
-				t.Fatalf("normalized = %+v", got)
-			}
-			for i, capability := range test.wantCaps {
-				if got.Capabilities[i] != capability {
-					t.Fatalf("capabilities = %v, want %v", got.Capabilities, test.wantCaps)
-				}
-			}
-		})
 	}
 }

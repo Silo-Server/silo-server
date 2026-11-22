@@ -3,9 +3,13 @@ package main
 import (
 	"context"
 	"os"
+	"sync/atomic"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
 
 func TestNodeDrainTimeout(t *testing.T) {
@@ -13,15 +17,15 @@ func TestNodeDrainTimeout(t *testing.T) {
 		value string
 		want  time.Duration
 	}{
-		{"", defaultNodeDrainTimeout},
+		{"", transcodenode.DefaultDrainTimeout},
 		{"0", 0},
 		{"0s", 0},
 		{"900", 15 * time.Minute},
 		{"45m", 45 * time.Minute},
 		{" 2h ", 2 * time.Hour},
-		{"-5m", defaultNodeDrainTimeout},
-		{"99999999999", defaultNodeDrainTimeout}, // more seconds than a Duration holds
-		{"soon", defaultNodeDrainTimeout},
+		{"-5m", transcodenode.DefaultDrainTimeout},
+		{"99999999999", transcodenode.DefaultDrainTimeout}, // more seconds than a Duration holds
+		{"soon", transcodenode.DefaultDrainTimeout},
 	} {
 		if got := nodeDrainTimeout(test.value); got != test.want {
 			t.Errorf("nodeDrainTimeout(%q) = %v, want %v", test.value, got, test.want)
@@ -83,13 +87,6 @@ func TestNodeDrainRunsUntilTheWorkEnds(t *testing.T) {
 	waitClosed(t, finished, "the drain to return once the work ended")
 }
 
-func TestNodeDrainStopsAtItsTimeout(t *testing.T) {
-	d, node := newFakeDrain(50 * time.Millisecond)
-	finished := runDrain(d, make(chan os.Signal, 1))
-	waitClosed(t, node.began, "the drain to begin")
-	waitClosed(t, finished, "the drain to give up at its timeout")
-}
-
 func TestSecondSignalEndsTheDrain(t *testing.T) {
 	d, node := newFakeDrain(time.Hour)
 	sigCh := make(chan os.Signal, 1)
@@ -97,6 +94,72 @@ func TestSecondSignalEndsTheDrain(t *testing.T) {
 	waitClosed(t, node.began, "the drain to begin")
 	sigCh <- syscall.SIGTERM
 	waitClosed(t, finished, "the drain to end on a second signal")
+}
+
+// A node whose key the main server refuses cannot be reached by any relay,
+// so a SIGTERM drain does not wait for its sessions; with an accepted key it
+// waits as before. The key state is read when the wait would start and again
+// while it runs.
+func TestNodeDrainDoesNotWaitWhileTheKeyIsRejected(t *testing.T) {
+	run := func(rejected *atomic.Bool) (finished <-chan struct{}) {
+		d, _ := newFakeDrain(time.Hour)
+		d.keyRejected = rejected.Load
+		return runDrain(d, make(chan os.Signal, 1))
+	}
+	t.Run("rejected when the drain begins", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var rejected atomic.Bool
+			rejected.Store(true)
+			finished := run(&rejected)
+			synctest.Wait()
+			select {
+			case <-finished:
+			default:
+				t.Fatal("drain waited for sessions no relay can reach")
+			}
+		})
+	})
+	t.Run("rejected during the drain", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var rejected atomic.Bool
+			finished := run(&rejected)
+			time.Sleep(30 * time.Minute) //nolint:forbidigo // advances synctest's fake clock
+			synctest.Wait()
+			select {
+			case <-finished:
+				t.Fatal("drain with an accepted key returned with work left")
+			default:
+			}
+			rejected.Store(true)
+			time.Sleep(nodeDrainKeyCheckInterval) //nolint:forbidigo // advances synctest's fake clock
+			synctest.Wait()
+			select {
+			case <-finished:
+			default:
+				t.Fatal("drain kept waiting after the key was rejected")
+			}
+		})
+	})
+	t.Run("accepted throughout", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var rejected atomic.Bool
+			finished := run(&rejected)
+			time.Sleep(time.Hour - time.Second) //nolint:forbidigo // advances synctest's fake clock
+			synctest.Wait()
+			select {
+			case <-finished:
+				t.Fatal("drain with an accepted key returned before its timeout")
+			default:
+			}
+			time.Sleep(2 * time.Second) //nolint:forbidigo // advances synctest's fake clock
+			synctest.Wait()
+			select {
+			case <-finished:
+			default:
+				t.Fatal("drain did not stop at its timeout")
+			}
+		})
+	})
 }
 
 // Announcements that arrive while a node's check runs fold into one more check

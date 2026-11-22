@@ -3,9 +3,7 @@ import { fixturePlanV3 } from "../protocol-v3.fixtures";
 import type { PlanV3 } from "../protocol-v3";
 import type { EngineCapabilities } from "./capabilities";
 import {
-  containerDefaultAudioOrdinal,
-  ENGINE_UNSUPPORTED_SOURCE,
-  engineTransferForPlan,
+  pageOriginProtocol,
   resolveOriginalPlaybackRoute,
   type NativeOriginalSupport,
 } from "./routing";
@@ -53,185 +51,194 @@ function originalPlan(overrides: {
   };
 }
 
-const audioTracks = [{ codec: "aac" }, { codec: "truehd", default: true }];
-
 describe("resolveOriginalPlaybackRoute", () => {
-  it("leaves files the media element plays to the media element", () => {
-    const route = resolveOriginalPlaybackRoute({
-      plan: originalPlan({ audioIndex: 1, recipe: { audio_codec: "aac" } }),
-      streamUrl: "/stream",
-      native,
-      engine,
-      audioTracks: [{ codec: "aac" }, { codec: "aac", default: true }],
-    });
-    expect(route).toEqual({ kind: "native" });
-  });
-
-  it("sends audio the element cannot decode to the engine", () => {
-    const route = resolveOriginalPlaybackRoute({
-      plan: originalPlan({ audioIndex: 1, recipe: { audio_codec: "truehd", audio_channels: 8 } }),
-      streamUrl: "/stream?st=1",
-      native,
-      engine,
-      audioTracks,
-    });
-    expect(route).toEqual({
-      kind: "engine",
-      source: {
-        url: "/stream?st=1",
-        headers: {},
-        container: "mkv",
-        durationSeconds: 3600,
-        startSeconds: 42,
-        video: {
-          codec: "h264",
-          width: 1920,
-          height: 1080,
-          transfer: "sdr",
-          stripDolbyVision: false,
-        },
-        audio: { ordinal: 1, codec: "truehd", channels: 8 },
+  const NODE = "https://node.example.test/stream/direct/opaque";
+  // The server names the stripe URL, and the engine uses it as given: no token
+  // is ever added to it. A plan that names none is not striped.
+  it.each([
+    {
+      name: "a media origin is used as given, with no login token",
+      parallelRangeUrl: "https://media.example.test/api/v2/stream/s?st=x&seek=12.5",
+      planUrl: "/stream/s?st=x&seek=12.5",
+      streamUrl: "/api/v2/stream/s?st=x&seek=12.5&token=access",
+      navigationProtocol: "h2",
+      want: "https://media.example.test/api/v2/stream/s?st=x&seek=12.5",
+    },
+    {
+      name: "a media origin without st still gets no login token",
+      parallelRangeUrl: "https://media.example.test/api/v2/stream/s",
+      planUrl: "/stream/s",
+      streamUrl: "/api/v2/stream/s?token=access",
+      navigationProtocol: "h2",
+      want: "https://media.example.test/api/v2/stream/s",
+    },
+    {
+      name: "a media origin whose URL new URL() rejects gives no stripe URL",
+      parallelRangeUrl: "https://a<b.example/api/v2/stream/s?st=x",
+      planUrl: "/stream/s?st=x",
+      streamUrl: "/api/v2/stream/s?st=x&token=access",
+      navigationProtocol: "http/1.1",
+      want: undefined,
+    },
+    {
+      name: "the plan's own stream is striped when the page came over HTTP/1.1",
+      parallelRangeUrl: "/stream/s?st=x",
+      planUrl: "/stream/s?st=x",
+      streamUrl: "/api/v2/stream/s?st=x&token=access",
+      navigationProtocol: "http/1.1",
+      want: "/api/v2/stream/s?st=x&token=access",
+    },
+    {
+      name: "the plan's own stream is not striped when the page came over HTTP/2",
+      parallelRangeUrl: "/stream/s?st=x",
+      planUrl: "/stream/s?st=x",
+      streamUrl: "/api/v2/stream/s?st=x&token=access",
+      navigationProtocol: "h2",
+      want: undefined,
+    },
+    {
+      name: "the plan's own stream is not striped when the browser names no protocol",
+      parallelRangeUrl: "/stream/s?st=x",
+      planUrl: "/stream/s?st=x",
+      streamUrl: "/api/v2/stream/s?st=x&token=access",
+      navigationProtocol: "",
+      want: undefined,
+    },
+    {
+      name: "a proxy node's URL the server names is striped as issued, whatever the page's protocol",
+      parallelRangeUrl: NODE,
+      planUrl: NODE,
+      streamUrl: NODE,
+      navigationProtocol: "h2",
+      want: NODE,
+    },
+    {
+      name: "a proxy node's URL the server did not name is not striped",
+      planUrl: NODE,
+      streamUrl: NODE,
+      navigationProtocol: "http/1.1",
+      want: undefined,
+    },
+    {
+      name: "a plan without parallel_range_url is not striped",
+      planUrl: "/stream/s?st=x",
+      streamUrl: "/api/v2/stream/s?st=x&token=access",
+      navigationProtocol: "http/1.1",
+      want: undefined,
+    },
+  ])("$name", ({ parallelRangeUrl, planUrl, streamUrl, navigationProtocol, want }) => {
+    const base = originalPlan({ recipe: { audio_codec: "truehd" } });
+    const plan = {
+      ...base,
+      stream: {
+        ...base.stream,
+        url: planUrl,
+        ...(parallelRangeUrl ? { parallel_range_url: parallelRangeUrl } : {}),
       },
-    });
-  });
-
-  it("uses the engine for a non-default audio track the element cannot choose", () => {
+    };
     const route = resolveOriginalPlaybackRoute({
-      plan: originalPlan({ audioIndex: 0 }),
-      streamUrl: "/stream",
-      native,
-      engine,
-      audioTracks,
-    });
-    expect(route.kind).toBe("engine");
-  });
-
-  it("presents HDR and Dolby Vision base layers through the engine", () => {
-    const hdr = resolveOriginalPlaybackRoute({
-      plan: originalPlan({
-        source: { dynamic_range: "hdr10", video_codec: "hevc" },
-        recipe: { video_codec: "hevc" },
-      }),
-      streamUrl: "/stream",
+      plan,
+      streamUrl,
+      navigationProtocol,
       native,
       engine,
       audioTracks: [],
     });
-    expect(hdr.kind === "engine" && hdr.source.video.transfer).toBe("pq");
-
-    const dv = resolveOriginalPlaybackRoute({
-      plan: originalPlan({
-        source: { dynamic_range: "dolby_vision", dv_bl_compat_id: 4, video_codec: "hevc" },
-        recipe: { video_codec: "hevc" },
-      }),
-      streamUrl: "/stream",
-      native,
-      engine,
-      audioTracks: [],
-    });
-    expect(dv.kind === "engine" && dv.source.video).toMatchObject({
-      transfer: "hlg",
-      stripDolbyVision: true,
-    });
-  });
-
-  it("leaves an HDR original the plan validated for this display to the media element", () => {
-    for (const [range, claim] of [
-      ["hdr10", "hdr10"],
-      ["hlg", "hlg"],
-    ] as const) {
-      const plan = originalPlan({
-        source: { dynamic_range: range, video_codec: "hevc" },
-        recipe: { video_codec: "hevc" },
-      });
-      plan.claims = { ...plan.claims, video: { ...plan.claims.video, [claim]: true } };
-      const route = resolveOriginalPlaybackRoute({
-        plan,
-        streamUrl: "/stream",
-        native: { ...native, videoCodecs: [...native.videoCodecs, "hevc"] },
-        engine,
-        audioTracks: [],
-      });
-      expect(route.kind).toBe("native");
-    }
-  });
-
-  it("refuses with a typed failure what neither can play", () => {
-    const profile5 = resolveOriginalPlaybackRoute({
-      plan: originalPlan({
-        source: { dynamic_range: "dolby_vision", dv_bl_compat_id: 0, video_codec: "hevc" },
-        recipe: { video_codec: "hevc" },
-      }),
-      streamUrl: "/stream",
-      native,
-      engine,
-      audioTracks: [],
-    });
-    expect(profile5).toMatchObject({
-      kind: "unsupported",
-      failure: { classification: ENGINE_UNSUPPORTED_SOURCE },
-    });
-
-    const noWebGPU = resolveOriginalPlaybackRoute({
-      plan: originalPlan({ source: { dynamic_range: "hdr10" } }),
-      streamUrl: "/stream",
-      native,
-      engine: { ...engine, hdr: false },
-      audioTracks: [],
-    });
-    expect(noWebGPU.kind).toBe("unsupported");
-
-    const avi = resolveOriginalPlaybackRoute({
-      plan: originalPlan({ source: { container: "avi" }, recipe: { audio_codec: "dts" } }),
-      streamUrl: "/stream",
-      native,
-      engine,
-      audioTracks: [],
-    });
-    expect(avi.kind).toBe("unsupported");
-  });
-
-  it("reports a typed failure instead of guessing when the engine is off", () => {
-    const route = resolveOriginalPlaybackRoute({
-      plan: originalPlan({ recipe: { audio_codec: "dts" } }),
-      streamUrl: "/stream",
-      native,
-      engine: null,
-      audioTracks: [],
-    });
-    expect(route.kind).toBe("unsupported");
+    if (route.kind !== "engine") throw new Error(`route is ${route.kind}, want engine`);
+    expect(route.source.url).toBe(streamUrl);
+    expect(route.source.parallelRangeUrl).toBe(want);
   });
 });
 
-describe("engineTransferForPlan", () => {
-  it("maps every server range label", () => {
-    const transfer = (dynamic_range: string, dv_bl_compat_id?: number) =>
-      engineTransferForPlan(originalPlan({ source: { dynamic_range, dv_bl_compat_id } }));
-    expect(transfer("sdr")).toBe("sdr");
-    expect(transfer("hdr10")).toBe("pq");
-    expect(transfer("hdr10_plus")).toBe("pq");
-    expect(transfer("hdr_unknown")).toBe("pq");
-    expect(transfer("hlg")).toBe("hlg");
-    expect(transfer("dolby_vision", 1)).toBe("pq");
-    expect(transfer("dolby_vision", 6)).toBe("pq");
-    expect(transfer("dolby_vision", 2)).toBe("sdr");
-    expect(transfer("dolby_vision", 0)).toBeNull();
-    expect(transfer("something_new")).toBeNull();
+describe("pageOriginProtocol", () => {
+  const origin = "https://app.example.test";
+  const same = (nextHopProtocol: string, startTime: number) => ({
+    name: `${origin}/assets/app.js`,
+    nextHopProtocol,
+    startTime,
+    redirectStart: 0,
+  });
+  // A same-origin URL that redirected, as a stored poster does to its signed storage URL: the name
+  // is the requested URL and the protocol is the one of the host it ended on.
+  const redirected = (nextHopProtocol: string, startTime: number) => ({
+    name: `${origin}/api/v2/items/i/poster`,
+    nextHopProtocol,
+    startTime,
+    redirectStart: startTime,
+  });
+  const cross = (nextHopProtocol: string, startTime: number) => ({
+    name: "https://media.example.test/api/v2/stream/s",
+    nextHopProtocol,
+    startTime,
+    redirectStart: 0,
   });
 
-  it("prefers the plan's effective range over the source's", () => {
-    const plan = originalPlan({
-      source: { dynamic_range: "dolby_vision", dv_bl_compat_id: 1 },
-      recipe: { dynamic_range: "hdr10" },
-    });
-    expect(engineTransferForPlan(plan)).toBe("pq");
-  });
-});
-
-describe("containerDefaultAudioOrdinal", () => {
-  it("matches the server: the first default-flagged track, else the first", () => {
-    expect(containerDefaultAudioOrdinal([])).toBe(0);
-    expect(containerDefaultAudioOrdinal([{}, { default: true }, { default: true }])).toBe(1);
-    expect(containerDefaultAudioOrdinal([{}, {}])).toBe(0);
+  it.each([
+    // On a repeat load the navigation entry's protocol is empty.
+    {
+      name: "a repeat visit takes a same-origin resource",
+      navigation: "",
+      resources: [same("http/1.1", 10)],
+      want: "http/1.1",
+    },
+    {
+      name: "the newest same-origin resource wins",
+      navigation: "",
+      resources: [same("h2", 10), same("http/1.1", 20)],
+      want: "http/1.1",
+    },
+    {
+      name: "the newest wins regardless of list order",
+      navigation: "",
+      resources: [same("http/1.1", 20), same("h2", 10)],
+      want: "http/1.1",
+    },
+    {
+      name: "an empty protocol is skipped",
+      navigation: "",
+      resources: [same("http/1.1", 10), same("", 20)],
+      want: "http/1.1",
+    },
+    {
+      name: "a cross-origin resource is ignored",
+      navigation: "",
+      resources: [cross("http/1.1", 10)],
+      want: "",
+    },
+    {
+      name: "an unparsable name is skipped",
+      navigation: "",
+      resources: [
+        { name: "not a url", nextHopProtocol: "http/1.1", startTime: 10, redirectStart: 0 },
+      ],
+      want: "",
+    },
+    {
+      name: "no resource falls back to the navigation",
+      navigation: "http/1.1",
+      resources: [],
+      want: "http/1.1",
+    },
+    { name: "nothing usable gives empty", navigation: "", resources: [], want: "" },
+    {
+      name: "the navigation protocol wins over a same-origin resource",
+      navigation: "http/1.1",
+      resources: [same("h2", 10)],
+      want: "http/1.1",
+    },
+    {
+      name: "a redirected same-origin resource is skipped for a direct one",
+      navigation: "",
+      resources: [same("http/1.1", 10), redirected("h2", 20)],
+      want: "http/1.1",
+    },
+    {
+      name: "a redirected same-origin resource alone gives empty",
+      navigation: "",
+      resources: [redirected("h2", 20)],
+      want: "",
+    },
+  ])("$name", ({ navigation, resources, want }) => {
+    expect(pageOriginProtocol(navigation, resources, origin)).toBe(want);
   });
 });

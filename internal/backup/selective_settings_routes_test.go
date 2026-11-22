@@ -90,22 +90,39 @@ func TestRoutesAreRecheckedUnderTheLock(t *testing.T) {
 	}
 }
 
-// TestSettingRoutesAreOnOnePage: a settings page restores as a unit, so a
-// route's address and secrets are restored together only when they are on
-// one page, offered by the restore.
-func TestSettingRoutesAreOnOnePage(t *testing.T) {
-	for _, r := range settingRoutes {
-		rule, ok := RestorableSetting(r.endpoint)
-		if !ok || rule.class != SettingExternalService {
-			t.Errorf("%s is not offered as an outside service's setting: %+v", r.endpoint, rule)
-		}
-		for _, key := range append(slices.Clone(r.secrets), r.enabled) {
-			if key == "" {
-				continue
+// TestEnvironmentKeepsWholeConnections: when this server's environment sets
+// any setting of an outside-service connection, every setting of it that
+// differs keeps this server's value, so a restore never pairs, say, the
+// environment's plain-text mail transport with the backup's host and
+// password. Settings outside the connection still restore.
+func TestEnvironmentKeepsWholeConnections(t *testing.T) {
+	const username, subtitle = "email.smtp_username", "branding.login_subtitle"
+	// Email's switch is an access setting: turning it on is kept stricter.
+	before := map[string]string{subtitle: ItemDiffers, settingSMTPHost: ItemDiffers, settingSMTPPassword: ItemDiffers,
+		username: ItemDiffers, settingEmailEnabled: SettingKeptStricter}
+	mail := []string{settingSMTPHost, settingSMTPPassword, username, settingEmailEnabled}
+	for name, tc := range map[string]struct {
+		env       string
+		untouched []string
+	}{
+		"the mail transport from the environment": {env: settingSMTPSecurity, untouched: []string{subtitle}},
+		"nothing from the environment":            {untouched: append([]string{subtitle}, mail...)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var plans []settingPlan
+			for key, status := range before {
+				plans = append(plans, settingPlan{preview: PreviewSetting{Key: key, Status: status}})
 			}
-			if other, ok := RestorableSetting(key); !ok || other.page != rule.page {
-				t.Errorf("%s is not on %s's page %q: %+v", key, r.endpoint, rule.page, other)
+			keepEnvironmentBundles(plans, func(key string) bool { return key == tc.env })
+			for _, p := range plans {
+				want := SettingManagedByEnvironment
+				if slices.Contains(tc.untouched, p.preview.Key) {
+					want = before[p.preview.Key]
+				}
+				if p.preview.Status != want {
+					t.Fatalf("%s = %s, want %s", p.preview.Key, p.preview.Status, want)
+				}
 			}
-		}
+		})
 	}
 }

@@ -46,6 +46,7 @@ const SETTINGS_TITLES: Record<string, MessageKey> = {
   "home-screen": "web.common.title.settings.homeScreen",
   "title-pages": "web.common.title.settings.titlePages",
   "connect-apps": "web.common.title.settings.connectApps",
+  "api-keys": "web.common.title.settings.apiKeys",
   devices: "web.common.title.settings.devices",
   personalize: "web.common.title.settings.personalize",
   "watch-providers": "web.common.title.settings.watchProviders",

@@ -5,7 +5,9 @@ MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
 SHARED_MAKEFILE_LOCAL := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/../Makefile.local))
 DEFAULT_PLUGIN_SDK_DIR := $(abspath ../silo-plugin-sdk)
 SHARED_PLUGIN_SDK_DIR := $(if $(MAIN_CHECKOUT_ROOT),$(abspath $(MAIN_CHECKOUT_ROOT)/../silo-plugin-sdk))
-GOOSE := go run github.com/pressly/goose/v3/cmd/goose@v3.27.1
+# The Goose CLI only creates and validates migration files here. Skip the
+# other database drivers when building it on a fresh runner.
+GOOSE := go run -tags=no_clickhouse,no_libsql,no_mssql,no_mysql,no_sqlite3,no_vertica,no_ydb github.com/pressly/goose/v3/cmd/goose@v3.27.1
 GOOSE_DIR := migrations/sql
 ENV_FILE ?= .env
 
@@ -35,6 +37,14 @@ frontend:
 build: frontend
 	go build -ldflags "$(GO_LDFLAGS)" -o silo ./cmd/silo/
 
+# Cross-build the macOS transcode node as the image's node_darwin stage does.
+# Without cgo, a new cgo import or an imageutil function missing from its node
+# stub fails here before the image build does.
+.PHONY: build-node-darwin
+NODE_DARWIN_OUT ?= silo-darwin-arm64
+build-node-darwin: embed-stub
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags silo_node -trimpath -ldflags "-s -w $(GO_LDFLAGS)" -o "$(NODE_DARWIN_OUT)" ./cmd/silo/
+
 # Run frontend dev server (proxies API to localhost:8080)
 dev-frontend:
 	cd web && pnpm run dev
@@ -47,9 +57,14 @@ dev-backend:
 dev-proxy:
 	go run ./cmd/silo/ --mode=proxy
 
-# Run a transcode node (HLS transcode worker, no DB required)
+# Run a transcode node against a running main server. It holds no database,
+# Redis or shared secret: it needs only SILO_CORE_URL (the main server's URL)
+# and SILO_NODE_KEY (the key the admin nodes page issued for it). PORT
+# defaults to 8090 so it does not collide with dev-backend on 8080.
 dev-transcode:
-	go run ./cmd/silo/ --mode=transcode
+	@test -n "$$SILO_CORE_URL" || { echo 'dev-transcode: set SILO_CORE_URL to the main server URL, e.g. http://localhost:8080' >&2; exit 1; }
+	@test -n "$$SILO_NODE_KEY$$SILO_NODE_KEY_FILE" || { echo 'dev-transcode: set SILO_NODE_KEY (or SILO_NODE_KEY_FILE) to the key issued for this node on the admin nodes page' >&2; exit 1; }
+	MODE=transcode PORT=$${PORT:-8090} go run ./cmd/silo/
 
 # Lint Go and frontend code
 lint:
@@ -61,7 +76,10 @@ lint:
 lint-changed:
 	BASE_REF=$(BASE_REF) scripts/lint-changed.sh
 
-.PHONY: verify-actionlint verify-shellcheck
+.PHONY: verify-fork-pins verify-actionlint verify-shellcheck
+verify-fork-pins:
+	go run ./scripts/ci/forkpins
+
 verify-actionlint:
 	@test "$$(actionlint -version | head -n 1)" = 1.7.12 || { echo 'actionlint 1.7.12 is required' >&2; exit 1; }
 	actionlint
@@ -102,8 +120,9 @@ embed-stub:
 test: test-go test-web
 
 # The queryattr concurrency tests prove nothing without the race detector.
+GO_TEST_PACKAGES ?= ./...
 test-go: embed-stub
-	go test ./...
+	go test $(GO_TEST_PACKAGES)
 	go test -race -count=1 ./internal/database/queryattr/
 
 # Run the DB-backed query-budget pins listed in $(DB_PINS) and the database
@@ -303,9 +322,11 @@ ifneq ($(CONTRACT_GO_TESTS),0)
 endif
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
 		base=$$(git merge-base $(BASE_REF) HEAD) && \
-		{ git show "$$base:$(APIV2_OPENAPI)" > "$$tmp/base.json" 2>/dev/null || : ; } && \
-		go run ./cmd/apiv2-contract-diff -base "$$tmp/base.json" -revision $(APIV2_OPENAPI) -contracts contracts/api/v2 \
-		|| { echo "::error::$(APIV2_OPENAPI) has an unapproved breaking change against $$base; see contracts/api/v2/breaking-approvals.schema.json"; exit 1; }
+		base_entry=$$(git ls-tree --name-only "$$base" -- "$(APIV2_OPENAPI)") && \
+		{ [ -z "$$base_entry" ] || git show "$$base:$(APIV2_OPENAPI)" > "$$tmp/base.json" \
+			|| { echo "::error::failed to read $(APIV2_OPENAPI) at $$base"; exit 1; }; } && \
+		{ go run ./cmd/apiv2-contract-diff -base "$$tmp/base.json" -revision $(APIV2_OPENAPI) -contracts contracts/api/v2 \
+			|| { echo "::error::$(APIV2_OPENAPI) has an unapproved breaking change against $$base; see contracts/api/v2/breaking-approvals.schema.json"; exit 1; }; }
 
 # Regenerate the native API v2 contract fixtures through the real v2 router.
 # The bodies are what the server answers, byte for byte, for synthetic

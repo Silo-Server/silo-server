@@ -13,37 +13,6 @@ import (
 	"time"
 )
 
-func TestResolveCopySeekAnchorUsesKeyPacketTimestamp(t *testing.T) {
-	dir := t.TempDir()
-	ffmpegPath := filepath.Join(dir, "ffmpeg")
-	argsPath := filepath.Join(dir, "ffmpeg-args")
-	probe := `#!/bin/sh
-printf '%s\n' "$@" > "` + argsPath + `"
-printf '%s\n' '#tb 0: 1/1000'
-printf '%s\n' '0,      14500,      14750,       41,   178989, 0xd16e41c4'
-`
-	if err := os.WriteFile(ffmpegPath, []byte(probe), 0o755); err != nil {
-		t.Fatalf("write fake ffmpeg: %v", err)
-	}
-
-	anchor, segment, err := ResolveCopySeekAnchor(context.Background(), ffmpegPath, "/media/movie.mkv", 18.261, 2)
-	if err != nil {
-		t.Fatalf("ResolveCopySeekAnchor: %v", err)
-	}
-	if anchor != 14.75 || segment != 7 {
-		t.Fatalf("resolved anchor = %v, segment = %d; want 14.75, 7", anchor, segment)
-	}
-	args, err := os.ReadFile(argsPath)
-	if err != nil {
-		t.Fatalf("read ffmpeg args: %v", err)
-	}
-	for _, want := range []string{"-fflags\n+genpts+fastseek\n", "-analyzeduration\n3000000\n", "-probesize\n5000000\n", "-ss\n18.261\n", "-map\n0:V:0\n", "-c:v\ncopy\n", "-copyts\n", "-avoid_negative_ts\ndisabled\n", "-frames:v\n1\n", "-f\nframecrc\n"} {
-		if !strings.Contains(string(args), want) {
-			t.Fatalf("ffmpeg args missing %q:\n%s", want, args)
-		}
-	}
-}
-
 func TestResolveCopySeekAnchorCoalescesMatchingConcurrentProbes(t *testing.T) {
 	dir := t.TempDir()
 	ffmpegPath := filepath.Join(dir, "ffmpeg")

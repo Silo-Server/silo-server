@@ -153,6 +153,7 @@ func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemVie
 			detail.SeasonUserData = h.items.getLeafUserData(ctx, v, detail.ContentID, detail.Type)
 		}
 		applyEffectiveEditionPreference(detail.SeasonUserData, &detail.EffectiveVersionEditionKey)
+		projectEditionPreference(detail.EditionAliases, detail.SeasonUserData, &detail.EffectiveVersionEditionKey)
 	}
 
 	detail.ViewerCurates = curates
@@ -253,7 +254,7 @@ func (h *CatalogResourceHandler) batchedViewerState(ctx context.Context, v ItemV
 		NotInterested: viewer.NotInterested,
 	}
 	if rating != nil {
-		state.rating = &rating.Rating
+		state.rating = &rating.Score
 	}
 	return state, true
 }
@@ -303,7 +304,7 @@ func (h *CatalogResourceHandler) enrichViewerState(ctx context.Context, v ItemVi
 		return
 	}
 
-	detail.UserRating = &rating.Rating
+	detail.UserRating = &rating.Score
 }
 
 // seasonListArtworkParam is the series-seasons query parameter advertised by

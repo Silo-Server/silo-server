@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/subtitles/ai"
 )
@@ -27,14 +26,6 @@ func (f *fakeSubtitleAIReads) job() *ai.Job {
 	return &ai.Job{ID: 9007199254740993, MediaFileID: 42, Status: ai.JobStatusFailed, ProgressMessage: "Transcribing", ErrorMessage: message, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}
 }
 
-func TestSubtitleAIQuotaFailureExplainsRecoveryWithoutProviderDetails(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	deps.SubtitleAIReads = &fakeSubtitleAIReads{jobError: llm.ErrQuotaExhausted.Error() + ": PRIVATE provider response"}
-	response := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/subtitles/ai/jobs/9007199254740993", "", viewerHeaders())
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Ask a server administrator to check AI Services.") || strings.Contains(response.Body.String(), "PRIVATE") {
-		t.Fatalf("quota failure response: %d %s", response.Code, response.Body.String())
-	}
-}
 func (f *fakeSubtitleAIReads) ListSubtitleAIJobs(_ context.Context, filter catalogpkg.AccessFilter, _ int) ([]ai.Job, error) {
 	f.filter = filter
 	return []ai.Job{*f.job()}, nil

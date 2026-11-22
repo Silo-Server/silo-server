@@ -10,17 +10,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
+
 	"github.com/Silo-Server/silo-server/internal/discord"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/userstore"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 )
 
 // UserLister enumerates login accounts for the interest backfill. Satisfied
@@ -51,6 +53,10 @@ type System struct {
 	// Webhooks is nil when no at-rest cipher is configured (webhook URLs are
 	// credentials and must not be stored in plaintext).
 	Webhooks *WebhookService
+	// PluginDestinations is nil when no at-rest cipher is configured:
+	// destination settings hold credentials. It delivers nothing until
+	// SetPluginChannelHost wires the plugin runtime.
+	PluginDestinations *PluginDestinationService
 	// ServerChannels is nil when no at-rest cipher is configured (channel
 	// URLs are credentials, same rule as webhooks).
 	ServerChannels *ServerChannelService
@@ -83,11 +89,14 @@ type System struct {
 	webhookRepo       *WebhookRepository
 	webhookDispatcher *WebhookDispatcher
 	webhookRetry      *WebhookRetryWorker
-	webPushRepo       *WebPushRepository
-	webPushDispatcher *WebPushDispatcher
-	pushDeviceRepo    *PushDeviceRepository
-	pushDispatcher    *PushDispatcher
-	pushSender        *pushSender
+
+	pluginDestinationSender     *pluginDestinationSender
+	pluginDestinationDispatcher *PluginDestinationDispatcher
+	webPushRepo                 *WebPushRepository
+	webPushDispatcher           *WebPushDispatcher
+	pushDeviceRepo              *PushDeviceRepository
+	pushDispatcher              *PushDispatcher
+	pushSender                  *pushSender
 	// serverChannelWorker sweeps release_events into admin broadcast posts;
 	// nil without the at-rest cipher.
 	serverChannelWorker *serverChannelWorker
@@ -156,13 +165,18 @@ func NewSystem(
 		// Pushes name the identity getServerIdentity reports, read through the
 		// raw settings repo as it is: a SECRET_KEY rotation must not change
 		// who the server is.
-		pushSenderInst.serverID = serveridentity.New(catalog.NewServerSettingsRepo(pool)).ServerID
+		pushSenderInst.serverID = serveridentity.New(serversettings.NewServerSettingsRepo(pool)).ServerID
 		pushDispatcher = newPushDispatcher(pushSenderInst)
 		dispatchers = append(dispatchers, pushDispatcher)
 	}
 
 	// Admin server channels (broadcast destinations) share the cipher
 	// requirement: their URLs are credentials too.
+	pluginDestinationService, pluginDestinationSenderInst, pluginDestinationDispatcher := newPluginDestinationParts(pool, deliveries, cipher, stores)
+	if pluginDestinationDispatcher != nil {
+		dispatchers = append(dispatchers, pluginDestinationDispatcher)
+	}
+
 	var serverChannelService *ServerChannelService
 	var serverChannelSweep *serverChannelWorker
 	if cipher != nil {
@@ -218,13 +232,16 @@ func NewSystem(
 	if webhookRepo != nil {
 		fanout.SetWebhookOutbox(webhookRepo, newProfileRateLimiter())
 	}
+	if pluginDestinationSenderInst != nil {
+		fanout.setPluginDestinationOutbox(pluginDestinationSenderInst, newProfileRateLimiter())
+	}
 	if webPushRepo != nil {
 		fanout.SetWebPushOutbox(webPushRepo)
 	}
 	if pushDeviceRepo != nil {
 		fanout.SetPushOutbox(pushDeviceRepo)
 	}
-	detector := NewAvailabilityDetector(releases, settings)
+	detector := NewAvailabilityDetector(releases)
 	detector.SetFanoutNudge(func() {
 		fanout.Nudge()
 		serverChannelSweep.Nudge() // nil-safe
@@ -240,41 +257,44 @@ func NewSystem(
 	}
 
 	system = &System{
-		Settings:            settings,
-		Releases:            releases,
-		Interests:           interests,
-		Deliveries:          deliveries,
-		Preferences:         preferences,
-		Detector:            detector,
-		Interest:            interest,
-		Fanout:              fanout,
-		Tickets:             NewTicketStore(redisClient),
-		Webhooks:            webhookService,
-		ServerChannels:      serverChannelService,
-		WebPush:             webPushService,
-		PushDevices:         pushDeviceService,
-		EmailPrefs:          emailPrefs,
-		DiscordPrefs:        discordPrefs,
-		mailSender:          mailSender,
-		emailBrand:          emailBrand,
-		emailWorker:         emailWorker,
-		discordWorker:       discordWorker,
-		discordClient:       discordClient,
-		webhookRepo:         webhookRepo,
-		webhookDispatcher:   webhookDispatcher,
-		webhookRetry:        webhookRetry,
-		webPushRepo:         webPushRepo,
-		webPushDispatcher:   webPushDispatcher,
-		pushDeviceRepo:      pushDeviceRepo,
-		pushDispatcher:      pushDispatcher,
-		pushSender:          pushSenderInst,
-		serverChannelWorker: serverChannelSweep,
-		dispatcher:          multiDispatcher,
-		pool:                pool,
-		stores:              stores,
-		scopes:              scopes,
-		users:               users,
-		logger:              slog.Default().With("component", "notifications.system"),
+		Settings:                    settings,
+		Releases:                    releases,
+		Interests:                   interests,
+		Deliveries:                  deliveries,
+		Preferences:                 preferences,
+		Detector:                    detector,
+		Interest:                    interest,
+		Fanout:                      fanout,
+		Tickets:                     NewTicketStore(redisClient),
+		Webhooks:                    webhookService,
+		PluginDestinations:          pluginDestinationService,
+		ServerChannels:              serverChannelService,
+		WebPush:                     webPushService,
+		PushDevices:                 pushDeviceService,
+		EmailPrefs:                  emailPrefs,
+		DiscordPrefs:                discordPrefs,
+		mailSender:                  mailSender,
+		emailBrand:                  emailBrand,
+		emailWorker:                 emailWorker,
+		discordWorker:               discordWorker,
+		discordClient:               discordClient,
+		webhookRepo:                 webhookRepo,
+		webhookDispatcher:           webhookDispatcher,
+		webhookRetry:                webhookRetry,
+		pluginDestinationSender:     pluginDestinationSenderInst,
+		pluginDestinationDispatcher: pluginDestinationDispatcher,
+		webPushRepo:                 webPushRepo,
+		webPushDispatcher:           webPushDispatcher,
+		pushDeviceRepo:              pushDeviceRepo,
+		pushDispatcher:              pushDispatcher,
+		pushSender:                  pushSenderInst,
+		serverChannelWorker:         serverChannelSweep,
+		dispatcher:                  multiDispatcher,
+		pool:                        pool,
+		stores:                      stores,
+		scopes:                      scopes,
+		users:                       users,
+		logger:                      slog.Default().With("component", "notifications.system"),
 	}
 	if emailPrefs != nil && cipher != nil {
 		// emailPrefs is only built with a mail sender, so the dispatcher
@@ -287,9 +307,18 @@ func NewSystem(
 		emailChannelInst.profileName = system.lookupProfileName
 	}
 	if sender != nil {
-		sender.operational = system.DispatchOperational
+		// The notice reaches no webhook (loop guard). Its channel settings
+		// are read before the sender's transaction begins.
+		sender.noticeWriter = func(ctx context.Context) func(context.Context, pgx.Tx, Delivery) (*InsertedDelivery, error) {
+			channels := system.operationalChannels(ctx)
+			return func(ctx context.Context, tx pgx.Tx, notice Delivery) (*InsertedDelivery, error) {
+				return system.insertOperational(ctx, tx, notice, OperationalDispatch{}, nil, channels)
+			}
+		}
+		sender.dispatchNotice = system.dispatchOperationalRow
 		sender.posterURL = system.discordPosterURL
 	}
+	system.wirePluginDestinationSender()
 	discordChannelInst.posterURL = system.discordPosterURL
 	if serverChannelSweep != nil {
 		serverChannelSweep.posterURL = system.discordPosterURL
@@ -392,6 +421,7 @@ func (s *System) Start(ctx context.Context) {
 			s.webhookRetry.Run(ctx)
 		}()
 	}
+	s.startPluginDestinations(ctx)
 	if s.serverChannelWorker != nil {
 		s.wg.Add(1)
 		go func() {
@@ -479,6 +509,9 @@ func (s *System) PurgeProfile(ctx context.Context, userID int, profileID string)
 		if err := s.webhookRepo.DeleteAllForProfile(ctx, userID, profileID); err != nil {
 			return fmt.Errorf("purge webhooks: %w", err)
 		}
+	}
+	if err := s.purgePluginDestinations(ctx, userID, profileID); err != nil {
+		return err
 	}
 	if s.webPushRepo != nil {
 		if err := s.webPushRepo.DeleteAllForProfile(ctx, userID, profileID); err != nil {
@@ -594,11 +627,13 @@ func (s *System) SeedAvailability(ctx context.Context, progress func(percent int
 
 const interestRebuildTask = "interest_rebuild"
 
-// RebuildInterest incrementally rebuilds profile_series_interest from
-// favorites, watchlist, and watch progress for every profile. Checkpointed
+// RebuildInterest incrementally rebuilds profile_series_interest from watch
+// progress and watch history for every profile. Checkpointed
 // per profile so a crash resumes with at most one profile of repeated work;
 // recomputes are idempotent upserts. Completed runs reset and start over
-// (the task doubles as periodic drift repair).
+// (the task doubles as periodic drift repair). One server rebuilds at a time:
+// a call made while another server's rebuild holds the cluster lock returns
+// ErrInterestRebuildRunning without doing any work.
 func (s *System) RebuildInterest(ctx context.Context, progress func(percent int, message string)) error {
 	report := func(percent int, message string) {
 		if progress != nil {
@@ -608,15 +643,20 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 	if s.users == nil {
 		return fmt.Errorf("interest rebuild requires a user lister")
 	}
+	claim, err := s.claimInterestRebuild(ctx)
+	if err != nil {
+		return err
+	}
+	defer claim.release()
 
-	checkpoint, completedAt, err := s.loadBackfillCheckpoint(ctx, interestRebuildTask)
+	checkpoint, completedAt, err := loadBackfillCheckpoint(ctx, claim.conn, interestRebuildTask)
 	if err != nil {
 		return err
 	}
 	if completedAt != nil {
 		// Start a fresh repair pass.
 		checkpoint = ""
-		if err := s.resetBackfillCheckpoint(ctx, interestRebuildTask); err != nil {
+		if err := resetBackfillCheckpoint(ctx, claim.conn, interestRebuildTask); err != nil {
 			return err
 		}
 	}
@@ -656,7 +696,7 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 				s.logger.WarnContext(ctx, "interest rebuild: profile failed",
 					"user_id", user.ID, "profile_id", profile.ID, "error", err)
 			}
-			if err := s.saveBackfillCheckpoint(ctx, interestRebuildTask, key); err != nil {
+			if err := saveBackfillCheckpoint(ctx, claim.conn, interestRebuildTask, key); err != nil {
 				return err
 			}
 			processed++
@@ -665,76 +705,37 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 			fmt.Sprintf("Rebuilt interest for %d profiles", processed))
 	}
 
-	if err := s.completeBackfillCheckpoint(ctx, interestRebuildTask); err != nil {
+	if err := completeBackfillCheckpoint(ctx, claim.conn, interestRebuildTask); err != nil {
 		return err
 	}
 	s.logger.InfoContext(ctx, "interest rebuild completed", "profiles", processed)
 	return nil
 }
 
-// rebuildProfileInterest recomputes every series the profile has any
-// relationship with (favorites, watchlist, progress, completed watch
-// history), plus every series that already has interest rows in Postgres —
-// rows whose sources were all removed must be recomputed too, or the
-// drift-repair pass would keep notifying about unfollowed shows forever.
+// rebuildProfileInterest recomputes every series the profile has watched
+// (progress, completed watch history), plus every series that already has
+// interest rows in Postgres — rows whose sources were all removed must be
+// recomputed too, or the drift-repair pass would keep them forever. Favorites
+// and the watchlist give no interest of their own: only Next Up notifies.
 func (s *System) rebuildProfileInterest(ctx context.Context, store userstore.UserStore, userID int, profileID string) error {
-	const pageSize = 500
 	itemIDs := make(map[string]struct{}, 64)
 
-	for offset := 0; ; offset += pageSize {
-		favorites, err := store.ListFavorites(ctx, profileID, pageSize, offset)
-		if err != nil {
-			return fmt.Errorf("list favorites: %w", err)
-		}
-		for _, favorite := range favorites {
-			itemIDs[favorite.MediaItemID] = struct{}{}
-		}
-		if len(favorites) < pageSize {
-			break
-		}
+	progress, err := store.ListProgressItemIDs(ctx, profileID)
+	if err != nil {
+		return fmt.Errorf("list progress: %w", err)
 	}
-	for offset := 0; ; offset += pageSize {
-		watchlist, err := store.ListWatchlist(ctx, profileID, pageSize, offset)
-		if err != nil {
-			return fmt.Errorf("list watchlist: %w", err)
-		}
-		for _, entry := range watchlist {
-			itemIDs[entry.MediaItemID] = struct{}{}
-		}
-		if len(watchlist) < pageSize {
-			break
-		}
-	}
-	for offset := 0; ; offset += pageSize {
-		progress, err := store.ListProgress(ctx, profileID, "", pageSize, offset)
-		if err != nil {
-			return fmt.Errorf("list progress: %w", err)
-		}
-		for _, entry := range progress {
-			itemIDs[entry.MediaItemID] = struct{}{}
-		}
-		if len(progress) < pageSize {
-			break
-		}
+	for _, id := range progress {
+		itemIDs[id] = struct{}{}
 	}
 	// History imports (watch providers, history import runs) may record
 	// watched episodes without any progress row; they are watch relationships
 	// all the same.
-	for offset := 0; ; offset += pageSize {
-		history, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{
-			ProfileID: profileID,
-			Limit:     pageSize,
-			Offset:    offset,
-		})
-		if err != nil {
-			return fmt.Errorf("list completed history: %w", err)
-		}
-		for _, entry := range history {
-			itemIDs[entry.MediaItemID] = struct{}{}
-		}
-		if len(history) < pageSize {
-			break
-		}
+	history, err := store.ListCompletedHistoryItems(ctx, userstore.CompletedHistoryItemQuery{ProfileID: profileID})
+	if err != nil {
+		return fmt.Errorf("list completed history: %w", err)
+	}
+	for _, item := range history {
+		itemIDs[item.MediaItemID] = struct{}{}
 	}
 
 	seriesIDs, err := s.batchResolveSeries(ctx, itemIDs)
@@ -799,132 +800,26 @@ func (s *System) batchResolveSeries(ctx context.Context, itemIDs map[string]stru
 	return seriesIDs, nil
 }
 
-// RetentionStats reports what a retention pass removed.
-type RetentionStats struct {
-	DeliveriesDeleted      int64
-	EventsDeleted          int64
-	StaleEventsDeleted     int64
-	InterestPruned         int64
-	WebhookAttemptsDeleted int64
-	WebPushAttemptsDeleted int64
-	WebPushSubsDeleted     int64
-	// UnboundWebPushSubsDeleted counts subscriptions with no recorded login
-	// whose account has no live login and no API key.
-	UnboundWebPushSubsDeleted int64
-	PushRegistrationsDeleted  int64
-	// UnboundPushRegistrationsDeleted counts registrations from before
-	// login_session_id whose device has no live login.
-	UnboundPushRegistrationsDeleted int64
-	DiscordLinkStatesDeleted        int64
-	// Email verification outbox: payloads dropped from terminal rows whose
-	// link expired, and receipt rows deleted past the retention window.
-	EmailVerificationPayloadsRetired int64
-	EmailVerificationReceiptsDeleted int64
-}
-
-// RunRetention applies the retention policy: read deliveries past the read
-// window, unread past the unread window, processed release events past the
-// debug window, unprocessed release events past the fanout staleness horizon,
-// inert interest rows, web push subscriptions whose login session ended or, for
-// one with no recorded login, whose account has no live one, and push
-// registrations whose login ended or, for one with no recorded login, whose
-// device has no live one.
-func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
-	var stats RetentionStats
-	now := time.Now().UTC()
-	readCutoff := now.AddDate(0, 0, -s.Settings.ReadRetentionDays(ctx))
-	unreadCutoff := now.AddDate(0, 0, -s.Settings.UnreadRetentionDays(ctx))
-	eventCutoff := now.AddDate(0, 0, -s.Settings.EventRetentionDays(ctx))
-
-	deleted, err := s.Deliveries.DeleteOld(ctx, readCutoff, unreadCutoff)
-	if err != nil {
-		return stats, fmt.Errorf("prune deliveries: %w", err)
-	}
-	stats.DeliveriesDeleted = deleted
-
-	events, err := s.Releases.DeleteProcessedBefore(ctx, eventCutoff)
-	if err != nil {
-		return stats, fmt.Errorf("prune release events: %w", err)
-	}
-	stats.EventsDeleted = events
-
-	// Unprocessed events accumulate without bound when fanout is disabled
-	// while availability detection keeps emitting; the fanout worker would
-	// suppress them as stale anyway, so retention reclaims them directly.
-	staleEvents, err := s.Releases.DeleteUnprocessedBefore(ctx, now.Add(-s.Settings.MaxEventAge(ctx)))
-	if err != nil {
-		return stats, fmt.Errorf("prune stale release events: %w", err)
-	}
-	stats.StaleEventsDeleted = staleEvents
-
-	pruned, err := s.Interests.PruneInert(ctx)
-	if err != nil {
-		return stats, fmt.Errorf("prune interest rows: %w", err)
-	}
-	stats.InterestPruned = pruned
-
-	if s.webhookRepo != nil {
-		attempts, err := s.webhookRepo.DeleteOldAttempts(ctx, now)
-		if err != nil {
-			return stats, fmt.Errorf("prune webhook attempts: %w", err)
-		}
-		stats.WebhookAttemptsDeleted = attempts
-	}
-	if s.webPushRepo != nil {
-		attempts, err := s.webPushRepo.DeleteOldAttempts(ctx, now)
-		if err != nil {
-			return stats, fmt.Errorf("prune web push attempts: %w", err)
-		}
-		stats.WebPushAttemptsDeleted = attempts
-		subscriptions, err := s.webPushRepo.DeleteEndedLoginSubscriptions(ctx)
-		if err != nil {
-			return stats, fmt.Errorf("prune web push subscriptions of ended logins: %w", err)
-		}
-		stats.WebPushSubsDeleted = subscriptions
-		unboundSubscriptions, err := s.webPushRepo.DeleteSubscriptionsWithNoLogin(ctx)
-		if err != nil {
-			return stats, fmt.Errorf("prune unbound web push subscriptions: %w", err)
-		}
-		stats.UnboundWebPushSubsDeleted = unboundSubscriptions
-	}
-	if s.pushDeviceRepo != nil {
-		registrations, err := s.pushDeviceRepo.DeleteEndedLoginRegistrations(ctx)
-		if err != nil {
-			return stats, fmt.Errorf("prune push registrations of ended logins: %w", err)
-		}
-		stats.PushRegistrationsDeleted = registrations
-		unbound, err := s.pushDeviceRepo.DeleteRegistrationsWithNoLogin(ctx)
-		if err != nil {
-			return stats, fmt.Errorf("prune unbound push registrations: %w", err)
-		}
-		stats.UnboundPushRegistrationsDeleted = unbound
-	}
-	if s.DiscordPrefs != nil {
-		states, err := s.DiscordPrefs.DeleteExpiredLinkStates(ctx)
-		if err != nil {
-			return stats, fmt.Errorf("prune discord link states: %w", err)
-		}
-		stats.DiscordLinkStatesDeleted = states
-	}
-	if s.EmailPrefs != nil {
-		payloads, rows, err := s.EmailPrefs.RetireVerificationDispatch(ctx, now)
-		if err != nil {
-			return stats, fmt.Errorf("prune email verification outbox: %w", err)
-		}
-		stats.EmailVerificationPayloadsRetired = payloads
-		stats.EmailVerificationReceiptsDeleted = rows
-	}
-	return stats, nil
-}
-
 func backfillKey(userID int, profileID string) string {
 	return fmt.Sprintf("%010d|%s", userID, profileID)
 }
 
-func (s *System) loadBackfillCheckpoint(ctx context.Context, task string) (string, *time.Time, error) {
+// backfillStateDB runs the notification_backfill_state statements.
+type backfillStateDB interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// backfillStateTimeout bounds each checkpoint statement, so a lock session
+// that stopped answering fails the rebuild instead of stalling it.
+const backfillStateTimeout = 10 * time.Second
+
+func loadBackfillCheckpoint(ctx context.Context, db backfillStateDB, task string) (string, *time.Time, error) {
+	ctx, cancel := context.WithTimeout(ctx, backfillStateTimeout)
+	defer cancel()
 	var key *string
 	var completedAt *time.Time
-	err := s.pool.QueryRow(ctx,
+	err := db.QueryRow(ctx,
 		`SELECT last_processed_key, completed_at FROM notification_backfill_state WHERE task = $1`,
 		task,
 	).Scan(&key, &completedAt)
@@ -941,8 +836,10 @@ func (s *System) loadBackfillCheckpoint(ctx context.Context, task string) (strin
 	return checkpoint, completedAt, nil
 }
 
-func (s *System) saveBackfillCheckpoint(ctx context.Context, task, key string) error {
-	_, err := s.pool.Exec(ctx, `
+func saveBackfillCheckpoint(ctx context.Context, db backfillStateDB, task, key string) error {
+	ctx, cancel := context.WithTimeout(ctx, backfillStateTimeout)
+	defer cancel()
+	_, err := db.Exec(ctx, `
 		INSERT INTO notification_backfill_state (task, last_processed_key, started_at, updated_at)
 		VALUES ($1, $2, now(), now())
 		ON CONFLICT (task) DO UPDATE SET
@@ -955,8 +852,10 @@ func (s *System) saveBackfillCheckpoint(ctx context.Context, task, key string) e
 	return nil
 }
 
-func (s *System) resetBackfillCheckpoint(ctx context.Context, task string) error {
-	_, err := s.pool.Exec(ctx, `
+func resetBackfillCheckpoint(ctx context.Context, db backfillStateDB, task string) error {
+	ctx, cancel := context.WithTimeout(ctx, backfillStateTimeout)
+	defer cancel()
+	_, err := db.Exec(ctx, `
 		INSERT INTO notification_backfill_state (task, last_processed_key, started_at, updated_at, completed_at)
 		VALUES ($1, NULL, now(), now(), NULL)
 		ON CONFLICT (task) DO UPDATE SET
@@ -971,8 +870,10 @@ func (s *System) resetBackfillCheckpoint(ctx context.Context, task string) error
 	return nil
 }
 
-func (s *System) completeBackfillCheckpoint(ctx context.Context, task string) error {
-	_, err := s.pool.Exec(ctx, `
+func completeBackfillCheckpoint(ctx context.Context, db backfillStateDB, task string) error {
+	ctx, cancel := context.WithTimeout(ctx, backfillStateTimeout)
+	defer cancel()
+	_, err := db.Exec(ctx, `
 		UPDATE notification_backfill_state SET completed_at = now(), updated_at = now() WHERE task = $1`,
 		task)
 	if err != nil {

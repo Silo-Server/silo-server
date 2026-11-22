@@ -280,7 +280,7 @@ func (e *noReadableAudiobookPartError) Error() string {
 // populateFromTags fills the audiobook's header fields from the ffprobe
 // format tags. Tags are lower-cased by normalizeFormatTags upstream.
 func (b *parsedAudiobook) populateFromTags(tags map[string]string) {
-	b.Authors = splitAudiobookCredits(firstNonEmpty(tags["album_artist"], tags["artist"], tags["composer"]))
+	b.Authors = audiobookTagAuthors(tags)
 	b.Narrators = audiobookTagNarrators(tags, b.Authors)
 	b.Author, b.Narrator = "", ""
 	if len(b.Authors) > 0 {
@@ -304,7 +304,10 @@ func (b *parsedAudiobook) populateFromTags(tags map[string]string) {
 			b.SeriesPosition = groupPosition
 		}
 	}
-	b.Title = audiobookTagTitle(tags["title"], tags["album"], b.Series)
+	if b.Series == "" {
+		b.Series = albumArtistGroupingSeries(tags, b.Authors)
+	}
+	b.Title = audiobookTagTitle(tags["title"], tags["album"], b.Series, b.SeriesPosition)
 	b.ASIN = firstNonEmpty(tags["asin"], tags["audible_asin"], tags["com.audible.asin"])
 	// ffprobe reports an M4B's long description (ldes) as "synopsis" and the
 	// short one (desc, at most 255 characters) as "description".

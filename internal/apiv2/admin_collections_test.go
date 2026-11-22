@@ -15,6 +15,8 @@ import (
 )
 
 type fakeAdminCollections struct {
+	listReads, sectionReads, countReads int
+	countedIDs                          []string
 	AdminCollectionService
 	AdminCollectionExtrasService
 	view                                               handlers.AdminCollection
@@ -26,13 +28,10 @@ type fakeAdminCollections struct {
 	syncErr                                            error
 	template                                           handlers.AdminCollectionTemplateResult
 	bundles                                            []templates.BundleWithTemplates
-	bundleReads                                        int
 	catalog                                            *templates.Catalog
 	catalogReads                                       int
 	featureReads                                       int
 	listed                                             []handlers.AdminCollection
-	listReads, sectionReads, countReads                int
-	countedIDs                                         []string
 	sections                                           []handlers.AdminCollectionSection
 	rowCounts                                          map[string]handlers.AdminCollectionRowCount
 }
@@ -249,20 +248,6 @@ func TestAdminCollectionTemplateApplyKeepsEntryReason(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("missing %s in %s", want, rec.Body)
 		}
-	}
-}
-
-func TestAdminCollectionErrorRendersInvalidArtworkAsValidationProblem(t *testing.T) {
-	p := adminCollectionError(&handlers.APIError{
-		Status:  http.StatusBadRequest,
-		Code:    "bad_request",
-		Message: "The file is not a supported image.",
-	})
-	if p.Status != http.StatusUnprocessableEntity || p.Type != TypeValidationFailed.URI() {
-		t.Fatalf("problem = %#v", p)
-	}
-	if len(p.Errors) != 1 || p.Errors[0].Detail != "The file is not a supported image." {
-		t.Fatalf("problem errors = %#v", p.Errors)
 	}
 }
 

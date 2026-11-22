@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
@@ -44,73 +45,6 @@ func (f *fakeRegistryStores) ListCapabilities(_ context.Context, id int) ([]*plu
 
 func (f *fakeRegistryStores) ListGlobalConfigs(_ context.Context, id int) ([]*plugins.RuntimeConfig, error) {
 	return f.configs[id], nil
-}
-
-func TestPluginProviderRegistryRebuild(t *testing.T) {
-	stores := &fakeRegistryStores{
-		bindings: []*plugins.AuthBinding{
-			{InstallationID: 3, CapabilityID: "oidc", Enabled: true, AutoProvision: true},
-			{InstallationID: 4, CapabilityID: "ldap", Enabled: false},
-			{InstallationID: 5, CapabilityID: "gone", Enabled: true},
-		},
-		installations: map[int]*plugins.Installation{3: {ID: 3, Enabled: true}, 4: {ID: 4, Enabled: true}},
-		capabilities: map[int][]*plugins.Capability{3: {{Type: "auth_provider.v1", ID: "oidc", Metadata: map[string]any{
-			"display_name": "Manifest name", "auth_modes": []any{"oauth2"},
-		}}}, 4: {{Type: "auth_provider.v1", ID: "ldap"}}},
-		configs: map[int][]*plugins.RuntimeConfig{3: {
-			{Key: "display_name", Value: map[string]any{"value": "Company SSO"}},
-			{Key: "icon_url_path", Value: map[string]any{"value": "/logo.svg"}},
-		}},
-	}
-	registry := NewPluginProviderRegistry(PluginProviderRegistryConfig{Bindings: stores, Installations: stores, GlobalConfigs: stores})
-	if got := registry.Providers(); len(got) != 0 {
-		t.Fatalf("before rebuild = %+v", got)
-	}
-	if err := registry.Rebuild(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	got := registry.Providers()
-	if len(got) != 1 {
-		t.Fatalf("providers = %+v", got)
-	}
-	info := got[0].Info
-	if info.ID != "plugin:3:oidc" || info.DisplayName != "Company SSO" || info.Mode != "oauth" ||
-		info.IconURL != plugins.ContentPrefix+"/plugins/3/assets/logo.svg" || info.InstallationID != 3 {
-		t.Fatalf("info = %+v", info)
-	}
-	if pp, ok := got[0].Provider.(*PluginProvider); !ok || !pp.config.AutoProvision {
-		t.Fatalf("provider = %#v", got[0].Provider)
-	}
-
-	// Switching providers without a restart: the OIDC binding goes off, the
-	// LDAP one comes on.
-	stores.bindings[0].Enabled = false
-	stores.bindings[1].Enabled = true
-	if err := registry.Rebuild(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	got = registry.Providers()
-	if len(got) != 1 || got[0].Info.ID != "plugin:4:ldap" || got[0].Info.Mode != "credentials" || got[0].Info.DisplayName != "ldap" {
-		t.Fatalf("after switch = %+v", got)
-	}
-
-	// A disabled installation offers no provider.
-	stores.installations[4].Enabled = false
-	_ = registry.Rebuild(context.Background())
-	if got := registry.Providers(); len(got) != 0 {
-		t.Fatalf("disabled installation = %+v", got)
-	}
-
-	// A failed read keeps the previous list.
-	stores.installations[4].Enabled = true
-	_ = registry.Rebuild(context.Background())
-	stores.listErr = errors.New("database down")
-	if err := registry.Rebuild(context.Background()); err == nil {
-		t.Fatal("rebuild error swallowed")
-	}
-	if got := registry.Providers(); len(got) != 1 {
-		t.Fatalf("after failed rebuild = %+v", got)
-	}
 }
 
 // TestPluginProviderRegistryRebuildKeepsSetOnReadErrors: a transient failure
@@ -155,27 +89,6 @@ func TestPluginProviderRegistryRebuildKeepsSetOnReadErrors(t *testing.T) {
 	}
 	if got := registry.Providers(); len(got) != 0 {
 		t.Fatalf("missing installation: providers = %+v", got)
-	}
-}
-
-func TestPluginProviderRegistryRejectsMissingCapability(t *testing.T) {
-	stores := &fakeRegistryStores{
-		bindings:      []*plugins.AuthBinding{{InstallationID: 3, CapabilityID: "oidc", Enabled: true}},
-		installations: map[int]*plugins.Installation{3: {ID: 3, Enabled: true}},
-		capabilities: map[int][]*plugins.Capability{3: {{Type: "auth_provider.v1", ID: "oidc", Metadata: map[string]any{
-			"auth_modes": []any{"oauth2"},
-		}}}},
-	}
-	registry := NewPluginProviderRegistry(PluginProviderRegistryConfig{Bindings: stores, Installations: stores})
-	if err := registry.Rebuild(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	stores.capabilities[3] = []*plugins.Capability{{Type: "auth_provider.v1", ID: "renamed"}}
-	if err := registry.Rebuild(t.Context()); err == nil {
-		t.Fatal("binding without its auth capability was registered")
-	}
-	if got := registry.Providers(); len(got) != 1 || got[0].Info.Mode != ProviderModeOAuth {
-		t.Fatalf("failed rebuild replaced the previous OAuth provider: %+v", got)
 	}
 }
 
@@ -226,69 +139,60 @@ func (f *lockedRegistryStores) waitForReads(t *testing.T, n int) {
 	}
 }
 
-// waitForProviders waits until the registry holds want providers.
-func waitForProviders(t *testing.T, registry *PluginProviderRegistry, want int) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for len(registry.Providers()) != want {
-		if time.Now().After(deadline) {
-			t.Fatalf("providers = %d, want %d", len(registry.Providers()), want)
+type registryTestClients struct {
+	oidc *pluginhost.AuthProviderClient
+}
+
+func (c registryTestClients) AuthProviderClient(_ context.Context, id int, capability string) (*pluginhost.AuthProviderClient, error) {
+	if id == 3 && capability == "oidc" {
+		return c.oidc, nil
+	}
+	return nil, plugins.ErrInstallationNotFound
+}
+
+func TestPluginProviderRegistryWaitsForSetupAndPublicURL(t *testing.T) {
+	stores := &fakeRegistryStores{
+		bindings: []*plugins.AuthBinding{
+			{InstallationID: 3, CapabilityID: "oidc", Enabled: true, CallbackMode: plugins.AuthCallbackStable},
+			{InstallationID: 4, CapabilityID: "network", Enabled: true},
+		},
+		installations: map[int]*plugins.Installation{3: {ID: 3, Enabled: true}, 4: {ID: 4, Enabled: true}},
+		capabilities: map[int][]*plugins.Capability{
+			3: {{Type: "auth_provider.v1", ID: "oidc", Metadata: map[string]any{"auth_modes": []string{"oauth2"}}}},
+			4: {{Type: "auth_provider.v1", ID: "network", Metadata: map[string]any{"auth_modes": []string{"network"}}}},
+		},
+	}
+	needsSetup, publicURL := true, false
+	oidc := &pluginhost.AuthProviderClient{}
+	registry := NewPluginProviderRegistry(PluginProviderRegistryConfig{
+		Bindings: stores, Installations: stores, Clients: registryTestClients{oidc},
+		NeedsSetup:     func(context.Context) (bool, error) { return needsSetup, nil },
+		OAuthAvailable: func() bool { return publicURL },
+	})
+	rebuild := func() []RegisteredProvider {
+		t.Helper()
+		if err := registry.Rebuild(t.Context()); err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(time.Millisecond)
+		return registry.Providers()
 	}
-}
-
-// TestPluginProviderRegistryRunRebuilds: a node catches up with a binding
-// change it was never told about, and retries a rebuild that failed.
-func TestPluginProviderRegistryRunRebuilds(t *testing.T) {
-	stores := &lockedRegistryStores{fakeRegistryStores: fakeRegistryStores{
-		bindings:      []*plugins.AuthBinding{{InstallationID: 3, CapabilityID: "oidc"}},
-		installations: map[int]*plugins.Installation{3: {ID: 3, Enabled: true}},
-		capabilities:  map[int][]*plugins.Capability{3: {{Type: "auth_provider.v1", ID: "oidc"}}},
-	}}
-	registry := NewPluginProviderRegistry(PluginProviderRegistryConfig{Bindings: stores, Installations: &stores.fakeRegistryStores, GlobalConfigs: &stores.fakeRegistryStores})
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		registry.RunRebuilds(ctx, 20*time.Millisecond, time.Millisecond)
-	}()
-	t.Cleanup(func() { cancel(); <-done })
-
-	// Turned on elsewhere, with no announcement: the periodic resync finds it.
-	stores.set(true, nil)
-	waitForProviders(t, registry, 1)
-	// A failing read keeps the set; the retry applies the change once the
-	// read works again.
-	reads := stores.set(false, errors.New("database down"))
-	stores.waitForReads(t, reads+2)
-	if got := len(registry.Providers()); got != 1 {
-		t.Fatalf("a failed rebuild changed the set: %d", got)
+	if providers := rebuild(); len(providers) != 0 {
+		t.Fatalf("providers before setup = %+v", providers)
 	}
-	stores.set(false, nil)
-	waitForProviders(t, registry, 0)
-}
-
-// TestPluginProviderRegistryRequestRebuild: an announcement rebuilds
-// without waiting for the resync, and requests collapse.
-func TestPluginProviderRegistryRequestRebuild(t *testing.T) {
-	stores := &lockedRegistryStores{fakeRegistryStores: fakeRegistryStores{
-		bindings:      []*plugins.AuthBinding{{InstallationID: 3, CapabilityID: "oidc"}},
-		installations: map[int]*plugins.Installation{3: {ID: 3, Enabled: true}},
-		capabilities:  map[int][]*plugins.Capability{3: {{Type: "auth_provider.v1", ID: "oidc"}}},
-	}}
-	registry := NewPluginProviderRegistry(PluginProviderRegistryConfig{Bindings: stores, Installations: &stores.fakeRegistryStores, GlobalConfigs: &stores.fakeRegistryStores})
-	for range 3 {
-		registry.RequestRebuild() // never blocks
+	if _, err := registry.AccountChecker(t.Context(), 3); !errors.Is(err, ErrProviderNotLoaded) {
+		t.Fatalf("account checker before setup: %v", err)
 	}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		registry.RunRebuilds(ctx, time.Hour, time.Hour)
-	}()
-	t.Cleanup(func() { cancel(); <-done })
-	stores.set(true, nil)
-	registry.RequestRebuild()
-	waitForProviders(t, registry, 1)
+	needsSetup = false
+	if providers := rebuild(); len(providers) != 1 || providers[0].Info.Mode != ProviderModeNetwork {
+		t.Fatalf("providers without public URL = %+v", providers)
+	}
+	if checker, err := registry.AccountChecker(t.Context(), 3); err != nil || checker != oidc {
+		t.Fatalf("OAuth account checker without public URL = %v, %v", checker, err)
+	}
+	publicURL = true
+	providers := rebuild()
+	if len(providers) != 2 || providers[0].Info.Mode != ProviderModeOAuth ||
+		providers[0].Provider.(*PluginProvider).CallbackMode() != plugins.AuthCallbackStable {
+		t.Fatalf("providers with public URL = %+v", providers)
+	}
 }

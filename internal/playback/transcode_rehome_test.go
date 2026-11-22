@@ -8,47 +8,6 @@ import (
 	"time"
 )
 
-func TestMoveTranscodeExecutorOnlyReplacesTheExpectedRoute(t *testing.T) {
-	manager := NewSessionManager(0, 0)
-	session, err := manager.StartSession(1, "profile-1", 42, PlayTranscode, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dead := TranscodeRoute{NodeURL: "http://dead:8080", TransportID: "transport-1"}
-	if err := manager.SetTranscodeRoute(session.ID, dead); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.SetNodeRoutingAssignment(session.ID, NodeRoutingAssignment{
-		Workload: "video_transcode", Execution: "transcode", ExecutionNodeID: 1,
-		ExecutionNodeURL: dead.NodeURL, Egress: "api",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	stale := TranscodeRoute{NodeURL: dead.NodeURL, TransportID: "older-transport"}
-	moved, err := manager.MoveTranscodeExecutor(session.ID, stale, TranscodeExecutorMove{NodeURL: "http://other:8080"})
-	if err != nil || moved {
-		t.Fatalf("move against a superseded route = %v, %v; want no change", moved, err)
-	}
-
-	moved, err = manager.MoveTranscodeExecutor(session.ID, dead, TranscodeExecutorMove{
-		NodeURL: "http://alive:8080", Execution: "transcode", ExecutionNodeID: 2, TranscodeHWAccel: "vaapi",
-	})
-	if err != nil || !moved {
-		t.Fatalf("move = %v, %v", moved, err)
-	}
-	got, _ := manager.GetSession(session.ID)
-	if got.TranscodeNodeURL != "http://alive:8080" || got.TranscodeTransportID != "transport-1" {
-		t.Fatalf("route = %q/%q, want the new node and the same transport", got.TranscodeNodeURL, got.TranscodeTransportID)
-	}
-	if got.RoutingExecutionNodeID != 2 || got.RoutingExecutionNodeURL != "http://alive:8080" || got.RoutingEgress != "api" {
-		t.Fatalf("routing = %+v", got)
-	}
-	if got.TranscodeHWAccel != "vaapi" {
-		t.Fatalf("hw accel = %q", got.TranscodeHWAccel)
-	}
-}
-
 func TestMoveTranscodeExecutorLeavesLegacyRoutingUnassigned(t *testing.T) {
 	manager := NewSessionManager(0, 0)
 	session, err := manager.StartSession(1, "profile-1", 42, PlayTranscode, false)
@@ -134,5 +93,46 @@ func TestRehomeTranscodeMoveOutlivesTheLeadingRequest(t *testing.T) {
 	}
 	if deadline.IsZero() {
 		t.Fatal("the move has no time bound of its own")
+	}
+}
+
+func TestMoveTranscodeExecutorOnlyReplacesTheExpectedRoute(t *testing.T) {
+	manager := NewSessionManager(0, 0)
+	session, err := manager.StartSession(1, "profile-1", 42, PlayTranscode, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead := TranscodeRoute{NodeURL: "http://dead:8080", TransportID: "transport-1"}
+	if err := manager.SetTranscodeRoute(session.ID, dead); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetNodeRoutingAssignment(session.ID, NodeRoutingAssignment{
+		Workload: "video_transcode", Execution: "transcode", ExecutionNodeID: 1,
+		ExecutionNodeURL: dead.NodeURL, Egress: "api",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	stale := TranscodeRoute{NodeURL: dead.NodeURL, TransportID: "older-transport"}
+	moved, err := manager.MoveTranscodeExecutor(session.ID, stale, TranscodeExecutorMove{NodeURL: "http://other:8080"})
+	if err != nil || moved {
+		t.Fatalf("move against a superseded route = %v, %v; want no change", moved, err)
+	}
+
+	moved, err = manager.MoveTranscodeExecutor(session.ID, dead, TranscodeExecutorMove{
+		NodeURL: "http://alive:8080", Execution: "transcode", ExecutionNodeID: 2, TranscodeHWAccel: "vaapi",
+	})
+	if err != nil || !moved {
+		t.Fatalf("move = %v, %v", moved, err)
+	}
+	got, _ := manager.GetSession(session.ID)
+	if got.TranscodeNodeURL != "http://alive:8080" || got.TranscodeTransportID != "transport-1" {
+		t.Fatalf("route = %q/%q, want the new node and the same transport", got.TranscodeNodeURL, got.TranscodeTransportID)
+	}
+	if got.RoutingExecutionNodeID != 2 || got.RoutingExecutionNodeURL != "http://alive:8080" || got.RoutingEgress != "api" {
+		t.Fatalf("routing = %+v", got)
+	}
+	if got.TranscodeHWAccel != "vaapi" {
+		t.Fatalf("hw accel = %q", got.TranscodeHWAccel)
 	}
 }

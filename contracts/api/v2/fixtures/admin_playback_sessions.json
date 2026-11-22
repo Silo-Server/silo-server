@@ -24,7 +24,17 @@
       "stream_bitrate_kbps": null,
       "target_bitrate_kbps": null,
       "source_bitrate_kbps": null,
-      "source_audio_channels": null
+      "source_audio_channels": null,
+      "subtitle": {
+        "track_id": "file:44:subtitle:2",
+        "language": "en",
+        "codec": "subrip",
+        "format": "vtt",
+        "source": "external",
+        "delivery": "sidecar",
+        "forced": false,
+        "hearing_impaired": true
+      }
     },
     {
       "session_id": "b",
@@ -54,7 +64,8 @@
       "effective_play_method": "transcode",
       "is_jellyfin_client": true,
       "routing_network_provider": "tailscale",
-      "routing_execution_node_id": "9"
+      "routing_execution_node_id": "9",
+      "subtitle": null
     }
   ],
   "page": {

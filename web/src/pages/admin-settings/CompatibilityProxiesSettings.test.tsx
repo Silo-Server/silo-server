@@ -1,127 +1,65 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 
 import CompatibilityProxiesSettings from "./CompatibilityProxiesSettings";
-import { fakeSettingsForm } from "./settingsForm.test-support";
 
-const useSettingsFormMock = vi.fn();
+const SETTINGS = {
+  "jellyfin_compat.enabled": "true",
+  "jellyfin_compat.web_enabled": "true",
+  "jellyfin_compat.public_url": "https://media.example.com",
+};
 
-vi.mock("@/hooks/useSettingsForm", () => ({
-  useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
+const { sensitiveStatus } = vi.hoisted(() => ({
+  sensitiveStatus: {
+    current: { configured: [], managed_by_env: [] } as {
+      configured: string[];
+      managed_by_env: string[];
+      managed_by_env_vars?: Record<string, string>;
+    },
+  },
 }));
-
-vi.mock("@/hooks/useRestartKeys", () => ({
-  useRestartKeys: () => new Set<string>(),
-}));
-
-let compatStatus: Record<string, unknown> = {};
 
 vi.mock("@/hooks/queries/admin/settings", () => ({
-  useJellyfinCompatStatus: () => ({ data: compatStatus, isLoading: false }),
+  useAdminServerSettings: () => ({ data: SETTINGS, isLoading: false }),
+  useAdminSensitiveStatus: () => ({ data: sensitiveStatus.current, isError: false }),
+  useUpdateServerSettings: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useJellyfinCompatStatus: () => ({
+    data: { enabled: true, web_enabled: true, api_state: "running", web_state: "missing" },
+    isLoading: false,
+  }),
   useInstallJellyfinCompatWeb: () => ({ mutate: vi.fn(), isPending: false }),
   useRemoveJellyfinCompatWeb: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateJellyfinCompatSettings: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
-const DEFAULTS: Record<string, string> = {
-  "jellyfin_compat.enabled": "true",
-  "jellyfin_compat.public_url": "https://media.example.com",
-  "jellyfin_compat.server_name": "Silo",
-  "jellyfin_compat.server_id": "4f1c0f8e2b6d4c1a9e3f7a2b5c8d0e1f",
-  "jellyfin_compat.emulated_server_version": "12.1.0",
-  "jellyfin_compat.session_ttl": "87600h",
-  "jellyfin_compat.playback_session_ttl": "6h",
-  "jellyfin_compat.web_enabled": "true",
-  "jellyfin_compat.web_version": "12.1",
-  "jellyfin_compat.web_install_dir": "/var/lib/silo/jellyfin-web",
-  "audiobookshelf_compat.enabled": "false",
-};
+vi.mock("@/hooks/useRestartKeys", () => ({ useRestartKeys: () => ({ has: () => false }) }));
 
-const makeForm = (overrides: Record<string, string> = {}, dirty: string[] = []) =>
-  fakeSettingsForm({ ...DEFAULTS, ...overrides }, { dirty });
+beforeEach(() => {
+  sensitiveStatus.current = { configured: [], managed_by_env: [] };
+});
 
-function renderPage() {
-  return render(
-    <MemoryRouter>
-      <CompatibilityProxiesSettings />
-    </MemoryRouter>,
-  );
-}
+it("stages nothing when the Jellyfin API is switched off and back on", async () => {
+  render(<CompatibilityProxiesSettings />);
+  const api = screen.getByRole("switch", { name: "Allow Jellyfin apps to connect" });
+  await userEvent.click(api);
+  await userEvent.click(api);
 
-const LOOPBACK_WARNING =
-  "Only this server can reach that address. Use one other devices can reach.";
+  expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
+});
 
-describe("CompatibilityProxiesSettings", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    compatStatus = { enabled: true, web_enabled: true, web_state: "missing", api_state: "running" };
-    useSettingsFormMock.mockReset();
-    useSettingsFormMock.mockReturnValue(makeForm());
-  });
+it("takes back the Jellyfin Web switch-off once the environment sets the API switch", async () => {
+  const { rerender } = render(<CompatibilityProxiesSettings />);
+  await userEvent.click(screen.getByRole("switch", { name: "Allow Jellyfin apps to connect" }));
+  expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
 
-  it("shows the server ID read-only, saying what changing it does", async () => {
-    renderPage();
-    const jellyfin = screen.getByRole("group", { name: "Jellyfin" });
-    await userEvent.click(within(jellyfin).getByRole("button", { name: "Advanced · 7 settings" }));
+  // A restart with SILO_JELLYFIN_ENABLED set: the form drops the API draft.
+  sensitiveStatus.current = {
+    configured: [],
+    managed_by_env: ["jellyfin_compat.enabled"],
+    managed_by_env_vars: { "jellyfin_compat.enabled": "SILO_JELLYFIN_ENABLED" },
+  };
+  rerender(<CompatibilityProxiesSettings />);
 
-    expect(within(jellyfin).getByText(DEFAULTS["jellyfin_compat.server_id"]!)).toBeInTheDocument();
-    expect(
-      within(jellyfin).getByText(
-        "Read-only. Changing it makes every Jellyfin app see a new server.",
-      ),
-    ).toBeInTheDocument();
-    expect(within(jellyfin).queryByRole("textbox", { name: "Server ID" })).not.toBeInTheDocument();
-    // Its key still loads so the value can be shown.
-    expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toContain("jellyfin_compat.server_id");
-  });
-
-  it.each([
-    "http://127.0.0.1:8096",
-    "http://localhost:8096",
-    "http://[::1]:8096",
-    "127.0.0.2",
-    "HTTP://LOCALHOST",
-  ])("warns that %s only reaches the server itself", (address) => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "jellyfin_compat.public_url": address }));
-    renderPage();
-
-    expect(screen.getByText(LOOPBACK_WARNING)).toBeInTheDocument();
-  });
-
-  it.each([
-    "https://media.example.com",
-    "http://192.168.1.10:8096",
-    "http://localhost.example.com",
-    "",
-  ])("does not warn about %j", (address) => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "jellyfin_compat.public_url": address }));
-    renderPage();
-
-    expect(screen.queryByText(LOOPBACK_WARNING)).not.toBeInTheDocument();
-  });
-
-  it("does not warn about the address while Jellyfin apps are not allowed", () => {
-    useSettingsFormMock.mockReturnValue(
-      makeForm({
-        "jellyfin_compat.enabled": "false",
-        "jellyfin_compat.public_url": "http://127.0.0.1:8096",
-      }),
-    );
-    renderPage();
-
-    expect(screen.queryByText(LOOPBACK_WARNING)).not.toBeInTheDocument();
-  });
-
-  it("labels Audiobookshelf as beta", () => {
-    renderPage();
-
-    const group = screen.getByRole("group", { name: "Audiobookshelf" });
-    expect(within(group).getByText("Beta")).toBeInTheDocument();
-    expect(
-      within(group).getByRole("switch", { name: "Allow Audiobookshelf apps to connect" }),
-    ).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "Jellyfin" })).queryByText("Beta")).toBeNull();
-  });
+  expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
 });

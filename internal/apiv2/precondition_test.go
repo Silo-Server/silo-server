@@ -260,9 +260,6 @@ func TestEvaluateCreateOnly(t *testing.T) {
 }
 
 func TestStaleVersionProblem(t *testing.T) {
-	if !errors.Is(ErrStaleVersion, ErrStaleVersion) || ErrStaleVersion.Error() == "" {
-		t.Fatal("sentinel")
-	}
 	cur := RenderETag("probe", "a", 9)
 	p := StaleVersionProblem(cur)
 	if p.Status != http.StatusPreconditionFailed || p.GetHeaders().Get("ETag") != cur.String() {

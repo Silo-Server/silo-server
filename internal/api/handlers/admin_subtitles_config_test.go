@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"sync"
-	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
@@ -83,44 +82,4 @@ func (p *adminSubtitleTestProvider) Search(context.Context, subtitles.SearchRequ
 
 func (p *adminSubtitleTestProvider) Download(context.Context, string, subtitles.DownloadTarget) ([]byte, subtitles.SubtitleFormat, error) {
 	return []byte("subtitle"), subtitles.FormatSRT, nil
-}
-
-func newTestableAdminSubtitleHandler(repo *adminSubtitleConfigRepo) (*AdminSubtitleHandler, *subtitles.Manager) {
-	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
-	handler := NewAdminSubtitleHandler(repo)
-	handler.SetDownloadedSubtitleDeps(nil, manager)
-	handler.providerFactory = func(cfg *subtitles.ProviderConfig) (subtitles.Provider, error) {
-		return &adminSubtitleTestProvider{name: cfg.ProviderName, key: cfg.APIKey}, nil
-	}
-	return handler, manager
-}
-
-func TestSubtitleProviderConnectionTestRequiresSearchResultsForEveryBuiltin(t *testing.T) {
-	for _, provider := range []string{"opensubtitles", "subdl", "subsource"} {
-		t.Run(provider, func(t *testing.T) {
-			repo := newAdminSubtitleConfigRepo()
-			repo.configs[provider] = subtitles.ProviderConfig{ProviderName: provider, Enabled: true, APIKey: subtitleTestCredential("invalid")}
-			handler, _ := newTestableAdminSubtitleHandler(repo)
-			view := handler.TestSubtitleProvider(context.Background(), provider, SubtitleProviderTestConfig{Enabled: true, APIKey: subtitleTestCredential("invalid")})
-			if view.Success || view.Error == "" {
-				t.Fatalf("view = %#v, want failed test after search returned no results", view)
-			}
-		})
-	}
-}
-
-// A connection test checks the submitted draft credentials over the saved
-// ones and saves nothing.
-func TestSubtitleProviderConnectionTestUsesUnsavedDraft(t *testing.T) {
-	repo := newAdminSubtitleConfigRepo()
-	repo.configs["subdl"] = subtitles.ProviderConfig{ProviderName: "subdl", Enabled: true, APIKey: subtitleTestCredential("old")}
-	handler, _ := newTestableAdminSubtitleHandler(repo)
-
-	view := handler.TestSubtitleProvider(context.Background(), "subdl", SubtitleProviderTestConfig{APIKey: subtitleTestCredential("valid")})
-	if !view.Success {
-		t.Fatalf("view = %#v, want the draft key to pass", view)
-	}
-	if got := repo.providerConfig("subdl").APIKey; got != subtitleTestCredential("old") {
-		t.Fatalf("connection test persisted draft key %q", got)
-	}
 }

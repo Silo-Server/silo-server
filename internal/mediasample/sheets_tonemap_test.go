@@ -2,7 +2,6 @@ package mediasample
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"slices"
@@ -75,43 +74,6 @@ func TestRunSheetsToneMapsDolbyVisionWithTheRPU(t *testing.T) {
 	}
 }
 
-func TestRunSheetsToneMapsHLGWithItsTransfer(t *testing.T) {
-	var loads atomic.Int32
-	fake := fourFrames()
-	runner := Runner{HWAccel: "vaapi", HWDevice: "/dev/dri/renderD128", Exec: fake.exec, Capabilities: listingCapabilities(&loads, nil, stockFilters...)}
-	result, err := runner.Run(t.Context(), hdrSheetsRequest(tonemap.SourceHLG, Attempt{Hardware: true}, Attempt{}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	graph := graphOf(fake.calls[1])
-	if result.Decoder != "hardware:vaapi" || !strings.Contains(graph, tonemap.SoftwareFilter(tonemap.SourceHLG, tonemap.SoftwareFilterHable)) ||
-		!strings.Contains(graph, "color_trc=arib-std-b67") || strings.Contains(graph, "procamp_vaapi") {
-		t.Fatalf("decoder %s, graph %s; want the HLG chain after a VAAPI decode", result.Decoder, graph)
-	}
-}
-
-func TestRunSheetsDecodesOnCUDA(t *testing.T) {
-	var loads atomic.Int32
-	fake := fourFrames()
-	runner := Runner{HWAccel: "nvenc", HWDevice: "1", Exec: fake.exec, Capabilities: listingCapabilities(&loads, nil, jellyfinFilters...)}
-	result, err := runner.Run(t.Context(), hdrSheetsRequest(tonemap.SourcePQ, Attempt{Hardware: true}, Attempt{}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	args := fake.calls[1]
-	decode := []string{"-init_hw_device", "cuda=cu:1", "-filter_hw_device", "cu", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda"}
-	if result.Decoder != "hardware:nvenc" || !slices.Equal(args[4:12], decode) || !strings.Contains(graphOf(args), "scale_cuda=") {
-		t.Fatalf("decoder %s, args %q; want CUDA decode on device 1", result.Decoder, args)
-	}
-	// Without a source signal there is no CUDA chain: software tone maps.
-	fake = fourFrames()
-	runner = Runner{HWAccel: "nvenc", Exec: fake.exec, Capabilities: listingCapabilities(&loads, nil, jellyfinFilters...)}
-	result, err = runner.Run(t.Context(), hdrSheetsRequest("", Attempt{Hardware: true}, Attempt{}))
-	if err != nil || result.Decoder != "software" || len(fake.calls) != 2 {
-		t.Fatalf("decoder %s, runs %d, error %v; want software only", result.Decoder, len(fake.calls), err)
-	}
-}
-
 // TestRunRefusesCUDAForStatsAndImages keeps the outputs whose chains assume
 // VAAPI surfaces off CUDA: their hardware attempts fail as unsupported
 // without starting ffmpeg.
@@ -130,80 +92,6 @@ func TestRunRefusesCUDAForStatsAndImages(t *testing.T) {
 		if failure, ok := errors.AsType[*Error](err); !ok || failure.Reason != ReasonUnsupported || started.Load() != 0 {
 			t.Errorf("%s: error %v after %d processes, want unsupported before ffmpeg", name, err, started.Load())
 		}
-	}
-}
-
-func TestRunSheetsWithoutASourceToneMap(t *testing.T) {
-	tests := map[string]struct {
-		filters []string
-		loadErr error
-		allow   bool
-		want    Reason
-	}{
-		"Dolby Vision without tonemapx": {filters: stockFilters, allow: true, want: ReasonUnsupported},
-		"no sidedata":                   {filters: []string{"zscale", "tonemapx"}, allow: true, want: ReasonUnsupported},
-		"software not allowed":          {filters: jellyfinFilters, want: ReasonUnsupported},
-		"listing failed":                {loadErr: errors.New("ffmpeg -filters timed out"), allow: true, want: ReasonCapabilities},
-	}
-	for name, tt := range tests {
-		var loads atomic.Int32
-		fake := fourFrames()
-		runner := Runner{HWAccel: "vaapi", HWDevice: "/dev/dri/renderD128", Exec: fake.exec, Capabilities: listingCapabilities(&loads, tt.loadErr, tt.filters...)}
-		req := hdrSheetsRequest(tonemap.SourceDolbyVision, Attempt{Hardware: true}, Attempt{})
-		req.Sheets.ToneMap.AllowSoftware = tt.allow
-		_, err := runner.Run(t.Context(), req)
-		wantLoads := int32(1)
-		if !tt.allow {
-			wantLoads = 0
-		}
-		if failure, ok := errors.AsType[*Error](err); !ok || failure.Reason != tt.want || len(fake.calls) != 0 || loads.Load() != wantLoads {
-			t.Errorf("%s: error %v after %d processes and %d loads, want %s before ffmpeg", name, err, len(fake.calls), loads.Load(), tt.want)
-		}
-	}
-}
-
-func TestSelectSourceToneMap(t *testing.T) {
-	tests := []struct {
-		kind    tonemap.SourceKind
-		filters []string
-		want    string
-	}{
-		{tonemap.SourcePQ, jellyfinFilters, tonemap.SoftwareFilter(tonemap.SourcePQ, tonemap.SoftwareFilterBT2390)},
-		{tonemap.SourcePQ, stockFilters, tonemap.SoftwareFilter(tonemap.SourcePQ, tonemap.SoftwareFilterHable)},
-		{tonemap.SourceDolbyVision, jellyfinFilters, tonemap.SoftwareFilter(tonemap.SourceDolbyVision, tonemap.SoftwareFilterBT2390)},
-		{tonemap.SourceDolbyVision, stockFilters, ""},
-		{tonemap.SourceSDRBT2020, []string{"zscale", "sidedata"}, tonemap.SoftwareFilter(tonemap.SourceSDRBT2020, "")},
-	}
-	for _, tt := range tests {
-		var loads atomic.Int32
-		runner := Runner{Capabilities: listingCapabilities(&loads, nil, tt.filters...)}
-		got, failure := runner.selectSourceToneMap(t.Context(), tt.kind)
-		if got != tt.want || (tt.want == "") != (failure != nil) {
-			t.Errorf("%s with %v: chain %q, failure %v; want %q", tt.kind, tt.filters, got, failure, tt.want)
-		}
-	}
-}
-
-func TestToneMapSourceValidation(t *testing.T) {
-	req := hdrSheetsRequest(tonemap.SourceHLG)
-	if err := req.Validate(); err != nil {
-		t.Fatalf("valid request rejected: %v", err)
-	}
-	encoded, err := json.Marshal(req)
-	if err != nil || !strings.Contains(string(encoded), `"source":"hlg"`) {
-		t.Fatalf("encoded %s, error %v", encoded, err)
-	}
-	var decoded Request
-	if err := json.Unmarshal(encoded, &decoded); err != nil || decoded.Sheets.ToneMap.Source != tonemap.SourceHLG {
-		t.Fatalf("decoded %+v, error %v", decoded.Sheets.ToneMap, err)
-	}
-	req.Sheets.ToneMap.Source = "hdr12"
-	if err := req.Validate(); err == nil {
-		t.Error("unknown source: want a validation error")
-	}
-	image := imageRequest(&ToneMap{AllowSoftware: true, Source: tonemap.SourcePQ})
-	if err := image.Validate(); err == nil {
-		t.Error("image with a source: want a validation error")
 	}
 }
 

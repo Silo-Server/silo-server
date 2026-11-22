@@ -3,6 +3,7 @@ import { ListRow, MetaDot, type ListRowProps } from "@/components/calm/ListRow";
 import { PosterPeek } from "@/components/calm/PosterPeek";
 import type { PeekRequest } from "@/components/calm/usePeekLimiter";
 import { rowKindGroup } from "@/lib/homeRows/catalog";
+import { holdsCollections } from "@/lib/sectionTypes";
 import {
   collapsedRowText,
   rowSwitchLabel,
@@ -13,6 +14,7 @@ import type { HomeRow, PageRef, Surface } from "@/lib/homeRows/types";
 import { useT } from "@/i18n";
 import { useHomeRowTitle } from "@/lib/sectionTitle";
 import { GROUP_ICONS } from "./rowIcons";
+import { RowOriginBadge } from "./RowOriginBadge";
 
 export interface RowLineProps extends Pick<
   ListRowProps,
@@ -47,7 +49,7 @@ function Description({ parts }: { parts: DescriptionPart[] }) {
         </span>
       );
     return (
-      <b key={index} className="text-foreground/75 font-medium">
+      <b key={index} className="text-foreground font-medium">
         {part.strong}
       </b>
     );
@@ -91,10 +93,8 @@ export function RowLine({
                 : t("web.home.rows.line.heroBanner")}
             </span>
           ) : null}
-          {row.own ? (
-            <span className="bg-info/15 text-info ring-info/30 inline-flex h-[22px] shrink-0 items-center rounded-full px-2 text-xs font-semibold ring-1 ring-inset">
-              {t("web.home.rows.line.yours")}
-            </span>
+          {surface === "profile" ? (
+            <RowOriginBadge origin={row.own ? "yours" : "server"} className="max-sm:hidden" />
           ) : null}
         </>
       }
@@ -111,8 +111,18 @@ export function RowLine({
               <MetaDot />
             </span>
           ) : null}
+          {surface === "profile" ? (
+            // Phones have no room for the tag next to the name.
+            <span className="sm:hidden">
+              <span className={row.own ? "text-info font-semibold" : "text-foreground font-medium"}>
+                {row.own ? t("web.home.rows.line.yours") : t("web.home.rows.line.server")}
+              </span>
+              <MetaDot />
+            </span>
+          ) : null}
           <Description parts={description} />
-          {row.itemLimit > 0 ? (
+          {/* A row of collections has no title limit; its description counts its collections. */}
+          {!holdsCollections(row.sectionType) && row.itemLimit > 0 ? (
             <>
               <MetaDot />
               {titleCount(row.itemLimit)}

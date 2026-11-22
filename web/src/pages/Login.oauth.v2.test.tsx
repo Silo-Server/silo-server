@@ -27,7 +27,8 @@ afterEach(cleanup);
 it("starts provider login with a top-level GET to v2 and preserves the encoded local destination", () => {
   renderLogin("/login?redirect=%2Fme%3Ftab%3Dsettings");
   // Not a form post: the CSP's form-action 'self' would block the redirect to the provider.
-  const link = screen.getByRole("link", { name: "Fixture provider" });
+  // The button reads as the admin's sign-in settings preview it (#4346).
+  const link = screen.getByRole("link", { name: "Sign in with Fixture provider" });
   expect(link.closest("form")).toBeNull();
   expect(link.getAttribute("href")).toBe("/api/v2/auth/oauth/3/start?next=%2Fme%3Ftab%3Dsettings");
 });

@@ -21,7 +21,13 @@ import {
   deleteWithRowsLabel,
   serverDeleteDescription,
 } from "@/lib/collections/copy";
-import { openRowPath, type RowsState } from "@/lib/collections/rows";
+import {
+  deleteWithRowChangesLabel,
+  keepsRowWithoutCollection,
+  openRowPath,
+  removedFromRow,
+  type RowsState,
+} from "@/lib/collections/rows";
 
 import { CollectionRowSummary } from "./CollectionRowSummary";
 import { useT } from "@/i18n";
@@ -74,6 +80,8 @@ export function DeleteCollectionDialog({
     );
   }
   const listed = rows.status === "ready" ? rows.rows : [];
+  // A row of collections that lists others too stays, without this one.
+  const keepsSome = listed.some(keepsRowWithoutCollection);
   return (
     <AlertDialog
       open={open}
@@ -108,7 +116,11 @@ export function DeleteCollectionDialog({
             <ul className="border-border/80 divide-border/70 grid divide-y rounded-xl border">
               {listed.map((row) => (
                 <li key={row.id} className="flex items-center gap-3 px-3 py-2.5">
-                  <CollectionRowSummary row={row} libraryNames={rowLibraryNames} />
+                  <CollectionRowSummary
+                    row={row}
+                    libraryNames={rowLibraryNames}
+                    note={keepsRowWithoutCollection(row) ? removedFromRow(row.title) : undefined}
+                  />
                   <Link
                     to={openRowPath(row)}
                     aria-label={t("web.collections.deleteDialog.openRowNamed", {
@@ -130,10 +142,13 @@ export function DeleteCollectionDialog({
           </p>
         ) : null}
         <AlertDialogFooter className="items-center sm:justify-between">
-          <p className="text-muted-foreground text-sm">
+          <p className="text-muted-foreground text-sm sm:grow sm:basis-32">
             {t("web.collections.deleteDialog.footer")}
           </p>
-          <div className="flex gap-2">
+          {/* The buttons stack below sm, and from sm up move below the note when
+              they don't fit beside it and wrap when they don't fit side by side,
+              as in ConfirmDialog. */}
+          <div className="flex w-full flex-col-reverse gap-2 sm:ms-auto sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
             <AlertDialogCancel disabled={isPending}>{t("common.cancel")}</AlertDialogCancel>
             <Button
               variant="destructive"
@@ -143,12 +158,14 @@ export function DeleteCollectionDialog({
               {isPending ? (
                 <span
                   aria-hidden
-                  className="me-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+                  className="me-2 inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
                 />
               ) : null}
-              {rows.status === "ready"
-                ? deleteWithRowsLabel(listed.length)
-                : t("web.collections.deleteDialog.delete")}
+              {rows.status !== "ready"
+                ? t("web.collections.deleteDialog.delete")
+                : keepsSome
+                  ? deleteWithRowChangesLabel(listed.length)
+                  : deleteWithRowsLabel(listed.length)}
             </Button>
           </div>
         </AlertDialogFooter>

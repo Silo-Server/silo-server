@@ -1,5 +1,5 @@
-// Package imageutil provides image resizing and thumbhash generation
-// for collection poster and backdrop uploads.
+//go:build !silo_node
+
 package imageutil
 
 import (
@@ -20,6 +20,7 @@ import (
 
 const (
 	webpQuality              = 90
+	posterCropQuality        = 95
 	thumbhashSourceDimension = 100
 )
 
@@ -43,11 +44,6 @@ func init() {
 	bimg.VipsCacheSetMax(0)
 	bimg.VipsCacheSetMaxMem(0)
 }
-
-// ErrInvalidImage reports source bytes that libvips cannot read as an image.
-// Failures after the header was read, such as encoding a variant, do not wrap
-// it; see PixelDataUndecodable for damaged pixel data.
-var ErrInvalidImage = errors.New("imageutil: invalid image")
 
 // maxGoDecodePixels bounds the raster this package lets the standard library
 // allocate, in PixelDataUndecodable and the thumbhash fallback. A
@@ -86,24 +82,6 @@ func SourceUnusable(err error, data []byte) bool {
 		return true
 	}
 	return !errors.Is(err, ErrBusy) && PixelDataUndecodable(data)
-}
-
-// MaxCachedOriginalDimension caps the longest edge of a cached "original"
-// variant at 4K. Provider artwork is rarely larger (TMDB backdrops top out at
-// 3840 wide, posters at 2000x3000), so the original keeps the provider's full
-// resolution; the cap bounds an outlier upload rather than everyday art.
-const MaxCachedOriginalDimension = 3840
-
-// Variant holds a named image variant (e.g. "original", "w500").
-type Variant struct {
-	Key  string
-	Data []byte
-}
-
-// VariantResult contains generated variants and their output format.
-type VariantResult struct {
-	Variants []Variant
-	Ext      string // file extension including dot: ".webp"
 }
 
 // GenerateVariants produces WebP variants of the source image at the requested
@@ -334,6 +312,44 @@ func encodeSquare(data []byte, side, squareSize int) ([]byte, error) {
 		Crop:          true,
 		Enlarge:       squareSize < side,
 	})
+}
+
+// CropToPoster returns the centered 2:3 portrait crop of data as a JPEG, for
+// a poster taken from a video frame. It trims whichever dimension is in
+// excess, keeping a landscape frame's full height or a narrower frame's full
+// width, and never scales; the poster variants are cut from the crop. The
+// frame is already a lossy JPEG, so a high-quality JPEG costs little more,
+// and unlike a PNG it decodes with shrink-on-load for each smaller variant.
+func CropToPoster(data []byte) ([]byte, error) {
+	size, release, err := reserveSource(data)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	width, height := size.Width, size.Height
+	if width*3 > height*2 {
+		width = height * 2 / 3
+	} else {
+		height = width * 3 / 2
+	}
+	if width < 1 || height < 1 {
+		return nil, fmt.Errorf("%w: a %dx%d image has no 2:3 crop", ErrInvalidImage, size.Width, size.Height)
+	}
+	out, err := bimg.NewImage(data).Process(bimg.Options{
+		Type:          bimg.JPEG,
+		Quality:       posterCropQuality,
+		StripMetadata: true,
+		// The offsets are in the stored orientation, the one Size reports.
+		NoAutoRotate: true,
+		Left:         (size.Width - width) / 2,
+		Top:          (size.Height - height) / 2,
+		AreaWidth:    width,
+		AreaHeight:   height,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("imageutil: crop to poster: %w", err)
+	}
+	return out, nil
 }
 
 // Thumbhash computes a base64-encoded thumbhash from raw image bytes.

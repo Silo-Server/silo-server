@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useId, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
-import { useQueries } from "@tanstack/react-query";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import {
   getProfileMenuSide,
@@ -29,8 +28,7 @@ import { usePluginSettingsList } from "@/hooks/queries/pluginSettings";
 import { useCriticalContentLoaded } from "@/lib/startupPriority";
 import { useMyMediaRequests, useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { useSidebarPins, useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
-import { libraryLayoutQuery } from "@/hooks/queries/sections";
-import { useSectionTitle } from "@/lib/sectionTitle";
+import { menuItemPinRef, usePinLabel } from "@/hooks/queries/pinLabels";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { pluginRouteHref } from "@/lib/pluginRouteHref";
@@ -78,6 +76,7 @@ import {
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { menuItemKey } from "@/lib/uiCustomization";
 import { Direction } from "radix-ui";
+import { getInitial } from "@/lib/text";
 
 // Same icons the admin library-type picker shows; Library only for a type the
 // picker does not know.
@@ -98,9 +97,21 @@ function getLibraryIdFromPathname(pathname: string): number | null {
  * layout box in both states and only fade — the moving frame hides them. Animating
  * `max-width` here used to reflow the whole nav subtree on every frame.
  */
-function SidebarLabel({ children, show }: { children: ReactNode; show: boolean }) {
+function SidebarLabel({
+  children,
+  show,
+  dir,
+}: {
+  children: ReactNode;
+  show: boolean;
+  /** "auto" for a name someone typed, so a cut one keeps its start in either script. */
+  dir?: "auto";
+}) {
   return (
-    <span className={`sidebar-fade max-w-[180px] truncate ${show ? "opacity-100" : "opacity-0"}`}>
+    <span
+      dir={dir}
+      className={`sidebar-fade max-w-[180px] truncate ${show ? "opacity-100" : "opacity-0"}`}
+    >
       {children}
     </span>
   );
@@ -200,6 +211,8 @@ interface ResolvedPrimaryMenuLink {
   href: string;
   label: string;
   icon: ReactNode;
+  /** "auto" when the label is a library, section or collection name. */
+  dir?: "auto";
 }
 
 export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppSidebarProps) {
@@ -276,37 +289,18 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
   // Grouped view of the Apps entries (null → keep the flat list under the
   // single "Apps" header). See groupAppNavLinks for the SDK category contract.
   const pluginNavGroups = useMemo(() => groupAppNavLinks(pluginNavLinks), [pluginNavLinks]);
-  // A pinned section stores the row's title from when it was pinned. Show the
-  // row's current title from its library's layout instead, translated like
-  // the row itself, and the stored one until the layout loads or when the row
-  // has left it.
-  const pinnedSectionLibraryIds = useMemo(() => {
-    const menuLibraryIds = new Set(
-      primaryMenu?.items.flatMap((item) => (item.type === "section" ? [item.library_id] : [])),
-    );
-    return (libraries ?? [])
-      .map((library) => library.id)
-      .filter(
-        (id) => menuLibraryIds.has(id) || pins[String(id)]?.some((pin) => pin.type === "section"),
-      );
-  }, [libraries, pins, primaryMenu]);
-  const pinnedSectionLayouts = useQueries({
-    // The layouts wait for the page's first content (see startupPriority).
-    queries: pinnedSectionLibraryIds.map((libraryId) => ({
-      ...libraryLayoutQuery(libraryId),
-      enabled: criticalContentLoaded,
-    })),
-    combine: (results) => results.map((result) => result.data),
-  });
-  const sectionTitle = useSectionTitle();
-  const pinnedSectionLabel = useCallback(
-    (libraryId: number, sectionId: string, storedLabel: string) => {
-      const layout = pinnedSectionLayouts[pinnedSectionLibraryIds.indexOf(libraryId)];
-      const section = layout?.sections.find((entry) => entry.id === sectionId);
-      return section ? sectionTitle(section) : storedLabel;
-    },
-    [pinnedSectionLayouts, pinnedSectionLibraryIds, sectionTitle],
+  // Pins and menu shortcuts store the title from when they were pinned; show
+  // the row's or collection's current title instead.
+  const pinRefs = useMemo(
+    () => [
+      ...(primaryMenu?.items ?? []).flatMap((item) => menuItemPinRef(item) ?? []),
+      ...Object.entries(pins).flatMap(([libraryId, libraryPins]) =>
+        libraryPins.map((pin) => ({ ...pin, libraryId: Number(libraryId) })),
+      ),
+    ],
+    [pins, primaryMenu],
   );
+  const pinLabel = usePinLabel(pinRefs);
   const primaryMenuLinks = useMemo<ResolvedPrimaryMenuLink[] | null>(() => {
     if (!primaryMenu) return null;
 
@@ -321,12 +315,13 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
             href: `/library/${library.id}`,
             label: item.label || library.name,
             icon: getLibraryIcon(library.type),
+            dir: "auto",
           },
         ];
       }
       if (item.type === "section") {
         if (!libraries?.some((candidate) => candidate.id === item.library_id)) return [];
-        const label = pinnedSectionLabel(item.library_id, item.section_id, item.label);
+        const label = pinLabel(menuItemPinRef(item));
         return [
           {
             key,
@@ -338,6 +333,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
             }),
             label,
             icon: <LayoutGrid className="h-[18px] w-[18px] shrink-0" />,
+            dir: "auto",
           },
         ];
       }
@@ -348,19 +344,17 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
         ) {
           return [];
         }
+        const label = pinLabel(menuItemPinRef(item));
         return [
           {
             key,
             href:
               item.library_id === undefined
-                ? buildUserCollectionCatalogHref(item.collection_id, item.label)
-                : buildLibraryCollectionCatalogHref(
-                    item.collection_id,
-                    item.label,
-                    item.library_id,
-                  ),
-            label: item.label,
+                ? buildUserCollectionCatalogHref(item.collection_id, label)
+                : buildLibraryCollectionCatalogHref(item.collection_id, label, item.library_id),
+            label,
             icon: <FolderOpen className="h-[18px] w-[18px] shrink-0" />,
+            dir: "auto",
           },
         ];
       }
@@ -405,7 +399,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
           return [];
       }
     });
-  }, [libraries, pinnedSectionLabel, primaryMenu, t]);
+  }, [libraries, pinLabel, primaryMenu, t]);
   const showDiscoverNav = primaryMenuLinks === null || showRequestsNav || showNotificationsNav;
 
   const catalogState = useMemo(
@@ -616,7 +610,9 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                         />
                       ) : null}
                       {link.icon}
-                      <SidebarLabel show={showLabels}>{link.label}</SidebarLabel>
+                      <SidebarLabel show={showLabels} dir={link.dir}>
+                        {link.label}
+                      </SidebarLabel>
                     </ViewTransitionLink>
                   </li>
                 );
@@ -719,7 +715,9 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                             <span className="flex w-[18px] flex-shrink-0 items-center justify-center">
                               {getLibraryIcon(lib.type)}
                             </span>
-                            <SidebarLabel show={showLabels}>{lib.name}</SidebarLabel>
+                            <SidebarLabel show={showLabels} dir="auto">
+                              {lib.name}
+                            </SidebarLabel>
                           </ViewTransitionLink>
                           {hasPins ? (
                             <button
@@ -754,18 +752,15 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                         {showLabels && hasPins && isExpanded && (
                           <div className="border-sidebar-border ms-3 space-y-0.5 border-s ps-2">
                             {libraryPins.map((pin) => {
-                              const pinLabel =
-                                pin.type === "section"
-                                  ? pinnedSectionLabel(lib.id, pin.id, pin.label)
-                                  : pin.label;
+                              const label = pinLabel({ ...pin, libraryId: lib.id });
                               const pinHref =
                                 pin.type === "collection"
-                                  ? buildLibraryCollectionCatalogHref(pin.id, pin.label, lib.id)
+                                  ? buildLibraryCollectionCatalogHref(pin.id, label, lib.id)
                                   : buildSectionCatalogHref({
                                       scope: "library",
                                       libraryId: lib.id,
                                       sectionId: pin.id,
-                                      title: pinLabel,
+                                      title: label,
                                     });
                               const pinActive = isPinnedCatalogActive(lib.id, pin);
                               const pinLabelId = `${pinLabelIdBase}-${lib.id}-${pin.type}-${pin.id}`;
@@ -773,24 +768,32 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                               return (
                                 <div
                                   key={`${pin.type}-${pin.id}`}
-                                  className="group/pin relative flex items-center"
+                                  className="group/row relative flex items-center"
                                 >
+                                  {/* The end padding keeps the label clear of the unpin
+                                    button whenever it shows: always on touch, and on
+                                    hover or focus under a fine pointer, where the label
+                                    keeps its full width at rest. */}
                                   <ViewTransitionLink
                                     to={pinHref}
                                     onClick={onNavigate}
-                                    className={`flex flex-1 items-center gap-2 rounded-xl px-2.5 py-2.5 text-[0.78125rem] font-medium transition-colors duration-150 ${
+                                    className={`flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2.5 py-2.5 text-[0.78125rem] font-medium transition-colors duration-150 ${
+                                      canToggle
+                                        ? "pe-7 group-focus-within/row:pe-7 group-hover/row:pe-7 [:where(:root[data-fine-pointer=true])_&]:pe-2.5"
+                                        : ""
+                                    } ${
                                       pinActive
                                         ? "text-sidebar-accent-foreground bg-sidebar-accent/90"
                                         : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/70"
                                     }`}
                                   >
                                     {pin.type === "collection" ? (
-                                      <FolderOpen className="h-3.5 w-3.5 opacity-60" />
+                                      <FolderOpen className="h-3.5 w-3.5 shrink-0 opacity-60" />
                                     ) : (
-                                      <LayoutGrid className="h-3.5 w-3.5 opacity-60" />
+                                      <LayoutGrid className="h-3.5 w-3.5 shrink-0 opacity-60" />
                                     )}
-                                    <span id={pinLabelId} className="truncate">
-                                      {pinLabel}
+                                    <span id={pinLabelId} dir="auto" className="bidi-text truncate">
+                                      {label}
                                     </span>
                                   </ViewTransitionLink>
                                   {canToggle ? (
@@ -803,7 +806,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                           label: pin.label,
                                         })
                                       }
-                                      className="text-muted-foreground hover:text-destructive absolute end-1 rounded p-1 opacity-0 transition-opacity group-hover/pin:opacity-100"
+                                      className="pointer-reveal text-muted-foreground hover:text-destructive absolute end-1 rounded p-1.5 transition-none"
                                       title={t("web.shell.sidebar.unpin")}
                                       aria-label={t("web.shell.sidebar.unpin")}
                                       aria-describedby={pinLabelId}
@@ -1113,14 +1116,12 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                       <AvatarImage src={profile.avatar_url} alt={profile.name} />
                     ) : null}
                     <AvatarFallback className="bg-primary text-primary-foreground text-xs font-bold shadow-[0_14px_32px_-20px_rgba(0,0,0,0.8)]">
-                      {profile?.name?.charAt(0).toUpperCase() ??
-                        user?.username?.charAt(0).toUpperCase() ??
-                        // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- placeholder initial, not a word
-                        "?"}
+                      {getInitial(profile?.name ?? user?.username ?? "?")}
                     </AvatarFallback>
                   </Avatar>
                 </span>
                 <span
+                  dir="auto"
                   className={`text-sidebar-foreground sidebar-fade max-w-[180px] truncate text-[0.8125rem] font-medium ${
                     showLabels ? "opacity-100" : "opacity-0"
                   }`}
@@ -1140,13 +1141,23 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     <AvatarImage src={profile.avatar_url} alt={profile.name} />
                   ) : null}
                   <AvatarFallback className="bg-primary text-primary-foreground text-sm font-bold">
-                    {(profile?.name ?? user?.username ?? "?").charAt(0).toUpperCase()}
+                    {getInitial(profile?.name ?? user?.username ?? "?")}
                   </AvatarFallback>
                 </Avatar>
+                {/* w-fit keeps a short name on the start side; the column would
+                    stretch it, and dir="auto" would then push it to the far edge. */}
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate text-[0.875rem] font-semibold">{displayName}</span>
+                  <span
+                    dir="auto"
+                    className="w-fit max-w-full truncate text-[0.875rem] font-semibold"
+                  >
+                    {displayName}
+                  </span>
                   {profile && user?.username && user.username !== profile.name && (
-                    <span className="text-muted-foreground truncate text-[0.6875rem] font-normal">
+                    <span
+                      dir="auto"
+                      className="text-muted-foreground w-fit max-w-full truncate text-[0.6875rem] font-normal"
+                    >
                       {user.username}
                     </span>
                   )}

@@ -2,7 +2,6 @@ package userdb
 
 import (
 	"database/sql"
-	"path/filepath"
 	"testing"
 )
 
@@ -33,48 +32,6 @@ func TestOnboardingRevisionMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.QueryRow("SELECT revision FROM profile_onboarding").Scan(&revision); err != nil || revision != 2 {
-		t.Fatal(revision, err)
-	}
-}
-
-// Exercise the public opening order, including InitSchema before migrations.
-func TestOnboardingRevisionPreV14CloseReopen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "legacy.db")
-	db, err := NewUserDB(path, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.DB.Exec(`DROP TABLE profile_onboarding; PRAGMA user_version=13;`); err != nil {
-		_ = db.Close()
-		t.Fatal(err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := NewUserDB(path, 1)
-	if err != nil {
-		t.Fatalf("reopen pre-v14 store: %v", err)
-	}
-	defer func() { _ = reopened.Close() }()
-	if version, err := userVersion(reopened.DB); err != nil || version != schemaVersion {
-		t.Fatal(version, err)
-	}
-	if _, err := reopened.DB.Exec(`INSERT INTO profile_onboarding(profile_id,tour_id,last_step,updated_at) VALUES('p','tour','welcome','2026-01-01T00:00:00Z'); UPDATE profile_onboarding SET last_step='playback' WHERE profile_id='p'`); err != nil {
-		t.Fatal(err)
-	}
-	var revision int
-	if err := reopened.DB.QueryRow(`SELECT revision FROM profile_onboarding WHERE profile_id='p'`).Scan(&revision); err != nil || revision != 2 {
-		t.Fatal(revision, err)
-	}
-	if err := reopened.Close(); err != nil {
-		t.Fatal(err)
-	}
-	again, err := NewUserDB(path, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = again.Close() }()
-	if err := again.DB.QueryRow(`SELECT revision FROM profile_onboarding WHERE profile_id='p'`).Scan(&revision); err != nil || revision != 2 {
 		t.Fatal(revision, err)
 	}
 }

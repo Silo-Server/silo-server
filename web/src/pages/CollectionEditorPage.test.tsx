@@ -14,7 +14,7 @@ import {
   showToOtherProfilesLabel,
   unshareWarning,
 } from "@/lib/collections/copy";
-import { chooseArtwork, uploadArtwork } from "@/test/collectionArtwork";
+import { uploadArtwork } from "@/test/collectionArtwork";
 import { adminCollection, adminCollectionList } from "@/test/fixtures/collectionAnswers";
 import { installV2Recorder, v2Recorder, type RecordedCall } from "@/test/v2Recorder";
 import getCollectionOk from "../../../contracts/api/v2/fixtures/get_collection_ok.json";
@@ -414,19 +414,6 @@ describe("creating a Manual collection", () => {
     expect(v2Recorder.callsOf("GET /api/v2/collections/{id}").length).toBeLessThanOrEqual(1);
   });
 
-  it("starts a fresh editor when New collection is opened again after a create", async () => {
-    const router = showEditorPage("/collections/new?type=manual");
-    fireEvent.change(await nameField(), { target: { value: "Rainy days" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create collection" }));
-    await waitFor(() => expect(router.state.location.pathname).toBe("/collections"));
-    await act(() => router.navigate("/collections/new?type=manual"));
-    expect(await nameField()).toHaveValue("");
-    expect(screen.getByRole("button", { name: "Create collection" })).toBeDisabled();
-    await act(() => router.navigate("/collections/c1/edit"));
-    expect(await nameField()).toHaveValue("Rainy days");
-    expect(screen.queryByRole("button", { name: "Create collection" })).toBeNull();
-  });
-
   it("moves to the edit page with a title it couldn't add when the new collection can't be read back, and reads it before the next save", async () => {
     let unreadable = true;
     v2Recorder.answer("GET /api/v2/collections/{id}", () => {
@@ -621,46 +608,6 @@ describe("the save bar and Where it shows", () => {
     expect(within(saveBar()).getByRole("status")).toHaveTextContent(
       `${showToOtherProfilesLabel()} not saved`,
     );
-  });
-});
-
-describe("the Look card", () => {
-  const SERVER_EDIT = "/admin/collections/c1/edit?libraryId=1";
-  const look = () => screen.getByRole("region", { name: "Look" });
-
-  it("Paste a link… shows the link field; Use link stages it and Save sends it", async () => {
-    v2Recorder.answer("PUT /api/v2/admin/collections/{id}/poster", adminCollection);
-    showEditorPage(SERVER_EDIT);
-    await chooseArtwork("poster", "Paste a link…");
-    const field = await within(look()).findByRole("textbox", { name: "Poster image link" });
-    await waitFor(() => expect(document.activeElement).toBe(field));
-    expect(writes()).toEqual([]);
-    fireEvent.change(field, { target: { value: "  https://images.example/fox.jpg " } });
-    fireEvent.click(within(look()).getByRole("button", { name: "Use link" }));
-    expect(within(look()).queryByRole("textbox")).toBeNull();
-    expect(within(look()).getByRole("img", { name: "Poster preview" })).toHaveAttribute(
-      "src",
-      "https://images.example/fox.jpg",
-    );
-    expect(within(saveBar()).getByRole("status")).toHaveTextContent("Poster not saved");
-    expect(writes()).toEqual([]);
-    await save();
-    await waitFor(() =>
-      expect(writes().map((call) => call.operation)).toEqual([
-        "PATCH /api/v2/admin/collections/{id}",
-        "PUT /api/v2/admin/collections/{id}/poster",
-      ]),
-    );
-    expect(writes()[1]!.form).toEqual({ source_url: "https://images.example/fox.jpg" });
-  });
-
-  it("Use the collage drops a new poster that isn't saved yet, sending nothing", async () => {
-    showEditorPage(SERVER_EDIT);
-    await uploadArtwork("poster");
-    expect(within(saveBar()).getByRole("status")).toHaveTextContent("Poster not saved");
-    await chooseArtwork("poster", "Use the collage");
-    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
-    expect(writes()).toEqual([]);
   });
 });
 

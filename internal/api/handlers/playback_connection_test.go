@@ -16,7 +16,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
-	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
@@ -74,8 +74,11 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 		return *kbps, *observed, true
 	}
 
+	// Only a request that would record asks whether a transcode paced it:
+	// for a remote transcode that is a call to its node.
+	notAsked := func() bool { t.Fatal("asked whether a transcode paced a request that records nothing"); return false }
 	lowered := request(playback.BandwidthEstimateObservedRebufferV3, new(44100), "")
-	if limit, err := h.applyLearnedLimit(r, &lowered, true); err != nil || limit == nil || limit.Kbps != 44100 {
+	if limit, err := h.applyLearnedLimit(r, &lowered, true, nil); err != nil || limit == nil || limit.Kbps != 44100 {
 		t.Fatalf("client lowering: limit=%+v err=%v", limit, err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE playback_connections SET observed_at = now() - interval '1 hour' WHERE user_id = $1`, user); err != nil {
@@ -86,7 +89,7 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	// it plans with min(estimate, limit) and records nothing.
 	for _, tc := range []struct{ sent, planned int }{{50000, 44100}, {44100, 44100}, {30000, 30000}} {
 		kept := request("", new(tc.sent), "")
-		if _, err := h.applyLearnedLimit(r, &kept, true); err != nil || kept.BandwidthEstimateKbps == nil || *kept.BandwidthEstimateKbps != tc.planned {
+		if _, err := h.applyLearnedLimit(r, &kept, true, notAsked); err != nil || kept.BandwidthEstimateKbps == nil || *kept.BandwidthEstimateKbps != tc.planned {
 			t.Fatalf("kept estimate %d planned %v, want %d (err %v)", tc.sent, kept.BandwidthEstimateKbps, tc.planned, err)
 		}
 	}
@@ -94,11 +97,11 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 		t.Fatalf("a kept estimate changed the limit: kbps=%d observed=%v", kbps, observed)
 	}
 	probed := request(playback.BandwidthEstimateProbeV3, new(20000), "")
-	if limit, err := h.applyLearnedLimit(r, &probed, true); err != nil || limit != nil {
+	if limit, err := h.applyLearnedLimit(r, &probed, true, notAsked); err != nil || limit != nil {
 		t.Fatalf("lower probe: limit=%+v err=%v", limit, err)
 	}
 	for _, replay := range []playback.StartRequestV3{lowered, probed} {
-		if _, err := h.applyLearnedLimit(r, &replay, false); err != nil {
+		if _, err := h.applyLearnedLimit(r, &replay, false, notAsked); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -108,13 +111,13 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 
 	cleared := request("", nil, playback.LearnedLimitClearV3)
 	replayedClear := cleared
-	if _, err := h.applyLearnedLimit(r, &replayedClear, false); err != nil {
+	if _, err := h.applyLearnedLimit(r, &replayedClear, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, ok := stored(); !ok {
 		t.Fatal("a replayed clear removed the limit")
 	}
-	if _, err := h.applyLearnedLimit(r, &cleared, true); err != nil {
+	if _, err := h.applyLearnedLimit(r, &cleared, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, ok := stored(); ok {
@@ -124,11 +127,23 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	// estimate plans with, and records, the throughput.
 	measured := request(playback.BandwidthEstimateObservedRebufferV3, new(44100), "")
 	measured.ObservedThroughputKbps = new(31000)
-	if _, err := h.applyLearnedLimit(r, &measured, true); err != nil {
+	if _, err := h.applyLearnedLimit(r, &measured, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if kbps, _, _ := stored(); kbps != 31000 || *measured.BandwidthEstimateKbps != 31000 {
 		t.Fatalf("measured lowering recorded %d and planned %d, want 31000", kbps, *measured.BandwidthEstimateKbps)
+	}
+
+	// A stall while the server's transcode had no lead over the client was
+	// paced by the encoder, not the link: the replan still plans under its
+	// estimate, but the device learns nothing from it.
+	_, observedBefore, _ := stored()
+	encoderBound := request(playback.BandwidthEstimateObservedRebufferV3, new(5163), "")
+	if _, err := h.applyLearnedLimit(r, &encoderBound, true, func() bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	if kbps, observed, _ := stored(); kbps != 31000 || !observed.Equal(observedBefore) || *encoderBound.BandwidthEstimateKbps != 5163 {
+		t.Fatalf("encoder-bound stall stored %d at %v and planned %d, want 31000 kept and 5163 planned", kbps, observed, *encoderBound.BandwidthEstimateKbps)
 	}
 
 	requireSeekRecoveryKeepsLimitV3(t, pool, user, stored)
@@ -234,243 +249,6 @@ func TestConnectionBudgetAppliesAdminCapDB(t *testing.T) {
 	}
 }
 
-func TestBufferedAutoPrefersCopyVersion(t *testing.T) {
-	source := v3HandlerFixtureFile(t)
-	source.Bitrate = 63000
-	source.VideoTracks[0].Bitrate = 63000
-	alternateValue := *source
-	alternate := &alternateValue
-	alternate.ID = 84
-	alternate.Bitrate = 31600
-	alternate.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
-	alternate.VideoTracks[0].Bitrate = 31600
-	h := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}})
-	h.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
-	req := v3HandlerStartRequest()
-	req.Capabilities.VideoDecode[0].MaxBitrateKbps = 100_000
-	req.QualityPreference = "auto"
-	req.BandwidthEstimateKbps = new(44100)
-	req.BandwidthEstimateSource = "observed_rebuffer"
-	req.ClientFeatures = append(req.ClientFeatures, playback.FeatureBufferingQualityV1)
-	req.AudioTrackID = playback.TrackIDV3(source.ID, "audio", 0)
-	r := httptest.NewRequest("POST", "/", nil).WithContext(newAuthorizedPlaybackContext())
-	chosen, next, _ := h.lowerBufferedVersion(r, req, source, 0, h.plannerSettingsV3(r.Context()))
-	if chosen.ID != alternate.ID {
-		t.Fatalf("selected %d, want lower original %d", chosen.ID, alternate.ID)
-	}
-	// A later replan resolves the selection against the file that plays.
-	if want := playback.TrackIDV3(alternate.ID, "audio", 0); next.AudioTrackID != want {
-		t.Fatalf("audio identity %q, want %q on the lower version", next.AudioTrackID, want)
-	}
-	req.AudioTrackID = ""
-	req.AllowAlternateVersions = new(false)
-	chosen, _, _ = h.lowerBufferedVersion(r, req, source, 0, h.plannerSettingsV3(r.Context()))
-	if chosen.ID != source.ID {
-		t.Fatal("fixed-file request changed version")
-	}
-	// Any Auto budget tries the version first: a speed test's, and a kept
-	// estimate a client repeats without a source.
-	req.AllowAlternateVersions = nil
-	for _, estimateSource := range []string{playback.BandwidthEstimateProbeV3, ""} {
-		req.BandwidthEstimateSource = estimateSource
-		if chosen, _, _ = h.lowerBufferedVersion(r, req, source, 0, h.plannerSettingsV3(r.Context())); chosen.ID != alternate.ID {
-			t.Fatalf("source %q selected %d, want lower original %d", estimateSource, chosen.ID, alternate.ID)
-		}
-	}
-}
-
-// TestBufferedAutoRefinesAudioOnTheLowerVersion: a start that names no audio
-// track refines its preference on the version that plays. The requested file's
-// E-AC-3 5.1 maps to the lower version's stereo AAC by position; refining the
-// TrueHD preference there keeps its 5.1 conversion instead.
-func TestBufferedAutoRefinesAudioOnTheLowerVersion(t *testing.T) {
-	source := v3HandlerFixtureFile(t)
-	source.Container, source.FilePath = "mkv", writePlaybackTestMediaFile(t, "movie-high.mkv")
-	source.Bitrate, source.VideoTracks[0].Bitrate = 63000, 63000
-	source.CodecAudio, source.AudioChannels = "truehd", 8
-	source.AudioTracks = []models.AudioTrack{
-		{Language: "en", Codec: "truehd", Channels: 8, Layout: "7.1", Default: true},
-		{Language: "en", Codec: "eac3", Channels: 6, Layout: "5.1(side)"},
-	}
-	alternateValue := *source
-	alternate := &alternateValue
-	alternate.ID, alternate.FilePath = 84, writePlaybackTestMediaFile(t, "movie-low.mkv")
-	alternate.Bitrate = 31600
-	alternate.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
-	alternate.VideoTracks[0].Bitrate = 31600
-	alternate.AudioTracks = []models.AudioTrack{
-		{Language: "en", Codec: "truehd", Channels: 8, Layout: "7.1", Default: true},
-		{Language: "en", Codec: "aac", Channels: 2, Layout: "stereo"},
-	}
-	h := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}})
-	h.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
-	h.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "true"}}
-	h.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
-	presetLocalRegistryV3(h, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
-		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
-	}))
-	h.ItemAccess = allowAllPlaybackItemAccess{}
-	h.InstallationID = serviceInstallation
-
-	req := v3HandlerStartRequest()
-	req.FileID = source.ID
-	req.QualityPreference = playback.QualityAutoV3
-	req.BandwidthEstimateKbps = new(44100)
-	req.ClientFeatures = append(req.ClientFeatures, playback.FeatureBufferingQualityV1)
-	req.Capabilities.CodecsAudio = []string{"aac", "ac3", "eac3"}
-	req.Capabilities.Containers = []string{"mkv", "matroska", "m3u8", "hls"}
-	req.Capabilities.VideoDecode[0].MaxBitrateKbps = 100_000
-	audio := []string{"aac", "ac3", "eac3"}
-	req.ClientPlaybackContext.Deliveries = map[string]playback.DeliveryCapabilityV3{
-		playback.DeliveryClassOriginalHTTPV3: {Enabled: true, SupportedOnDevice: true, Containers: []string{"mkv", "matroska"}, VideoCodecs: []string{"h264"}, AudioDecodeCodecs: audio, Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true}},
-		playback.DeliveryClassHLSV3:          {Enabled: true, SupportedOnDevice: true, Containers: []string{"m3u8", "hls"}, VideoCodecs: []string{"h264"}, AudioDecodeCodecs: audio, Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true}, Features: []string{playback.ClientNativeHLSPlaybackV3}},
-	}
-	caller := PlaybackCaller{UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation}
-	started, err := h.StartPlaybackV2(newAuthorizedPlaybackContext(), caller, req)
-	if err != nil || started.PlaybackPlan == nil {
-		t.Fatalf("start: err=%v response=%#v", err, started)
-	}
-	t.Cleanup(func() { h.tm.CloseTranscodeSession(started.SessionID, "") })
-	plan := started.PlaybackPlan
-	if plan.EffectiveMediaFileID != alternate.ID {
-		t.Fatalf("effective file %d, want the lower version %d", plan.EffectiveMediaFileID, alternate.ID)
-	}
-	if plan.SelectedTracks.Audio == nil || plan.SelectedTracks.Audio.Index == nil || *plan.SelectedTracks.Audio.Index != 0 ||
-		plan.EffectiveRecipe.AudioChannels == nil || *plan.EffectiveRecipe.AudioChannels != 6 {
-		t.Fatalf("audio %#v recipe %s %v, want track 0 as 5.1 AAC", plan.SelectedTracks.Audio, plan.EffectiveRecipe.AudioCodec, plan.EffectiveRecipe.AudioChannels)
-	}
-}
-
-// TestBufferedAutoPicksTheBestFittingVersion: of the versions within an Auto
-// budget, one that keeps the source's dynamic range plays first, then the
-// highest bitrate, whatever order the catalog lists them in (SDR and non-4K
-// first). A version the client would have to encode is passed over for the
-// 1080p SDR one.
-func TestBufferedAutoPicksTheBestFittingVersion(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		codec     string
-		hdr       bool
-		wantLower bool
-	}{
-		{"a lower HDR version keeps the picture HDR", "hevc", true, true},
-		{"a 4K SDR version beats a lower 1080p one", "h264", false, true},
-		{"a version the client cannot copy is passed over", "av1", true, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			handler, source, sdr, req := subtitleBlockedHDRFixtureV3(t)
-			lowerValue := *source
-			lower := &lowerValue
-			lower.ID, lower.FilePath, lower.CodecVideo, lower.Bitrate, lower.SubtitleTracks = 85, writePlaybackTestMediaFile(t, "movie-4k-lower.mkv"), tc.codec, 30_000, nil
-			track := source.VideoTracks[0]
-			track.Codec, track.Bitrate = tc.codec, 30_000
-			if !tc.hdr {
-				track.Profile, track.Level, track.BitDepth, track.VideoRange, track.VideoRangeType = "high", 51, 8, "SDR", "SDR"
-			}
-			lower.VideoTracks = []models.VideoTrack{track}
-			handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, sdr, lower}}}
-			req.ClientFeatures = append(req.ClientFeatures, playback.FeatureBufferingQualityV1)
-			req.Capabilities.VideoDecode = append(req.Capabilities.VideoDecode, playback.VideoDecodeCapabilityV3{
-				Codec: "h264", Profiles: []string{"high"}, Levels: []int{41, 51}, BitDepths: []int{8},
-				MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true,
-			})
-			req.BandwidthEstimateKbps, req.BandwidthEstimateSource = new(44100), playback.BandwidthEstimateProbeV3
-			r := httptest.NewRequest(http.MethodPost, "/", nil).WithContext(newAuthorizedPlaybackContext())
-			chosen, _, _ := handler.lowerBufferedVersion(r, req, source, 0, handler.plannerSettingsV3(r.Context()))
-			want := sdr.ID
-			if tc.wantLower {
-				want = lower.ID
-			}
-			if chosen.ID != want {
-				t.Fatalf("selected %d, want %d", chosen.ID, want)
-			}
-		})
-	}
-}
-
-func TestLearnedLimitAnnotationRequiresAdditionalReduction(t *testing.T) {
-	source := v3HandlerFixtureFile(t)
-	source.Bitrate = 63000
-	source.VideoTracks[0].Bitrate = 63000
-	request := v3HandlerStartRequest()
-	request.QualityPreference = playback.QualityAutoV3
-	request.BandwidthEstimateKbps = new(44100)
-	limit := &playback.BandwidthLimitV3{Kbps: 44100, Source: playback.BandwidthEstimateObservedRebufferV3}
-	for _, tc := range []struct {
-		name           string
-		delivered, cap int
-		annotated      bool
-	}{
-		{"lower original", 31600, 0, true},
-		{"unchanged source", 63000, 0, false},
-		{"admin cap already lower", 8000, 8000, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			result := playback.PlannerResultV3{Plan: &playback.PlanV3{}}
-			result.Plan.Source.BitrateKbps = tc.delivered
-			markLearnedLimit(&result, limit, source, request, tc.cap)
-			if (result.Plan.BandwidthLimit != nil) != tc.annotated {
-				t.Fatalf("annotation=%+v", result.Plan.BandwidthLimit)
-			}
-		})
-	}
-}
-
-// TestBufferedReplansGoLowerToAVersion: an HDR source without a tone-map route
-// cannot be transcoded, so Auto under a buffering budget must play a lower
-// version instead of returning the source. An output change, in either form,
-// returns to the requested edition first, and must not carry the stalled
-// source back while the learned limit (here sent as the observed estimate it
-// becomes) applies.
-func TestBufferedReplansGoLowerToAVersion(t *testing.T) {
-	handler, source, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
-	handler.InstallationID = serviceInstallation
-	startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
-	// The device decodes the 1080p H.264 version as it is.
-	startRequest.Capabilities.VideoDecode = append(startRequest.Capabilities.VideoDecode, v3HandlerStartRequest().Capabilities.VideoDecode[0])
-	caller := PlaybackCaller{UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation}
-	ctx := newAuthorizedPlaybackContext()
-	started, err := handler.StartPlaybackV2(ctx, caller, startRequest)
-	if err != nil || started.PlaybackPlan == nil || started.PlaybackPlan.EffectiveMediaFileID != source.ID {
-		t.Fatalf("start: err=%v response=%#v", err, started)
-	}
-	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
-
-	plan := started.PlaybackPlan
-	// Android reports an output move as a failure recovery classified
-	// output_route_changed, with the new output context.
-	movedOutput := startRequest.ClientPlaybackContext
-	movedOutput.Output.OutputContextID = "output-after-route-change"
-	for i, step := range []struct {
-		operation playback.ReplanOperationV3
-		failure   playback.FailureV3
-		context   playback.ClientPlaybackContextV3
-	}{
-		{playback.ReplanOperationQualityChangeV3, playback.FailureV3{}, startRequest.ClientPlaybackContext},
-		{playback.ReplanOperationOutputChangeV3, playback.FailureV3{}, startRequest.ClientPlaybackContext},
-		{playback.ReplanOperationFailureRecoveryV3, playback.FailureV3{Classification: "output_route_changed"}, movedOutput},
-	} {
-		operation := step.operation
-		replan := playback.ReplanRequestV3{
-			ProtocolVersion: playback.ProtocolV3, Operation: operation, Failure: step.failure,
-			PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: fmt.Sprintf("buffered-replan-%04d", i),
-			FailedPlanID: plan.PlanID, PlanAttemptID: fmt.Sprintf("buffered-attempt-%04d", i),
-			PlanAttemptKey: plan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 30,
-			QualityPreference: playback.QualityAutoV3, SelectedTracks: plan.SelectedTracks,
-			BandwidthEstimateKbps: new(44100), BandwidthEstimateSource: playback.BandwidthEstimateObservedRebufferV3,
-			ClientFeatures: startRequest.ClientFeatures, Capabilities: startRequest.Capabilities, ClientPlaybackContext: step.context,
-		}
-		response, err := handler.ReplanPlaybackV2(ctx, caller, started.SessionID, PlaybackReplanCommand{Request: replan, Digest: fmt.Sprintf("buffered-digest-%d", i)})
-		if err != nil || response.PlaybackPlan == nil {
-			t.Fatalf("%s: err=%v response=%#v", operation, err, response)
-		}
-		plan = response.PlaybackPlan
-		if plan.EffectiveMediaFileID != alternate.ID || plan.Delivery == playback.DeliveryTranscodeHLSV3 {
-			t.Fatalf("%s played file %d by %s with warnings %v, want the lower version %d without encoding", operation, plan.EffectiveMediaFileID, plan.Delivery, plan.DegradationWarnings, alternate.ID)
-		}
-	}
-}
-
 // TestLearnedLimitCarriesThroughReplansDB: a lowering records the limit, and a
 // later output change that sends no estimate still plans under it from the
 // store, stays on the lower version and reports bandwidth_limit.
@@ -485,6 +263,7 @@ func TestLearnedLimitCarriesThroughReplansDB(t *testing.T) {
 	handler, _, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
 	handler.InstallationID = serviceInstallation
 	handler.JWTSecret = "learned-limit-replans-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("learned-limit-replans-secret")
 	handler.Connections = &connectionstore.Store{Pool: pool}
 	startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
 	startRequest.Capabilities.VideoDecode = append(startRequest.Capabilities.VideoDecode, v3HandlerStartRequest().Capabilities.VideoDecode[0])
@@ -554,6 +333,7 @@ func TestLearnedLimitMarksOnlyAStartItLoweredDB(t *testing.T) {
 			handler, source, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
 			handler.InstallationID = serviceInstallation
 			handler.JWTSecret = "learned-limit-starts-secret"
+			handler.NodeKeys = nodeauthtest.SameKey("learned-limit-starts-secret")
 			handler.Connections = &connectionstore.Store{Pool: pool}
 			startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
 			h264 := v3HandlerStartRequest().Capabilities.VideoDecode[0]
@@ -629,6 +409,7 @@ func TestLearnedLimitMarksOnlyAReplanItLoweredDB(t *testing.T) {
 			handler, source, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
 			handler.InstallationID = serviceInstallation
 			handler.JWTSecret = "learned-limit-replan-marks-secret"
+			handler.NodeKeys = nodeauthtest.SameKey("learned-limit-replan-marks-secret")
 			handler.Connections = &connectionstore.Store{Pool: pool}
 			startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
 			h264 := v3HandlerStartRequest().Capabilities.VideoDecode[0]
@@ -709,7 +490,7 @@ func TestConnectionReadingsDB(t *testing.T) {
 	t.Cleanup(func() { _, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM users WHERE id = $1`, user) })
 
 	connections := &connectionstore.Store{Pool: pool}
-	h := &PlaybackHandler{Connections: connections, JWTSecret: "connection-readings-secret"}
+	h := &PlaybackHandler{Connections: connections, JWTSecret: "connection-readings-secret", NodeKeys: nodeauthtest.SameKey("connection-readings-secret")}
 	remote := clientip.SetContext(apimw.SetClaims(ctx, &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess}), "203.0.113.7")
 	key, _ := connectionstore.Key(remote, h.JWTSecret)
 	if err := h.ReportPlaybackProbe(remote, "tv-1", connectionstore.ProbeResult{Kbps: 48000, Bytes: 3000000, DurationMS: 500, Transport: "ethernet", LowerBound: true}); err != nil {
@@ -766,5 +547,91 @@ func TestConnectionReadingsDB(t *testing.T) {
 	}
 	if got := estimated(nil, ""); got != nil {
 		t.Fatalf("expired readings planned under %d, want no estimate", *got)
+	}
+}
+
+// A transcode on a remote node is judged by the node that runs it. When the
+// core cannot get that answer, the node may be gone or failing, which stalls
+// the client whatever its link: the stall counts as the server's and no limit
+// is learned from it. So does any node on the route the replan found not
+// answering, and an HLS session whose transcode runs nowhere the replica can
+// see. A session with no transcode, such as direct play, still records.
+func TestTranscodeOutputBoundAsksTheRemoteNode(t *testing.T) {
+	const transportID = "session-remote-plan0001"
+	for _, tc := range []struct {
+		name        string
+		status      int
+		body        string
+		unreachable bool
+		// deadProxy is an egress proxy the replan found not answering.
+		deadProxy bool
+		local     bool
+		hls       bool
+		// direct is original-file playback, which has no transcode.
+		direct bool
+		// gone is a playback session removed while the replan ran.
+		gone        bool
+		progressive bool
+		want        bool
+	}{
+		{name: "node reports the client waiting on the encoder", status: http.StatusOK, body: `{"output_bound":true}`, want: true},
+		{name: "node reports the encoder ahead", status: http.StatusOK, body: `{"output_bound":false}`, want: false},
+		{name: "node does not run the transport", status: http.StatusNotFound, want: true},
+		{name: "node fails the read", status: http.StatusServiceUnavailable, want: true},
+		{name: "node answers garbage", status: http.StatusOK, body: `not json`, want: true},
+		{name: "replan found the node unreachable", status: http.StatusOK, body: `{"output_bound":false}`, unreachable: true, want: true},
+		{name: "direct play with no transcode on this replica or a node", local: true, direct: true, want: false},
+		{name: "direct play through an egress proxy the replan found unreachable", local: true, direct: true, deadProxy: true, want: true},
+		// The session plays HLS, but its transcode is on no node and not on
+		// this replica, as while it is being rebuilt: the answer is unknown.
+		{name: "HLS session with no transcode on this replica or a node", local: true, hls: true, want: true},
+		{name: "playback session gone while the replan ran", local: true, gone: true, want: true},
+		{name: "remote progressive remux on a node the replan found unreachable", status: http.StatusNotFound, progressive: true, unreachable: true, want: true},
+		// A progressive remux has no segment lead, as on this replica, and
+		// its request may already have ended, so the node is not asked.
+		{name: "remote progressive remux", status: http.StatusNotFound, progressive: true, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var asked, signed bool
+			node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				asked = r.Method == http.MethodGet && r.URL.Path == "/transcode/"+transportID+"/output-bound"
+				signed = nodeauthtest.Signed(r, "test-secret")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer node.Close()
+			manager := playback.NewSessionManager(0, 0)
+			session := &playback.Session{ID: "session-remote", UserID: 7, ProfileID: "profile-1", PlayMethod: playback.PlayTranscode}
+			if !tc.local {
+				session.TranscodeNodeURL, session.TranscodeTransportID = node.URL, transportID
+			}
+			if tc.progressive {
+				session.OutputContainer, session.OutputProtocol = playback.OutputContainerFMP4, playback.OutputProtocolHTTP
+			}
+			if tc.direct {
+				session.PlayMethod, session.OutputProtocol = playback.PlayDirect, playback.OutputProtocolHTTP
+			}
+			if tc.hls {
+				session.OutputProtocol = playback.OutputProtocolHLS
+			}
+			if !tc.gone {
+				manager.RegisterReconstructed(session)
+			}
+			handler := newKeyedPlaybackHandler(manager)
+			var unreachable map[string]struct{}
+			if tc.unreachable {
+				unreachable = map[string]struct{}{node.URL: {}}
+			}
+			if tc.deadProxy {
+				unreachable = map[string]struct{}{"http://egress-proxy.invalid": {}}
+			}
+
+			if got := handler.transcodeOutputBoundV3(t.Context(), session.ID, unreachable); got != tc.want {
+				t.Fatalf("output bound = %v, want %v", got, tc.want)
+			}
+			if wantAsked := !tc.local && !tc.unreachable && !tc.progressive; asked != wantAsked || (asked && !signed) {
+				t.Fatalf("node asked = %v (signed %v), want asked %v and signed", asked, signed, wantAsked)
+			}
+		})
 	}
 }

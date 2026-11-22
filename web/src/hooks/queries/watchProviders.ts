@@ -207,7 +207,7 @@ export async function fetchWatchProviders() {
   return { providers: result.items as WatchProviderSummary[] };
 }
 
-export async function fetchWatchProviderConnection(provider: string) {
+async function fetchWatchProviderConnection(provider: string) {
   const profileContext = captureProfileRequestContext();
   const scope = profileContext ? { profileContext } : {};
   const result = await v2("GET /api/v2/watch-providers/{provider}/connection", {
@@ -343,10 +343,7 @@ function isActiveSyncRun(run: WatchProviderSyncRun) {
 // was seen: either the run previously seen as queued or running, or a newer
 // run already final when first seen, such as a scheduled run that started and
 // ended between two reads. The first read of the page is never a completion.
-export function syncRunFinished(
-  previous: WatchProviderSyncRun | undefined,
-  latest: WatchProviderSyncRun,
-) {
+function syncRunFinished(previous: WatchProviderSyncRun | undefined, latest: WatchProviderSyncRun) {
   if (previous === undefined || isActiveSyncRun(latest)) return false;
   return previous.id === latest.id ? isActiveSyncRun(previous) : true;
 }

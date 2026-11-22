@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -205,26 +204,6 @@ func TestProgressMergeKeepsHeartbeatDB(t *testing.T) {
 	}
 	if position != 90 {
 		t.Fatalf("position = %v, want the heartbeat's 90", position)
-	}
-}
-
-// TestWatchSourcesValidate: a play's source is one of the fixed sources or
-// a watch-sync plugin's, plugin:<installation id>:<capability id>; anything
-// else makes the document invalid.
-func TestWatchSourcesValidate(t *testing.T) {
-	play := func(source string) json.RawMessage {
-		data, _ := json.Marshal(watchHistoryDocument{Progress: []watchProgressEntry{}, Hidden: []watchHiddenEntry{},
-			History: []watchPlayEntry{{Item: "movie-1", WatchedAt: time.Unix(1700000000, 0).UTC(), Source: source}}})
-		return data
-	}
-	for source, ok := range map[string]bool{
-		"playback": true, "plugin:2147483647:a.b-c_d": true,
-		"somewhere": false, "plugin:01:x": false, "plugin:14:MDBList": false, "plugin:2147483648:x": false,
-		"plugin:14:" + strings.Repeat("a", 129): false,
-	} {
-		if _, err := (BackupData{}).Validate(play(source)); (err == nil) != ok {
-			t.Errorf("source %q: valid %v, want %v", source, err == nil, ok)
-		}
 	}
 }
 

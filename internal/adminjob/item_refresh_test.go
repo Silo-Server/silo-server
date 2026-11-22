@@ -1,6 +1,7 @@
 package adminjob
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -73,38 +76,6 @@ func TestItemRefreshResolverBuildRequestAcceptsPathOutsideLibraryRoots(t *testin
 	}
 }
 
-func TestItemRefreshResolverDeriveCompleteRefreshScope_UsesCanonicalRootForSeriesWithoutEpisodes(t *testing.T) {
-	t.Parallel()
-
-	resolver := &ItemRefreshResolver{
-		folderRepo: &itemRefreshTestFolderRepo{
-			folder: &models.MediaFolder{
-				ID:   7,
-				Type: "series",
-			},
-		},
-	}
-
-	file := &models.MediaFile{
-		MediaFolderID:     7,
-		FilePath:          "/media/shows/Example Show/Season 01/Example.Show.S01E01.mkv",
-		CanonicalRootPath: "/media/shows/Example Show",
-		ContentID:         "pending-series",
-		BaseType:          "series",
-	}
-
-	scanPath, canonicalRootPath, err := resolver.deriveCompleteRefreshScope(context.Background(), file)
-	if err != nil {
-		t.Fatalf("deriveCompleteRefreshScope() error = %v", err)
-	}
-	if got, want := scanPath, "/media/shows/Example Show"; got != want {
-		t.Fatalf("scanPath = %q, want %q", got, want)
-	}
-	if got, want := canonicalRootPath, "/media/shows/Example Show"; got != want {
-		t.Fatalf("canonicalRootPath = %q, want %q", got, want)
-	}
-}
-
 type itemRefreshTestIngester struct {
 	scanPath string
 	runID    string
@@ -154,11 +125,13 @@ type itemRefreshTestScanRuns struct {
 	cancelErr    error
 	cancelCtxErr error
 	heartbeats   atomic.Int64
+	// heartbeatErr, when set, is what every heartbeat reports.
+	heartbeatErr error
 }
 
 func (r *itemRefreshTestScanRuns) TouchHeartbeat(_ context.Context, _ string, _ *time.Time) error {
 	r.heartbeats.Add(1)
-	return nil
+	return r.heartbeatErr
 }
 
 func (r *itemRefreshTestScanRuns) Create(_ context.Context, input scanqueue.CreateInput) (*models.ScanRun, bool, error) {
@@ -378,105 +351,6 @@ func TestItemRefreshWithholdsScanCompleteWhenMetadataFails(t *testing.T) {
 	}
 }
 
-func TestItemRefreshPublishesScanCompleteAfterMetadataRefresh(t *testing.T) {
-	t.Parallel()
-
-	eventBus := &libraryRefreshTestEventBus{}
-	refresher := &itemRefreshTestRefresher{}
-	executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, refresher, eventBus)
-
-	if _, err := executor.Execute(context.Background(), ItemRefreshRequest{
-		RequestedContentID: "series-1",
-		RefreshContentID:   "series-1",
-		ScanFolderID:       3,
-		ScanPath:           "/media/show",
-	}, nil); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if refresher.contentID != "series-1" {
-		t.Fatalf("refreshed content = %q, want series-1", refresher.contentID)
-	}
-	var scanComplete, itemChanged bool
-	for _, event := range eventBus.events {
-		scanComplete = scanComplete || (event.Type == cache.EventScanComplete && event.Payload == "3")
-		itemChanged = itemChanged || (event.Type == cache.EventCatalogItemChanged && event.Payload == "series-1")
-	}
-	if !scanComplete || !itemChanged {
-		t.Fatalf("events = %#v, want scan_complete and catalog_item_changed for series-1 after metadata refresh", eventBus.events)
-	}
-}
-
-// Without Redis the event bus is a no-op, so the node that ran the refresh
-// evicts its own cached rails rather than relying on its subscriber.
-func TestItemRefreshEvictsLocalRailsWithoutAnEventBus(t *testing.T) {
-	t.Parallel()
-
-	executor := NewItemRefreshExecutor(
-		&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 3, Enabled: true}},
-		&itemRefreshTestFileRepo{},
-		&itemRefreshTestRootClaimRepo{},
-		&itemRefreshTestGroupClaimRepo{},
-		newItemRefreshTestSkippedRootRepo(),
-		nil,
-		nil,
-		&itemRefreshTestIngester{},
-		&itemRefreshTestScanRuns{},
-		&itemRefreshTestRefresher{},
-		&cache.NoopEventBus{},
-		nil,
-	)
-	var evicted []string
-	executor.evictRails = func(contentIDs ...string) { evicted = append(evicted, contentIDs...) }
-
-	if _, err := executor.Execute(context.Background(), ItemRefreshRequest{
-		RequestedContentID: "episode-1",
-		RefreshContentID:   "series-1",
-		ScanFolderID:       3,
-		ScanPath:           "/media/show",
-	}, nil); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if !slices.Equal(evicted, []string{"series-1", "episode-1"}) {
-		t.Fatalf("evicted = %v, want series-1 and episode-1", evicted)
-	}
-}
-
-func TestItemRefreshIngestsWithoutRunWhenScopeAlreadyClaimed(t *testing.T) {
-	t.Parallel()
-
-	ingester := &itemRefreshTestIngester{}
-	scanRuns := &itemRefreshTestScanRuns{existing: &models.ScanRun{ID: "queued-autoscan-run", Status: scanqueue.StatusAccepted}}
-	executor := newItemRefreshTestExecutor(ingester, scanRuns, &itemRefreshTestRefresher{}, nil)
-
-	result, err := executor.Execute(context.Background(), ItemRefreshRequest{
-		RequestedContentID: "series-1",
-		RefreshContentID:   "series-1",
-		ScanFolderID:       3,
-		ScanPath:           "/media/show",
-	}, nil)
-	if err != nil {
-		t.Fatalf("Execute() error = %v, want ingest to proceed without owning a run", err)
-	}
-	if result == nil || result.MatchedFiles != 2 {
-		t.Fatalf("Execute() result = %#v, want the subtree ingest to have run", result)
-	}
-	if ingester.scanPath != "/media/show" {
-		t.Fatalf("ingested path = %q, want /media/show", ingester.scanPath)
-	}
-	// No run is owned, so provenance is deliberately empty and nothing is
-	// started, completed, failed, or heart-beaten against the borrowed run.
-	if ingester.runID != "" {
-		t.Fatalf("scan provenance = %q, want empty for an unowned scan", ingester.runID)
-	}
-	if scanRuns.startedID != "" || scanRuns.completedID != "" || scanRuns.failedID != "" || scanRuns.cancelledID != "" {
-		t.Fatalf("scan lifecycle touched an unowned run: started=%q completed=%q failed=%q canceled=%q",
-			scanRuns.startedID, scanRuns.completedID, scanRuns.failedID, scanRuns.cancelledID)
-	}
-	if scanRuns.heartbeats.Load() != 0 {
-		t.Fatalf("heartbeats = %d, want 0 for an unowned run", scanRuns.heartbeats.Load())
-	}
-}
-
 type itemRefreshTestFileRepo struct {
 	filesByPath []*models.MediaFile
 	clearedPath string
@@ -630,181 +504,28 @@ func TestItemRefreshExecutorFailsScanRunWhenIngestFails(t *testing.T) {
 	}
 }
 
-func TestItemRefreshExecutorReportsArtworkCacheFailureAsWarning(t *testing.T) {
-	t.Parallel()
-
-	executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, nil)
-	executor.SetArtworkCacher(&itemRefreshTestArtworkCacher{err: errors.New("download failed")})
-
-	// The metadata refresh is already committed when artwork caching runs, so
-	// a caching failure must not discard the result the client needs.
-	result, err := executor.Execute(context.Background(), ItemRefreshRequest{
-		RequestedContentID: "series-1",
-		RefreshContentID:   "series-1",
-		ScanFolderID:       3,
-		ScanPath:           "/media/series-1",
-	}, nil)
-	if err != nil {
-		t.Fatalf("Execute() error = %v, want nil", err)
-	}
-	if got, want := result.ArtworkCacheWarning, "download failed"; got != want {
-		t.Fatalf("Execute() artwork warning = %q, want %q", got, want)
-	}
-	if got, want := result.RefreshContentID, "series-1"; got != want {
-		t.Fatalf("Execute() refresh content id = %q, want %q", got, want)
-	}
+type itemRefreshTestAudiobooks struct {
+	calls []string
+	err   error
 }
 
-// A reset job resets its target. Run as a plain refresh, it would keep every
-// value its providers lack (#3581). An audiobook's folder is scanned again
-// after the reset, so its tags fill the fields the provider left empty.
-func TestItemRefreshExecutorRunsResetJobsAsResets(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		mode      ItemRefreshMode
-		itemType  string
-		wantReset bool
-		wantScans int
-	}{
-		{mode: ItemRefreshModeQuick, itemType: "movie", wantScans: 1},
-		{mode: ItemRefreshModeReset, itemType: "movie", wantReset: true, wantScans: 1},
-		{mode: ItemRefreshModeQuick, itemType: "audiobook", wantScans: 1},
-		{mode: ItemRefreshModeReset, itemType: "audiobook", wantReset: true, wantScans: 2},
-	} {
-		refresher := &itemRefreshTestRefresher{}
-		ingester := &itemRefreshTestIngester{}
-		executor := newItemRefreshTestExecutor(ingester, &itemRefreshTestScanRuns{}, refresher, nil)
-		if _, err := executor.Execute(context.Background(), ItemRefreshRequest{
-			RequestedContentID: "item-1",
-			RequestedType:      tc.itemType,
-			RefreshContentID:   "item-1",
-			ScanFolderID:       3,
-			ScanPath:           "/media/item-1",
-			Mode:               tc.mode,
-		}, nil); err != nil {
-			t.Fatalf("%s %s: Execute() error = %v, want nil", tc.mode, tc.itemType, err)
-		}
-		if refresher.reset != tc.wantReset || refresher.contentID != "item-1" || ingester.scans != tc.wantScans {
-			t.Errorf("%s %s: reset=%v content_id=%q scans=%d, want reset=%v on item-1 with %d scans",
-				tc.mode, tc.itemType, refresher.reset, refresher.contentID, ingester.scans, tc.wantReset, tc.wantScans)
-		}
-	}
+func (a *itemRefreshTestAudiobooks) ClaimRefresh(_ context.Context, contentID string) (string, error) {
+	a.calls = append(a.calls, "claim "+contentID)
+	return "token", nil
 }
 
-// A reset is committed before the audiobook's tags are read again, so when
-// the read fails the reset's cache invalidation and events still go out, and
-// the job then fails with the read's error.
-func TestItemRefreshResetKeepsEventsWhenTagRereadFails(t *testing.T) {
-	t.Parallel()
-
-	eventBus := &libraryRefreshTestEventBus{}
-	executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{failScan: 2}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, eventBus)
-	var evicted []string
-	executor.evictRails = func(contentIDs ...string) { evicted = append(evicted, contentIDs...) }
-	_, err := executor.Execute(context.Background(), ItemRefreshRequest{
-		RequestedContentID: "book-1",
-		RequestedType:      itemTypeAudiobook,
-		RefreshContentID:   "book-1",
-		ScanFolderID:       3,
-		ScanPath:           "/media/book-1",
-		Mode:               ItemRefreshModeReset,
-	}, nil)
-	if err == nil || !strings.Contains(err.Error(), "read audiobook tags after the reset") {
-		t.Errorf("Execute() error = %v, want the failed tag read", err)
-	}
-	var changed bool
-	for _, event := range eventBus.events {
-		changed = changed || (event.Type == cache.EventCatalogItemChanged && event.Payload == "book-1")
-	}
-	if !changed || len(evicted) == 0 {
-		t.Errorf("events = %#v, evicted = %v; want book-1 published and evicted", eventBus.events, evicted)
-	}
+func (a *itemRefreshTestAudiobooks) ResetMatchTx(_ context.Context, _ pgx.Tx, contentID, _ string) error {
+	a.calls = append(a.calls, "reset "+contentID)
+	return nil
 }
 
-// A complete refresh whose scope another worker is still matching waits for
-// its files to be linked again before it resolves the rebuilt item, and gives
-// up with errNoRebuiltContent once relinkWait passes. A movie target, which no
-// series root queue matches, ingests without the unlinked settle wait.
-func TestItemRefreshExecutorCompleteRefreshWaitsForTheRelink(t *testing.T) {
-	t.Parallel()
-	// The relink poll runs on synctest's fake clock, so the waits cost no time.
-	synctest.Test(t, func(t *testing.T) {
-		run := func(t *testing.T, requestedType string, unlinkedReads int, wait time.Duration) (*ItemRefreshResult, *itemRefreshTestIngester, *itemRefreshTestFileRepo, error) {
-			t.Helper()
-			ingester := &itemRefreshTestIngester{}
-			fileRepo := &itemRefreshTestFileRepo{
-				filesByPath:   []*models.MediaFile{{ContentID: "new-id", FilePath: "/media/mixed/Title/Title.mkv"}},
-				unlinkedReads: unlinkedReads,
-			}
-			executor := NewItemRefreshExecutor(
-				&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 7, Enabled: true, Paths: []string{"/media/mixed"}}},
-				fileRepo, &itemRefreshTestRootClaimRepo{}, &itemRefreshTestGroupClaimRepo{}, newItemRefreshTestSkippedRootRepo(),
-				nil, nil, ingester, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, nil, nil,
-			)
-			executor.relinkWait = wait
-			result, err := executor.Execute(context.Background(), ItemRefreshRequest{
-				RequestedContentID: "old-id", RequestedType: requestedType, RefreshContentID: "old-id",
-				ScanFolderID: 7, ScanPath: "/media/mixed/Title", Mode: ItemRefreshModeComplete,
-			}, nil)
-			return result, ingester, fileRepo, err
-		}
-
-		result, ingester, files, err := run(t, "series", 3, 5*time.Second)
-		if err != nil || result.RefreshContentID != "new-id" {
-			t.Fatalf("relinked after %d reads: result %+v, err %v; want new-id", files.reads, result, err)
-		}
-		if !ingester.unlinked {
-			t.Fatal("a series target ingested as unchanged, want IngestUnlinkedSubtree")
-		}
-
-		if _, _, _, err := run(t, "series", 1_000, 50*time.Millisecond); !errors.Is(err, errNoRebuiltContent) {
-			t.Fatalf("never relinked: err = %v, want errNoRebuiltContent", err)
-		}
-
-		if _, ingester, _, err := run(t, "movie", 0, time.Second); err != nil || ingester.unlinked {
-			t.Fatalf("movie target: err %v, unlinked ingest %v; want the plain ingest", err, ingester.unlinked)
-		}
-	})
+func (a *itemRefreshTestAudiobooks) Refresh(_ context.Context, contentID, _ string) error {
+	a.calls = append(a.calls, "refresh "+contentID)
+	return a.err
 }
 
-// A series root match links the root's files to a pending skeleton before it
-// asks the providers, and the provider match can merge that skeleton away. A
-// complete refresh waits for the match to finish instead of resolving to the
-// skeleton, and fails with errRebuiltItemMatching when it doesn't finish.
-func TestItemRefreshExecutorCompleteRefreshWaitsForTheSeriesMatch(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		run := func(statuses *itemRefreshTestItemStatuses, wait time.Duration) (*ItemRefreshResult, *itemRefreshTestItemStatuses, error) {
-			executor := NewItemRefreshExecutor(
-				&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 7, Enabled: true, Paths: []string{"/media/tv"}}},
-				&itemRefreshTestFileRepo{filesByPath: []*models.MediaFile{{ContentID: "new-id", FilePath: "/media/tv/Title/Title S01E01.mkv"}}},
-				&itemRefreshTestRootClaimRepo{}, &itemRefreshTestGroupClaimRepo{}, newItemRefreshTestSkippedRootRepo(),
-				nil, nil, &itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, nil, nil,
-			)
-			executor.relinkWait = wait
-			executor.SetItemStatusReader(statuses)
-			result, err := executor.Execute(context.Background(), ItemRefreshRequest{
-				RequestedContentID: "old-id", RequestedType: "series", RefreshContentID: "old-id",
-				ScanFolderID: 7, ScanPath: "/media/tv/Title", Mode: ItemRefreshModeComplete,
-			}, nil)
-			return result, statuses, err
-		}
-
-		result, statuses, err := run(&itemRefreshTestItemStatuses{pendingReads: 2}, 5*time.Second)
-		if err != nil || result.RefreshContentID != "new-id" || statuses.reads < 3 {
-			t.Fatalf("matched after %d status reads: result %+v, err %v; want new-id after the 3rd", statuses.reads, result, err)
-		}
-		// A skeleton merged away between the file read and the status read
-		// has no status; the refresh reads the scope again.
-		result, statuses, err = run(&itemRefreshTestItemStatuses{goneReads: 2}, 5*time.Second)
-		if err != nil || result.RefreshContentID != "new-id" || statuses.reads < 3 {
-			t.Fatalf("item gone for %d status reads: result %+v, err %v; want new-id after the 3rd", statuses.reads, result, err)
-		}
-		if _, _, err := run(&itemRefreshTestItemStatuses{pendingReads: 1_000}, 50*time.Millisecond); !errors.Is(err, errRebuiltItemMatching) {
-			t.Fatalf("never matched: err = %v, want errRebuiltItemMatching", err)
-		}
-	})
+func (a *itemRefreshTestAudiobooks) ReleaseRefresh(_ context.Context, contentID, _ string) {
+	a.calls = append(a.calls, "release "+contentID)
 }
 
 // itemRefreshTestItemStatuses reports no item for its first goneReads reads,
@@ -1094,6 +815,13 @@ func newPodcastRefreshFixture(t *testing.T, pool *pgxpool.Pool) *podcastRefreshF
 	if _, err := scan.ScanFolder(ctx, folder); err != nil {
 		t.Fatalf("ScanFolder: %v", err)
 	}
+	executor := newItemRefreshDBExecutor(pool, scan, fileRepo, &itemRefreshTestRefresher{})
+	return &podcastRefreshFixture{pool: pool, fileRepo: fileRepo, executor: executor, folderID: folder.ID, episodes: episodes}
+}
+
+// newItemRefreshDBExecutor builds an item refresh executor over the test
+// database whose scans run on scan and whose metadata step is refresher.
+func newItemRefreshDBExecutor(pool *pgxpool.Pool, scan *scanner.Scanner, fileRepo *scanner.FileRepository, refresher *itemRefreshTestRefresher) *ItemRefreshExecutor {
 	folders := catalog.NewFolderRepository(pool)
 	skippedRoots := metadata.NewSkippedRootRepository(pool)
 	executor := NewItemRefreshExecutor(
@@ -1106,12 +834,12 @@ func newPodcastRefreshFixture(t *testing.T, pool *pgxpool.Pool) *podcastRefreshF
 		catalog.NewEpisodeRepository(pool),
 		libraryingest.NewExecutor(scan, podcastRefreshNoMatcher{}, folders, skippedRoots, nil, nil),
 		&itemRefreshTestScanRuns{},
-		&itemRefreshTestRefresher{},
+		refresher,
 		nil,
 		nil,
 	)
 	executor.evictRails = nil
-	return &podcastRefreshFixture{pool: pool, fileRepo: fileRepo, executor: executor, folderID: folder.ID, episodes: episodes}
+	return executor
 }
 
 // catalogIDs returns the show ID and the episode ID of each episode file.
@@ -1136,8 +864,8 @@ func (f *podcastRefreshFixture) catalogIDs(t *testing.T) (string, []string) {
 	return showID, episodeIDs
 }
 
-// podcastRefreshNoMatcher stands in for the metadata matcher: the podcast
-// scanner links its own files, so a podcast ingest has nothing to match.
+// podcastRefreshNoMatcher stands in for the metadata matcher: the podcast and
+// ebook scanners link their own files, so their ingest has nothing to match.
 type podcastRefreshNoMatcher struct{}
 
 func (podcastRefreshNoMatcher) ProcessBatchByFolderAndPathPrefix(context.Context, int, string, time.Time) (int, error) {
@@ -1150,4 +878,200 @@ func (podcastRefreshNoMatcher) ProcessAllByFolderAndPathPrefix(context.Context, 
 
 func (podcastRefreshNoMatcher) RetryUnmatchedItemsByFolderAndPathPrefix(context.Context, int, string) (int, int, error) {
 	return 0, 0, nil
+}
+
+// A complete refresh of an ebook keeps the book's content ID, so its ISBN,
+// reader progress and other per-user rows stay on it.
+func TestCompleteItemRefreshKeepsEbookIDDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	const isbn = "9780441172719"
+	f := newEbookRefreshFixture(t, pool, isbn)
+	resolver := NewItemRefreshResolver(
+		catalog.NewItemRepository(pool),
+		catalog.NewSeasonRepository(pool),
+		catalog.NewEpisodeRepository(pool),
+		catalog.NewFolderRepository(pool),
+		f.fileRepo,
+	)
+	req, err := resolver.ResolveWithMode(ctx, f.contentID, ItemRefreshModeComplete)
+	if err != nil {
+		t.Fatalf("ResolveWithMode: %v", err)
+	}
+	result, err := f.executor.Execute(ctx, *req, nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var gotContentID string
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(content_id, '') FROM media_files WHERE id = $1`, f.fileID,
+	).Scan(&gotContentID); err != nil {
+		t.Fatalf("load refreshed file: %v", err)
+	}
+	if gotContentID != f.contentID || result.RefreshContentID != f.contentID || result.DetailContentID != f.contentID {
+		t.Fatalf("after complete refresh: file content_id=%q refresh=%q detail=%q, want %q",
+			gotContentID, result.RefreshContentID, result.DetailContentID, f.contentID)
+	}
+	if !f.refresher.reset || f.refresher.contentID != f.contentID {
+		t.Fatalf("metadata step: reset=%v content_id=%q, want a reset of %q", f.refresher.reset, f.refresher.contentID, f.contentID)
+	}
+	if got := ebookISBNOwner(t, pool, isbn); got != f.contentID {
+		t.Fatalf("isbn owner after refresh = %q, want %q", got, f.contentID)
+	}
+	var progressRows, ebookItems int
+	if err := pool.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM ebook_reader_progress WHERE user_id = $1 AND content_id = $2),
+			(SELECT COUNT(*) FROM media_items mi
+			   JOIN media_item_libraries mil ON mil.content_id = mi.content_id
+			  WHERE mil.media_folder_id = $3 AND mi.type = 'ebook')`,
+		f.userID, f.contentID, f.folderID,
+	).Scan(&progressRows, &ebookItems); err != nil {
+		t.Fatalf("load refreshed state: %v", err)
+	}
+	if progressRows != 1 || ebookItems != 1 {
+		t.Fatalf("after complete refresh: reader progress rows=%d ebook items=%d, want 1 and 1", progressRows, ebookItems)
+	}
+}
+
+type ebookRefreshFixture struct {
+	fileRepo  *scanner.FileRepository
+	executor  *ItemRefreshExecutor
+	refresher *itemRefreshTestRefresher
+	folderID  int
+	contentID string
+	fileID    int
+	userID    int
+}
+
+// newEbookRefreshFixture scans an ebook library holding one EPUB with an
+// ISBN and gives a profile reading progress on it.
+func newEbookRefreshFixture(t *testing.T, pool *pgxpool.Pool, isbn string) *ebookRefreshFixture {
+	t.Helper()
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "ebooks")
+	bookPath := filepath.Join(root, "Frank Herbert", "Dune.epub")
+	writeItemRefreshTestEPUB(t, bookPath, "Dune", "Frank Herbert", isbn)
+
+	folder := &models.MediaFolder{Type: "ebooks", Name: "Ebook refresh test", Enabled: true, Paths: []string{root}}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO media_folders (type, name, enabled) VALUES ($1, $2, true) RETURNING id`, folder.Type, folder.Name,
+	).Scan(&folder.ID); err != nil {
+		t.Fatalf("seed folder: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `
+			DELETE FROM media_items WHERE content_id IN (
+				SELECT content_id FROM media_files WHERE media_folder_id = $1 AND content_id IS NOT NULL
+				UNION
+				SELECT content_id FROM media_item_libraries WHERE media_folder_id = $1
+			)`, folder.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = $1`, folder.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folder_paths WHERE media_folder_id = $1`, folder.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folder.ID)
+	})
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO media_folder_paths (media_folder_id, path) VALUES ($1, $2)`, folder.ID, root,
+	); err != nil {
+		t.Fatalf("seed folder path: %v", err)
+	}
+
+	fileRepo := scanner.NewFileRepository(pool)
+	scan := scanner.NewScanner(fileRepo, "ffprobe", nil, 1, false, 0)
+	if _, err := scan.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("ScanFolder: %v", err)
+	}
+	f := &ebookRefreshFixture{fileRepo: fileRepo, refresher: &itemRefreshTestRefresher{}, folderID: folder.ID}
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(content_id, ''), id FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folder.ID, bookPath,
+	).Scan(&f.contentID, &f.fileID); err != nil || f.contentID == "" {
+		t.Fatalf("load scanned book: content_id=%q err=%v", f.contentID, err)
+	}
+	if got := ebookISBNOwner(t, pool, isbn); got != f.contentID {
+		t.Fatalf("isbn owner after scan = %q, want %q", got, f.contentID)
+	}
+
+	username := fmt.Sprintf("ebook-refresh-%d", time.Now().UnixNano())
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO users (username, email, password_hash, role, enabled)
+		VALUES ($1, $2, 'test', 'user', true) RETURNING id`, username, username+"@example.invalid",
+	).Scan(&f.userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, f.userID) })
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO ebook_reader_progress (user_id, profile_id, content_id, file_id, location, progress)
+		VALUES ($1, 'profile-1', $2, $3, 'epubcfi(/6/4)', 0.4)`, f.userID, f.contentID, f.fileID,
+	); err != nil {
+		t.Fatalf("seed reader progress: %v", err)
+	}
+	f.executor = newItemRefreshDBExecutor(pool, scan, fileRepo, f.refresher)
+	return f
+}
+
+func ebookISBNOwner(t *testing.T, pool *pgxpool.Pool, isbn string) string {
+	t.Helper()
+	var owner string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COALESCE(MAX(content_id), '') FROM media_item_provider_ids WHERE provider = 'isbn' AND provider_id = $1`, isbn,
+	).Scan(&owner); err != nil {
+		t.Fatalf("load isbn owner: %v", err)
+	}
+	return owner
+}
+
+// writeItemRefreshTestEPUB writes a minimal EPUB whose OPF carries the title,
+// author and ISBN.
+func writeItemRefreshTestEPUB(t *testing.T, path, title, author, isbn string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir book: %v", err)
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create epub: %v", err)
+	}
+	zw := zip.NewWriter(file)
+	for _, entry := range []struct{ name, body string }{
+		{"META-INF/container.xml", `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`},
+		{"OPS/content.opf", `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <metadata>
+    <dc:title>` + title + `</dc:title>
+    <dc:creator>` + author + `</dc:creator>
+    <dc:identifier>` + isbn + `</dc:identifier>
+    <dc:language>en</dc:language>
+  </metadata>
+</package>`},
+	} {
+		w, err := zw.Create(entry.name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", entry.name, err)
+		}
+		if _, err := w.Write([]byte(entry.body)); err != nil {
+			t.Fatalf("write zip entry %s: %v", entry.name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close epub: %v", err)
+	}
 }

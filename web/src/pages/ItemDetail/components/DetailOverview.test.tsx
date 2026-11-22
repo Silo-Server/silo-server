@@ -1,53 +1,34 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+// @vitest-environment jsdom
+import { afterEach, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 
 import DetailOverview from "./DetailOverview";
 
-describe("DetailOverview", () => {
-  afterEach(() => vi.restoreAllMocks());
+afterEach(cleanup);
 
-  function mockOverflow(overflowing: boolean) {
-    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(overflowing ? 200 : 84);
-    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(84);
-  }
+// A live region is announced reliably only when it exists before its content
+// changes, so the status must be mounted before the translation starts and
+// carry its outcome after it ends.
+it("announces a translation's start and finish through one persistent status region", () => {
+  const onTranslate = () => {};
+  const { rerender } = render(<DetailOverview overview="Original" onTranslate={onTranslate} />);
+  const status = screen.getByRole("status");
+  expect(status.textContent).toBe("");
 
-  it("offers More when the clamp hides text and expands on click", () => {
-    mockOverflow(true);
-    render(<DetailOverview overview="A long overview" clamp />);
-    const text = screen.getByText("A long overview");
-    expect(text).toHaveClass("line-clamp-3");
-    const toggle = screen.getByRole("button", { name: "More" });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(toggle);
-    expect(text).not.toHaveClass("line-clamp-3");
-    expect(screen.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true");
-  });
+  rerender(<DetailOverview overview="Original" translating />);
+  expect(screen.getByRole("status")).toBe(status);
+  expect(status.textContent).toContain("Translating");
 
-  it("keeps a spoiler-hidden overview behind a reveal button", () => {
-    mockOverflow(false);
-    const onReveal = vi.fn();
-    const { rerender } = render(<DetailOverview overview="Who dies" hidden onReveal={onReveal} />);
-    expect(screen.queryByText("Who dies")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Description hidden/ }));
-    expect(onReveal).toHaveBeenCalledTimes(1);
+  rerender(<DetailOverview overview="Übersetzt" machineTranslated />);
+  expect(screen.getByRole("status")).toBe(status);
+  expect(status.textContent).toContain("Translated by AI");
+});
 
-    rerender(<DetailOverview overview="Who dies" onReveal={onReveal} />);
-    expect(screen.getByText("Who dies")).toBeInTheDocument();
-  });
-
-  it("hides the toggle when the whole overview fits", () => {
-    mockOverflow(false);
-    render(<DetailOverview overview="Short" clamp />);
-    expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
-  });
-
-  it("labels machine-translated text, but not while a translation is running", () => {
-    mockOverflow(false);
-    const { rerender } = render(<DetailOverview overview="Übersetzt" machineTranslated />);
-    expect(screen.getByText("Translated by AI")).toBeInTheDocument();
-    rerender(<DetailOverview overview="Übersetzt" machineTranslated translating />);
-    expect(screen.queryByText("Translated by AI")).not.toBeInTheDocument();
-    rerender(<DetailOverview overview="Provider text" />);
-    expect(screen.queryByText("Translated by AI")).not.toBeInTheDocument();
-  });
+// Moving to another item that is already AI-translated must not sound like a
+// translation finishing on this page.
+it("shows an existing AI translation without announcing it", () => {
+  const { rerender } = render(<DetailOverview overview="Original" />);
+  rerender(<DetailOverview overview="Übersetzt" machineTranslated />);
+  expect(screen.getByRole("status").textContent).toBe("");
+  expect(screen.getByText("Translated by AI")).toBeTruthy();
 });

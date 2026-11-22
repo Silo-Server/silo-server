@@ -1,6 +1,8 @@
 import { CircleAlert } from "lucide-react";
 import "@/styles/player-hud.css";
+import { isTransientV2Error } from "@/api/v2/request";
 import { isSourceFallbackReason } from "@/api/v2/watchTogetherSourceFallback";
+import { readWatchTogetherCapabilities } from "@/api/v2/watchTogetherCapabilities";
 import { playbackCapabilitiesV2 } from "../start-v2";
 import { playerV2Origin } from "../player-v2";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -10,12 +12,13 @@ import type { PlaybackRealtimeEventEnvelope } from "../realtime-protocol";
 import { usePlaybackSession } from "../hooks/usePlaybackSession";
 import { useMarkerChangeGuard } from "../hooks/useMarkerChangeGuard";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
+import { resumeVersionForPlan } from "../utils/mediaTimeline";
 import { resolvePlayableSubtitles } from "../utils/playableSubtitles";
 import { patchVersionMarkers, resolveActiveVersionMarkers } from "../utils/watchPageMarkers";
 import { VideoPlayer } from "./VideoPlayer";
 import { PlayerLoadingCover } from "./PlayerLoadingCover";
 import { fetchWatchDetail } from "@/hooks/queries/items";
-import { transientTrickplayError, useWatchTrickplay } from "@/hooks/queries/trickplay";
+import { useWatchTrickplay } from "@/hooks/queries/trickplay";
 import { itemKeys } from "@/hooks/queries/keys";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useWatchTogetherRoomConnection } from "../hooks/useWatchTogetherRoomConnection";
@@ -78,25 +81,41 @@ export function WatchPage(props: WatchPageProps) {
   );
 }
 
+// A server that serves rooms but advertises no room socket is current but has
+// no Redis, which the room socket's one-time handshake credentials need. An
+// older server, or a failed read, keeps the generic "needs an update" text.
+async function watchPartyNeedsRedis(): Promise<boolean> {
+  try {
+    const caps = await readWatchTogetherCapabilities();
+    return caps.state === "available" && caps.socket_protocol === "";
+  } catch {
+    return false;
+  }
+}
+
 function WatchPartyPlaybackGate(props: WatchPageProps) {
   const t = useT();
   const config = usePlayerConfig();
-  const [status, setStatus] = useState<"checking" | "supported" | "unsupported" | "failed">(
-    "checking",
-  );
+  const [status, setStatus] = useState<
+    "checking" | "supported" | "unsupported" | "redisRequired" | "failed"
+  >("checking");
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let cancelled = false;
     void playbackCapabilitiesV2(config)
-      .then(({ features }) => {
-        if (!cancelled) {
-          setStatus(
-            features.includes("watch_party_coordinator_v1") &&
-              features.includes("fixed_media_file_v1")
-              ? "supported"
-              : "unsupported",
-          );
+      .then(async ({ features }) => {
+        if (
+          features.includes("watch_party_coordinator_v1") &&
+          features.includes("fixed_media_file_v1")
+        ) {
+          return "supported" as const;
         }
+        return (await watchPartyNeedsRedis())
+          ? ("redisRequired" as const)
+          : ("unsupported" as const);
+      })
+      .then((next) => {
+        if (!cancelled) setStatus(next);
       })
       .catch(() => {
         if (!cancelled) setStatus("failed");
@@ -119,7 +138,9 @@ function WatchPartyPlaybackGate(props: WatchPageProps) {
           <p className="text-sm leading-relaxed text-[var(--hud-ash)]">
             {status === "unsupported"
               ? t("web.player.watchTogether.unsupported")
-              : t("web.player.watchTogether.checkFailed")}
+              : status === "redisRequired"
+                ? t("web.player.watchTogether.redisRequired")
+                : t("web.player.watchTogether.checkFailed")}
           </p>
         )}
         {status === "failed" && (
@@ -176,8 +197,6 @@ function WatchPagePlayer({
   showMarkerSource = false,
   bufferingMode = "always",
   autoSkipRecap,
-  autoPlayNextPreview,
-  autoPlayNext,
   canEditMarkers,
   seriesContext,
   onNavigateEpisode,
@@ -323,6 +342,12 @@ function WatchPagePlayer({
     () => playbackVersions.find((version) => version.file_id === session.mediaFileId),
     [playbackVersions, session.mediaFileId],
   );
+  const resumeVersion = resumeVersionForPlan(
+    playbackVersions,
+    session.plan?.requested_media_file_id,
+    activePlaybackVersion,
+    session.versionPinned(),
+  );
   const trickplayAvailable = activePlaybackVersion?.trickplay_available === true;
   const trickplayQuery = useWatchTrickplay(
     contentId,
@@ -332,7 +357,7 @@ function WatchPagePlayer({
   // A failed refresh retains query data. A terminal response withdraws the
   // cached previews; transient failures keep them until the query recovers.
   const trickplay =
-    trickplayAvailable && (!trickplayQuery.isError || transientTrickplayError(trickplayQuery.error))
+    trickplayAvailable && (!trickplayQuery.isError || isTransientV2Error(trickplayQuery.error))
       ? (trickplayQuery.data ?? null)
       : null;
   const refetchTrickplay = trickplayQuery.refetch;
@@ -373,17 +398,25 @@ function WatchPagePlayer({
 
   const versionPinned = session.versionPinned;
   const handleEnded = useCallback(() => {
+    const version = resumeVersion ?? activePlaybackVersion;
     onEnded?.({
       positionSeconds: session.durationSeconds ?? 0,
       durationSeconds: session.durationSeconds ?? undefined,
-      lastFileId: session.mediaFileId,
-      lastResolution: activePlaybackVersion?.resolution,
-      lastHDR: activePlaybackVersion?.hdr,
-      lastCodecVideo: activePlaybackVersion?.codec_video,
-      lastEditionKey: activePlaybackVersion?.edition_key,
+      lastFileId: resumeVersion?.file_id ?? session.mediaFileId,
+      lastResolution: version?.resolution,
+      lastHDR: version?.hdr,
+      lastCodecVideo: version?.codec_video,
+      lastEditionKey: version?.edition_key,
       versionPinned: versionPinned(),
     });
-  }, [activePlaybackVersion, onEnded, session.durationSeconds, session.mediaFileId, versionPinned]);
+  }, [
+    activePlaybackVersion,
+    onEnded,
+    resumeVersion,
+    session.durationSeconds,
+    session.mediaFileId,
+    versionPinned,
+  ]);
 
   const { saveAudioChoice, saveSubtitleChoice } = useTrackChoicePersistence({
     seriesId: seriesContext?.seriesId ?? contentId,
@@ -675,6 +708,7 @@ function WatchPagePlayer({
       replanErrorTitle={session.errorTitle}
       sessionId={session.sessionId}
       selectedVersion={selectedVersion}
+      resumeVersion={resumeVersion}
       versions={playbackVersions}
       activeFileId={session.mediaFileId}
       chapters={activeChapters}
@@ -721,8 +755,6 @@ function WatchPagePlayer({
       autoSkipRecap={autoSkipRecap}
       preview={activeMarkers.preview}
       markerSegments={selectedVersion?.marker_segments}
-      autoPlayNextPreview={autoPlayNextPreview}
-      autoPlayNext={autoPlayNext}
       canEditMarkers={canEditMarkers}
       onMarkersEdited={(editedFileId, markers) =>
         applyMarkerChange((current) =>

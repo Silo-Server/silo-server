@@ -17,6 +17,7 @@ import type {
   Person,
   PlaybackVariant,
   ResolvedSection,
+  SectionCollectionCard,
   Season,
   SeasonUserData,
   SectionItem,
@@ -91,6 +92,7 @@ export function catalogItemFromV2(item: CatalogItemV2): CatalogCardItem {
     sort_metrics: item.sort_metrics,
     badges: item.badges,
     user_state: item.user_state,
+    authors: item.authors,
     upcoming_event: item.upcoming_event
       ? {
           ...item.upcoming_event,
@@ -101,6 +103,23 @@ export function catalogItemFromV2(item: CatalogItemV2): CatalogCardItem {
     manga_volume_count: item.manga_volume_count,
     pending_translation_language: item.pending_translation_language,
     machine_translated_fields: item.machine_translated_fields,
+  };
+}
+
+/** A v2 collection card, as rows of collections and a title's "Also in" row carry it. */
+export function sectionCollectionCardFromV2(
+  card: components["schemas"]["SectionCollectionCard"],
+): SectionCollectionCard {
+  return {
+    id: card.id,
+    source: card.source,
+    title: card.title,
+    poster_url: card.poster_url,
+    poster_thumbhash: card.poster_thumbhash,
+    poster_is_collage: card.poster_is_collage,
+    item_count: card.item_count,
+    ...(card.library_id !== undefined && { library_id: Number(card.library_id) }),
+    ...(card.creator_profile_id && { creator_profile_id: card.creator_profile_id }),
   };
 }
 
@@ -115,6 +134,9 @@ export function sectionFromV2(section: SectionV2): ResolvedSection {
     is_custom: section.is_custom,
     customized: section.customized,
     items: section.items.map(catalogItemFromV2),
+    ...(section.collections?.length && {
+      collections: section.collections.map(sectionCollectionCardFromV2),
+    }),
     ...(section.has_more && { has_more: true }),
     ...sectionTitleKey(section),
   };

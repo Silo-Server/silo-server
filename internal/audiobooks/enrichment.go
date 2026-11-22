@@ -28,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -230,6 +231,7 @@ func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
 			SELECT 1
 			FROM media_items mi
 			WHERE mi.type = 'audiobook'
+			  AND mi.match_ignored_at IS NULL
 			  AND EXISTS (
 			      SELECT 1
 			      FROM media_item_libraries mil
@@ -385,6 +387,7 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 			SELECT mi.content_id
 			FROM media_items mi
 			WHERE mi.type = 'audiobook'
+			  AND mi.match_ignored_at IS NULL
 			  AND EXISTS (
 			      SELECT 1
 			      FROM media_item_libraries mil
@@ -450,9 +453,51 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 			)
 			RETURNING content_id, claim_token
 		)
-		SELECT
-			mi.content_id,
-			c.claim_token,
+		SELECT mi.content_id, c.claim_token, `+enrichmentItemColumns+`
+		FROM claimed c
+		JOIN media_items mi ON mi.content_id = c.content_id
+		ORDER BY mi.created_at ASC, mi.content_id ASC
+	`, e.batchSize, defaultEnrichClaimLease.Seconds(), audiobookNoMatchRetryLimit)
+	if err != nil {
+		return nil, fmt.Errorf("querying unenriched audiobooks: %w", err)
+	}
+	defer rows.Close()
+
+	var items []enrichmentItemRow
+	for rows.Next() {
+		var item enrichmentItemRow
+		if err := rows.Scan(append([]any{&item.ContentID, &item.ClaimToken}, item.columnTargets()...)...); err != nil {
+			return nil, fmt.Errorf("scanning audiobook enrichment row: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating audiobook enrichment rows: %w", err)
+	}
+
+	// Load any durable provider IDs for the batch in one query.
+	if e.providerIDs != nil && len(items) > 0 {
+		ids := make([]string, len(items))
+		for i := range items {
+			ids[i] = items[i].ContentID
+		}
+		pids, err := e.providerIDs.GetByContentIDs(ctx, ids)
+		if err != nil {
+			// The claim stands; the items search without their stored IDs.
+			slog.WarnContext(ctx, "audiobook enrichment: could not load provider IDs for the batch", "component", "audiobooks", "error", err)
+		}
+		for i := range items {
+			items[i].ProviderIDs = providerIDMapFromRows(pids[items[i].ContentID])
+		}
+	}
+
+	return items, nil
+}
+
+// enrichmentItemColumns are the media_items (alias mi) columns an
+// enrichmentItemRow holds after its content ID and claim token, in the order
+// columnTargets scans them.
+const enrichmentItemColumns = `
 			mi.title,
 			mi.year,
 			COALESCE((
@@ -499,55 +544,12 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 			COALESCE((
 				SELECT s.series_name FROM audiobook_series s WHERE s.content_id = mi.content_id
 			), '') AS series_name
-		FROM claimed c
-		JOIN media_items mi ON mi.content_id = c.content_id
-		ORDER BY mi.created_at ASC, mi.content_id ASC
-	`, e.batchSize, defaultEnrichClaimLease.Seconds(), audiobookNoMatchRetryLimit)
-	if err != nil {
-		return nil, fmt.Errorf("querying unenriched audiobooks: %w", err)
-	}
-	defer rows.Close()
+`
 
-	var items []enrichmentItemRow
-	for rows.Next() {
-		var item enrichmentItemRow
-		if err := rows.Scan(
-			&item.ContentID,
-			&item.ClaimToken,
-			&item.Title,
-			&item.Year,
-			&item.FolderID,
-			&item.Language,
-			&item.Author,
-			&item.Narrators,
-			&item.SeriesPosition,
-			&item.SeriesName,
-		); err != nil {
-			return nil, fmt.Errorf("scanning audiobook enrichment row: %w", err)
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating audiobook enrichment rows: %w", err)
-	}
-
-	// Load any durable provider IDs for the batch in one query.
-	if e.providerIDs != nil && len(items) > 0 {
-		ids := make([]string, len(items))
-		for i := range items {
-			ids[i] = items[i].ContentID
-		}
-		pids, err := e.providerIDs.GetByContentIDs(ctx, ids)
-		if err != nil {
-			// The claim stands; the items search without their stored IDs.
-			slog.WarnContext(ctx, "audiobook enrichment: could not load provider IDs for the batch", "component", "audiobooks", "error", err)
-		}
-		for i := range items {
-			items[i].ProviderIDs = providerIDMapFromRows(pids[items[i].ContentID])
-		}
-	}
-
-	return items, nil
+// columnTargets returns the scan targets for enrichmentItemColumns.
+func (item *enrichmentItemRow) columnTargets() []any {
+	return []any{&item.Title, &item.Year, &item.FolderID, &item.Language, &item.Author,
+		&item.Narrators, &item.SeriesPosition, &item.SeriesName}
 }
 
 // enrichItem runs the Search → GetMetadata → persist cycle for a single item.
@@ -563,18 +565,12 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		return e.completeWithoutMetadata(ctx, item, EnrichmentOutcomeSkipped)
 	}
 
-	var providers []metadata.Provider
-	var err error
-	if e.resolveProviders != nil {
-		providers, err = e.resolveProviders(ctx, item.FolderID, "audiobook")
-	} else {
-		providers, err = metadata.ResolveChain(ctx, item.FolderID, "audiobook", e.chainRepo, e.resolver)
-	}
+	providers, err := e.resolveChain(ctx, item.FolderID)
 	if err != nil {
 		resolveErr := fmt.Errorf("resolving audiobook chain for folder %d: %w", item.FolderID, err)
 		// Classify the cause, not the wrapper: folder 403 must not read as
 		// an HTTP status.
-		e.recordFailure(ctx, item, classifyProviderError(err), resolveErr.Error())
+		e.recordFailure(ctx, item, classifyProviderError(err), resolveErr.Error(), time.Time{})
 		return resolveErr
 	}
 	if len(providers) == 0 {
@@ -624,7 +620,11 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 	// Phase 3: Persist.
 	if err := e.persist(ctx, item, accumulatedIDs, accumulator); err != nil {
 		persistErr := fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)
-		e.recordFailure(ctx, item, classifyProviderError(persistErr), persistErr.Error())
+		if errors.Is(err, access.ErrMetadataCurationScope) {
+			// A refused curator's refresh says nothing about the providers.
+			return persistErr
+		}
+		e.recordFailure(ctx, item, classifyProviderError(persistErr), persistErr.Error(), time.Time{})
 		return persistErr
 	}
 	e.enqueueRemoteArtwork(ctx, item.ContentID, accumulator)
@@ -639,6 +639,14 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 	)
 
 	return nil
+}
+
+// resolveChain returns the audiobook provider chain of library folderID.
+func (e *Enricher) resolveChain(ctx context.Context, folderID int) ([]metadata.Provider, error) {
+	if e.resolveProviders != nil {
+		return e.resolveProviders(ctx, folderID, audiobookItemType)
+	}
+	return metadata.ResolveChain(ctx, folderID, audiobookItemType, e.chainRepo, e.resolver)
 }
 
 func (e *Enricher) autoLinkLiteraryWork(ctx context.Context, contentID string) {
@@ -850,6 +858,11 @@ func (e *Enricher) persistMetadataAndProviderIDsTx(
 	if err := e.state.AssertClaimTx(ctx, tx, item.ContentID, item.ClaimToken); err != nil {
 		return err
 	}
+	// A delegated curator's refresh writes only while every library holding
+	// the book is in the curator's scope. The sweep carries no authorizer.
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, item.ContentID); err != nil {
+		return err
+	}
 	// Read the locks under the row lock, after the provider calls: an admin
 	// who locks a field while the providers answer must still win.
 	var locked []int
@@ -873,6 +886,9 @@ func (e *Enricher) persistMetadataAndProviderIDsTx(
 		if err := e.providerIDs.ReplaceByContentIDTx(ctx, tx, item.ContentID, "audiobook", providerIDs); err != nil {
 			return fmt.Errorf("persisting audiobook provider IDs: %w", err)
 		}
+	}
+	if err := catalog.ApplyWorkClaimsTx(ctx, tx, item.ContentID, audiobookItemType, result.WorkClaims); err != nil {
+		return fmt.Errorf("persisting audiobook work ids: %w", err)
 	}
 	if err := e.itemRepo.UpdateMetadataTx(ctx, tx, item.ContentID, upd); err != nil {
 		return fmt.Errorf("updating audiobook metadata: %w", err)
@@ -919,6 +935,9 @@ func (e *Enricher) completeWithoutMetadata(ctx context.Context, item enrichmentI
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	if err := e.state.AssertClaimTx(ctx, tx, item.ContentID, item.ClaimToken); err != nil {
+		return err
+	}
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, item.ContentID); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
@@ -1118,7 +1137,7 @@ func (e *Enricher) failOrDefer(ctx context.Context, item enrichmentItemRow, prov
 		return e.deferItem(ctx, item, until)
 	}
 	joined := errors.Join(providerErrs...)
-	e.recordFailure(ctx, item, classifyProviderError(joined), joined.Error())
+	e.recordFailure(ctx, item, classifyProviderError(joined), joined.Error(), latestPauseMet(providerErrs))
 	return fmt.Errorf("no metadata obtained, %d provider error(s): %w", len(providerErrs), joined)
 }
 
@@ -1138,6 +1157,19 @@ func pausedOnly(errs []error) (time.Time, bool) {
 	return until, len(errs) > 0
 }
 
+// latestPauseMet returns the latest pause end among the paused providers the
+// item met, or zero when it met none.
+func latestPauseMet(errs []error) time.Time {
+	var latest time.Time
+	for _, err := range errs {
+		var paused *providerPausedError
+		if errors.As(err, &paused) && paused.until.After(latest) {
+			latest = paused.until
+		}
+	}
+	return latest
+}
+
 // deferItem returns a claimed item untouched until the providers' pause ends.
 func (e *Enricher) deferItem(ctx context.Context, item enrichmentItemRow, until time.Time) error {
 	slog.DebugContext(ctx, "audiobook enrichment: providers paused; deferring item", "component", "audiobooks",
@@ -1153,14 +1185,20 @@ func (e *Enricher) deferItem(ctx context.Context, item enrichmentItemRow, until 
 // recordFailure stamps a classified failure and parks a retry. Swallowed for
 // the same reason as recordOutcome. A rate-limited item stays out at least
 // until the gate lets its own providers be called again, which carries a
-// provider's retry-after over to the item.
-func (e *Enricher) recordFailure(ctx context.Context, item enrichmentItemRow, class EnrichmentErrorClass, cause string) {
+// provider's retry-after over to the item: the end of the chain's rate-limit
+// pauses and of pausedUntil, the latest pause the item itself met. A route
+// paused as down that the item never needed does not hold it back.
+func (e *Enricher) recordFailure(ctx context.Context, item enrichmentItemRow, class EnrichmentErrorClass, cause string, pausedUntil time.Time) {
 	if e == nil || e.state == nil {
 		return
 	}
 	var retryAfter time.Duration
 	if class == EnrichmentErrorRateLimited {
-		if until := e.gate.latestPause(item.Chain); !until.IsZero() {
+		until := e.gate.latestRateLimit(item.Chain)
+		if pausedUntil.After(until) {
+			until = pausedUntil
+		}
+		if !until.IsZero() {
 			retryAfter = time.Until(until)
 		}
 	}

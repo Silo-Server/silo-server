@@ -31,11 +31,15 @@ var accessSettings = func() map[string]widerFunc {
 		// Who may sign in, and how.
 		settingLocalPasswordLogin:             on,
 		"auth.email_auto_match":               on,
+		config.AuthUserAPIKeysSettingKey:      on,
 		"signup.enabled":                      on,
 		"password_reset.self_service_enabled": on,
 		"jellyfin_compat.enabled":             on,
 		"jellyfin_compat.web_enabled":         on,
-		"audiobookshelf_compat.enabled":       on,
+		// Serves a credential-less stream to anyone sharing the address
+		// that negotiated it.
+		config.JellyfinCompatAddressStreamGrantSettingKey: on,
+		"audiobookshelf_compat.enabled":                   on,
 		// How long a session, or an account its provider dropped, stays
 		// signed in, and whether an unreachable provider still vouches.
 		"auth.access_token_expiry":                       longer,
@@ -66,8 +70,6 @@ var accessSettings = func() map[string]widerFunc {
 		"notifications.android_push_delivery_enabled": on,
 		"notifications.discord_enabled":               on,
 		"notifications.server_channels_enabled":       on,
-		"notifications.fanout_enabled":                on,
-		settingReleaseEvents:                          on,
 		"notifications.ui_enabled":                    on,
 		// What leaves the server: downloads, library data sent to outside AI
 		// and embedding providers, markers shared online, and the server's
@@ -110,7 +112,6 @@ const (
 	settingSMTPSecurity       = "email.smtp_security"
 	smtpStartTLS, smtpTLS     = "starttls", "tls"
 	smtpNone                  = "none"
-	settingReleaseEvents      = "notifications.release_events_enabled"
 	settingEmailEnabled       = "email.enabled"
 	settingSMTPHost           = "email.smtp_host"
 	settingSMTPPassword       = "email.smtp_password" //nolint:gosec // G101: a setting key, not a credential

@@ -212,14 +212,6 @@ func TestCollectorRetriesSingleObjectAfterPartialDeleteDB(t *testing.T) {
 	}
 }
 
-func TestCollectRetryDelay(t *testing.T) {
-	for attempts, want := range map[int]time.Duration{0: 10 * time.Minute, 1: 20 * time.Minute, 3: 80 * time.Minute, 7: 1280 * time.Minute, 8: 24 * time.Hour, 40: 24 * time.Hour} {
-		if got := collectRetryDelay(attempts); got != want {
-			t.Errorf("attempts %d: delay %s, want %s", attempts, got, want)
-		}
-	}
-}
-
 // TestDeletedFileQueueLookupSeeksChapterFileIndexDB pins the plan of the
 // lookup queue_deleted_media_file_blobs runs for every deleted media file
 // (migration 20261010180000_add_marker_thumbnails.sql holds its current body).

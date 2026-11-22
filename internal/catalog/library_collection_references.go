@@ -59,3 +59,25 @@ func LockLibraryCollectionReferences(ctx context.Context, tx pgx.Tx, previousIDs
 	}
 	return nil
 }
+
+// SectionConfigReferencesCollection is a SQL condition true when a
+// page_sections config (the jsonb expression config) references the library
+// collection id bound at param: a collection row's library_collection_id or
+// an entry of a row of collections' collections list. Every check of what a
+// row shows reads references through this condition or
+// SectionConfigCollectionIDs, so the delete guard, the row counts and the
+// row listing agree.
+func SectionConfigReferencesCollection(config, param string) string {
+	return "(" + config + "->>'library_collection_id' = " + param + "::text OR " +
+		config + "->'collections' @> jsonb_build_array(jsonb_build_object('library_collection_id', " + param + "::text)))"
+}
+
+// SectionConfigCollectionIDs is a SQL subquery for a LATERAL join yielding,
+// in column id, each library collection a page_sections config (the jsonb
+// expression config) references, once.
+func SectionConfigCollectionIDs(config string) string {
+	return "(SELECT " + config + "->>'library_collection_id' AS id WHERE " + config + "->>'library_collection_id' IS NOT NULL" +
+		" UNION SELECT e->>'library_collection_id' FROM jsonb_array_elements(CASE WHEN jsonb_typeof(" + config +
+		"->'collections') = 'array' THEN " + config + "->'collections' ELSE '[]'::jsonb END) e" +
+		" WHERE e->>'library_collection_id' IS NOT NULL)"
+}

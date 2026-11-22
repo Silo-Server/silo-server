@@ -153,6 +153,14 @@ fi
 
 # --- An earlier install is here. ---------------------------------------------
 
+# This step reads the URLs to tell where Silo's data is; a file variant hides
+# them, and the earlier stack never read one.
+for name in DATABASE_URL_FILE REDIS_URL_FILE; do
+  if [[ -n "${!name:-}" ]]; then
+    fail "$name is set in .env, and this step needs to read the URL to move the earlier install. Remove it from .env while the install moves. If the earlier stack's own service held the data, set nothing in its place; the image runs PostgreSQL itself, and Redis unless ENABLE_REDIS=false. If an external service did, put its URL in ${name%_FILE} instead, where this step checks it"
+  fi
+done
+
 # The earlier file set these for Silo itself, hiding any in .env; this one
 # passes .env through, and the services they named are gone.
 if [[ -n "${DATABASE_URL:-}" ]]; then
@@ -170,13 +178,13 @@ fi
 # Silo applies these on every start, over the stored settings, and the image
 # keeps a URL set here even with its own Meilisearch on.
 if [[ "$(url_host "${SILO_MEILISEARCH_URL:-}")" == meilisearch ]]; then
-  fail "SILO_MEILISEARCH_URL in .env points at the earlier stack's Meilisearch. Remove SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, and SILO_MEILISEARCH_API_KEY from .env, and set ENABLE_MEILISEARCH=true to use the bundled one"
+  fail "SILO_MEILISEARCH_URL in .env points at the earlier stack's Meilisearch. Remove SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, SILO_MEILISEARCH_API_KEY, and SILO_MEILISEARCH_API_KEY_FILE from .env, and set ENABLE_MEILISEARCH=true to use the bundled one"
 fi
 # Without a URL here, the one stored from the admin UI applies, which named
 # the earlier stack's service. Silo trims and lowercases the provider.
 env_provider="$(printf '%s' "${SILO_SEARCH_PROVIDER:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
 if [[ "$env_provider" == meilisearch && -z "${SILO_MEILISEARCH_URL:-}" ]] && ! truthy "${ENABLE_MEILISEARCH:-false}"; then
-  fail "SILO_SEARCH_PROVIDER in .env chooses Meilisearch, and the earlier stack's Meilisearch is gone. Remove SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, and SILO_MEILISEARCH_API_KEY from .env, and set ENABLE_MEILISEARCH=true to use the bundled one"
+  fail "SILO_SEARCH_PROVIDER in .env chooses Meilisearch, and the earlier stack's Meilisearch is gone. Remove SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, SILO_MEILISEARCH_API_KEY, and SILO_MEILISEARCH_API_KEY_FILE from .env, and set ENABLE_MEILISEARCH=true to use the bundled one"
 fi
 
 # The earlier stack's Silo container reached these through bind mounts, which
@@ -330,13 +338,13 @@ SQL
     fail "after the copy, $(host "$config") has $((free_kb / 1024)) MiB free, and rebuilding its largest text index ($((largest_kb / 1024)) MiB) on the first start needs about $(( (2 * largest_kb + 1024 * 1024) / 1024 )) MiB. Free space there and start again; the earlier Compose file still starts meanwhile"
   fi
 
-  # Proxy and transcode nodes reached the earlier stack's PostgreSQL and Redis
-  # on published ports; the bundled ones are closed to them unless node access
-  # is on, and nodes then sign in as silo.
+  # Proxy nodes reached the earlier stack's PostgreSQL and Redis on published
+  # ports; the bundled ones are closed to them unless node access is on, and
+  # proxies then sign in as silo. Transcode nodes reach Silo itself.
   if ! truthy "${ENABLE_NODE_ACCESS:-false}"; then
-    nodes="$(stage_psql -d silo -c "SELECT count(*) FROM stream_nodes WHERE enabled")"
+    nodes="$(stage_psql -d silo -c "SELECT count(*) FROM stream_nodes WHERE enabled AND type = 'proxy'")"
     if (( nodes > 0 )); then
-      fail "this server has $nodes enabled proxy or transcode node(s), which need its PostgreSQL and Redis. Set ENABLE_NODE_ACCESS=true and uncomment the node-access ports in docker-compose.yml (see .env.example), and point each node's DATABASE_URL at user silo with POSTGRES_PASSWORD and its REDIS_URL at REDIS_PASSWORD"
+      fail "this server has $nodes enabled proxy node(s), which need its PostgreSQL and Redis. Set ENABLE_NODE_ACCESS=true and uncomment the node-access ports in docker-compose.yml (see .env.example), and point each proxy's DATABASE_URL at user silo with POSTGRES_PASSWORD and its REDIS_URL at REDIS_PASSWORD"
     fi
   fi
 

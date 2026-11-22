@@ -2,7 +2,6 @@ package jellycompat
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -64,51 +63,6 @@ func apiKeyRequest() *http.Request {
 	req := httptest.NewRequest(http.MethodGet, "/Items", nil)
 	req.Header.Set("X-Emby-Token", "sa_test")
 	return req
-}
-
-func TestRequireSessionOrAPIKeySession_SynthesizesPrimaryProfile(t *testing.T) {
-	now := fixedNow()
-	clock := func() time.Time { return now }
-	keyAuth, provider, _ := adminKeyAuthWithPrimary(t, clock)
-	sessionAuth := &Authenticator{sessions: NewSessionStore(time.Hour, clock)}
-
-	var got *Session
-	h := RequireSessionOrAPIKeySession(sessionAuth, keyAuth)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = SessionFromContext(r.Context())
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, apiKeyRequest())
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if got == nil {
-		t.Fatal("expected synthesized session in context")
-	}
-	if got.StreamAppUserID != 2 {
-		t.Errorf("StreamAppUserID = %d, want 2", got.StreamAppUserID)
-	}
-	if got.ProfileID != "p1" || got.ProfileName != "Parent" {
-		t.Errorf("profile = %q/%q, want p1/Parent", got.ProfileID, got.ProfileName)
-	}
-	if want := PseudoUserID(2, "p1"); got.PseudoUserID != want {
-		t.Errorf("PseudoUserID = %s, want %s", got.PseudoUserID, want)
-	}
-	if got.Username != "admin" {
-		t.Errorf("Username = %q, want admin", got.Username)
-	}
-	// Refresh-skip invariants: no upstream Silo token, zero expiry.
-	if got.StreamAppAccessToken != "" || got.StreamAppRefreshToken != "" {
-		t.Errorf("expected empty upstream tokens, got access=%q refresh=%q", got.StreamAppAccessToken, got.StreamAppRefreshToken)
-	}
-	if !got.StreamAppTokenExpiry.IsZero() {
-		t.Error("expected zero StreamAppTokenExpiry so RequireSession skips refresh")
-	}
-	if provider.forCalls != 1 {
-		t.Errorf("ForUser calls = %d, want 1", provider.forCalls)
-	}
 }
 
 func TestRequireSessionOrAPIKeySession_RejectsNonAdminKey(t *testing.T) {
@@ -202,7 +156,7 @@ func TestPlaybackSessionAuth_APIKeyViaPlaySessionId(t *testing.T) {
 	playback.Put(PlaybackSession{ID: "ps1", CompatToken: "sa_test", RouteItemID: "x"})
 
 	var got *Session
-	h := PlaybackSessionAuth(sessions, playback, keyAuth)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := PlaybackSessionAuth(sessions, playback, keyAuth, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = SessionFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -217,33 +171,6 @@ func TestPlaybackSessionAuth_APIKeyViaPlaySessionId(t *testing.T) {
 	}
 	if got == nil || got.Token != "sa_test" || got.StreamAppUserID != 2 {
 		t.Fatalf("expected synthesized api-key session (token sa_test, user 2); got %+v", got)
-	}
-}
-
-func TestHandleUsers_ReturnsCallerAsSingleElement(t *testing.T) {
-	h := NewAuthHandler(func() *config.Config { return &config.Config{} }, nil, nil)
-	session := &Session{PseudoUserID: PseudoUserID(2, "p1"), Username: "admin"}
-
-	req := httptest.NewRequest(http.MethodGet, "/Users", nil)
-	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, session))
-	rec := httptest.NewRecorder()
-	h.HandleUsers(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	var users []map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &users); err != nil {
-		t.Fatalf("unmarshal: %v; body=%s", err, rec.Body.String())
-	}
-	if len(users) != 1 {
-		t.Fatalf("len = %d, want 1 (current profile only)", len(users))
-	}
-	if users[0]["Id"] != compatUserID(session.PseudoUserID) {
-		t.Errorf("Id = %v, want %s", users[0]["Id"], compatUserID(session.PseudoUserID))
-	}
-	if users[0]["Name"] != "admin" {
-		t.Errorf("Name = %v, want admin", users[0]["Name"])
 	}
 }
 

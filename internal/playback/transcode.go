@@ -26,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback/dovirpu"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -72,12 +73,25 @@ type TranscodeOpts struct {
 	// track; empty (older recipes and tokens) keeps the plain copy. It is
 	// durable because reconstruction must write the same segment bytes.
 	CopyAudioCodec string
-	// KeyframePlaylist serves a copy-video stream that starts at the
-	// beginning as one complete VOD playlist planned from the source's
-	// keyframe index, instead of FFmpeg's growing playlist (#1466). It is
-	// durable because a reconstructed session must keep serving the playlist
-	// the player already has.
+	// KeyframePlaylist serves a copy-video stream as one complete VOD
+	// playlist planned from the source's keyframe index, instead of FFmpeg's
+	// growing playlist (#1466): from the beginning, or from a resume's
+	// resolved origin. It is durable because a reconstructed session must
+	// keep serving the playlist the player already has.
 	KeyframePlaylist bool
+	// KeyframePlanned reports that the session serves a keyframe plan, which
+	// KeyframePlaylist only asks for: a copy that can't be planned keeps
+	// FFmpeg's playlist. StartTranscode sets it from the plan it resolved,
+	// whatever the caller passed. It is durable so a node-backed session's
+	// recipe records which playlist the node served (#4044).
+	KeyframePlanned bool
+	// KeyframePlanResume records that a resume serves a keyframe plan. A
+	// resume's plan numbers and cuts segments differently from FFmpeg's
+	// playlist, so a rebuild follows this rather than deciding afresh: a
+	// rebuilt resume without it keeps FFmpeg's playlist, and one with it that
+	// can no longer plan fails. The session sets it when it starts a resume's
+	// plan, so its recipe and its node's start response carry it.
+	KeyframePlanResume bool
 	// Reconstructed marks a session rebuilt from its recipe after its server
 	// or node lost it. It isn't durable: each rebuild sets it.
 	Reconstructed bool
@@ -360,6 +374,10 @@ type TranscodeSession struct {
 	// seek anchor, which RecipeOpts restores for a planned session.
 	planStreamOrigin       float64
 	planSeekAnchorResolved bool
+	// planResumeSeconds is the position a resume's plan was asked for (the
+	// first run's requested seek), or 0 for a plan from the start. The
+	// source-aligned playlist starts the player there.
+	planResumeSeconds float64
 	// subtitleSpans lists each generation's subtitle rendition cue file,
 	// oldest first, including those an earlier session recorded in the same
 	// output directory. Guarded by mu.
@@ -414,6 +432,12 @@ type SegmentProgress struct {
 	StartSegmentNumber   int
 	SegmentDuration      int
 	LastRequestedSegment int
+	// LastCompletedSegment is the highest segment the client finished
+	// downloading in the current generation, read with the rest.
+	LastCompletedSegment int
+	// Failed is a stopped FFmpeg that exited with an error, read with the
+	// rest so a restart cannot clear it between reads.
+	Failed bool
 }
 
 // SegmentRecoveryDecision tells the segment handler whether to briefly wait
@@ -528,6 +552,10 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	}
 	if err := prepareSubtitleFilterInput(ctx, &opts); err != nil {
 		releaseHWDevice()
+		// A start refused here wrote nothing. Drop the directory it made,
+		// which a node that hands the start back would otherwise keep until
+		// the orphan sweep; a directory that holds anything stays.
+		_ = os.Remove(opts.OutputDir)
 		return nil, err
 	}
 	copyPlan, err := resolveCopyPlan(ctx, opts)
@@ -535,9 +563,20 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", err)
 	}
+	opts.KeyframePlanned = copyPlan != nil
 	var copyGroups *copyGroupAssembler
+	planResumeSeconds := 0.0
 	if copyPlan != nil {
 		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))
+		if copyPlan.resumes() {
+			// A resume's first run starts at the plan's first segment, the
+			// way a restart for it does. Its segments are numbered from the
+			// plan, not from FFmpeg's start number.
+			planResumeSeconds = opts.SeekSeconds
+			opts.SeekSeconds = copyPlan.restartSeekSeconds(0)
+			opts.StartSegmentNumber = 0
+			opts.KeyframePlanResume = true
+		}
 		copyGroups = newCopyGroupAssembler(opts.OutputDir, copyPlan)
 		// The session starts at generation 0.
 		opts.copyGroupPrefix = copyGroups.startRun(opts.StartSegmentNumber, audioRecipeKey(opts), 0)
@@ -572,6 +611,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		copyGroups:             copyGroups,
 		planStreamOrigin:       opts.StreamOriginSeconds,
 		planSeekAnchorResolved: opts.CopySeekAnchorResolved,
+		planResumeSeconds:      planResumeSeconds,
 		subtitleSpans:          subtitleSpans,
 		subtitleCueBase:        subtitleCueBase,
 	}
@@ -582,7 +622,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		bin = ffmpegBinary()
 	}
 
-	log.Printf("playback: ffmpeg cmd: %s %s", bin, strings.Join(args, " "))
+	log.Printf("playback: ffmpeg cmd: %s %s", bin, fspath.RedactRelayed(strings.Join(args, " ")))
 	s.logFFmpegEvent(ctx, "ffmpeg process starting", "")
 
 	cmd := fspath.CommandContext(ctx, bin, args...)
@@ -884,7 +924,7 @@ func validateToneMapSource(ctx context.Context, opts TranscodeOpts) error {
 	if opts.ToneMapMode == "" {
 		return nil
 	}
-	if err := opts.ToneMapSourceRevision.ValidatePath(opts.InputPath); err != nil {
+	if err := opts.ToneMapSourceRevision.ValidatePath(ctx, opts.InputPath); err != nil {
 		if errors.Is(err, tonemap.ErrSourceRevisionChanged) {
 			return err
 		}
@@ -1760,13 +1800,10 @@ func toneMappedTextSubtitleFilter(opts TranscodeOpts) string {
 func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []string {
 	subInput := fmt.Sprintf("[0:s:%d]", opts.SubtitleTrackIndex)
 	var graph string
+	before, after := bitmapSubtitleScale(opts)
 	if opts.ToneMapMode == tonemap.ModeSoftware {
 		filters := tonemap.SoftwareFilter(opts.ToneMapSourceKind, opts.ToneMapFilter)
-		graph = "[0:v:0]" + filters + "[vmain];[vmain]" + subInput + "overlay=eof_action=pass"
-		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
-			graph += "," + scale
-		}
-		graph += "[vout]"
+		graph = bitmapSubtitleGraph(opts, subInput, joinFilters(filters, before), after)
 		return append(args, "-filter_complex", graph)
 	}
 
@@ -1788,19 +1825,17 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 				vaapiScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
 		}
 	case transcodeHWNVENC:
+		var filters string
 		if tonemap.IsSDRSource(opts.ToneMapSourceKind) {
-			graph = "[0:v:0]" + nvencSDRFallbackDownload(opts) + "," + tonemap.SoftwareFilter(opts.ToneMapSourceKind, "") + "[vmain];[vmain]" + subInput + "overlay=eof_action=pass"
+			filters = nvencSDRFallbackDownload(opts) + "," + tonemap.SoftwareFilter(opts.ToneMapSourceKind, "")
 		} else {
-			graph = "[0:v:0]" + tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12[vmain];[vmain]" +
-				subInput + "overlay=eof_action=pass"
+			filters = tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12"
 		}
-		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
-			graph += "," + scale
-		}
-		graph += ",format=nv12,hwupload_cuda," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		graph = bitmapSubtitleGraph(opts, subInput, joinFilters(filters, before),
+			joinFilters(after, "format=nv12,hwupload_cuda", tonemap.HDRMetadataRemovalFilter()))
 	case transcodeHWVideoToolbox:
-		graph = "[0:v:0]" + videoToolboxToneMapCPUFilter(opts) + "[vmain];[vmain]" +
-			subInput + "overlay=eof_action=pass," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		// The VideoToolbox filter already scales to the target.
+		graph = bitmapSubtitleGraph(opts, subInput, videoToolboxToneMapCPUFilter(opts), tonemap.HDRMetadataRemovalFilter())
 	}
 	if graph == "" {
 		return args
@@ -1935,8 +1970,9 @@ func appendAACEncodeFilterArgs(args []string, sourceChannels int, targetCodec st
 // appendAudioArgs adds audio codec arguments. Supports "copy" for passthrough,
 // plus opus / aac / eac3 / ac3 as re-encode targets. EAC3 and AC3 are useful
 // when we must transcode video but want to preserve surround channels for an
-// HDMI receiver — both are legal in HLS fMP4 (not MPEG-TS; ensure the HLS
-// packager is fMP4 when emitting these).
+// HDMI receiver. HLS carries both in fMP4 and in MPEG-TS segments; the
+// surround bitstream conversion (audio_to_eac3 / audio_to_ac3) packages them
+// as the client's other copy remuxes are packaged.
 func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 	// Case-insensitive so the switch agrees with TranscodesAudio for any
 	// client-supplied spelling.
@@ -1950,13 +1986,19 @@ func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args, "-c:a", "copy")
 	case "opus":
 		args = append(args, "-c:a", "libopus", "-b:a", "192k", "-ac", "2")
-	case "eac3":
-		// Typical Dolby Digital Plus 5.1 bitrate; let the source dictate channel
-		// count so we preserve surround when possible.
-		args = append(args, "-c:a", "eac3", "-b:a", "384k")
-	case "ac3":
-		// Legacy Dolby Digital; universal AVR support.
-		args = append(args, "-c:a", "ac3", "-b:a", "448k")
+	case audioCodecEAC3, audioCodecAC3:
+		if opts.TargetAudioChannels == surroundBitstreamChannelsV3 {
+			// The frozen audio_to_eac3 / audio_to_ac3 recipe the v3 planner
+			// promises: 48 kHz 5.1 at 640 kbps.
+			args = append(args, surroundBitstreamAudioArgsV3(codec)...)
+		} else if codec == audioCodecEAC3 {
+			// Typical Dolby Digital Plus 5.1 bitrate; let the source dictate channel
+			// count so we preserve surround when possible.
+			args = append(args, "-c:a", "eac3", "-b:a", "384k")
+		} else {
+			// Legacy Dolby Digital; universal AVR support.
+			args = append(args, "-c:a", "ac3", "-b:a", "448k")
+		}
 	default:
 		channels, bitrateKbps := ResolveAACOutputV3(opts.TargetAudioChannels, opts.TargetAudioBitrateKbps)
 		args = append(args, "-c:a", "aac", "-b:a", strconv.Itoa(bitrateKbps)+"k", "-ac", strconv.Itoa(channels))
@@ -2000,6 +2042,142 @@ func hwSurfaceToCPUFilter(opts TranscodeOpts) string {
 	return "hwdownload,format=" + tonemap.SurfaceDownloadPixelFormat(opts.SourceVideoBitDepth) + ",format=yuv420p"
 }
 
+var (
+	scaleReferenceMu    sync.Mutex
+	scaleReferenceCache map[string]bool
+	// scaleReferenceRetry holds when a probe that gave no answer may run again.
+	scaleReferenceRetry map[string]time.Time
+
+	// scaleReferenceSupported is the probe bitmap burn-in consults; tests
+	// replace it because they build arguments for fake FFmpeg paths.
+	scaleReferenceSupported = supportsScaleReference
+)
+
+// scaleReferenceRetryAfter is how long a probe that gave no answer waits
+// before it runs again, so a struggling host doesn't pay its timeout on every
+// PGS transcode.
+const scaleReferenceRetryAfter = time.Minute
+
+// supportsScaleReference reports whether the given FFmpeg binary's scale
+// filter takes a second, reference input whose size the rw and rh expressions
+// read (FFmpeg 7.1+). Older builds fail to parse the whole graph. Probed by
+// running a tiny lavfi graph. A definite answer is cached per binary path:
+// FFmpeg running the graph, or rejecting the expression as one it can't parse.
+// Anything else (a timeout, a binary that won't start, another error) answers
+// no for now and probes again after scaleReferenceRetryAfter.
+func supportsScaleReference(bin string) bool {
+	scaleReferenceMu.Lock()
+	defer scaleReferenceMu.Unlock()
+	if available, ok := scaleReferenceCache[bin]; ok {
+		return available
+	}
+	if retry, ok := scaleReferenceRetry[bin]; ok && time.Now().Before(retry) {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var stderr bytes.Buffer
+	cmd := procgroup.CommandContext(ctx, bin, "-hide_banner", "-nostdin", "-v", "error",
+		"-f", "lavfi", "-i", "color=s=16x16:d=0.04",
+		"-f", "lavfi", "-i", "color=s=32x32:d=0.04",
+		"-filter_complex", "[0:v][1:v]scale=w='min(rw,iw*rw/(ih*rdar))':h=rh",
+		"-f", "null", "-")
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	available := err == nil
+	var exitErr *exec.ExitError
+	rejected := !available && ctx.Err() == nil && errors.As(err, &exitErr) &&
+		bytes.Contains(stderr.Bytes(), []byte("Cannot parse expression"))
+	if !available && !rejected {
+		slog.Warn("could not probe ffmpeg's scale filter; PGS burn-in keeps the plain overlay for now", "ffmpeg", bin, "error", err)
+		if scaleReferenceRetry == nil {
+			scaleReferenceRetry = make(map[string]time.Time)
+		}
+		scaleReferenceRetry[bin] = time.Now().Add(scaleReferenceRetryAfter)
+		return false
+	}
+	if rejected {
+		slog.Warn("ffmpeg's scale filter has no reference input; PGS burn-in keeps the plain overlay and needs FFmpeg 7.1+ to fit cropped and scaled frames", "ffmpeg", bin)
+	}
+	if scaleReferenceCache == nil {
+		scaleReferenceCache = make(map[string]bool)
+	}
+	scaleReferenceCache[bin] = available
+	delete(scaleReferenceRetry, bin)
+	return available
+}
+
+// fitsBitmapSubtitle reports whether the burn-in fits the subtitle canvas to
+// the frame: only PGS, and only when the FFmpeg that runs the graph supports
+// scale's reference input.
+func fitsBitmapSubtitle(opts TranscodeOpts) bool {
+	return IsPGS(opts.SubtitleCodec) && scaleReferenceSupported(ResolveFFmpegPath(opts.FFmpegPath))
+}
+
+// bitmapSubtitleComposite overlays the decoded bitmap subtitle sub onto the CPU
+// frames at the pad main. A PGS canvas keeps the disc's frame size, usually
+// 1920x1080, while the frame can be smaller: an encode that cropped the black
+// bars, or video already scaled to the target. So each subtitle frame is fitted
+// inside the video frame, keeping its aspect ratio, and centered. The fit works
+// in display proportions (rdar), so an anamorphic frame doesn't stretch the
+// square-pixel canvas, and the subtitle is premultiplied before the scale so a
+// downscaled edge doesn't darken. A canvas the size of the frame stays at 0,0.
+// The fit sizes the subtitle from the video
+// frame with scale's reference input, which needs FFmpeg 7.1 or later; with an
+// older FFmpeg, PGS falls back to the plain overlay at 0,0, which other bitmap
+// codecs always use. The GPU composites (overlay_vaapi, overlay_opencl) are not
+// built here and still place the canvas at 0,0.
+func bitmapSubtitleComposite(opts TranscodeOpts, main, sub string) string {
+	if !fitsBitmapSubtitle(opts) {
+		return main + sub + "overlay=eof_action=pass"
+	}
+	return main + "split[bsmain][bsref];" +
+		sub + "premultiply=inplace=1[bspre];" +
+		"[bspre][bsref]scale=w='min(rw,iw*rw/(ih*rdar))':h='min(rh,ih*rdar*rh/iw)':eval=frame[bsub];" +
+		"[bsmain][bsub]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:eof_action=pass:alpha=premultiplied"
+}
+
+// bitmapSubtitleScale returns the target scale filter to run before and after
+// bitmapSubtitleComposite; at most one is non-empty. A fitted PGS track scales
+// first, so its canvas is fitted at the encoder's input size. The plain overlay
+// composites at the source size and scales after.
+func bitmapSubtitleScale(opts TranscodeOpts) (before, after string) {
+	scale := resolutionToScale(opts.TargetResolution)
+	if scale == "" {
+		return "", ""
+	}
+	if fitsBitmapSubtitle(opts) {
+		return scale, ""
+	}
+	return "", scale
+}
+
+// joinFilters joins the non-empty filters of a chain with commas.
+func joinFilters(filters ...string) string {
+	var nonEmpty []string
+	for _, f := range filters {
+		if f != "" {
+			nonEmpty = append(nonEmpty, f)
+		}
+	}
+	return strings.Join(nonEmpty, ",")
+}
+
+// bitmapSubtitleGraph labels the main video [vmain] after filters, then
+// composites the subtitle and runs tail, ending at [vout]. An empty main chain
+// becomes null, so the composite always reads a labeled pad and a deinterlace
+// prepended to [0:v:0] still feeds it.
+func bitmapSubtitleGraph(opts TranscodeOpts, sub, filters, tail string) string {
+	if filters == "" {
+		filters = "null"
+	}
+	graph := "[0:v:0]" + filters + "[vmain];" + bitmapSubtitleComposite(opts, "[vmain]", sub)
+	if tail != "" {
+		graph += "," + tail
+	}
+	return graph + "[vout]"
+}
+
 // appendBitmapSubtitleBurnInArgs adds burn-in arguments for BITMAP subtitle
 // codecs (PGS/VOBSUB/DVB). libass's subtitles= filter cannot render bitmap
 // tracks, so the decoded subtitle stream is composited onto the video with an
@@ -2007,9 +2185,10 @@ func hwSurfaceToCPUFilter(opts TranscodeOpts) string {
 // pad [vout] replaces the raw video stream in stream mapping (see
 // appendStreamSelectionArgs), so -vf must never be emitted alongside this.
 //
-// Overlay runs at the source's native resolution FIRST and any target scaling
-// happens after, so bitmap subtitle geometry is never distorted by a
-// pre-scaling mismatch between the video and subtitle planes.
+// On the CPU paths a PGS track is scaled to the target first and its canvas
+// fitted to the frame when FFmpeg supports it (see bitmapSubtitleComposite);
+// other bitmap codecs, and the GPU composites, overlay at the source resolution
+// and scale after.
 // eof_action=pass keeps the video flowing untouched once the subtitle stream
 // ends instead of freezing the last overlay frame on screen.
 //
@@ -2049,24 +2228,19 @@ func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string 
 		graph = subInput + "format=bgra,hwupload[sub];" +
 			"[0:v:0][sub]overlay_vaapi=eof_action=pass," + vaapiScaleFilter(opts.TargetResolution) + "[vout]"
 	default:
-		// NVENC and CPU: software overlay on CPU frames. Build the overlay
-		// fragment (subtitle input + optional post-scale) once, then wire it into
-		// the encode-specific pipeline.
-		cpuFilters := subInput + "overlay=eof_action=pass"
-		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
-			cpuFilters += "," + scale
-		}
+		// NVENC and CPU: software overlay on CPU frames.
+		before, after := bitmapSubtitleScale(opts)
 		if opts.HWAccel == transcodeHWNVENC && opts.SoftwareVideoDecode {
 			// CPU-decoded frames need no download; upload the composite to the
 			// configured CUDA device.
 			graph = softwareDecodedBitmapBurnInGraph(opts, subInput, false)
 		} else if opts.HWAccel == transcodeHWNVENC {
 			// Download to CPU for the overlay, then re-upload to CUDA.
-			graph = "[0:v:0]" + hwSurfaceToCPUFilter(opts) + "[vmain];[vmain]" + cpuFilters +
-				",format=nv12,hwupload_cuda[vout]"
+			graph = bitmapSubtitleGraph(opts, subInput, joinFilters(hwSurfaceToCPUFilter(opts), before),
+				joinFilters(after, "format=nv12,hwupload_cuda"))
 		} else {
 			// CPU encoding: overlay directly on decoded frames.
-			graph = "[0:v:0]" + cpuFilters + "[vout]"
+			graph = bitmapSubtitleGraph(opts, subInput, before, after)
 		}
 	}
 
@@ -2077,15 +2251,12 @@ func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string 
 // the finished NV12 frames for the hardware encoder. It is the Hi10 AVC
 // counterpart of the all-hardware overlay_vaapi graph above.
 func softwareDecodedBitmapBurnInGraph(opts TranscodeOpts, subInput string, qsv bool) string {
-	filters := subInput + "overlay=eof_action=pass"
-	if scale := resolutionToScale(opts.TargetResolution); scale != "" {
-		filters += "," + scale
-	}
-	filters += ",format=nv12,hwupload"
+	before, after := bitmapSubtitleScale(opts)
+	tail := joinFilters(after, "format=nv12,hwupload")
 	if qsv {
-		filters += ",hwmap=derive_device=qsv,format=qsv"
+		tail += ",hwmap=derive_device=qsv,format=qsv"
 	}
-	return "[0:v:0]format=yuv420p[vmain];[vmain]" + filters + "[vout]"
+	return bitmapSubtitleGraph(opts, subInput, joinFilters("format=yuv420p", before), tail)
 }
 
 // appendSubtitleBurnInArgs adds subtitle burn-in filter arguments for TEXT
@@ -2257,6 +2428,13 @@ func escapeFilterPath(path string) string {
 
 const subtitleFilterAliasName = "subtitle-source.media"
 
+// ErrRelayedSubtitleBurnIn refuses a text burn-in whose track could not be
+// staged when the input is relayed from the core (fspath.IsRelayed): the
+// libass fallback, which reads the whole media file, is not taken over the
+// relay. A transcode node answers it as work it cannot do, so the start runs
+// on a node that reads the file locally, or on the API server.
+var ErrRelayedSubtitleBurnIn = errors.New("subtitle burn-in: the track cannot be staged and a source read through the core cannot be handed to libass")
+
 // textSubtitleFilter is the libass subtitles filter of a text burn-in: the
 // staged track, the only stream of its file, with its fonts, or else the
 // track's index in the media file.
@@ -2294,6 +2472,15 @@ func prepareSubtitleFilterInput(ctx context.Context, opts *TranscodeOpts) error 
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if fspath.IsRelayed(opts.InputPath) {
+		// libass opens its file with no protocol whitelist and reads all of
+		// it: over the relay that is the whole source through the core, past
+		// any startup budget. The start fails so it runs where the file is
+		// local.
+		slog.InfoContext(ctx, "burn-in subtitle not staged; a relayed source cannot be handed to libass",
+			"component", "playback", "playback_session_id", opts.SessionID, "subtitle_track", opts.SubtitleTrackIndex, "error", err)
+		return fmt.Errorf("%w: %w", ErrRelayedSubtitleBurnIn, err)
 	}
 	slog.InfoContext(ctx, "burn-in subtitle not staged; libass reads the media file",
 		"component", "playback", "playback_session_id", opts.SessionID, "subtitle_track", opts.SubtitleTrackIndex, "error", err)
@@ -2641,9 +2828,18 @@ func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuer
 		return nil, err
 	}
 	if s.copyPlan != nil {
-		// A planned playlist starts at the source's beginning and doesn't
-		// depend on FFmpeg's progress or restarts.
-		return s.buildPlaybackManifest(segPrefix, rawQuery)
+		// A planned playlist doesn't depend on FFmpeg's progress or
+		// restarts. One from the start is on the source's timeline already;
+		// a resume's starts at its origin, so it gets the gap before it that
+		// a seeked FFmpeg playlist gets.
+		manifest, err := s.buildPlaybackManifest(segPrefix, rawQuery)
+		if err != nil || !s.copyPlan.resumes() {
+			return manifest, err
+		}
+		opts := s.Opts()
+		opts.SeekSeconds, opts.StartSegmentNumber = s.planResumeSeconds, 0
+		opts.StreamOriginSeconds, opts.CopySeekAnchorResolved = s.planStreamOrigin, true
+		return AlignRealManifestToSourceTimeline(manifest, opts, sourceTimelineGapURI(manifest, opts, segPrefix, rawQuery))
 	}
 	s.mu.Lock()
 	opts, generation, restarting := s.opts, s.segmentGeneration, s.restarting != nil
@@ -2661,15 +2857,7 @@ func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuer
 		return manifest, nil
 	}
 
-	gapURI := segPrefix + "source_timeline_gap" + hlsSegmentExtension(opts)
-	if rawQuery != "" {
-		// Gap URIs take the query form the real segment URIs got.
-		gapQuery := rawQuery
-		if definition, reference := manifestVariable(manifestQueryVariable, rawQuery, minRewrittenURISavings); definition != "" && bytes.Contains(manifest, []byte(definition)) {
-			gapQuery = reference
-		}
-		gapURI += "?" + gapQuery
-	}
+	gapURI := sourceTimelineGapURI(manifest, opts, segPrefix, rawQuery)
 	if strings.EqualFold(opts.TargetCodecVideo, "copy") && opts.CopySeekAnchorResolved {
 		timeline, err := parseManifestTimeline(manifest)
 		if err != nil {
@@ -2687,6 +2875,20 @@ func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuer
 		return manifest, nil
 	}
 	return AlignRealManifestToSourceTimeline(manifest, opts, gapURI)
+}
+
+// sourceTimelineGapURI is the URI of the gap segments a source-aligned
+// playlist prepends. Gap URIs take the query form the real segment URIs got.
+func sourceTimelineGapURI(manifest []byte, opts TranscodeOpts, segPrefix, rawQuery string) string {
+	gapURI := segPrefix + "source_timeline_gap" + hlsSegmentExtension(opts)
+	if rawQuery != "" {
+		gapQuery := rawQuery
+		if definition, reference := manifestVariable(manifestQueryVariable, rawQuery, minRewrittenURISavings); definition != "" && bytes.Contains(manifest, []byte(definition)) {
+			gapQuery = reference
+		}
+		gapURI += "?" + gapQuery
+	}
+	return gapURI
 }
 
 // AlignRealManifestToSourceTimeline prepends bounded EXT-X-GAP segments to a
@@ -3083,6 +3285,8 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 		StartSegmentNumber:   opts.StartSegmentNumber,
 		SegmentDuration:      opts.SegmentDuration,
 		LastRequestedSegment: s.lastRequestedSegment,
+		LastCompletedSegment: s.lastCompletedSegment,
+		Failed:               !s.running && s.waitErr != nil,
 		GenerationStartedAt:  s.generationStartedAt,
 	}
 	s.mu.Unlock()
@@ -3126,6 +3330,34 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 	}
 
 	return progress
+}
+
+// OutputBoundsClient reports whether the running encoder has no lead over the
+// client: the client has completed downloading every produced segment but at
+// most the newest. Playback is then paced by how fast the server produces
+// segments, not by the link, so a stall the client reports now is the
+// server's. An encoder that keeps up runs ahead of the client up to the
+// throttle window; one that is slower than real time, such as a heavy
+// subtitle burn-in, never gets ahead. Output left by an earlier FFmpeg
+// generation is not this encoder's lead: until the running one writes its
+// own, and while a restart replaces it, the client is waiting on it. An
+// encoder that failed counts like one that runs: a client that caught up
+// with its output waits on a server fault.
+func (s *TranscodeSession) OutputBoundsClient() bool {
+	progress := s.SegmentProgress(time.Now())
+	if progress.Restarting {
+		return true
+	}
+	if !progress.Running && !progress.Failed {
+		// A finished encoder left every segment for the client to fetch.
+		return false
+	}
+	// A running encoder, or one that failed, paces a client that has caught
+	// up with its output.
+	if progressPredatesGeneration(progress) {
+		return true
+	}
+	return progress.ProducedHead-progress.LastCompletedSegment <= 1
 }
 
 // SegmentRecoveryDecision determines whether a missing segment should briefly
@@ -3559,6 +3791,10 @@ func (s *TranscodeSession) SegmentAt(positionSeconds float64) int {
 		return 0
 	}
 	if s.copyPlan != nil {
+		// A resume's plan starts at its origin, not at the source's start.
+		if s.copyPlan.resumes() {
+			positionSeconds = max(positionSeconds-s.planStreamOrigin, 0)
+		}
 		return s.copyPlan.segmentAt(positionSeconds)
 	}
 	if d := s.Opts().SegmentDuration; d > 0 {
@@ -3576,16 +3812,15 @@ func (s *TranscodeSession) Opts() TranscodeOpts {
 
 // RecipeOpts returns the opts to persist for rebuilding the session. A
 // keyframe-planned session's timeline is its plan, wherever a restart has
-// moved the current run, so its recipe starts from the beginning like its
-// first run: the rebuild plans the same segments again (the planner takes
-// only a session from the start), and a segment request restarts FFmpeg at
-// the player's position.
+// moved the current run, so its recipe starts where its first run did: from
+// the beginning, or at a resume's origin. The rebuild plans the same segments
+// again, and a segment request restarts FFmpeg at the player's position.
 func (s *TranscodeSession) RecipeOpts() TranscodeOpts {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	opts := s.opts
 	if s.copyPlan != nil {
-		opts.SeekSeconds, opts.StartSegmentNumber = 0, 0
+		opts.SeekSeconds, opts.StartSegmentNumber = s.planResumeSeconds, 0
 		opts.StreamOriginSeconds, opts.CopySeekAnchorResolved = s.planStreamOrigin, s.planSeekAnchorResolved
 	}
 	return opts
@@ -3895,7 +4130,11 @@ func (s *TranscodeSession) restart(
 	if s.copyPlan != nil {
 		startSegment = min(max(startSegment, 0), len(s.copyPlan.durations)-1)
 		seekSeconds = s.copyPlan.restartSeekSeconds(startSegment)
+		// The plan's timeline doesn't move: a resume's stays at its origin.
 		streamOriginSeconds, copySeekAnchorResolved = 0, true
+		if s.copyPlan.resumes() {
+			streamOriginSeconds = s.planStreamOrigin
+		}
 	}
 
 	s.mu.Lock()
@@ -3970,7 +4209,7 @@ func (s *TranscodeSession) restart(
 		bin = ffmpegBinary()
 	}
 
-	log.Printf("playback: ffmpeg restart cmd: %s %s", bin, strings.Join(args, " "))
+	log.Printf("playback: ffmpeg restart cmd: %s %s", bin, fspath.RedactRelayed(strings.Join(args, " ")))
 	if decodeOnCPU {
 		slog.WarnContext(ctx, "transcode could not configure its filter graph on GPU-decoded frames; restarting with CPU decoding",
 			"component", "playback",

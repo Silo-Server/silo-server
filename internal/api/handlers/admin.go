@@ -35,8 +35,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/s3client"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
@@ -188,11 +190,14 @@ type AdminHandler struct {
 	AccessGroups                 AccessGroupValidator
 	BootstrapSensitiveConfigured map[string]bool
 	BootstrapSensitiveValues     map[string]string
-	RedisBootstrapAvailable      bool
-	OnUserSessionsRevoked        func(ctx context.Context, userID int)
-	OnServerSettingUpdated       func(ctx context.Context, key, value string)
-	RestartStatus                *ServerRestartStatusTracker
-	CatalogSearchStatus          catalog.CatalogSearchStatusProvider
+	// BootstrapEnvVars names the environment variable that sets each key in
+	// BootstrapSensitiveConfigured, for the admin UI to show.
+	BootstrapEnvVars        map[string]string
+	RedisBootstrapAvailable bool
+	OnUserSessionsRevoked   func(ctx context.Context, userID int)
+	OnServerSettingUpdated  func(ctx context.Context, key, value string)
+	RestartStatus           *ServerRestartStatusTracker
+	CatalogSearchStatus     catalog.CatalogSearchStatusProvider
 	// BeforeServerSettingCommit runs inside the settings transaction for each
 	// setting whose effective value changes. An error rolls the save back. tx
 	// is nil when the settings store has no transactional update.
@@ -572,14 +577,6 @@ func (h *AdminHandler) sweepWatchlistTitles(ctx context.Context, userID int) {
 	}
 }
 
-func (h *AdminHandler) loadPlaybackSessions(ctx context.Context, r *http.Request) ([]playbackSessionRow, error) {
-	loader, err := resolvePlaybackSessionsLoader(h.SessionsLoader, h.pool, h.storeProv, h.DetailSvc)
-	if err != nil {
-		return nil, err
-	}
-	return loader.Load(ctx, PlaybackSessionsQuery{})
-}
-
 // updateMayRequireSessionRevocation is updateRequiresSessionRevocation without
 // the current account to compare against: any credential or enabled change
 // might sign the user out.
@@ -748,8 +745,8 @@ type UpdateItemMetadataRequest struct {
 
 // sensitiveSettingKeys is the audited allowlist of secret-bearing settings
 // keys, shared with the at-rest encryption decorator so redaction and
-// encryption can never drift apart. See catalog.SensitiveSettingKeys.
-var sensitiveSettingKeys = catalog.SensitiveSettingKeys
+// encryption can never drift apart. See serversettings.SensitiveSettingKeys.
+var sensitiveSettingKeys = serversettings.SensitiveSettingKeys
 
 // machineManagedSettingKeys contains durable internal state that shares the
 // server_settings store but is not part of the administrator settings API.
@@ -759,6 +756,7 @@ var machineManagedSettingKeys = map[string]bool{
 	"auth.jwt_secret":                           true,
 	"audiobooks.abs.jwt_secret":                 true,
 	chatgpt.CredentialsKey:                      true,
+	plugins.ProvisionRestoreHoldKey:             true,
 	config.AIProvidersSettingKey:                true,
 	config.ArtworkStorageReconcileCheckpointKey: true,
 	config.ArtworkStorageSweepCheckpointKey:     true,
@@ -805,6 +803,18 @@ var errArtworkStorageLocked = &APIError{
 	Message: "recorded storage locations cannot be changed directly; use a managed storage transition",
 }
 
+// checkArtworkLocalPath refuses a local artwork root that startup could not
+// open (a file, a symbolic link, or a path inside a file). Startup exits on
+// such a root before the admin UI can fix it. The check runs on the node that
+// takes the save and creates nothing. field names the rejected request member.
+func checkArtworkLocalPath(path, field string) error {
+	if err := blobstore.CheckLocalRoot(path); err != nil {
+		slog.Warn("refused unusable artwork.local_path", "error", err)
+		return fieldError(field, artworkLocalPathKey+" must be a folder Silo can open, not a file, a symbolic link, or a path inside a file")
+	}
+	return nil
+}
+
 // artworkIdentityInputs names the effective settings that decide where public
 // artwork and private operational objects live. The S3 keys are canonical; the
 // effective map already applies the legacy operational aliases. A private
@@ -843,34 +853,74 @@ func artworkIdentityInputs(effective map[string]string) (backend string, inputs 
 }
 
 // rejectArtworkIdentityChange refuses a write that would move artwork storage
-// after it has been recorded: a backend other than the recorded one, or a
-// different value for any setting that backend's identity is built from.
-// Writes that leave the location as it is, including re-saving the same
-// values or adding a bucket an explicit local backend ignores, are allowed so
-// a settings form that includes the keys can still submit.
-func rejectArtworkIdentityChange(recorded string, before, after map[string]string) error {
-	recordedBackend, _, _ := strings.Cut(strings.TrimSpace(recorded), "|")
-	_, beforeInputs := artworkIdentityInputs(before)
+// after it has been recorded. A write that leaves the location settings as they
+// are saves, including re-saving the same values or adding a bucket an explicit
+// local backend ignores, so a settings form that includes the keys can still
+// submit. That holds even when the saved settings already name another
+// location: one saved before the first write recorded the running store, while
+// a restart was pending. A write that changes them must name the recorded
+// location, which is how such a pending change is put back. The assets and
+// private locations are judged separately against their own recorded rows.
+func rejectArtworkIdentityChange(recordedAssets, recordedPrivate string, before, after map[string]string) error {
+	beforeBackend, beforeInputs := artworkIdentityInputs(before)
 	afterBackend, afterInputs := artworkIdentityInputs(after)
-	if recordedBackend == "" {
-		// Only the private bucket is recorded. The assets location can still
-		// be chosen until the first artwork write.
-		for key, value := range beforeInputs {
-			if strings.HasPrefix(key, "s3.private_") && afterInputs[key] != value {
-				return errArtworkStorageLocked
-			}
+	privateUnchanged := true
+	assetsUnchanged := afterBackend == beforeBackend
+	for key, value := range beforeInputs {
+		if afterInputs[key] == value {
+			continue
 		}
-		return nil
+		if strings.HasPrefix(key, "s3.private_") {
+			privateUnchanged = false
+		} else {
+			assetsUnchanged = false
+		}
 	}
-	if afterBackend != recordedBackend {
+	// Startup accepts only these exact forms: it rewrites a legacy assets row
+	// before serving, and binds the private row by exact match.
+	if !privateUnchanged && (privateIdentity(afterInputs) != recordedPrivate ||
+		ambiguousS3Location(afterInputs[s3PrivateEndpointKey], afterInputs[s3PrivateBucketKey])) {
 		return errArtworkStorageLocked
 	}
-	for key, value := range beforeInputs {
-		if afterInputs[key] != value {
-			return errArtworkStorageLocked
-		}
+	// Without a recorded assets row only the private bucket is locked; the
+	// assets location can still be chosen until the first artwork write.
+	if strings.TrimSpace(recordedAssets) == "" || assetsUnchanged {
+		return nil
+	}
+	if afterBackend == blobstore.BackendS3 && ambiguousS3Location(afterInputs[s3PublicEndpointKey], afterInputs[s3PublicBucketKey]) {
+		return errArtworkStorageLocked
+	}
+	if identity := assetsIdentity(afterBackend, afterInputs); identity != recordedAssets && !blobstore.SameLocalRoot(recordedAssets, identity) {
+		return errArtworkStorageLocked
 	}
 	return nil
+}
+
+// ambiguousS3Location reports whether an S3 endpoint or bucket contains the
+// "|" that separates identity parts. Only then can another location spell the
+// same identity, such as bucket "a|b" with prefix "c" for bucket "a" with
+// prefix "b|c", so a changed location with one never counts as the recorded
+// one.
+func ambiguousS3Location(endpoint, bucket string) bool {
+	return strings.Contains(endpoint, "|") || strings.Contains(bucket, "|")
+}
+
+// assetsIdentity is the identity the assets store would report for the
+// normalized inputs artworkIdentityInputs returns.
+func assetsIdentity(backend string, inputs map[string]string) string {
+	if backend == blobstore.BackendS3 {
+		return blobstore.S3Identity(inputs[s3PublicEndpointKey], inputs[s3PublicBucketKey], inputs[s3PublicKeyPrefixKey])
+	}
+	return blobstore.BackendLocal + "|" + inputs[artworkLocalPathKey]
+}
+
+// privateIdentity is the identity startup records for the private bucket the
+// inputs name: empty without one, as storage.operational_identity is.
+func privateIdentity(inputs map[string]string) string {
+	if inputs[s3PrivateBucketKey] == "" {
+		return ""
+	}
+	return blobstore.S3Identity(inputs[s3PrivateEndpointKey], inputs[s3PrivateBucketKey], inputs[s3PrivateKeyPrefixKey])
 }
 
 func redactAdminSettings(values map[string]string) {
@@ -1291,8 +1341,9 @@ var adminSettingDependencyGroups = [][]string{
 	{"matcher.enable_tv_series_root_queue", "matcher.enable_tv_series_group_queue"},
 	{"ai.max_concurrent_jobs", "subtitle_ai.max_concurrent_jobs"},
 	{"ai.chat_model", "subtitle_ai.chat_model", "ai.reasoning_effort"}, //nolint:goconst // Keep the complete setting dependency explicit.
-	// A provider binding is checked against the registry it names.
-	append([]string{config.AIProvidersSettingKey}, config.AIProviderBindingKeys()...),
+	// A provider binding is checked against the registry it names, and the
+	// text binding against the auth mode that can leave it idle.
+	append([]string{config.AIProvidersSettingKey, config.AIAuthModeSettingKey}, config.AIProviderBindingKeys()...),
 	{
 		diagnostics.KeyMaxBundleBytes,
 		diagnostics.KeyMaxUncompressedBytes,
@@ -1443,10 +1494,20 @@ func redisDBRow(active map[string]string, value string) string {
 // exception: REDIS_URL keeps a server up whose saved number it cannot start
 // with, and the clear is how that number is removed.
 func (h *AdminHandler) environmentRefusesSave(key, value string) bool {
-	if !h.BootstrapSensitiveConfigured[key] {
+	if _, set := h.EnvironmentSetting(key); !set {
 		return false
 	}
 	return key != config.RedisDBSettingKey || strings.TrimSpace(value) != ""
+}
+
+// EnvironmentSetting is the value the process environment supplies for key;
+// set is false when it supplies none. A save of such a key is refused
+// (environmentRefusesSave), and a selective restore keeps it.
+func (h *AdminHandler) EnvironmentSetting(key string) (value string, set bool) {
+	if !h.BootstrapSensitiveConfigured[key] {
+		return "", false
+	}
+	return h.BootstrapSensitiveValues[key], true
 }
 
 func shouldPersistAdminSetting(stored map[string]string, key, normalized string, effectiveChanged bool) bool {
@@ -1594,6 +1655,11 @@ func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, value
 		if err != nil {
 			return fail(&APIError{Status: http.StatusBadRequest, Code: code, Message: err.Error()})
 		}
+		if key == artworkLocalPathKey {
+			if err := checkArtworkLocalPath(value, "values."+key); err != nil {
+				return fail(err)
+			}
+		}
 		normalized[key] = value
 	}
 	checkedRedis, err := h.checkRedisSave(ctx, normalized)
@@ -1635,7 +1701,7 @@ func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, value
 				}
 			}
 			if artworkStorageLocked(stored) {
-				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
+				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], stored[blobstore.OperationalIdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
 					preconditionErr = err
 					return nil, err
 				}
@@ -1774,6 +1840,11 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		return AdminSettingUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: err.Error()}
 	} else {
 		req.Value = normalized
+	}
+	if key == artworkLocalPathKey {
+		if err := checkArtworkLocalPath(req.Value, "value"); err != nil {
+			return AdminSettingUpdateResult{}, err
+		}
 	}
 
 	switch key {
@@ -2002,7 +2073,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				}
 			}
 			if artworkStorageLocked(stored) {
-				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
+				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], stored[blobstore.OperationalIdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
 					preconditionErr = err
 					return nil, err
 				}

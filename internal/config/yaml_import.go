@@ -254,6 +254,9 @@ func YAMLToSettingsMap(path string) (map[string]string, error) {
 	setIfNonEmpty(m, "jellyfin_compat.web_install_dir", raw.JellyfinCompat.WebInstallDir)
 	setIfNonEmpty(m, "jellyfin_compat.session_ttl", raw.JellyfinCompat.SessionTTL)
 	setIfNonEmpty(m, "jellyfin_compat.playback_session_ttl", raw.JellyfinCompat.PlaybackSessionTTL)
+	if raw.JellyfinCompat.AddressStreamGrantEnabled != nil {
+		m[JellyfinCompatAddressStreamGrantSettingKey] = strconv.FormatBool(*raw.JellyfinCompat.AddressStreamGrantEnabled)
+	}
 
 	return m, nil
 }

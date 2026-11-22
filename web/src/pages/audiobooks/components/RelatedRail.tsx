@@ -1,65 +1,90 @@
+import type { ReactNode } from "react";
+import MediaCardArtwork from "@/components/MediaCardArtwork";
+import MediaCarousel from "@/components/MediaCarousel";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import WatchProgressBar from "@/components/WatchProgressBar";
 import { useUICustomization } from "@/hooks/useUICustomization";
-import { carouselCardWidthClasses } from "@/lib/uiCustomization";
+import { buildItemHref } from "@/lib/mediaNavigation";
+import { carouselCardWidthClasses, squareCarouselCardWidthClasses } from "@/lib/uiCustomization";
 
 interface RelatedRailItem {
   content_id: string;
   title: string;
   poster_url?: string;
-  subtitle?: string;
+  poster_thumbhash?: string;
+  /** A line above the title, such as the book's place in its series. */
+  kicker?: string;
+  subtitle?: ReactNode;
   highlight?: boolean;
+  /** 0-1 while the profile is partway through it; draws a bar on the cover. */
+  progress?: number;
 }
 
 interface RelatedRailProps {
   heading: string;
-  subtitle?: string;
+  /** Shown beside the heading, such as a series' book count. */
+  meta?: string;
   items: RelatedRailItem[];
   coverAspect?: "square" | "poster";
 }
 
-export function RelatedRail({
-  heading,
-  subtitle,
-  items,
-  coverAspect = "square",
-}: RelatedRailProps) {
+export function RelatedRail({ heading, meta, items, coverAspect = "square" }: RelatedRailProps) {
   const { cardPresentation } = useUICustomization();
   if (items.length === 0) return null;
-  const coverAspectClass = coverAspect === "poster" ? "aspect-[2/3]" : "aspect-square";
+  const square = coverAspect === "square";
+  const widthClasses = square
+    ? squareCarouselCardWidthClasses(cardPresentation.poster_size)
+    : carouselCardWidthClasses(cardPresentation.poster_size);
+  const currentIndex = items.findIndex((item) => item.highlight);
+
   return (
-    <section>
-      <div className="mb-4">
-        <h2 className="text-xl font-semibold tracking-tight">{heading}</h2>
-        {subtitle && <p className="text-muted-foreground mt-1 text-xs">{subtitle}</p>}
-      </div>
-      <div className="-mx-2 -mt-1 flex gap-3 overflow-x-auto px-2 pt-1 pb-2">
-        {items.map((item) => (
-          <ViewTransitionLink
-            key={item.content_id}
-            to={`/item/${encodeURIComponent(item.content_id)}`}
-            className={`block ${carouselCardWidthClasses(cardPresentation.poster_size)}`}
+    <MediaCarousel
+      title={heading}
+      edgePadding={false}
+      startSlide={currentIndex >= 0 ? currentIndex : undefined}
+      headerActions={
+        meta ? <span className="text-muted-foreground text-sm">{meta}</span> : undefined
+      }
+    >
+      {items.map((item) => (
+        <ViewTransitionLink
+          key={item.content_id}
+          to={buildItemHref({ contentId: item.content_id })}
+          aria-current={item.highlight ? "page" : undefined}
+          className={`media-card group/related block ${widthClasses}`}
+        >
+          <MediaCardArtwork
+            src={item.poster_url}
+            alt={item.title}
+            mediaType={square ? "audiobook" : "ebook"}
+            thumbhash={item.poster_thumbhash}
+            square={square}
+            scrim="none"
+            lazy
           >
-            <div
-              className={`bg-muted relative ${coverAspectClass} overflow-hidden rounded-lg ${
-                item.highlight ? "ring-primary ring-offset-background ring-2 ring-offset-2" : ""
-              }`}
-            >
-              {item.poster_url ? (
-                <img
-                  src={item.poster_url}
-                  alt={item.title}
-                  className="h-full w-full object-cover"
-                  loading="lazy"
-                />
-              ) : null}
-            </div>
-            <div className="mt-2 truncate text-sm font-medium">{item.title}</div>
-            {item.subtitle ? (
-              <div className="text-muted-foreground truncate text-xs">{item.subtitle}</div>
-            ) : null}
-          </ViewTransitionLink>
-        ))}
-      </div>
-    </section>
+            {item.highlight && (
+              <div
+                aria-hidden="true"
+                className="ring-primary pointer-events-none absolute inset-0 rounded-xl ring-2 ring-inset"
+              />
+            )}
+            {item.progress != null && item.progress > 0 && (
+              <WatchProgressBar percent={item.progress * 100} />
+            )}
+          </MediaCardArtwork>
+          {item.kicker && (
+            <div className="text-muted-foreground mt-2 truncate text-xs">{item.kicker}</div>
+          )}
+          <div
+            className={`line-clamp-2 text-sm leading-snug font-semibold ${item.kicker ? "mt-0.5" : "mt-2"}`}
+          >
+            {item.title}
+          </div>
+          {item.subtitle ? (
+            <div className="text-muted-foreground mt-0.5 truncate text-xs">{item.subtitle}</div>
+          ) : null}
+        </ViewTransitionLink>
+      ))}
+    </MediaCarousel>
   );
 }

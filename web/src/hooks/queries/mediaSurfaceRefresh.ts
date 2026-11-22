@@ -25,6 +25,7 @@ import {
   watchlistKeys,
 } from "./keys";
 import { sectionShowsWholeList } from "./homeRowLimit";
+import { PERSONAL_STATE_WRITE_KEY } from "./personalStateWrites";
 import {
   activeCatalogQueryMatchesLibrary,
   activeSectionQueryMatchesLibrary,
@@ -47,6 +48,7 @@ interface InvalidateMediaSurfaceOptions {
    */
   skipItemQueries?: boolean;
   skipSimilarItems?: boolean;
+  skipHomeRefresh?: boolean;
   // Items already found related to itemId, such as through a watch detail
   // dropped since (dropInactiveWatchDetail), which was the only link from an
   // episode to its series.
@@ -93,18 +95,50 @@ const scheduledInvalidations = new WeakMap<
     }
   >
 >();
+const owedDetailRefreshes = new WeakMap<QueryClient, Set<string>>();
 
+// Writing data marks a query fresh. A detail that was already invalidated,
+// such as by another device's metadata save while no page showed it, still
+// owes a refetch (refetchDetailWhenWritesSettle).
 export function updateCatalogItemDetail(
   queryClient: QueryClient,
   itemId: string,
   updater: (detail: ItemDetail) => ItemDetail,
 ) {
-  queryClient.setQueriesData<ItemDetail>(
-    {
-      predicate: (query) => isItemDetailQueryKey(query.queryKey, itemId),
-    },
-    (current) => (current ? updater(current) : current),
+  const filters = { predicate: (query: Query) => isItemDetailQueryKey(query.queryKey, itemId) };
+  const owesRefetch = queryClient
+    .getQueryCache()
+    .findAll(filters)
+    .some((query) => query.state.isInvalidated);
+  queryClient.setQueriesData<ItemDetail>(filters, (current) =>
+    current ? updater(current) : current,
   );
+  if (owesRefetch) refetchDetailWhenWritesSettle(queryClient, itemId);
+}
+
+// A read made while a write is pending can miss it and replace the write's
+// patch, and the toggles' own refreshes skip the item's detail. So an owed
+// detail is invalidated once no personal-state write is pending: overlapping
+// writes share one refetch after the last of them, and a patch with no write
+// behind it, such as a realtime event's, refetches at once.
+function refetchDetailWhenWritesSettle(queryClient: QueryClient, itemId: string) {
+  const waiting = owedDetailRefreshes.get(queryClient);
+  if (waiting) {
+    waiting.add(itemId);
+    return;
+  }
+  const owed = new Set([itemId]);
+  owedDetailRefreshes.set(queryClient, owed);
+  const refetchOnceSettled = () => {
+    if (queryClient.isMutating({ mutationKey: PERSONAL_STATE_WRITE_KEY }) > 0) return;
+    unsubscribe();
+    owedDetailRefreshes.delete(queryClient);
+    void queryClient.invalidateQueries({
+      predicate: (query) => [...owed].some((id) => isItemDetailQueryKey(query.queryKey, id)),
+    });
+  };
+  const unsubscribe = queryClient.getMutationCache().subscribe(refetchOnceSettled);
+  refetchOnceSettled();
 }
 
 // Callers must await this before writing optimistic state. The default
@@ -226,7 +260,7 @@ function queryKeyStartsWith(queryKey: readonly unknown[], prefix: readonly unkno
 // Only these shapes are narrowed by itemId. episodeKeys.byItem is left out on
 // purpose: it is invalidated only through watchedKeys, and mapping it here
 // would change which episode lists a refresh touches.
-export function getQueryKeyItemId(queryKey: readonly unknown[]): string | undefined {
+function getQueryKeyItemId(queryKey: readonly unknown[]): string | undefined {
   if (!Array.isArray(queryKey) || queryKey.length < 2) return undefined;
   if (
     queryKey[0] === "items" &&
@@ -432,6 +466,7 @@ function shouldInvalidateMediaSurfaceQuery(
   }
   if (queryKeyStartsWith(queryKey, sectionKeys.all)) {
     return (
+      !(options.skipHomeRefresh && queryKeyStartsWith(queryKey, sectionKeys.home())) &&
       !isLibraryLayoutQueryKey(queryKey) &&
       activeSectionQueryMatchesLibrary(queryKey, options.libraryId)
     );
@@ -717,6 +752,9 @@ export function scheduleMediaSurfaceInvalidation(
             ...(options.knownRelatedIds ?? []),
           ])
         : undefined,
+    skipHomeRefresh: existing
+      ? Boolean(existing.options.skipHomeRefresh && options.skipHomeRefresh)
+      : options.skipHomeRefresh,
     watchedKeys: [...(existing?.options.watchedKeys ?? []), ...(options.watchedKeys ?? [])],
     // A later event without a series (one whose lookup failed, say) mustn't
     // drop the series an earlier event for the same item named.
@@ -730,10 +768,15 @@ export function scheduleMediaSurfaceInvalidation(
       // Home reads its sections through one-shot `fetchQuery` calls with no
       // observers, so the signal has to be bumped after the invalidation lands
       // or Home re-reads a cache that is still marked fresh.
-      void invalidateMediaSurfaceQueries(queryClient, mergedOptions).then(
-        () => bumpHomeRefreshSignal(queryClient),
-        () => bumpHomeRefreshSignal(queryClient),
-      );
+      const invalidation = invalidateMediaSurfaceQueries(queryClient, mergedOptions);
+      if (mergedOptions.skipHomeRefresh) {
+        void invalidation.catch(() => {});
+      } else {
+        void invalidation.then(
+          () => bumpHomeRefreshSignal(queryClient),
+          () => bumpHomeRefreshSignal(queryClient),
+        );
+      }
     },
     Math.max(0, Math.min(MEDIA_SURFACE_REFRESH_DELAY_MS, deadline - now)),
   );

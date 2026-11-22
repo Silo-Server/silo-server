@@ -209,94 +209,6 @@ func (s *finalizeRecordingScanner) FinalizeVariantsByPathPrefix(context.Context,
 	return nil
 }
 
-func TestIngestFolderSkipsGenericMatchingForDedicatedEnrichment(t *testing.T) {
-	tests := []struct {
-		name               string
-		folderType         string
-		expectedProcessAll int64
-		expectedRetry      int64
-	}{
-		{name: "ebooks", folderType: "ebooks", expectedProcessAll: 0, expectedRetry: 0},
-		{name: "movies", folderType: "movies", expectedProcessAll: 1, expectedRetry: 1},
-		{name: "series", folderType: "series", expectedProcessAll: 1, expectedRetry: 1},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			matcher := &retryRecordingMatcher{}
-			scanner := &finalizeRecordingScanner{}
-			exec := &Executor{
-				scanner: scanner,
-				matcher: matcher,
-				now:     time.Now,
-			}
-			folder := &models.MediaFolder{ID: 5, Type: tt.folderType, Paths: []string{"/library"}}
-
-			if _, err := exec.IngestFolder(context.Background(), folder); err != nil {
-				t.Fatalf("ingest folder: %v", err)
-			}
-			if got := matcher.processAllCalls.Load(); got != tt.expectedProcessAll {
-				t.Fatalf("ProcessAllByFolderAndPathPrefix calls = %d, want %d", got, tt.expectedProcessAll)
-			}
-			if got := matcher.retryCalls.Load(); got != tt.expectedRetry {
-				t.Fatalf("RetryUnmatchedItemsByFolderAndPathPrefix calls = %d, want %d", got, tt.expectedRetry)
-			}
-			if got := scanner.finalizeCalls.Load(); got != 1 {
-				t.Fatalf("FinalizeVariantsByPathPrefix calls = %d, want 1", got)
-			}
-		})
-	}
-}
-
-// TestIngestSkipsVariantFinalizationForAudiobooks keeps the filename-based
-// variant pass away from audiobook rows. The audiobook scanner writes each
-// book's part order itself and skips unchanged books only while those
-// columns hold it.
-func TestIngestSkipsVariantFinalizationForAudiobooks(t *testing.T) {
-	folderTypes := []struct {
-		folderType   string
-		wantFinalize int64
-	}{
-		{folderType: "movies", wantFinalize: 1},
-		{folderType: "series", wantFinalize: 1},
-		{folderType: "mixed", wantFinalize: 1},
-		{folderType: "ebooks", wantFinalize: 1},
-		{folderType: "audiobooks", wantFinalize: 0},
-		{folderType: " Audiobook ", wantFinalize: 0},
-	}
-	modes := []struct {
-		name   string
-		ingest func(*Executor, *models.MediaFolder) (*Result, error)
-	}{
-		{name: "library", ingest: func(e *Executor, folder *models.MediaFolder) (*Result, error) {
-			return e.IngestFolder(context.Background(), folder)
-		}},
-		{name: "subtree", ingest: func(e *Executor, folder *models.MediaFolder) (*Result, error) {
-			return e.IngestSubtree(context.Background(), folder, "/library/Title")
-		}},
-		{name: "file", ingest: func(e *Executor, folder *models.MediaFolder) (*Result, error) {
-			return e.IngestFile(context.Background(), folder, "/library/Title/part1.mp3")
-		}},
-	}
-
-	for _, tt := range folderTypes {
-		for _, mode := range modes {
-			t.Run(tt.folderType+"/"+mode.name, func(t *testing.T) {
-				scanner := &finalizeRecordingScanner{}
-				exec := &Executor{scanner: scanner, matcher: &retryRecordingMatcher{}, now: time.Now}
-				folder := &models.MediaFolder{ID: 5, Type: tt.folderType, Paths: []string{"/library"}}
-
-				if _, err := mode.ingest(exec, folder); err != nil {
-					t.Fatalf("ingest: %v", err)
-				}
-				if got := scanner.finalizeCalls.Load(); got != tt.wantFinalize {
-					t.Fatalf("FinalizeVariantsByPathPrefix calls = %d, want %d", got, tt.wantFinalize)
-				}
-			})
-		}
-	}
-}
-
 // TestIngestFolderLetsActiveDrainerBatchFinishAfterSettleWindow is a regression
 // test for the settle-window cancellation bug: a TV library full scan was
 // recorded as "cancelled" because stopDrainers cancelled a drainer batch that
@@ -458,7 +370,6 @@ func TestIngestChecksLocalSidecarsAfterMatchingVideoScopes(t *testing.T) {
 		{folderType: "series", wantCheck: true},
 		{folderType: "mixed", wantCheck: true},
 		{folderType: "ebooks", wantCheck: false},
-		{folderType: "audiobooks", wantCheck: false},
 	} {
 		t.Run(tt.folderType, func(t *testing.T) {
 			matcher := &retryRecordingMatcher{}

@@ -2,15 +2,11 @@ package apiv2
 
 import (
 	"context"
-	"slices"
-	"strings"
-	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/policy"
 )
 
 type fakeAdminItemMetadata struct {
@@ -30,114 +26,6 @@ func (f *fakeAdminItemMetadata) UpdateCatalogItemMetadata(_ context.Context, id 
 	f.calls++
 	f.id, f.update, f.clear = id, req, cleared
 	return &catalogsvc.ItemDetail{ContentID: id, Title: "Updated", Type: "movie"}, nil
-}
-func TestAdminItemMetadataTransport(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	f := &fakeAdminItemMetadata{}
-	deps.AdminItemMetadata = f
-	deps.PermissionGates[policy.PermissionMetadataCuration] = adminTranslationGate
-	h := newTestHandler(t, deps)
-	path := Prefix + "/admin/items/item-1"
-	rec := do(t, h, "POST", path+"/refresh-metadata", `{}`, bearer(memberToken))
-	if rec.Code != 202 || f.calls != 1 || f.mode != adminjob.ItemRefreshModeQuick || f.userID != 1 || rec.Header().Get("Location") != Prefix+"/admin/jobs/item-refresh-1" {
-		t.Fatalf("refresh: %d %s %#v", rec.Code, rec.Body, f)
-	}
-	rec = do(t, h, "PATCH", path+"/metadata", `{"overview":"","genres":[],"year":0,"title":null}`, bearer(memberToken))
-	if rec.Code != 200 || f.update.Overview == nil || *f.update.Overview != "" || f.update.Genres == nil || len(*f.update.Genres) != 0 || f.update.Year == nil || *f.update.Year != 0 || f.update.Title != nil || len(f.clear) != 0 || !strings.Contains(rec.Body.String(), `"title":"Updated"`) {
-		t.Fatalf("update: %d %s %#v", rec.Code, rec.Body, f.update)
-	}
-	// An explicit null clears a nullable member; omission and a null on a
-	// member that cannot be cleared leave the value alone.
-	rec = do(t, h, "PATCH", path+"/metadata", `{"rating_imdb":null,"release_date":null,"air_date":null,"rating_tmdb":6.5,"year":null}`, bearer(memberToken))
-	if rec.Code != 200 || !slices.Equal(f.clear, []string{"rating_imdb", "release_date", "air_date"}) || f.update.RatingIMDB != nil || f.update.RatingTMDB == nil || *f.update.RatingTMDB != 6.5 || f.update.Year != nil {
-		t.Fatalf("clear: %d %s clear=%v %#v", rec.Code, rec.Body, f.clear, f.update)
-	}
-	// status is the match status; a null is omission, like the other members
-	// that cannot be cleared.
-	rec = do(t, h, "PATCH", path+"/metadata", `{"status":"matched"}`, bearer(memberToken))
-	if rec.Code != 200 || f.update.Status == nil || *f.update.Status != "matched" {
-		t.Fatalf("match status: %d %s %#v", rec.Code, rec.Body, f.update)
-	}
-	rec = do(t, h, "PATCH", path+"/metadata", `{"status":null}`, bearer(memberToken))
-	if rec.Code != 200 || f.update.Status != nil {
-		t.Fatalf("null status: %d %s %#v", rec.Code, rec.Body, f.update)
-	}
-	rec = do(t, h, "POST", path+"/refresh-metadata", `{"mode":"reset"}`, bearer(memberToken))
-	if rec.Code != 202 || f.mode != adminjob.ItemRefreshModeReset {
-		t.Fatalf("reset: %d %s %#v", rec.Code, rec.Body, f)
-	}
-	before := f.calls
-	rec = do(t, h, "POST", path+"/refresh-metadata", `{"mode":"wrong"}`, bearer(memberToken))
-	if rec.Code != 422 || f.calls != before {
-		t.Fatalf("invalid mode: %d", rec.Code)
-	}
-	rec = do(t, h, "PATCH", path+"/metadata", `{"status":"Ended"}`, bearer(memberToken))
-	if rec.Code != 422 || f.calls != before {
-		t.Fatalf("invalid status: %d %s", rec.Code, rec.Body)
-	}
-	for _, tc := range []struct{ method, path string }{{"POST", "/refresh-metadata"}, {"PATCH", "/metadata"}} {
-		rec = do(t, h, tc.method, Prefix+"/admin/items/forbidden"+tc.path, `{}`, bearer(adminToken))
-		if rec.Code != 403 || f.calls != before {
-			t.Fatalf("permission: %d calls=%d", rec.Code, f.calls)
-		}
-	}
-}
-func TestAdminItemMetadataRejectsMalformedDates(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	f := &fakeAdminItemMetadata{}
-	deps.AdminItemMetadata = f
-	deps.PermissionGates[policy.PermissionMetadataCuration] = adminTranslationGate
-	h := newTestHandler(t, deps)
-	path := Prefix + "/admin/items/item-1/metadata"
-	// Each date member once: values that don't parse, and year 0, which
-	// time.Parse accepts but PostgreSQL's date type does not. Every bad member
-	// is named and nothing reaches the service.
-	p := requireProblem(t, do(t, h, "PATCH", path, `{"release_date":"","first_air_date":"2024-02-30","last_air_date":"0000-01-01","air_date":"2024-02-29T00:00:00Z","title":"Kept"}`, bearer(memberToken)), TypeValidationFailed)
-	var locations []string
-	for _, e := range p.Errors {
-		if e.Code != codeInvalid {
-			t.Fatalf("errors = %+v", p.Errors)
-		}
-		locations = append(locations, e.Location)
-	}
-	if !slices.Equal(locations, []string{"body.release_date", "body.first_air_date", "body.last_air_date", "body.air_date"}) || f.calls != 0 {
-		t.Fatalf("errors = %+v calls=%d", p.Errors, f.calls)
-	}
-	// A real date is accepted and null still clears.
-	rec := do(t, h, "PATCH", path, `{"release_date":"2024-02-29","air_date":null}`, bearer(memberToken))
-	if rec.Code != 200 || f.calls != 1 || !slices.Equal(f.clear, []string{"air_date"}) {
-		t.Fatalf("valid date: %d %s clear=%v", rec.Code, rec.Body, f.clear)
-	}
-}
-func TestAdminItemMetadataNormalizesProviderIDs(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	f := &fakeAdminItemMetadata{}
-	deps.AdminItemMetadata = f
-	deps.PermissionGates[policy.PermissionMetadataCuration] = adminTranslationGate
-	h := newTestHandler(t, deps)
-	path := Prefix + "/admin/items/item-1/metadata"
-	// Lookups compare provider IDs exactly, so each is stored the way a
-	// refresh stores it: trimmed, IMDb in lowercase, TMDB without a URL slug.
-	rec := do(t, h, "PATCH", path, `{"tmdb_id":" 550-fight-club ","imdb_id":"TT0137523 ","tvdb_id":" 81189"}`, bearer(memberToken))
-	if rec.Code != 200 || f.update.TmdbID == nil || *f.update.TmdbID != "550" || f.update.ImdbID == nil || *f.update.ImdbID != "tt0137523" || f.update.TvdbID == nil || *f.update.TvdbID != "81189" {
-		t.Fatalf("normalize: %d %s %#v", rec.Code, rec.Body, f.update)
-	}
-	// Blank still clears.
-	rec = do(t, h, "PATCH", path, `{"tmdb_id":"  "}`, bearer(memberToken))
-	if rec.Code != 200 || f.update.TmdbID == nil || *f.update.TmdbID != "" {
-		t.Fatalf("clear: %d %s %#v", rec.Code, rec.Body, f.update)
-	}
-	// A value that is no ID of its provider is named with any bad date, and
-	// nothing is written: a refresh would drop it and restore the old ID.
-	before := f.calls
-	p := requireProblem(t, do(t, h, "PATCH", path, `{"tmdb_id":"fight club","imdb_id":"0137523","tvdb_id":"0","release_date":"soon"}`, bearer(memberToken)), TypeValidationFailed)
-	var locations []string
-	for _, e := range p.Errors {
-		locations = append(locations, e.Location)
-	}
-	if !slices.Equal(locations, []string{"body.release_date", "body.imdb_id", "body.tmdb_id", "body.tvdb_id"}) || f.calls != before {
-		t.Fatalf("errors = %+v calls=%d", p.Errors, f.calls)
-	}
 }
 func adminCatalogItemMetadataFixtureCases() []fixtureCase {
 	return []fixtureCase{

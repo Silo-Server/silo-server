@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 // @ts-expect-error The vendored JavaScript module does not ship TypeScript declarations.
 import { search } from "../../vendor/foliate-js/search.js";
@@ -197,5 +197,35 @@ describe("foliate view search", () => {
     expect(matched).toBeLessThan(SEARCH_RESULT_LIMIT);
     expect(subitems).toEqual([]);
     expect(addAnnotation).not.toHaveBeenCalled();
+  });
+
+  it("pauses a long section without matches so an abort stops it there", async () => {
+    // Each read of the clock moves it 30 ms, so every section runs past the
+    // search's time budget however fast the scan is.
+    let now = 0;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => (now += 30));
+    onTestFinished(() => clock.mockRestore());
+    const { view } = makeView(Array.from({ length: 3 }, () => "lorem ipsum ".repeat(1_000)));
+    const sections = (view.book as { sections: { createDocument: () => Promise<Document> }[] })
+      .sections;
+    let opened = 0;
+    for (const section of sections) {
+      const createDocument = section.createDocument;
+      section.createDocument = () => {
+        opened++;
+        return createDocument();
+      };
+    }
+    const controller = new AbortController();
+    // Queued before the scan starts, like a click on Back during the search.
+    setTimeout(() => controller.abort());
+
+    const { subitems } = await collect(
+      view.search({ query: "quixotic", signal: controller.signal }),
+    );
+
+    expect(controller.signal.aborted).toBe(true);
+    expect(subitems).toEqual([]);
+    expect(opened).toBe(1);
   });
 });

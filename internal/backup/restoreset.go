@@ -28,12 +28,13 @@ import (
 // section's web_only; version 5 changed no field: a server smart
 // collection's rules draw from their own library_ids (none: every library)
 // rather than only from the collection's libraries; version 6 a home
-// section's title_key and title_args. A reader refuses an
+// section's title_key and title_args; version 7 a rating's score (1 to 10)
+// in place of its whole stars. A reader refuses an
 // unknown section and an unknown field, so any of those is a new version,
 // and an older set never holds them.
 const (
 	restoreSetFormat  = "silo-restore-set"
-	restoreSetVersion = 6
+	restoreSetVersion = 7
 	// restoreSetSmartRulesOwnLibraries is the first version whose smart
 	// collection rules keep their own libraries.
 	restoreSetSmartRulesOwnLibraries = 5

@@ -5,12 +5,16 @@ import {
   ConnectionCheckAction,
   useConnectionCheck,
 } from "@/components/admin/ConnectionCheckAction";
+import { SecretField } from "@/components/settings/SecretField";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { useAdminServerStatus } from "@/hooks/queries/admin/settings";
+import { fetchAdminServerStatus, useAdminServerStatus } from "@/hooks/queries/admin/settings";
+import { useRequestServerRestart } from "@/hooks/queries/admin/serverRestart";
+import { settingsRestartPending } from "@/hooks/admin/useSettingsHealth";
+import { useMounted } from "@/hooks/useMounted";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useT, type MessageKey, type Translate } from "@/i18n";
-import { stageRedisUrl } from "@/pages/admin-settings/redisDraft";
+import { REDIS_KEYS, keepSavedRedisUrl, stageRedisUrl } from "@/pages/admin-settings/redisDraft";
 import {
   SettingField,
   SettingFieldRow,
@@ -20,10 +24,10 @@ import {
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
 import { useStepSubmit, useStepSummary } from "../useStep";
 
-const REDIS_KEYS = ["redis.url", "redis.db"];
-
 const PUBLIC_S3_KEYS = [
   "s3.public_endpoint",
+  "s3.public_region",
+  "s3.public_path_style",
   "s3.public_bucket",
   "s3.public_key_prefix",
   "s3.public_access_key",
@@ -37,6 +41,8 @@ const PUBLIC_S3_KEYS = [
 
 const PRIVATE_S3_KEYS = [
   "s3.private_endpoint",
+  "s3.private_region",
+  "s3.private_path_style",
   "s3.private_bucket",
   "s3.private_key_prefix",
   "s3.private_access_key",
@@ -64,6 +70,17 @@ const STORAGE_LOCATION_KEYS = [
   "s3.private_bucket",
   "s3.private_key_prefix",
 ];
+
+// The namespaces of this step's settings that the server reads only at startup.
+const STORAGE_RESTART_PREFIXES = ["s3.", "artwork.", "redis."] as const;
+const RESTART_POLL_MS = 1_000;
+// Once the restart looks stuck, poll gently: each status read runs health probes.
+const RESTART_SLOW_POLL_MS = 5_000;
+// Shutdown waits a few seconds for streams to drain, then startup migrates and
+// opens storage; past a minute, nothing is bringing the process back.
+const RESTART_SLOW_MS = 60_000;
+
+type RestartPhase = "idle" | "applying" | "slow";
 
 const S3_URL_AUTH_OPTIONS: { value: string; label: MessageKey }[] = [
   { value: "presigned", label: "web.setup.storage.authPresigned" },
@@ -105,7 +122,9 @@ function redisStatusFor(
 /**
  * One storage backend: a summary row that says whether it is configured, and a
  * disclosure with the fields. A backend an admin does not touch stays folded
- * and reads as one line, which is what most single-node installs want.
+ * and reads as one line, which is what most single-node installs want. One
+ * holding an unsaved edit is marked changed and stays open, because Continue
+ * saves it.
  */
 function Backend({
   title,
@@ -113,6 +132,7 @@ function Backend({
   configured,
   status,
   open,
+  edited,
   onToggle,
   readOnly = false,
   children,
@@ -123,28 +143,51 @@ function Backend({
   /** Overrides the default Configured / Not set up line. */
   status?: ReactNode;
   open: boolean;
+  /** Whether a field inside holds an unsaved edit. */
+  edited: boolean;
   onToggle: () => void;
   /** Show the environment-owned values for inspection without offering edits. */
   readOnly?: boolean;
   children: ReactNode;
 }) {
   const t = useT();
+  const shown = open || edited;
   return (
     <>
       <SettingFieldRow
         label={title}
+        dirty={edited}
         description={description}
         status={
-          status ??
-          (configured ? (
-            <SettingFieldStatus tone="ok">{t("web.setup.storage.configured")}</SettingFieldStatus>
-          ) : (
-            <SettingFieldStatus tone="muted">{t("web.setup.storage.notSetUp")}</SettingFieldStatus>
-          ))
+          <div className="flex flex-col items-start gap-1">
+            {status ??
+              (configured ? (
+                <SettingFieldStatus tone="ok">
+                  {t("web.setup.storage.configured")}
+                </SettingFieldStatus>
+              ) : (
+                <SettingFieldStatus tone="muted">
+                  {t("web.setup.storage.notSetUp")}
+                </SettingFieldStatus>
+              ))}
+            {/* Says why Hide is unavailable. */}
+            {edited ? (
+              <SettingFieldStatus tone="muted">
+                {t("web.admin.settings.fields.groupUnsavedChanges")}
+              </SettingFieldStatus>
+            ) : null}
+          </div>
         }
       >
-        <Button type="button" variant="secondary" size="sm" onClick={onToggle} aria-expanded={open}>
-          {open
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={onToggle}
+          aria-expanded={shown}
+          disabled={edited}
+        >
+          {shown
             ? t("web.setup.storage.hide")
             : readOnly
               ? t("web.setup.storage.view")
@@ -153,7 +196,7 @@ function Backend({
                 : t("web.setup.storage.setUp")}
         </Button>
       </SettingFieldRow>
-      {open ? <div className="setup-backend-fields">{children}</div> : null}
+      {shown ? <div className="setup-backend-fields">{children}</div> : null}
     </>
   );
 }
@@ -180,14 +223,25 @@ function S3Fields({
   const t = useT();
   const key = (name: string) => `s3.${prefix}_${name}`;
   const urlAuth = form.getValue(key("url_auth")) || "presigned";
+  // Link-mode settings show for the modes that use them. One the selected mode
+  // doesn't use stays, marked as changed, while it holds an unsaved edit, so
+  // Continue never saves a value the admin can't see.
+  const linkModeUses = (linkKey: string) =>
+    linkKey === "s3.public_read_endpoint"
+      ? urlAuth !== "presigned"
+      : urlAuth === "cloudflare_token";
+  const keptForEdit = (linkKey: string) => !linkModeUses(linkKey) && form.isDirty(linkKey);
+  const showsLinkSetting = (linkKey: string) => linkModeUses(linkKey) || form.isDirty(linkKey);
   return (
     <>
       <SettingField
         label={t("web.setup.storage.endpointLabel")}
         // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
         hint="https://s3.amazonaws.com"
+        dir="ltr"
         value={form.getValue(key("endpoint"))}
         onChange={(v) => form.setValue(key("endpoint"), v)}
+        managedByEnv={form.envVar(key("endpoint"))}
         disabled={locationLocked}
         description={
           locationLocked
@@ -201,21 +255,25 @@ function S3Fields({
         label={t("web.setup.storage.bucketLabel")}
         value={form.getValue(key("bucket"))}
         onChange={(v) => form.setValue(key("bucket"), v)}
+        managedByEnv={form.envVar(key("bucket"))}
         disabled={locationLocked}
       />
-      <SettingField
+      {/* Emptying a secret field keeps the saved value; the wizard clears none. */}
+      <SecretField
         label={t("web.setup.storage.accessKeyLabel")}
-        type="password"
         value={form.getValue(key("access_key"))}
+        configured={form.sensitiveConfigured.includes(key("access_key"))}
         onChange={(v) => form.setValue(key("access_key"), v)}
-        sensitiveConfigured={form.sensitiveConfigured.includes(key("access_key"))}
+        onKeep={() => form.resetValue(key("access_key"))}
+        managedByEnv={form.envVar(key("access_key"))}
       />
-      <SettingField
+      <SecretField
         label={t("web.setup.storage.secretKeyLabel")}
-        type="password"
         value={form.getValue(key("secret_key"))}
+        configured={form.sensitiveConfigured.includes(key("secret_key"))}
         onChange={(v) => form.setValue(key("secret_key"), v)}
-        sensitiveConfigured={form.sensitiveConfigured.includes(key("secret_key"))}
+        onKeep={() => form.resetValue(key("secret_key"))}
+        managedByEnv={form.envVar(key("secret_key"))}
       />
       <SettingField
         label={t("web.setup.storage.prefixLabel")}
@@ -224,7 +282,23 @@ function S3Fields({
         hint="silo"
         value={form.getValue(key("key_prefix"))}
         onChange={(v) => form.setValue(key("key_prefix"), v)}
+        managedByEnv={form.envVar(key("key_prefix"))}
         disabled={locationLocked}
+      />
+      <SettingField
+        label={t("web.admin.settings.storage.s3.region")}
+        description={t("web.admin.settings.storage.s3.regionDescription")}
+        value={form.getValue(key("region"))}
+        onChange={(v) => form.setValue(key("region"), v)}
+        managedByEnv={form.envVar(key("region"))}
+      />
+      <SettingField
+        label={t("web.admin.settings.storage.s3.pathStyle")}
+        type="toggle"
+        description={t("web.admin.settings.storage.s3.pathStyleDescription")}
+        value={form.getValue(key("path_style"))}
+        onChange={(v) => form.setValue(key("path_style"), v)}
+        managedByEnv={form.envVar(key("path_style"))}
       />
       {prefix === "public" ? (
         <>
@@ -234,40 +308,54 @@ function S3Fields({
             value={urlAuth}
             onChange={(v) => form.setValue("s3.public_url_auth", v)}
             options={S3_URL_AUTH_OPTIONS.map((o) => ({ value: o.value, label: t(o.label) }))}
+            // A disabled fieldset does not stop a Radix select from opening.
+            disabled={disabled}
+            managedByEnv={form.envVar("s3.public_url_auth")}
           />
-          {urlAuth !== "presigned" ? (
+          {showsLinkSetting("s3.public_read_endpoint") ? (
             <SettingField
               label={t("web.setup.storage.readEndpointLabel")}
+              dirty={keptForEdit("s3.public_read_endpoint")}
               // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
               hint="https://cdn.example.com"
+              dir="ltr"
               value={form.getValue("s3.public_read_endpoint")}
               onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
+              managedByEnv={form.envVar("s3.public_read_endpoint")}
             />
           ) : null}
-          {urlAuth === "cloudflare_token" ? (
-            <>
-              <SettingField
-                label={t("web.setup.storage.tokenSecretLabel")}
-                type="password"
-                hint={t("web.setup.storage.tokenSecretHint")}
-                value={form.getValue("s3.public_token_secret")}
-                onChange={(v) => form.setValue("s3.public_token_secret", v)}
-                sensitiveConfigured={form.sensitiveConfigured.includes("s3.public_token_secret")}
-              />
-              <SettingField
-                label={t("web.setup.storage.tokenParamLabel")}
-                description={t("web.setup.storage.tokenParamDescription")}
-                value={form.getValue("s3.public_token_param") || "verify"}
-                onChange={(v) => form.setValue("s3.public_token_param", v)}
-              />
-              <SettingField
-                label={t("web.setup.storage.tokenTtlLabel")}
-                type="number"
-                unit={t("web.setup.storage.seconds")}
-                value={form.getValue("s3.public_token_ttl") || "10800"}
-                onChange={(v) => form.setValue("s3.public_token_ttl", v)}
-              />
-            </>
+          {showsLinkSetting("s3.public_token_secret") ? (
+            <SecretField
+              label={t("web.setup.storage.tokenSecretLabel")}
+              dirty={keptForEdit("s3.public_token_secret")}
+              hint={t("web.setup.storage.tokenSecretHint")}
+              value={form.getValue("s3.public_token_secret")}
+              configured={form.sensitiveConfigured.includes("s3.public_token_secret")}
+              onChange={(v) => form.setValue("s3.public_token_secret", v)}
+              onKeep={() => form.resetValue("s3.public_token_secret")}
+              managedByEnv={form.envVar("s3.public_token_secret")}
+            />
+          ) : null}
+          {showsLinkSetting("s3.public_token_param") ? (
+            <SettingField
+              label={t("web.setup.storage.tokenParamLabel")}
+              dirty={keptForEdit("s3.public_token_param")}
+              description={t("web.setup.storage.tokenParamDescription")}
+              value={form.getValue("s3.public_token_param")}
+              onChange={(v) => form.setValue("s3.public_token_param", v)}
+              managedByEnv={form.envVar("s3.public_token_param")}
+            />
+          ) : null}
+          {showsLinkSetting("s3.public_token_ttl") ? (
+            <SettingField
+              label={t("web.setup.storage.tokenTtlLabel")}
+              dirty={keptForEdit("s3.public_token_ttl")}
+              type="number"
+              unit={t("web.setup.storage.seconds")}
+              value={form.getValue("s3.public_token_ttl")}
+              onChange={(v) => form.setValue("s3.public_token_ttl", v)}
+              managedByEnv={form.envVar("s3.public_token_ttl")}
+            />
           ) : null}
         </>
       ) : null}
@@ -285,10 +373,58 @@ function S3Fields({
 export function StorageStep() {
   const t = useT();
   const form = useSettingsForm({ keys: useMemo(() => ALL_KEYS, []) });
+  const serverStatus = useAdminServerStatus();
+  const restart = useRequestServerRestart();
+  const [restartPhase, setRestartPhase] = useState<RestartPhase>("idle");
+  const mounted = useMounted();
+
+  // Storage settings take effect when Silo starts. Applying them before the
+  // Libraries step keeps the first stored files in the location the admin chose,
+  // instead of recording the old location and locking the new one out (#4418).
+  async function applySavedStorage(): Promise<boolean> {
+    const before = await fetchAdminServerStatus();
+    if (!mounted.current) return false;
+    // The answering process reports these until it restarts, which also covers
+    // a save made before a page reload.
+    if (!settingsRestartPending(before, STORAGE_RESTART_PREFIXES)) return true;
+    setRestartPhase("applying");
+    const slowAt = Date.now() + RESTART_SLOW_MS;
+    let slow = false;
+    // Not awaited: polling for the new process is the real signal, and a
+    // request that never answers must not hold it up.
+    restart.mutateAsync({}).catch(() => {
+      slow = true;
+      if (mounted.current) setRestartPhase("slow");
+    });
+    while (mounted.current) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, slow ? RESTART_SLOW_POLL_MS : RESTART_POLL_MS),
+      );
+      try {
+        const now = await fetchAdminServerStatus();
+        // An admin who left the step mid-restart has moved on; don't finish it.
+        if (!mounted.current) return false;
+        if (now.started_at !== before.started_at) {
+          setRestartPhase("idle");
+          void serverStatus.refetch();
+          return true;
+        }
+      } catch {
+        // Expected while the old process stops and the new one starts.
+      }
+      if (!slow && Date.now() >= slowAt) {
+        slow = true;
+        setRestartPhase("slow");
+      }
+    }
+    return false;
+  }
+
   const { handleSubmit, busy, skip } = useStepSubmit(
     "storage",
     form,
     t("web.setup.storage.saveFailed"),
+    applySavedStorage,
   );
   const [open, setOpen] = useState<{ redis: boolean; public: boolean; private: boolean }>({
     redis: false,
@@ -303,7 +439,6 @@ export function StorageStep() {
   const redisManaged = form.sensitiveManagedByEnv.includes("redis.url");
   // The health probe pings Redis and Postgres; only worth it once there is a
   // Redis to report on.
-  const serverStatus = useAdminServerStatus();
   const artworkStorage = serverStatus.data?.artwork_storage;
   const storageLockStatusKnown =
     !serverStatus.isError &&
@@ -360,6 +495,22 @@ export function StorageStep() {
       onSkip={skip}
       footnote={t("web.setup.storage.footnote")}
     >
+      {restartPhase === "applying" ? (
+        <div className="rounded-xl border p-4" role="status">
+          <p className="text-sm font-medium">{t("web.setup.storage.applyingTitle")}</p>
+          <p className="text-muted-foreground mt-1 text-xs">
+            {t("web.setup.storage.applyingBody")}
+          </p>
+        </div>
+      ) : null}
+      {restartPhase === "slow" ? (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4" role="alert">
+          <p className="text-sm font-medium">{t("web.setup.storage.restartSlowTitle")}</p>
+          <p className="text-muted-foreground mt-1 text-xs">
+            {t("web.setup.storage.restartSlowBody")}
+          </p>
+        </div>
+      ) : null}
       {locationStatusUnavailable ? (
         <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4" role="alert">
           <p className="text-sm font-medium">{t("web.setup.storage.lockUnknownTitle")}</p>
@@ -370,141 +521,148 @@ export function StorageStep() {
           </p>
         </div>
       ) : null}
-      <StepSection>
-        <SettingField
-          label={t("web.setup.storage.backendLabel")}
-          type="select"
-          value={artworkBackend}
-          options={[
-            { value: "auto", label: t("web.setup.storage.backendAuto") },
-            { value: "local", label: t("web.setup.storage.backendLocal") },
-            { value: "s3", label: "S3" },
-          ]}
-          disabled={locationStatusUnavailable || artworkLocked}
-          description={
-            locationStatusUnavailable
-              ? t("web.setup.storage.lockUnknownBackend")
-              : artworkLocked
-                ? t("web.setup.storage.backendLocked")
-                : t("web.setup.storage.backendDescription")
-          }
-          onChange={(value) => {
-            form.setValue("artwork.storage_backend", value);
-            if (value === "s3") setOpen((o) => ({ ...o, public: true }));
-          }}
-        />
-        <SettingField
-          label={t("web.setup.storage.localPathLabel")}
-          // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
-          hint="/var/lib/silo/artwork"
-          value={form.getValue("artwork.local_path")}
-          onChange={(value) => form.setValue("artwork.local_path", value)}
-          disabled={locationStatusUnavailable || artworkLocked}
-          description={
-            locationStatusUnavailable
-              ? t("web.setup.storage.lockUnknownPath")
-              : t("web.setup.storage.localPathDescription")
-          }
-        />
-        <SettingFieldRow
-          label={t("web.setup.storage.keepArtworkLabel")}
-          description={t("web.setup.storage.keepArtworkDescription")}
-        >
-          <Switch
-            checked={form.getValue("metadata.cache_images") !== "false"}
-            onCheckedChange={(v) => form.setValue("metadata.cache_images", v ? "true" : "false")}
-            aria-label={t("web.setup.storage.keepArtworkLabel")}
-          />
-        </SettingFieldRow>
-        <Backend
-          // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- product name
-          title="Redis"
-          description={
-            redisManaged
-              ? t("web.setup.storage.redisManagedDescription")
-              : t("web.setup.storage.redisDescription")
-          }
-          configured={redisConfigured}
-          status={
-            redisStatus ? (
-              <SettingFieldStatus tone={redisStatus.tone}>{redisStatus.text}</SettingFieldStatus>
-            ) : undefined
-          }
-          open={open.redis}
-          onToggle={() => setOpen((o) => ({ ...o, redis: !o.redis }))}
-          readOnly={redisManaged}
-        >
+      {/* Locked while Silo restarts: an edit made now could not be saved
+          before the step moves on. */}
+      <fieldset disabled={restartPhase !== "idle"} className="contents">
+        <StepSection>
           <SettingField
-            label={t("web.setup.storage.redisUrlLabel")}
-            type="password"
+            label={t("web.setup.storage.backendLabel")}
+            type="select"
+            value={artworkBackend}
+            options={[
+              { value: "auto", label: t("web.setup.storage.backendAuto") },
+              { value: "local", label: t("web.setup.storage.backendLocal") },
+              { value: "s3", label: "S3" },
+            ]}
+            // A disabled fieldset does not stop a Radix select from opening.
+            disabled={busy || locationStatusUnavailable || artworkLocked}
+            description={
+              locationStatusUnavailable
+                ? t("web.setup.storage.lockUnknownBackend")
+                : artworkLocked
+                  ? t("web.setup.storage.backendLocked")
+                  : t("web.setup.storage.backendDescription")
+            }
+            onChange={(value) => {
+              form.setValue("artwork.storage_backend", value);
+              if (value === "s3") setOpen((o) => ({ ...o, public: true }));
+            }}
+            managedByEnv={form.envVar("artwork.storage_backend")}
+          />
+          <SettingField
+            label={t("web.setup.storage.localPathLabel")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
-            hint="redis://localhost:6379"
-            value={form.getValue("redis.url")}
-            onChange={(v) => stageRedisUrl(form, v)}
-            sensitiveConfigured={redisSaved && form.getValue("redis.url") === ""}
-            disabled={redisManaged}
+            hint="/var/lib/silo/artwork"
+            dir="ltr"
+            value={form.getValue("artwork.local_path")}
+            onChange={(value) => form.setValue("artwork.local_path", value)}
+            disabled={locationStatusUnavailable || artworkLocked}
+            description={
+              locationStatusUnavailable
+                ? t("web.setup.storage.lockUnknownPath")
+                : t("web.setup.storage.localPathDescription")
+            }
+            managedByEnv={form.envVar("artwork.local_path")}
           />
-          <SettingField
-            label={t("web.setup.storage.redisDbLabel")}
-            type="number"
+          <SettingFieldRow
+            label={t("web.setup.storage.keepArtworkLabel")}
+            description={t("web.setup.storage.keepArtworkDescription")}
+          >
+            <Switch
+              checked={form.getValue("metadata.cache_images") !== "false"}
+              onCheckedChange={(v) => form.setValue("metadata.cache_images", v ? "true" : "false")}
+              aria-label={t("web.setup.storage.keepArtworkLabel")}
+            />
+          </SettingFieldRow>
+          <Backend
+            // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- product name
+            title="Redis"
             description={
               redisManaged
-                ? t("web.setup.storage.redisDbManaged")
-                : t("web.setup.storage.redisDbDescription")
+                ? t("web.setup.storage.redisManagedDescription")
+                : t("web.setup.storage.redisDescription")
             }
-            value={form.getValue("redis.db")}
-            onChange={(v) => form.setValue("redis.db", v)}
-            disabled={redisManaged}
-          />
-          <ConnectionCheckAction
-            onClick={redisCheck.run}
-            result={redisCheck.result}
-            isPending={redisCheck.isPending}
-            disabled={busy}
-            label={t("web.setup.wizard.checkConnection")}
-          />
-        </Backend>
-        <Backend
-          title={t("web.setup.storage.publicTitle")}
-          description={t("web.setup.storage.publicDescription")}
-          configured={publicConfigured}
-          open={open.public}
-          onToggle={() => setOpen((o) => ({ ...o, public: !o.public }))}
-        >
-          <S3Fields
-            form={form}
-            prefix="public"
-            check={publicCheck}
-            disabled={busy}
-            locationLocked={
-              locationStatusUnavailable || (artworkLocked && artworkBackend !== "local")
+            configured={redisConfigured}
+            status={
+              redisStatus ? (
+                <SettingFieldStatus tone={redisStatus.tone}>{redisStatus.text}</SettingFieldStatus>
+              ) : undefined
             }
-            locationStatusUnavailable={locationStatusUnavailable}
-            lockedDescription={
-              usesS3
-                ? t("web.setup.storage.publicLockedS3")
-                : t("web.setup.storage.publicLockedLocal")
-            }
-          />
-        </Backend>
-        <Backend
-          title={t("web.setup.storage.privateTitle")}
-          description={t("web.setup.storage.privateDescription")}
-          configured={privateConfigured}
-          open={open.private}
-          onToggle={() => setOpen((o) => ({ ...o, private: !o.private }))}
-        >
-          <S3Fields
-            form={form}
-            prefix="private"
-            check={privateCheck}
-            disabled={busy}
-            locationLocked={locationStatusUnavailable || privateLocked}
-            locationStatusUnavailable={locationStatusUnavailable}
-            lockedDescription={t("web.setup.storage.privateLocked")}
-          />
-        </Backend>
-      </StepSection>
+            open={open.redis}
+            edited={REDIS_KEYS.some(form.isDirty)}
+            onToggle={() => setOpen((o) => ({ ...o, redis: !o.redis }))}
+            readOnly={redisManaged}
+          >
+            <SecretField
+              label={t("web.setup.storage.redisUrlLabel")}
+              // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
+              hint="redis://localhost:6379"
+              value={form.getValue("redis.url")}
+              configured={redisSaved}
+              onChange={(v) => stageRedisUrl(form, v)}
+              onKeep={() => keepSavedRedisUrl(form)}
+              managedByEnv={form.envVar("redis.url")}
+            />
+            <SettingField
+              label={t("web.setup.storage.redisDbLabel")}
+              type="number"
+              description={t("web.setup.storage.redisDbDescription")}
+              value={form.getValue("redis.db")}
+              onChange={(v) => form.setValue("redis.db", v)}
+              managedByEnv={form.envVar("redis.db")}
+            />
+            <ConnectionCheckAction
+              onClick={redisCheck.run}
+              result={redisCheck.result}
+              isPending={redisCheck.isPending}
+              disabled={busy}
+              label={t("web.setup.wizard.checkConnection")}
+            />
+          </Backend>
+          <Backend
+            title={t("web.setup.storage.publicTitle")}
+            description={t("web.setup.storage.publicDescription")}
+            configured={publicConfigured}
+            open={open.public}
+            edited={PUBLIC_S3_KEYS.some(form.isDirty)}
+            onToggle={() => setOpen((o) => ({ ...o, public: !o.public }))}
+          >
+            <S3Fields
+              form={form}
+              prefix="public"
+              check={publicCheck}
+              disabled={busy}
+              locationLocked={
+                locationStatusUnavailable || (artworkLocked && artworkBackend !== "local")
+              }
+              locationStatusUnavailable={locationStatusUnavailable}
+              lockedDescription={
+                usesS3
+                  ? t("web.setup.storage.publicLockedS3")
+                  : t("web.setup.storage.publicLockedLocal")
+              }
+            />
+          </Backend>
+          <Backend
+            title={t("web.setup.storage.privateTitle")}
+            description={t("web.setup.storage.privateDescription")}
+            configured={privateConfigured}
+            open={open.private}
+            edited={PRIVATE_S3_KEYS.some(form.isDirty)}
+            onToggle={() => setOpen((o) => ({ ...o, private: !o.private }))}
+          >
+            <S3Fields
+              form={form}
+              prefix="private"
+              check={privateCheck}
+              disabled={busy}
+              locationLocked={locationStatusUnavailable || privateLocked}
+              locationStatusUnavailable={locationStatusUnavailable}
+              lockedDescription={t("web.setup.storage.privateLocked")}
+            />
+          </Backend>
+        </StepSection>
+      </fieldset>
     </StepFrame>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent } from "react";
+import { useState, useMemo, useCallback, useRef, type ChangeEvent } from "react";
 import { joinList } from "@/lib/appLocale";
 import { Check, Loader2, AlertCircle, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -60,15 +60,9 @@ interface ImageSelectorTabProps {
   item: ItemDetail;
   enabled: boolean;
   onImageApplied?: () => void;
-  onApplyPendingChange?: (pending: boolean) => void;
 }
 
-export default function ImageSelectorTab({
-  item,
-  enabled,
-  onImageApplied,
-  onApplyPendingChange,
-}: ImageSelectorTabProps) {
+export default function ImageSelectorTab({ item, enabled, onImageApplied }: ImageSelectorTabProps) {
   const t = useT();
   const availableTabs = item.type === "season" ? SEASON_TABS : IMAGE_TABS;
   const [activeTab, setActiveTab] = useState<ImageTab>("poster");
@@ -86,11 +80,6 @@ export default function ImageSelectorTab({
   const pending = applyMutation.isPending || uploadMutation.isPending;
 
   const images = useMemo(() => data?.images ?? [], [data]);
-
-  useEffect(() => {
-    onApplyPendingChange?.(pending);
-    return () => onApplyPendingChange?.(false);
-  }, [pending, onApplyPendingChange]);
 
   const current = data?.current;
   const providerErrors = data?.provider_errors;
@@ -302,7 +291,9 @@ export default function ImageSelectorTab({
               )}
             >
               {p.id === null ? t("web.item.images.allProviders") : p.id.toUpperCase()}
-              <span className="tabular-nums opacity-60">{numberText(p.count)}</span>
+              <span className="text-muted-foreground font-normal tabular-nums">
+                {numberText(p.count)}
+              </span>
             </button>
           ))}
         </div>
@@ -378,7 +369,7 @@ export default function ImageSelectorTab({
 
                   {/* Current indicator */}
                   {isCurrent && (
-                    <div className="bg-primary/90 text-primary-foreground absolute start-1 top-1 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-semibold">
+                    <div className="bg-primary text-primary-foreground absolute start-1 top-1 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-semibold">
                       <Check className="size-2.5" />
                       {t("web.item.images.current")}
                     </div>

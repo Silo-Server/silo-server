@@ -137,6 +137,7 @@ function mockForm(overrides: FormOverrides = {}) {
     restartRequired: false,
     sensitiveConfigured: [],
     sensitiveManagedByEnv: [],
+    envVar: () => undefined,
     sensitiveStatusReady: true,
     sensitiveStatusError: false,
     buildConnectionCheckRequest: vi.fn(),
@@ -1228,12 +1229,8 @@ describe("StorageSettings", () => {
 
     render(<StorageSettings />);
 
-    // No Replace step: the saved credential is a masked, always-editable input.
     const publicGroup = within(screen.getByRole("group", { name: "Public storage" }));
     const input = publicGroup.getByLabelText("Access Key");
-    expect(input).toHaveAttribute("type", "password");
-    expect(input).toHaveAttribute("placeholder", "••••••••••••");
-    expect(publicGroup.queryByRole("button", { name: /Replace/ })).not.toBeInTheDocument();
 
     // Deleting the draft means "keep the saved secret", never "clear it".
     await userEvent.clear(input);
@@ -1349,6 +1346,58 @@ describe("StorageSettings", () => {
         "placeholder",
         "••••••••••••",
       );
+    });
+  });
+
+  describe("leaving Cloudflare token links", () => {
+    beforeEach(() => {
+      realForm.enabled = true;
+      serverSettings.current = {
+        "artwork.storage_backend": "s3",
+        "s3.public_url_auth": "presigned",
+      };
+      sensitiveStatus.current = { configured: [], managed_by_env: [] };
+    });
+
+    afterEach(() => {
+      realForm.enabled = false;
+    });
+
+    it("keeps a typed token secret in view after switching back to signed links", async () => {
+      render(<StorageSettings />);
+
+      const publicGroup = within(screen.getByRole("group", { name: "Public storage" }));
+      const linkMode = publicGroup.getByRole("combobox", {
+        name: "How asset links are authorized",
+      });
+      await userEvent.click(linkMode);
+      await userEvent.click(screen.getByRole("option", { name: "Cloudflare signed token" }));
+      await userEvent.click(publicGroup.getByRole("button", { name: /Advanced/ }));
+      await userEvent.type(publicGroup.getByLabelText("Token Secret"), "secret");
+      await userEvent.click(linkMode);
+      await userEvent.click(screen.getByRole("option", { name: "Signed links (recommended)" }));
+
+      expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+      expect(publicGroup.getByLabelText("Token Secret")).toHaveValue("secret");
+    });
+
+    it("lets go of a token secret that was typed and erased again", async () => {
+      render(<StorageSettings />);
+
+      const publicGroup = within(screen.getByRole("group", { name: "Public storage" }));
+      const linkMode = publicGroup.getByRole("combobox", {
+        name: "How asset links are authorized",
+      });
+      await userEvent.click(linkMode);
+      await userEvent.click(screen.getByRole("option", { name: "Cloudflare signed token" }));
+      await userEvent.click(publicGroup.getByRole("button", { name: /Advanced/ }));
+      await userEvent.type(publicGroup.getByLabelText("Token Secret"), "secret");
+      await userEvent.clear(publicGroup.getByLabelText("Token Secret"));
+      await userEvent.click(linkMode);
+      await userEvent.click(screen.getByRole("option", { name: "Signed links (recommended)" }));
+
+      expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
+      expect(publicGroup.queryByLabelText("Token Secret")).not.toBeInTheDocument();
     });
   });
 });

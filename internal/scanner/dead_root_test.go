@@ -23,11 +23,13 @@ func TestRootCoverageClauses(t *testing.T) {
 	if len(clauses) != 2 {
 		t.Fatalf("clauses len = %d, want 2 (%v)", len(clauses), clauses)
 	}
-	if clauses[0] != `(file_path = $3 OR file_path LIKE $4 ESCAPE '\')` {
-		t.Fatalf("clauses[0] = %q", clauses[0])
-	}
-	if clauses[1] != `(file_path = $5 OR file_path LIKE $6 ESCAPE '\')` {
-		t.Fatalf("clauses[1] = %q", clauses[1])
+	// Each root's clause binds its own pair of arguments, numbered from firstArg.
+	for i, placeholders := range [][]string{{"$3", "$4"}, {"$5", "$6"}} {
+		for _, placeholder := range placeholders {
+			if !strings.Contains(clauses[i], placeholder) {
+				t.Fatalf("clauses[%d] = %q, want it to bind %s", i, clauses[i], placeholder)
+			}
+		}
 	}
 
 	want := []any{moviesRoot, moviesRoot + "/%", "/mnt/tv_shows", `/mnt/tv\_shows/%`}

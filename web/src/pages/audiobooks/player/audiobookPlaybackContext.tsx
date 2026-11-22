@@ -5,19 +5,23 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import { toast } from "sonner";
 import {
   getAccessToken,
   getAuthContextVersion,
-  getOrCreateDeviceId,
+  getDeviceHeaders,
   getProfileToken,
   refreshAuthentication,
 } from "@/api/client";
+import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useT } from "@/i18n";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player/context/PlayerConfigContext";
 import { storage } from "@/utils/storage";
@@ -25,12 +29,17 @@ import type { AudiobookPlayerControls, AudiobookPlayerStatus } from "./Audiobook
 
 const AudiobookPlayer = lazy(() => import("./AudiobookPlayer"));
 
+/** The root property MiniBar publishes its height on, and the provider clears. */
+export const AUDIOBOOK_BAR_HEIGHT_PROPERTY = "--audiobook-bar-height";
+
 export interface AudiobookPlaybackStartInput {
   contentId: string;
   title: string;
   author?: string;
   narrator?: string;
   posterUrl?: string;
+  /** The cover's thumbhash; the Now Listening view takes its tint from it. */
+  posterThumbhash?: string;
   files: AudiobookFile[];
   initialPositionSeconds?: number;
   autoPlay?: boolean;
@@ -62,6 +71,7 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
   const [active, setActive] = useState<AudiobookPlayerStatus | null>(null);
   const [controls, setControls] = useState<AudiobookPlayerControls | null>(null);
   const { profile } = useCurrentProfile();
+  const t = useT();
   const profileId = profile?.id ?? null;
   const playbackProfileRef = useRef<string | null>(null);
   const playerConfig = useMemo<PlayerConfig>(
@@ -70,7 +80,7 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
       getAccessToken: () => getAccessToken(),
       getProfileId: () => storage.get(storage.KEYS.PROFILE_ID),
       getProfileToken: () => getProfileToken(),
-      getDeviceId: () => getOrCreateDeviceId(),
+      getDeviceHeaders,
       refreshToken: refreshAuthentication,
       getAuthContext: getAuthContextVersion,
     }),
@@ -95,6 +105,19 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
     setActiveRequest(null);
   }, []);
 
+  // React.lazy keeps a failed chunk import failed, so the player can't start
+  // again until the page reloads; say so instead of dropping the tap.
+  const handlePlayerFailed = useCallback(() => {
+    stopPlayback();
+    toast.error(t("web.shell.errorBoundary.title"), {
+      description: t("web.shell.errorBoundary.description"),
+      action: {
+        label: t("web.shell.errorBoundary.refresh"),
+        onClick: () => window.location.reload(),
+      },
+    });
+  }, [stopPlayback, t]);
+
   // The book belongs to the profile that started it: a profile switch must
   // not keep it playing or report its progress under the new profile.
   useEffect(() => {
@@ -111,6 +134,14 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
       stopPlayback();
     }
   }, [activeRequest, profileId, stopPlayback]);
+
+  // MiniBar leaves its height on the root while Now Listening covers it; drop
+  // it once nothing is playing. Switching books keeps it until the next bar
+  // measures its own.
+  useLayoutEffect(() => {
+    if (activeRequest) return;
+    document.documentElement.style.removeProperty(AUDIOBOOK_BAR_HEIGHT_PROPERTY);
+  }, [activeRequest]);
 
   const toggleActivePlayback = useCallback(() => {
     controls?.togglePlay();
@@ -133,22 +164,27 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
       {children}
       {activeRequest && (
         <PlayerConfigProvider config={playerConfig}>
-          <Suspense fallback={null}>
-            <AudiobookPlayer
-              key={`${activeRequest.contentId}-${activeRequest.requestKey}`}
-              contentId={activeRequest.contentId}
-              title={activeRequest.title}
-              author={activeRequest.author}
-              narrator={activeRequest.narrator}
-              posterUrl={activeRequest.posterUrl}
-              files={activeRequest.files}
-              initialPositionSeconds={activeRequest.initialPositionSeconds}
-              autoPlay={activeRequest.autoPlay}
-              onClose={stopPlayback}
-              onPlaybackStateChange={setActive}
-              onControlsChange={setControls}
-            />
-          </Suspense>
+          {/* The player renders over every page: if its chunk fails to load,
+            end this playback and say so instead of taking the page down. */}
+          <LocalErrorBoundary onError={handlePlayerFailed}>
+            <Suspense fallback={null}>
+              <AudiobookPlayer
+                key={`${activeRequest.contentId}-${activeRequest.requestKey}`}
+                contentId={activeRequest.contentId}
+                title={activeRequest.title}
+                author={activeRequest.author}
+                narrator={activeRequest.narrator}
+                posterUrl={activeRequest.posterUrl}
+                posterThumbhash={activeRequest.posterThumbhash}
+                files={activeRequest.files}
+                initialPositionSeconds={activeRequest.initialPositionSeconds}
+                autoPlay={activeRequest.autoPlay}
+                onClose={stopPlayback}
+                onPlaybackStateChange={setActive}
+                onControlsChange={setControls}
+              />
+            </Suspense>
+          </LocalErrorBoundary>
         </PlayerConfigProvider>
       )}
     </AudiobookPlaybackControllerContext.Provider>

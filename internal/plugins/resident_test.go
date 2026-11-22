@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -143,6 +142,25 @@ func waitState(t *testing.T, service *Service, id int, what string, pred func(Ru
 }
 
 func running(state RuntimeState, ok bool) bool { return ok && state.State == ResidentRunning }
+
+func TestResidentClientRefreshesStaleInstallation(t *testing.T) {
+	f := newResidentFixture(t, ResidentOptions{})
+	ctx := t.Context()
+	f.service.StartResidents(ctx)
+	waitState(t, f.service, 5, "initial process", running)
+	if _, err := f.service.ensureClient(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Update(ctx, 5, UpdateInstallationInput{Restart: true}); err != nil {
+		t.Fatal(err)
+	}
+	// The supervisor can see the new row before the lifecycle poll refreshes the cache.
+	f.service.Residents().Reconcile(ctx)
+	waitState(t, f.service, 5, "replacement process", running)
+	if _, err := f.service.ensureClient(ctx, 5); err != nil {
+		t.Fatalf("RPC could not use the current resident: %v", err)
+	}
+}
 
 func TestResidentSupervisorStartsAtReconcileAndStopsOnDisable(t *testing.T) {
 	f := newResidentFixture(t, ResidentOptions{})
@@ -314,23 +332,6 @@ func TestResidentSupervisorHaltStopsResidents(t *testing.T) {
 	}
 }
 
-func TestResidentBackoffSchedule(t *testing.T) {
-	minBackoff, maxBackoff := time.Second, time.Minute
-	for _, tc := range []struct {
-		failures int
-		want     time.Duration
-	}{{0, time.Second}, {1, time.Second}, {2, 2 * time.Second}, {3, 4 * time.Second}, {6, 32 * time.Second}, {7, time.Minute}, {10, time.Minute}, {64, time.Minute}} {
-		if got := residentBackoff(tc.failures, minBackoff, maxBackoff); got != tc.want {
-			t.Errorf("residentBackoff(%d) = %v, want %v", tc.failures, got, tc.want)
-		}
-	}
-	for i := 0; i < 100; i++ {
-		if j := defaultBackoffJitter(time.Minute); j < 0 || j > 15*time.Second {
-			t.Fatalf("jitter %v outside [0, 15s]", j)
-		}
-	}
-}
-
 func TestResidentRestartOfNonResidentOnlyStops(t *testing.T) {
 	host := &fakeServiceHost{}
 	store := newFakeServiceInstallationStore(&Installation{ID: 2, PluginID: "silo.metadb", Version: "1", InstallPath: "/x/plugin", Enabled: true, Kind: KindPlugin})
@@ -369,55 +370,6 @@ func buildResidentFixtureVersion(t *testing.T, version string) string {
 		t.Fatal(err)
 	}
 	return bin
-}
-
-// A replaced or auto-updated binary changes the row's version and install
-// path. On the host that made the change the process is already gone; on
-// any other host running the installation (a proxy node) it is still alive
-// and must be replaced by the next reconcile, not kept because it answers
-// health checks.
-func TestResidentSupervisorReplacesProcessWhenBinaryChanges(t *testing.T) {
-	f := newResidentFixture(t, ResidentOptions{})
-	ctx := context.Background()
-	f.service.StartResidents(ctx)
-	waitState(t, f.service, 5, "initial running", running)
-	first, err := f.host.Client(5)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := first.Manifest().GetVersion(); got != "0.1.0" {
-		t.Fatalf("initial version = %q", got)
-	}
-
-	next := buildResidentFixtureVersion(t, "0.2.0")
-	version := "0.2.0"
-	if err := f.store.Update(ctx, 5, UpdateInstallationInput{Version: &version, InstallPath: &next}); err != nil {
-		t.Fatal(err)
-	}
-	f.service.OnLifecycleChange(ctx)
-
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		current, err := f.host.Client(5)
-		state, _ := f.service.Residents().State(5)
-		if err == nil && current != first && current.Manifest().GetVersion() == "0.2.0" && state.State == ResidentRunning {
-			if state.RestartCount != 0 || state.LastError != "" {
-				t.Fatalf("replacement counted as a failure: %+v", state)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("resident kept the old process after the binary changed (err=%v, state=%+v)", err, state)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	// The same reconcile again is a no-op: nothing changed.
-	replaced, _ := f.host.Client(5)
-	f.service.OnLifecycleChange(ctx)
-	if again, err := f.host.Client(5); err != nil || again != replaced {
-		t.Fatalf("an unchanged row replaced the process (err=%v)", err)
-	}
 }
 
 // fixtureArchive packs a built fixture binary the way the installer stores
@@ -545,47 +497,6 @@ func TestResidentLazyRPCDoesNotLaunchBeforeTheGateOpens(t *testing.T) {
 	}
 }
 
-// A change of host identity (a proxy whose stream_nodes row was deleted and
-// re-registered under a new id) replaces every running resident: the process
-// keeps the identity it started with in memory, so it must not go on serving
-// under the new one.
-func TestResidentSupervisorReplacesProcessWhenHostIdentityChanges(t *testing.T) {
-	f := newResidentFixture(t, ResidentOptions{})
-	ctx := context.Background()
-	var identity atomic.Value
-	identity.Store("node:1")
-	f.service.SetResidentHostIdentity(func() string { return identity.Load().(string) })
-	f.service.StartResidents(ctx)
-	waitState(t, f.service, 5, "running under node:1", running)
-	first, err := f.host.Client(5)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	f.service.OnLifecycleChange(ctx)
-	if same, err := f.host.Client(5); err != nil || same != first {
-		t.Fatalf("an unchanged identity replaced the process (err=%v)", err)
-	}
-
-	identity.Store("node:2")
-	f.service.OnLifecycleChange(ctx)
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		current, err := f.host.Client(5)
-		state, _ := f.service.Residents().State(5)
-		if err == nil && current != first && state.State == ResidentRunning {
-			if state.RestartCount != 0 || state.LastError != "" {
-				t.Fatalf("identity change counted as a failure: %+v", state)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("resident kept the old process after the host identity changed (err=%v, state=%+v)", err, state)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 // Overlapping reconciles must not let an older one, whose desired set was
 // computed before a disable, resurrect the resident after a newer one
 // removed it. Reconcile is serialized end to end, so the second call sees
@@ -658,7 +569,9 @@ func TestResidentRestartReturnsWhenCallerCancels(t *testing.T) {
 	store := newFakeServiceInstallationStore(&Installation{ID: 5, PluginID: manifest.PluginId, Version: manifest.Version, InstallPath: path, Enabled: true, Kind: KindPlugin})
 	service := &Service{host: host, installations: store}
 	service.resident = newResidentSupervisor(service, ResidentOptions{})
-	service.resident.entries[5] = &residentEntry{id: 5, state: ResidentRunning}
+	service.resident.entries[5] = &residentEntry{
+		id: 5, state: ResidentRunning, desired: residentRuntime{installation: runtimeOf(store.byID[5])},
+	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)

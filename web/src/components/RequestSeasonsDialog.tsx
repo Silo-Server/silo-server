@@ -1,7 +1,8 @@
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import type { RequestMediaDetail, RequestMediaSeason } from "@/api/types";
 import { RequestOptionFields } from "@/components/RequestOptionFields";
+import { LineTitle, TitleLineParts } from "@/components/TitleLine";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -210,8 +211,8 @@ export function RequestSeasonsDialog({
                           aria-describedby={`${metaID} ${statusID}`}
                         />
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium">
-                            {seasonName(t, season)}
+                          <span className="flex flex-wrap overflow-hidden font-medium">
+                            <TitleLineParts>{seasonName(t, season)}</TitleLineParts>
                           </span>
                           <span id={metaID} className="text-muted-foreground block text-xs">
                             {formatRequestSeasonMeta(season)}
@@ -240,6 +241,9 @@ export function RequestSeasonsDialog({
           <Button variant="outline" onClick={() => close(false)}>
             {t("common.cancel")}
           </Button>
+          {/* The label lists the picked seasons, so it can be wider than the dialog: the
+              button shrinks beside Cancel and the list ends in "…", while the words around
+              it stay whole, since the verb comes after the list in some languages. */}
           <Button
             onClick={submit}
             disabled={
@@ -250,14 +254,22 @@ export function RequestSeasonsDialog({
               (!serverChooses && selected.length === 0) ||
               createRequest.isPending
             }
-            className="gap-2"
+            className="min-w-0 shrink gap-2"
           >
             {(createRequest.isPending || refreshing) && <Loader2 className="size-4 animate-spin" />}
-            {selected.length > 0
-              ? t("web.requests.seasons.requestSeasons", { seasons: formatSeasonList(selected) })
-              : serverChooses
-                ? t("web.requests.seasons.requestSeries")
-                : t("web.requests.request")}
+            <span className="flex min-w-0 whitespace-pre">
+              {selected.length > 0 ? (
+                t("web.requests.seasons.requestSeasons", {
+                  seasons: <span className="truncate">{formatSeasonList(selected)}</span>,
+                })
+              ) : (
+                <span className="truncate">
+                  {serverChooses
+                    ? t("web.requests.seasons.requestSeries")
+                    : t("web.requests.request")}
+                </span>
+              )}
+            </span>
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -265,12 +277,16 @@ export function RequestSeasonsDialog({
   );
 }
 
-function seasonName(t: Translate, season: RequestMediaSeason): string {
+/** "Season 2", or "Season 2: Name" with the name in a `LineTitle`. */
+function seasonName(t: Translate, season: RequestMediaSeason): ReactNode {
   const numberText = String(season.season_number);
   const number = t("web.requests.seasons.season", { number: season.season_number });
   // TMDB's generic name is English ("Season 2"); compare with that, not the translation.
   return season.name && season.name !== `Season ${numberText}` && season.name !== number
-    ? t("web.requests.seasons.seasonNamed", { number: season.season_number, name: season.name })
+    ? t("web.requests.seasons.seasonNamed", {
+        number: season.season_number,
+        name: <LineTitle>{season.name}</LineTitle>,
+      })
     : number;
 }
 

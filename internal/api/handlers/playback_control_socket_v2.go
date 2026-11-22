@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 
@@ -34,7 +35,10 @@ import (
 // upgrade:
 //
 //   - a caller that is not the session's account and profile is refused (403);
-//   - the session must exist in this replica's manager (404 otherwise);
+//   - the session must exist in this replica's manager. A mint that misses
+//     there reads the durable playback attempt: an ended attempt is gone for
+//     good (410), a live one is only not rebuilt here yet (503, retry), and
+//     no attempt at all is 404. The upgrade itself stays 404;
 //   - a reconnect resumes the lane only for the same owner and installation;
 //     a different installation is refused while the lane is held (409);
 //   - ack and result frames are routed only while the registration that
@@ -65,6 +69,13 @@ var (
 	ErrPlaybackControlSocketStale         = errors.New("playback control authority is stale")
 	ErrPlaybackControlSocketLaneHeld      = errors.New("playback control lane is held by another installation")
 	ErrPlaybackControlSocketInvalidTicket = evt.ErrSocketTicket
+	// ErrPlaybackControlSocketSessionEnded: the session's durable attempt was
+	// stopped, so no later request rebuilds it and the client should stop.
+	ErrPlaybackControlSocketSessionEnded = errors.New("playback session has ended")
+	// ErrPlaybackControlSocketSessionResuming: the attempt is still live but
+	// this replica has no in-memory session for it yet. The player's next media
+	// request rebuilds it, so the client should retry.
+	ErrPlaybackControlSocketSessionResuming = errors.New("playback session is not active on this replica yet")
 )
 
 // PlaybackControlBinding is the identity a ticket captures: the playback
@@ -222,6 +233,9 @@ func (h *PlaybackControlSocketV2) Mint(ctx context.Context, identity evt.SocketI
 	identity.AccessFingerprint = eventsScopeFingerprint(scope)
 	identity.EffectiveRole = claims.Role
 	binding, err := h.admit(ctx, identity, playbackSessionID, installationID, nil)
+	if errors.Is(err, playback.ErrSessionNotFound) {
+		err = h.missingSessionError(ctx, identity, playbackSessionID)
+	}
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -234,6 +248,40 @@ func (h *PlaybackControlSocketV2) Mint(ctx context.Context, identity evt.SocketI
 		expiry = identity.AccessExpiresAt
 	}
 	return ticket, expiry, nil
+}
+
+// missingSessionError tells a session that ended from one this replica has not
+// rebuilt yet, using the durable attempt the progress route also reads. A
+// restart empties the in-memory map, and the player's next media request
+// rebuilds a live session under the same id; an ended one never returns. Only
+// the owner learns which case applies: any other caller, an absent attempt,
+// and a store with no attempt service all get the not-found they got before.
+func (h *PlaybackControlSocketV2) missingSessionError(ctx context.Context, identity evt.SocketIdentity, playbackSessionID string) error {
+	store := h.Playback.PlanStoreV3
+	// The store keys attempts by UUID; anything else cannot name one, and a
+	// durable store would answer it with a query error, not a miss.
+	// uuid.Parse also accepts braces or any other one-character wrapper, a urn
+	// prefix, no hyphens and upper case, so only the canonical form it prints back
+	// counts as an id the store can be asked about.
+	if id, err := uuid.Parse(playbackSessionID); store == nil || err != nil || id == uuid.Nil || id.String() != playbackSessionID {
+		return playback.ErrSessionNotFound
+	}
+	attempt, err := store.GetAttemptIdentity(ctx, playbackSessionID)
+	if errors.Is(err, playback.ErrSessionNotFound) {
+		return playback.ErrSessionNotFound
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "could not read the playback attempt for a control ticket",
+			"component", "api", "playback_session_id", playbackSessionID, "error", err)
+		return ErrPlaybackControlSocketUnavailable
+	}
+	if attempt == nil || attempt.UserID != identity.UserID || attempt.ProfileID == "" || attempt.ProfileID != identity.ProfileID {
+		return playback.ErrSessionNotFound
+	}
+	if attempt.Stopped {
+		return ErrPlaybackControlSocketSessionEnded
+	}
+	return ErrPlaybackControlSocketSessionResuming
 }
 
 // admit checks that the session exists here and belongs to the caller's
@@ -310,7 +358,7 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	}
 	validated, claims, err := h.Validate(r.Context(), ticket.Identity)
 	if err != nil {
-		http.Error(w, "realtime authority expired", http.StatusUnauthorized)
+		refuseSocketHandshake(w, err, "realtime authority expired")
 		return
 	}
 	expected := ticket.Binding
@@ -333,8 +381,8 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	if ticket.Identity.AccessExpiresAt.Before(deadline) {
 		deadline = ticket.Identity.AccessExpiresAt
 	}
-	ctx, cancel := context.WithDeadline(validated, deadline)
-	defer cancel()
+	ctx, cancel := socketLifetime(validated, deadline)
+	defer cancel(nil)
 
 	upgrader := websocket.Upgrader{Subprotocols: []string{PlaybackControlSocketProtocol}, EnableCompression: true, CheckOrigin: func(r *http.Request) bool {
 		return socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load()))
@@ -344,6 +392,7 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		slog.ErrorContext(r.Context(), "playback control websocket upgrade failed", "component", "api", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		return
 	}
+	closer := newSocketCloser(conn)
 	realtimeConn := &sessionRealtimeConn{conn: conn}
 	registration := h.Playback.RealtimeHub.Register(sessionID, realtimeConn)
 	if registration == nil {
@@ -367,48 +416,41 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		if h.Playback.RealtimeHub.Unregister(registration) && h.Playback.setRealtimeConnectionState(sessionID, false) {
 			h.Playback.syncSessionsNow(context.Background(), "realtime_disconnect")
 		}
-		_ = conn.Close()
+		closer.close(context.Cause(ctx))
 	}()
 
 	configureWebSocket(conn)
 	readCtx, cancelRead := context.WithCancel(ctx)
 	defer cancelRead()
 	// The read loop takes no context: close the socket when the deadline
-	// passes or a re-check cancels the read.
-	stopClose := context.AfterFunc(readCtx, func() { _ = conn.Close() })
+	// passes or a re-check ends the connection, with the close frame its
+	// cause names.
+	stopClose := closer.closeWhenDone(ctx)
 	defer stopClose()
 	startWebSocketPingLoop(readCtx, realtimeConn.WritePing)
 	// Re-check login authority and session ownership without extending the
-	// deadline; loss of either closes an otherwise healthy socket.
-	go func() {
-		interval := h.checkInterval
-		if interval <= 0 {
-			interval = playbackControlCheckInterval
+	// deadline; loss of either closes an otherwise healthy socket. A lost
+	// session or lane names no close code, so it ends without a close frame.
+	interval := h.checkInterval
+	if interval <= 0 {
+		interval = playbackControlCheckInterval
+	}
+	go recheckSocketAuthority(readCtx, cancel, interval, func(checkCtx context.Context) error {
+		if _, _, err := h.Validate(checkCtx, ticket.Identity); err != nil {
+			return err
 		}
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-readCtx.Done():
-				return
-			case <-ticker.C:
-				checkCtx, stop := context.WithTimeout(readCtx, 2*time.Second)
-				_, _, err := h.Validate(checkCtx, ticket.Identity)
-				if err == nil {
-					_, err = h.admit(checkCtx, ticket.Identity, sessionID, expected.InstallationID, &expected)
-				}
-				stop()
-				if err != nil {
-					cancelRead()
-					return
-				}
-			}
-		}
-	}()
+		_, err := h.admit(checkCtx, ticket.Identity, sessionID, expected.InstallationID, &expected)
+		return err
+	})
 	for {
 		_, data, err := wsconn.ReadMessage(conn, wsMaxClientMessageBytes)
 		if err != nil {
 			return
+		}
+		if ctx.Err() != nil {
+			// The connection is ending: keep reading for the peer's close
+			// reply, but act on nothing more it sends.
+			continue
 		}
 		if !h.owns(sessionID, lane) {
 			// A newer registration for the same owner took the lane; frames

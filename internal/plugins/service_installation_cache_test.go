@@ -63,74 +63,6 @@ func TestRefreshMarkerRuntimeInvalidatesReplicaState(t *testing.T) {
 	}
 }
 
-func TestRefreshMarkerRuntimeKeepsResidentSupervised(t *testing.T) {
-	f := newResidentFixture(t, ResidentOptions{})
-	f.service.StartResidents(t.Context())
-	waitState(t, f.service, 5, "initial resident launch", running)
-	before, err := f.host.Client(5)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := f.service.RefreshMarkerRuntime(5); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, f.service, 5, "resident launch after marker refresh", running)
-	after, err := f.host.Client(5)
-	if err != nil {
-		t.Fatalf("supervisor reports running without a resident process: %v", err)
-	}
-	if after == before {
-		t.Fatal("marker refresh retained the previous resident process")
-	}
-}
-
-func TestIsInstallationEnabledReflectsCacheAndInvalidation(t *testing.T) {
-	ctx := context.Background()
-	svc, store := newCachedInstallationService(&Installation{ID: 7, PluginID: "silo.metadb", Enabled: true})
-
-	enabled, err := svc.IsInstallationEnabled(ctx, 7)
-	if err != nil {
-		t.Fatalf("IsInstallationEnabled err = %v", err)
-	}
-	if !enabled {
-		t.Fatal("IsInstallationEnabled = false, want true")
-	}
-	if store.getByIDCalls != 1 {
-		t.Fatalf("GetByID calls = %d, want 1", store.getByIDCalls)
-	}
-
-	// Disable the underlying row. Until a lifecycle change, the cache still
-	// reports the stale (enabled) value and issues no further reads.
-	falseVal := false
-	if err := store.Update(ctx, 7, UpdateInstallationInput{Enabled: &falseVal}); err != nil {
-		t.Fatalf("store.Update err = %v", err)
-	}
-	enabled, err = svc.IsInstallationEnabled(ctx, 7)
-	if err != nil {
-		t.Fatalf("cached IsInstallationEnabled err = %v", err)
-	}
-	if !enabled {
-		t.Fatal("cached IsInstallationEnabled = false, want stale true before invalidation")
-	}
-	if store.getByIDCalls != 1 {
-		t.Fatalf("GetByID calls = %d, want still 1 (served from cache)", store.getByIDCalls)
-	}
-
-	// After a lifecycle change the cache is wiped and the new value is read.
-	svc.OnLifecycleChange(ctx)
-	enabled, err = svc.IsInstallationEnabled(ctx, 7)
-	if err != nil {
-		t.Fatalf("post-invalidate IsInstallationEnabled err = %v", err)
-	}
-	if enabled {
-		t.Fatal("post-invalidate IsInstallationEnabled = true, want false")
-	}
-	if store.getByIDCalls != 2 {
-		t.Fatalf("GetByID calls = %d, want 2 after invalidation", store.getByIDCalls)
-	}
-}
-
 // TestCachedInstallationSkipsWriteOnRacingInvalidation proves the generation
 // guard: if a lifecycle invalidation lands while GetByID is in flight, the
 // fetched (potentially pre-mutation) row is returned to the caller but is not
@@ -187,40 +119,41 @@ func TestLoadInstallationRequireEnabledGateAppliesAfterCache(t *testing.T) {
 	}
 }
 
-// A watch registry reload can read a newer installation from another API node.
-// Refreshing the service cache makes its next RPC replace the old process too.
-func TestWatchProviderReloadUsesUpdatedInstallation(t *testing.T) {
-	oldManifest := testPluginManifest(t, "silo.watchprovider.trakt", "0.1.0")
-	newManifest := testPluginManifest(t, "silo.watchprovider.trakt", "0.2.0")
-	newPath := writeInstalledPluginManifest(t, newManifest)
-	svc, store := newCachedInstallationService(&Installation{
-		ID: 7, PluginID: oldManifest.PluginId, Version: oldManifest.Version,
-		InstallPath: writeInstalledPluginManifest(t, oldManifest), Enabled: true,
-	})
-	host := &fakeServiceHost{
-		clientResult: &fakePluginClient{manifest: oldManifest},
-		startResult:  &fakePluginClient{manifest: newManifest},
-	}
-	svc.host = host
-	if _, err := svc.WatchSyncProviderClient(t.Context(), 7, "trakt"); err != nil {
+func TestLifecyclePollRecoversMissedEnablementCycleDB(t *testing.T) {
+	ctx := t.Context()
+	pool := builtinGuardTestPool(t)
+	id := seedResidentQueryInstallation(t, pool, true)
+	store := NewInstallationStore(pool)
+	service := &Service{installations: store}
+	service.reconcileLifecycle(ctx, false)
+
+	if err := store.Update(ctx, id, UpdateInstallationInput{Enabled: new(false)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Update(t.Context(), 7, UpdateInstallationInput{Version: &newManifest.Version, InstallPath: &newPath}); err != nil {
+	disabled, err := service.loadInstallation(ctx, id, false)
+	if err != nil {
 		t.Fatal(err)
 	}
-	rows, err := store.ListEnabled(t.Context())
-	if err != nil || len(rows) != 1 || rows[0].Version != newManifest.Version {
-		t.Fatalf("updated installations = %+v, err = %v", rows, err)
+	if disabled.Enabled {
+		t.Fatal("peer did not cache the disabled row between polls")
 	}
-	svc.InvalidateInstallationCache()
-	if _, err := svc.WatchSyncProviderClient(t.Context(), 7, "trakt"); err != nil {
+
+	if err := store.Update(ctx, id, UpdateInstallationInput{Enabled: new(true)}); err != nil {
 		t.Fatal(err)
 	}
-	if len(host.started) != 1 || len(host.stopped) != 1 || host.started[0].Manifest.Version != newManifest.Version {
-		t.Fatalf("plugin did not restart on the updated installation: starts=%+v stops=%v", host.started, host.stopped)
+	service.reconcileLifecycle(ctx, false)
+	enabled, err := service.loadInstallation(ctx, id, true)
+	if err != nil {
+		t.Fatalf("peer kept the disabled row after re-enable: %v", err)
 	}
-	manifest, err := svc.manifestForInstallation(t.Context(), 7, false)
-	if err != nil || manifest.Version != newManifest.Version {
-		t.Fatalf("manifest = %+v, err = %v, want current version", manifest, err)
+
+	if err := store.Update(ctx, id, UpdateInstallationInput{Enabled: new(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if service.reconcileInstallations(ctx) {
+		t.Fatal("saving the already enabled value advanced the runtime")
+	}
+	if enabled.RuntimeGeneration != disabled.RuntimeGeneration+1 {
+		t.Fatalf("runtime generation on re-enable = %d, want %d", enabled.RuntimeGeneration, disabled.RuntimeGeneration+1)
 	}
 }

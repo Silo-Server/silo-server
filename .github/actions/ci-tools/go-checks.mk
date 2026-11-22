@@ -12,15 +12,23 @@ lint:
 	$(MAKE) -f Makefile lint-router-recovery
 
 # The whole tree, so a change that breaks vet in a package it did not touch
-# still fails; lint-changed reports only changed lines.
+# still fails; lint-changed reports only changed lines. The macOS node build
+# is vetted too, since Linux never compiles the darwin installer, and its
+# cross-build fails on a new cgo import or a gap in imageutil's node stub.
 vet:
 	go vet ./...
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go vet -tags silo_node ./cmd/silo/ ./internal/nodeinstall/ ./internal/nodebuild/ ./internal/imageutil/ ./web/
+	$(MAKE) -f Makefile build-node-darwin NODE_DARWIN_OUT=/dev/null
 
 # Package assertions belong to the tests lane; these check generated artifacts.
 contracts:
 	$(MAKE) -j1 -f Makefile verify-settings-bindings verify-playback-fixtures verify-route-inventory
 	$(MAKE) -j1 -f Makefile verify-apiv2-openapi CONTRACT_GO_TESTS=0
 	git fetch --no-tags origin "+refs/heads/$${CONTRACT_BASE_REF}:refs/remotes/origin/$${CONTRACT_BASE_REF}"
+	@base="$$(git merge-base "origin/$${CONTRACT_BASE_REF}" HEAD)" && \
+		entry="$$(git ls-tree "$$base" -- contracts/api/v2/openapi.json)" && \
+		blob="$$(printf '%s\n' "$$entry" | awk '$$2 == "blob" { print $$3 }')" && \
+		if [ -n "$$blob" ]; then git cat-file -e "$$blob"; fi
 	$(MAKE) -j1 -f Makefile verify-apiv2-contract CONTRACT_GO_TESTS=0 BASE_REF="origin/$${CONTRACT_BASE_REF}"
 
 # Go's test cache cannot see files a test's child process reads, so these
@@ -42,8 +50,19 @@ test-dependencies:
 	  } END { exit bad }'
 
 tests: test-dependencies
-	GOFLAGS="$${TEST_GOFLAGS}" $(MAKE) -f Makefile test-go
 	@want="$$(printf '%s\n' $(wildcard $(UNCACHED) $(IMMUTABLE)) | sort -u)"; \
 	got="$$(git grep -l -E '(exec\.Command(Context)?\(([^,]+, )?"(go|git|node)"|LookPath\("(go|git|node)"\))' -- '*_test.go' | sed 's@/[^/]*$$@@' | sort -u)"; \
 	if [ "$$want" != "$$got" ]; then echo "::error::packages whose tests start go, git, or node changed"; echo "want: $$want"; echo "got: $$got"; exit 1; fi
-	go test -count=1 $(addprefix ./,$(UNCACHED))
+	$(MAKE) -f Makefile embed-stub
+	@if [ "$${GITHUB_EVENT_NAME}" = schedule ]; then \
+		GOFLAGS="$${TEST_GOFLAGS}" $(MAKE) -f Makefile test-go; \
+	else \
+		listed="$$(go list -f '{{.ImportPath}} {{.Module.Path}}' ./...)" || exit $$?; \
+		packages="$$(printf '%s\n' "$$listed" | awk -v excluded="$(UNCACHED)" '\
+			BEGIN { n = split(excluded, paths, " "); for (i = 1; i <= n; i++) uncached[paths[i]] = 1 } \
+		NF == 2 && !(substr($$1, length($$2) + 2) in uncached) { printf "%s ", $$1 } \
+		')" || exit $$?; \
+		if [ -z "$$packages" ]; then echo "::error::ordinary Go test package list is empty"; exit 1; fi; \
+		GOFLAGS="$${TEST_GOFLAGS}" $(MAKE) -f Makefile test-go GO_TEST_PACKAGES="$$packages" && \
+			go test -count=1 $(addprefix ./,$(UNCACHED)); \
+	fi

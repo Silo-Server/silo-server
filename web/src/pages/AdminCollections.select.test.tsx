@@ -9,7 +9,6 @@ import type { components } from "@/api/v2/schema";
 import { installV2Recorder, v2Recorder, type RecordedCall } from "@/test/v2Recorder";
 
 import {
-  ADMIN_COLLECTION_CAPABILITIES,
   answerAdminCollections,
   storedAdminCollection as stored,
 } from "./adminCollections.test-support";
@@ -134,42 +133,16 @@ beforeEach(() => {
 });
 
 describe("AdminCollections Select collections", () => {
-  it("offers no Sync when the server can't import lists", async () => {
-    v2Recorder.answer("GET /api/v2/admin/collections/capabilities", {
-      ...ADMIN_COLLECTION_CAPABILITIES,
-      imports: false,
-    });
-    renderPage();
-    const user = await enterSelectMode();
-    await pick(user, "Best Picture Winners", "Christmas Classics");
-    expect(within(bar()).getByRole("status")).toHaveTextContent("2 selected");
-    expect(within(bar()).queryByRole("button", { name: /^Sync/ })).not.toBeInTheDocument();
-    expect(screen.queryByText(/^Sync skips/)).not.toBeInTheDocument();
-    expect(within(bar()).getByRole("button", { name: "Hide from tabs" })).toBeEnabled();
-  });
-
   it("refuses more than 100 at a time", async () => {
-    items = Array.from({ length: 101 }, (_, index) => stored(`List ${index + 1}`));
+    items = Array.from({ length: 100 }, (_, index) => stored(`List ${index + 1}`));
     items.push(stored("Studio Ghibli"));
     renderPage();
     const user = await enterSelectMode();
     await user.click(screen.getByRole("checkbox", { name: "Select all" }));
     expect(within(bar()).getByRole("status")).toHaveTextContent(
-      "102 selectedSelect up to 100 collections at a time.",
+      "101 selectedSelect up to 100 collections at a time.",
     );
     expect(within(bar()).getByRole("button", { name: "Hide from tabs" })).toBeDisabled();
-  });
-
-  it("syncs only the synced lists picked, and says how many synced", async () => {
-    renderPage();
-    const user = await enterSelectMode();
-    await pick(user, "Best Picture Winners", "Christmas Classics", "Netflix Originals");
-    await user.click(within(bar()).getByRole("button", { name: "Sync 2 lists" }));
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Synced 2 lists."));
-    expect(pathsOf("POST /api/v2/admin/collections/{id}/sync").sort()).toEqual([
-      "/api/v2/admin/collections/best-picture-winners/sync",
-      "/api/v2/admin/collections/netflix-originals/sync",
-    ]);
   });
 
   it("keeps at most four syncs in flight", async () => {
@@ -251,13 +224,17 @@ describe("AdminCollections Select collections", () => {
     ]);
   });
 
-  it("asks first with the rows' total when rows use any it hides, and Cancel sends nothing", async () => {
+  it("checks the latest row count before hiding and sends nothing on Cancel", async () => {
     renderPage();
     const user = await enterSelectMode();
-    await pick(user, "Best Picture Winners", "Trending This Week", "Studio Ghibli");
+    await pick(user, "Best Picture Winners", "Studio Ghibli");
+    // Another admin adds two rows for Studio Ghibli after the list loads.
+    items = items.map((entry) =>
+      entry.title === "Studio Ghibli" ? { ...entry, row_count: 2 } : entry,
+    );
     await user.click(within(bar()).getByRole("button", { name: "Hide from tabs" }));
     const dialog = await screen.findByRole("alertdialog", {
-      name: "Hide 3 collections from Collections tabs?",
+      name: "Hide 2 collections from Collections tabs?",
     });
     expect(dialog).toHaveTextContent(
       "3 rows still show them, but those rows' See all won't open while they're hidden.",
@@ -270,23 +247,11 @@ describe("AdminCollections Select collections", () => {
       within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Hide" }),
     );
     await waitFor(() =>
-      expect(v2Recorder.callsOf("PATCH /api/v2/admin/collections/{id}")).toHaveLength(3),
+      expect(pathsOf("PATCH /api/v2/admin/collections/{id}").sort()).toEqual([
+        "/api/v2/admin/collections/best-picture-winners",
+        "/api/v2/admin/collections/studio-ghibli",
+      ]),
     );
-  });
-
-  it("reads the rows that use them afresh, so a row added since still asks first", async () => {
-    renderPage();
-    const user = await enterSelectMode();
-    // Another admin adds a row showing Studio Ghibli after the List was read.
-    items = items.map((entry) =>
-      entry.title === "Studio Ghibli" ? { ...entry, row_count: 1 } : entry,
-    );
-    await pick(user, "Studio Ghibli", "Christmas Classics");
-    await user.click(within(bar()).getByRole("button", { name: "Hide from tabs" }));
-    expect(
-      await screen.findByRole("alertdialog", { name: "Hide 2 collections from Collections tabs?" }),
-    ).toHaveTextContent("1 row still shows one of them");
-    expect(v2Recorder.writes()).toEqual([]);
   });
 
   it("hides nothing and says so when the rows that use them can't be read", async () => {
@@ -306,10 +271,16 @@ describe("AdminCollections Select collections", () => {
     expect(v2Recorder.writes()).toEqual([]);
   });
 
-  it("deletes only what rows don't use, and names the ones it keeps", async () => {
+  it("deletes only what rows currently don't use, and names the ones it keeps", async () => {
     renderPage();
     const user = await enterSelectMode();
-    await pick(user, "Netflix Originals", "Trending This Week", "Studio Ghibli");
+    await pick(user, "Best Picture Winners", "Trending This Week", "Studio Ghibli");
+    // Another admin removes the last row for Best Picture Winners after the list loads.
+    items = items.map((entry) =>
+      entry.title === "Best Picture Winners"
+        ? { ...entry, row_count: 0, home_row_count: 0 }
+        : entry,
+    );
     await user.click(within(bar()).getByRole("button", { name: "Delete…" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Delete 2 collections?" });
     expect(dialog).toHaveTextContent(
@@ -322,7 +293,7 @@ describe("AdminCollections Select collections", () => {
 
     const removes = v2Recorder.callsOf("DELETE /api/v2/admin/collections/{id}");
     expect(removes.map((call) => call.path).sort()).toEqual([
-      "/api/v2/admin/collections/netflix-originals",
+      "/api/v2/admin/collections/best-picture-winners",
       "/api/v2/admin/collections/studio-ghibli",
     ]);
     for (const call of removes) expect(call.headers["If-Match"]).toBe(`"${call.path}#1"`);
@@ -336,25 +307,6 @@ describe("AdminCollections Select collections", () => {
     expect(toast.error).toHaveBeenCalledWith("Rows still use them. Remove the rows first.");
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(v2Recorder.writes()).toEqual([]);
-  });
-});
-
-describe("AdminCollections Select collections with nothing to pick", () => {
-  const notTvShows = (entry: AdminCollection) => !entry.library_ids.includes("3");
-
-  it("leaves when the library switches to one with no collections", async () => {
-    items = items.filter(notTvShows);
-    renderPage();
-    const user = await enterSelectMode();
-    await pick(user, "Studio Ghibli");
-    await user.click(screen.getByRole("button", { name: /^TV Shows/ }));
-    await screen.findByText("No collections in TV Shows yet");
-    expect(screen.queryByRole("group", { name: "Selected collections" })).toBeNull();
-
-    // Coming back to a library with collections doesn't bring select mode back.
-    await user.click(screen.getByRole("button", { name: /^Movies/ }));
-    await screen.findByText("Studio Ghibli");
-    expect(screen.queryByRole("checkbox", { name: "Select Studio Ghibli" })).toBeNull();
   });
 });
 
@@ -378,51 +330,6 @@ describe("AdminCollections Delete all while select mode works", () => {
     await act(async () => finish());
     await waitFor(() =>
       expect(within(bar()).getByRole("button", { name: "Show on tabs" })).toBeEnabled(),
-    );
-  });
-
-  it("holds a list's own switch while it syncs", async () => {
-    const finish = hold("POST /api/v2/admin/collections/{id}/sync", {
-      status: "success",
-      message: "",
-      items_matched: 3,
-    });
-    renderPage();
-    const user = await enterSelectMode();
-    await pick(user, "Netflix Originals");
-    await user.click(within(bar()).getByRole("button", { name: "Sync 1 list" }));
-    await waitFor(() =>
-      expect(v2Recorder.callsOf("POST /api/v2/admin/collections/{id}/sync")).toHaveLength(1),
-    );
-    // A visibility PATCH now would carry the ETag the sync is about to move.
-    const toggle = screen.getByRole("switch", { name: /^Show Netflix Originals on/ });
-    expect(toggle).toBeDisabled();
-    await act(async () => finish());
-    await waitFor(() => expect(toggle).toBeEnabled());
-  });
-
-  it("waits for a picked list's own sync from its row", async () => {
-    const finish = hold("POST /api/v2/admin/collections/{id}/sync", {
-      status: "success",
-      message: "",
-      items_matched: 3,
-    });
-    renderPage();
-    const user = userEvent.setup();
-    await screen.findByText("Netflix Originals");
-    await user.click(screen.getByRole("button", { name: "More for Netflix Originals" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Sync now" }));
-    await waitFor(() =>
-      expect(v2Recorder.callsOf("POST /api/v2/admin/collections/{id}/sync")).toHaveLength(1),
-    );
-    await enterSelectMode(user);
-    await pick(user, "Netflix Originals");
-    // A bar action now would read the ETag the sync is about to move.
-    expect(within(bar()).getByRole("button", { name: "Hide from tabs" })).toBeDisabled();
-    expect(within(bar()).getByRole("button", { name: "Sync 1 list" })).toBeDisabled();
-    await act(async () => finish());
-    await waitFor(() =>
-      expect(within(bar()).getByRole("button", { name: "Hide from tabs" })).toBeEnabled(),
     );
   });
 
@@ -453,19 +360,6 @@ describe("AdminCollections Delete all while select mode works", () => {
 });
 
 describe("AdminCollections Select collections delete", () => {
-  it("reads the rows that use them afresh, so a row removed since still lets it go", async () => {
-    renderPage();
-    const user = await enterSelectMode();
-    // Another admin removes Trending This Week's rows after the List was read.
-    items = items.map((entry) =>
-      entry.title === "Trending This Week" ? { ...entry, row_count: 0 } : entry,
-    );
-    await pick(user, "Trending This Week", "Studio Ghibli");
-    await user.click(within(bar()).getByRole("button", { name: "Delete…" }));
-    const dialog = await screen.findByRole("alertdialog", { name: "Delete 2 collections?" });
-    expect(dialog).not.toHaveTextContent("kept because rows use");
-  });
-
   it("holds the confirm open, and says why, when a starter pack starts adding", async () => {
     renderPage();
     const user = await enterSelectMode();

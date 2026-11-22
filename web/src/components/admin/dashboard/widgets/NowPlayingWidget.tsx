@@ -12,6 +12,7 @@ import {
   formatPlaybackPosition,
   getPlaybackSessionSubtitle,
   getSessionClientLabel,
+  isEpisodeSession,
 } from "@/pages/adminActivityPresentation";
 import type { AdminSession } from "@/api/types";
 import { formatRelativeTime } from "@/lib/date";
@@ -20,6 +21,7 @@ import { SectionError } from "../feedback";
 import { useReportCollapsed } from "../widgetChrome";
 import { SessionProfilePill } from "./SessionProfilePill";
 import { useT } from "@/i18n";
+import { getInitial } from "@/lib/text";
 
 /**
  * Most cards the widget mounts at once. The widget shows only what fits, and a
@@ -28,14 +30,12 @@ import { useT } from "@/i18n";
 const MAX_RENDERED_STREAMS = 40;
 
 /**
- * Cards shown below lg, where dashboard rows size to their content and there is
- * no widget height to fit against (matches the lg rule in app.css).
+ * Cards shown below the dashboard's 12-column layout, where rows size to their
+ * content and there is no widget height to fit against. FIXED_ROWS_QUERY is
+ * that layout's media query on .admin-widget-grid in app.css.
  */
 const STACKED_STREAM_LIMIT = 4;
-const FIXED_ROWS_QUERY = "(min-width: 1024px)";
-
-/** Height kept free under the last visible row for the "+N more" link. */
-const MORE_LINK_HEIGHT_PX = 24;
+const FIXED_ROWS_QUERY = "(min-width: 64rem) and (min-width: 1024px)";
 
 export function NowPlayingWidget() {
   const t = useT();
@@ -88,10 +88,13 @@ export function NowPlayingWidget() {
           </Link>
         )}
       </div>
-      {/* The widget shows as many whole cards as its height allows; the rest
-          are counted in the "+N more" link instead of half-drawn at the edge.
+      {/* The widget shows as many whole cards as its height allows instead of
+          half-drawing one at the edge; the header's "View all" link counts
+          every stream.
           Cards pair up only when the widget itself is wide enough for two, so a
-          half-width widget shows one full-width card per row. */}
+          half-width widget shows one full-width card per row. The viewport
+          stays positioned so it is the cards' offsetParent: the fit compares
+          their offsetTop with its height. */}
       <div ref={setViewport} className="@container relative min-h-0 flex-1 overflow-hidden">
         {sessionsQuery.isLoading ? (
           <div className="grid grid-cols-1 gap-3.5 @2xl:grid-cols-2">
@@ -126,22 +129,6 @@ export function NowPlayingWidget() {
                 );
               })}
             </div>
-            {sessions.length > visibleCount && (
-              <Link
-                to="/admin/activity"
-                className={cn(
-                  "text-muted-foreground hover:text-primary block text-center text-[12px] leading-6 transition-colors",
-                  // In a fixed-height widget the link sits in the strip the
-                  // fit leaves free; a content-sized one just flows after.
-                  fixedRows ? "absolute inset-x-0 bottom-0" : "mt-1",
-                )}
-              >
-                {t("web.admin.dashboard.widgets.nowPlaying.moreStreams", {
-                  count: sessions.length - visibleCount,
-                  count_text: sessions.length - visibleCount,
-                })}
-              </Link>
-            )}
           </>
         )}
       </div>
@@ -179,13 +166,11 @@ function useFittedCardCount(cardCount: number) {
     let next = Number.POSITIVE_INFINITY;
     const last = cards[cards.length - 1];
     if (last && bottomOf(last) > height) {
-      // Not everything fits, so the "+N more" link needs its strip too.
-      const limit = height - MORE_LINK_HEIGHT_PX;
-      // Keep one card even in a widget too short for it: a lone link reads as
-      // an error, and the card clips cleanly at the edge.
+      // Keep one card even in a widget too short for it: an empty widget reads
+      // as an error, and the card clips cleanly at the edge.
       next = Math.max(
         1,
-        cards.findIndex((card) => bottomOf(card) > limit),
+        cards.findIndex((card) => bottomOf(card) > height),
       );
     }
     setVisibleCount(next);
@@ -241,18 +226,15 @@ function useFittedCardCount(cardCount: number) {
 // measures either way.
 function StreamCard({ session, showPoster }: { session: AdminSession; showPoster: boolean }) {
   const t = useT();
-  const isEpisode =
-    session.series_name && session.season_number != null && session.episode_number != null;
+  const isEpisode = isEpisodeSession(session);
+  // The show leads for an episode; the episode line follows it.
   const title = isEpisode
-    ? session.episode_name ||
-      t("web.admin.dashboard.widgets.nowPlaying.episodeFallback", {
-        season: String(session.season_number),
-        episode: String(session.episode_number),
-      })
+    ? session.series_title
     : session.media_title ||
       t("web.admin.dashboard.widgets.nowPlaying.fileFallback", {
         id: session.media_file_id,
       });
+  const subtitle = getPlaybackSessionSubtitle(session);
   const username =
     session.username ||
     t("web.admin.dashboard.widgets.nowPlaying.userFallback", { id: session.user_id });
@@ -281,11 +263,13 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
         ) : (
           <Play className={`text-primary/40 h-5 w-5 ${session.is_paused ? "opacity-45" : ""}`} />
         )}
+        {/* Icon only: the poster is 58px inside, narrower than the word in
+            most languages, so the word is left to screen readers. */}
         {session.is_paused ? (
           <div className="absolute inset-0 flex items-center justify-center bg-black/35">
-            <div className="border-border/40 bg-background/90 text-foreground inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold shadow-sm backdrop-blur">
-              <Pause className="h-3 w-3" />
-              {t("web.admin.dashboard.widgets.nowPlaying.paused")}
+            <div className="border-border/40 bg-background/90 text-foreground flex h-6 w-6 items-center justify-center rounded-full border shadow-sm backdrop-blur">
+              <Pause className="h-3 w-3 fill-current" aria-hidden="true" />
+              <span className="sr-only">{t("web.admin.dashboard.widgets.nowPlaying.paused")}</span>
             </div>
           </div>
         ) : null}
@@ -293,47 +277,32 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
 
       {/* Info */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {isEpisode ? (
-          <>
-            {session.content_id ? (
-              <Link
-                to={`/item/${session.content_id}`}
-                className="hover:text-primary truncate text-sm font-bold transition-colors"
-              >
-                {title}
-              </Link>
-            ) : (
-              <div className="truncate text-sm font-bold">{title}</div>
-            )}
-            {/* Same episode line as the Activity page's Stream column. */}
-            <div className="text-muted-foreground mb-1.5 truncate text-xs">
-              {getPlaybackSessionSubtitle(session)}
+        <div className="mb-1.5 flex min-w-0 flex-col">
+          {session.media_item_id ? (
+            <Link
+              to={`/item/${session.media_item_id}`}
+              dir="auto"
+              className="bidi-text hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
+            >
+              {title}
+            </Link>
+          ) : (
+            <div dir="auto" className="bidi-text truncate text-sm font-bold">
+              {title}
             </div>
-          </>
-        ) : (
-          <>
-            {session.content_id ? (
-              <Link
-                to={`/item/${session.content_id}`}
-                className="hover:text-primary truncate text-sm font-bold transition-colors"
-              >
-                {title}
-              </Link>
-            ) : (
-              <div className="truncate text-sm font-bold">{title}</div>
-            )}
-            {session.media_type && (
-              <div className="text-muted-foreground mb-1.5 truncate text-xs">
-                {session.media_type === "movie"
-                  ? t("web.admin.dashboard.widgets.nowPlaying.movie")
-                  : t("web.admin.dashboard.widgets.nowPlaying.series")}
-              </div>
-            )}
-          </>
-        )}
+          )}
+          {subtitle ? (
+            <div className="text-muted-foreground truncate text-xs">{subtitle}</div>
+          ) : null}
+        </div>
 
-        {/* Tags */}
-        <div className="mb-1.5 flex flex-wrap gap-1">
+        {/* Tags. Capped at one line so every card has the same height and
+            the widget's rows stay even: tags that would wrap are clipped
+            whole. The cap is the pills' height: the 0.75rem line height
+            each pill is given here (overriding its own), their 0.25rem of
+            padding, and 2px of border. Keep it in rem so it grows with
+            Text Size. */}
+        <div className="mb-1.5 flex max-h-[calc(1rem+2px)] flex-wrap gap-1 overflow-hidden leading-3 [&>*]:leading-3">
           <span
             className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodMeta.badgeClass}`}
           >
@@ -345,7 +314,9 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
               title={session.client_user_agent || clientLabel}
               className="border-border/60 bg-muted/30 text-muted-foreground inline-flex max-w-[9rem] rounded border px-1.5 py-0.5 text-[9px] font-semibold"
             >
-              <span className="truncate">{clientLabel}</span>
+              <span dir="auto" className="truncate">
+                {clientLabel}
+              </span>
             </span>
           ) : null}
           <PlaybackRouteBadges session={session} />
@@ -361,9 +332,11 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             className="text-primary-foreground flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
             style={{ background: `var(--primary)` }}
           >
-            {username.charAt(0).toUpperCase()}
+            {getInitial(username)}
           </div>
-          <span className="min-w-0 truncate text-xs font-medium">{username}</span>
+          <span dir="auto" className="min-w-0 truncate text-xs font-medium">
+            {username}
+          </span>
           <span className="text-muted-foreground ms-auto shrink-0 text-[10px] whitespace-nowrap">
             <span className="tabular-nums">{position}</span>
             {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- punctuation separating two already-formatted times */}

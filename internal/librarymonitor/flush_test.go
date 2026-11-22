@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
+
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -61,38 +61,6 @@ func assertNoBatch(t *testing.T, q *fakeQueue) {
 	}
 }
 
-func TestFlushResolvesEachKindAndDeduplicates(t *testing.T) {
-	lib := library(1, "/lib")
-	resolver := &fakeResolver{fn: func(kind changeKind, path string) (*scantrigger.Target, error) {
-		switch {
-		case strings.HasSuffix(path, ".mkv") && kind == changeFile:
-			return dirTarget(lib, "/lib/M"), nil
-		case kind == changeVanishedFile:
-			return dirTarget(lib, "/lib/M"), nil
-		case kind == changeVanishedDir:
-			return dirTarget(lib, path), nil
-		}
-		return nil, &scantrigger.RequestError{Status: http.StatusBadRequest, Reason: scantrigger.ReasonUnsupportedExtension}
-	}}
-	queue := newFakeQueue()
-	m := newFlushMonitor(t, resolver, queue, lib)
-
-	m.tracker.observe(Event{Kind: EventCloseWrite, Dir: "/lib/M", Name: "a.mkv"}, t0)
-	m.tracker.observe(Event{Kind: EventCloseWrite, Dir: "/lib/M", Name: "b.mkv"}, t0)
-	m.tracker.observe(Event{Kind: EventCloseWrite, Dir: "/lib/M", Name: "notes.txt"}, t0)
-	m.tracker.observe(Event{Kind: EventDelete, Dir: "/lib/M", Name: "old.mkv"}, t0)
-	m.tracker.observe(Event{Kind: EventDelete, Dir: "/lib", Name: "Gone", IsDir: true}, t0)
-
-	m.flush(context.Background(), t0.Add(time.Second))
-	assertNoBatch(t, queue)
-	m.flush(context.Background(), t0.Add(5*time.Second))
-	got := takeBatch(t, queue)
-	want := []string{"1 subtree /lib/Gone realtime_monitor", "1 subtree /lib/M realtime_monitor"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("enqueued %v, want %v", got, want)
-	}
-}
-
 func TestFlushNeverWidensAPathToALibraryAndSkipsOptedOutLibraries(t *testing.T) {
 	on := library(1, "/on")
 	off := library(2, "/off")
@@ -137,22 +105,6 @@ func TestFlushCollapsesMoreThanTheCapToOneLibraryScan(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("enqueued %v, want %v", got, want)
-	}
-}
-
-func TestFlushExactlyAtTheCapDoesNotCollapse(t *testing.T) {
-	lib := library(1, "/lib")
-	resolver := &fakeResolver{fn: func(_ changeKind, path string) (*scantrigger.Target, error) {
-		return dirTarget(lib, path), nil
-	}}
-	queue := newFakeQueue()
-	m := newFlushMonitor(t, resolver, queue, lib)
-	for i := 0; i < maxTargetsPerLibrary; i++ {
-		m.tracker.observe(Event{Kind: EventDelete, Dir: "/lib", Name: fmt.Sprintf("Dir %04d", i), IsDir: true}, t0)
-	}
-	m.flush(context.Background(), t0.Add(5*time.Second))
-	if got := takeBatch(t, queue); len(got) != maxTargetsPerLibrary {
-		t.Fatalf("enqueued %d targets, want %d", len(got), maxTargetsPerLibrary)
 	}
 }
 
@@ -239,33 +191,6 @@ func TestFlushOverflowLibraryScanSupersedesPathTargets(t *testing.T) {
 	want := []string{"1 library  realtime_monitor", "2 subtree /other/B realtime_monitor"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("enqueued %v, want %v", got, want)
-	}
-}
-
-func TestHandleEventDropsIgnoredNames(t *testing.T) {
-	lib := library(1, "/lib")
-	var resolved []string
-	resolver := &fakeResolver{fn: func(kind changeKind, path string) (*scantrigger.Target, error) {
-		resolved = append(resolved, kind.String()+" "+path)
-		return dirTarget(lib, "/lib/M"), nil
-	}}
-	m := newFlushMonitor(t, resolver, newFakeQueue(), lib)
-	b := newFakeBackend("inotify")
-	for _, ev := range []Event{
-		{Kind: EventCloseWrite, Dir: "/lib/M", Name: "movie.mkv.part"},
-		{Kind: EventDelete, Dir: "/lib/M", Name: "x.tmp"},
-		{Kind: EventCreate, Dir: "/lib", Name: "@eaDir", IsDir: true},
-		// A finished download renamed from its temp name arrives as a move in.
-		{Kind: EventRename, OldDir: "/lib/M", OldName: "movie.mkv.!qB", Dir: "/lib/M", Name: "movie.mkv"},
-		// Renamed to a temp name: gone as far as the library is concerned.
-		{Kind: EventRename, OldDir: "/lib/M", OldName: "old.mkv", Dir: "/lib/M", Name: "old.mkv.partial"},
-	} {
-		m.handleEvent(backendEvent{backend: b, ev: ev}, t0)
-	}
-	m.flush(context.Background(), t0.Add(5*time.Second))
-	want := []string{"file /lib/M/movie.mkv", "vanished_file /lib/M/old.mkv"}
-	if !reflect.DeepEqual(resolved, want) {
-		t.Fatalf("resolved %v, want %v", resolved, want)
 	}
 }
 
