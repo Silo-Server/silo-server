@@ -92,11 +92,11 @@ describe("DashboardGrid pointer resize", () => {
     rerender(
       <Grid layout={layoutWith([{ id: "playback-24h", span: 9, rows: 2 }], resizeWidget)} />,
     );
-    // The handle lets go of the pointer as the resize ends.
-    expect(release).toHaveBeenCalledWith(1);
     fireEvent.lostPointerCapture(handle, { pointerId: 1 });
     fireEvent.pointerMove(handle, { pointerId: 1, clientX: 400 });
     fireEvent.pointerUp(handle, { pointerId: 1, clientX: 400 });
     expect(resizeWidget).not.toHaveBeenCalled();
+    // The handle lets go of the pointer as the resize ends.
+    expect(release).toHaveBeenCalledWith(1);
   });
 });

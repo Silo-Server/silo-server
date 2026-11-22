@@ -394,8 +394,9 @@ export function DashboardGrid({
   // Remove activated from the keyboard while the mouse holds a handle, or a
   // different server layout arriving. The session's start size and position
   // belong to the old layout, so the resize ends without saving rather than
-  // writing a size from before the change. This runs before the browser can
-  // deliver the release.
+  // writing a size from before the change. A keyboard change commits before
+  // the browser can deliver the release. A server layout commits in a later
+  // task, so a release in the few milliseconds before then still saves.
   useLayoutEffect(() => {
     const session = resizeSessionRef.current;
     if (session && session.geometry !== layoutGeometry(entries)) {
