@@ -785,6 +785,99 @@ describe("usePlaybackSession quality changes", () => {
 
     unmount();
   });
+
+  it("clears a cellular step-down estimate on a queued track replan after switching to Wi-Fi", async () => {
+    let resolveFirstReplan!: (response: Response) => void;
+    let replanCount = 0;
+    const fetchMock = sessionFetch(() => {
+      replanCount += 1;
+      if (replanCount === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveFirstReplan = resolve;
+        });
+      }
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: `plan:wifi-clear-${replanCount}`,
+            plan_attempt_key: `v3:wifi-clear-${replanCount}`,
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+    const bodiesTo = (suffix: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith(suffix))
+        .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Record a cellular stall step-down estimate, then start an audio switch
+    // and queue a subtitle switch behind it.
+    act(() => result.current.setKeptEstimate(3_000));
+    act(() => result.current.switchAudioTrack(1, 30));
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
+    expect(bodiesTo("/playback/session-1/replan")[0]?.bandwidth_estimate_kbps).toBe(3_000);
+    act(() => result.current.changeSubtitleTrack(2, 30));
+
+    // Switch from cellular to Wi-Fi while the first replan is in flight.
+    rerender({ cap: null, tier: "unmetered" });
+
+    // Resolving the first replan dispatches the queued subtitle switch on Wi-Fi;
+    // it must clear the cellular estimate and omit the cellular cap.
+    act(() =>
+      resolveFirstReplan(
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:wifi-clear-1",
+              plan_attempt_key: "v3:wifi-clear-1",
+            }),
+          ),
+        ),
+      ),
+    );
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(2));
+    expect(bodiesTo("/playback/session-1/replan")[1]).toMatchObject({
+      operation: "track_change",
+      selected_tracks: { subtitle: { id: "", index: 2 } },
+    });
+    expect(bodiesTo("/playback/session-1/replan")[1]).not.toHaveProperty("bandwidth_cap_kbps");
+    expect(bodiesTo("/playback/session-1/replan")[1]).not.toHaveProperty("bandwidth_estimate_kbps");
+
+    unmount();
+  });
 });
 
 describe("usePlaybackSession initial bitmap subtitles", () => {

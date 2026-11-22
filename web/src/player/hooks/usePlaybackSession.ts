@@ -1525,6 +1525,18 @@ export function usePlaybackSession(
         : [];
       const attemptCount = isFailureRecovery ? attemptCountRef.current : 1;
 
+      // Leaving a metered link invalidates any step-down estimate recorded on
+      // the previous network; clear it before building the first unmetered
+      // replan (including a queued track_change) so Wi-Fi does not stay pinned
+      // to a cellular estimate.
+      if (
+        activePlanTierRef.current !== undefined &&
+        activePlanTierRef.current !== "unmetered" &&
+        latestNetworkTierRef.current === "unmetered"
+      ) {
+        keptEstimateRef.current = undefined;
+      }
+
       // A lowering or Restore names its own estimate. The client's other Auto
       // replans repeat the kept step-down estimate, without a source because
       // it is not a new observation. The speed-test reading is for starts
@@ -1844,25 +1856,22 @@ export function usePlaybackSession(
       const nextQuality = userPickedQualityRef.current ? qualityRef.current : tierQuality;
       const qualityChanged = nextQuality !== qualityRef.current;
       const capChanged = tierCap !== activeBandwidthCapRef.current;
-      if (!qualityChanged && !capChanged) return;
+      const leavingMetered =
+        activePlanTierRef.current !== undefined &&
+        activePlanTierRef.current !== "unmetered" &&
+        activeNetworkTierRef.current === "unmetered";
+      const clearMeteredEstimate = leavingMetered && keptEstimateRef.current !== undefined;
+      if (!qualityChanged && !capChanged && !clearMeteredEstimate) return;
 
       const previousPreference = qualityRef.current;
       if (qualityChanged) {
         qualityRef.current = nextQuality;
         setState((current) => ({ ...current, qualityPreference: nextQuality }));
       }
-      const leavingMetered =
-        activePlanTierRef.current !== undefined &&
-        activePlanTierRef.current !== "unmetered" &&
-        activeNetworkTierRef.current === "unmetered";
-      if (leavingMetered) {
-        keptEstimateRef.current = undefined;
-      }
       void issueReplanRef
         .current({
           operation: "quality_change",
           positionSeconds: playbackPositionRef.current,
-          ...(leavingMetered ? { bandwidthEstimateKbps: null } : {}),
         })
         .then((adopted) => {
           if (adopted || !qualityChanged || qualityRef.current !== nextQuality) return;
