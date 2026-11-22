@@ -347,6 +347,46 @@ func TestStatusRecordsTheLastSuccessDB(t *testing.T) {
 	}
 }
 
+// TestNightlyRecordsTheSlotItWasAdmittedForDB: a scheduled run records the
+// slot it took the lock for, so moving backup.time later while it runs does
+// not let the trigger at the new time take a second copy the same night.
+func TestNightlyRecordsTheSlotItWasAdmittedForDB(t *testing.T) {
+	ctx := t.Context()
+	opts, _ := upgradeOptions(t)
+	opts.Status = PostgresStatus{Pool: opts.Pool}
+	opts.Location = time.UTC
+	settings := &mapSettings{values: map[string]string{config.BackupTimeSettingKey: "04:00"}}
+	opts.Settings = settings
+	at := func(hour int) func() time.Time {
+		return func() time.Time { return time.Date(2026, 10, 30, hour, 0, 30, 0, time.UTC) }
+	}
+	first := opts
+	first.Now = at(4)
+	blocking := &blockingDestination{Destination: opts.Destination, entered: make(chan struct{}), release: make(chan struct{})}
+	first.Destination = blocking
+	nightly := make(chan error, 1)
+	go func() {
+		result, err := New(first).RunTask(ctx, nil)
+		if err == nil && result.Skipped != "" {
+			err = errors.New(result.Skipped)
+		}
+		nightly <- err
+	}()
+	awaitBefore(t, blocking.entered, nightly, "the 04:00 backup to start writing its dump")
+	if err := settings.Set(ctx, config.BackupTimeSettingKey, "06:00"); err != nil {
+		t.Fatal(err)
+	}
+	close(blocking.release)
+	if err := await(t, nightly, "the 04:00 backup to finish"); err != nil {
+		t.Fatalf("04:00 backup: %v", err)
+	}
+	second := opts
+	second.Now = at(6)
+	if result, err := New(second).RunTask(ctx, nil); err != nil || result.Skipped != SkippedAlreadyDone {
+		t.Fatalf("the 06:00 run the same night = %+v, %v; want %q", result, err, SkippedAlreadyDone)
+	}
+}
+
 func blobstoreRoot(t *testing.T, store blobstore.Store) string {
 	t.Helper()
 	root, ok := strings.CutPrefix(blobstore.Location(store), blobstore.BackendLocal+"|")

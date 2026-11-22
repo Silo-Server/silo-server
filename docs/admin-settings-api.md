@@ -20,7 +20,10 @@ and `managed_by_env_vars` maps each of them to the variable that sets it, such
 as `{"server.public_url": "SILO_PUBLIC_URL", "redis.db": "REDIS_URL"}`. The web
 settings pages show that name on a read-only field instead of keeping their own
 list. The variables are `REDIS_URL` (for `redis.url` and `redis.db`) and the
-table in `internal/config/env_settings.go`, which gives each variable a scope:
+table in `internal/config/env_settings.go`, which gives each variable a scope.
+`REDIS_URL` and each secret in the table (a key stored encrypted) can instead
+be read from the file its `_FILE` variant names, such as `REDIS_URL_FILE` or
+`SILO_SMTP_PASSWORD_FILE`; the map then names that variable.
 
 - Stored: an API server that starts with the variable set checks the value the
   way an admin save does (per-key normalization, the cross-field validation
@@ -84,8 +87,16 @@ which needs the `search` action and an index scope covering Silo's indexes.
 A key Meilisearch refuses for either request, or a missing one on a secured
 instance, fails with a message asking for another key. The check does not
 prove the key can write documents.
-Provider failures return `success: false` with a generic message that excludes
-provider error bodies and credentials. Invalid kinds/configuration return `422`.
+Provider failures return `success: false` with a message written by Silo that
+excludes provider error bodies and credentials. The `ai_chat` and
+`ai_transcription` checks name the kind of failure when they can classify it,
+such as a rejected key, an unknown model, a billing or rate limit, or a timeout.
+A refused `ai_chat` request of any other kind answers
+`web.admin.common.connectionCheck.result.textAIRejected` with its status code as
+the `status` argument, or `textAIRefused`, with no arguments, when the provider
+reported the refusal inside a successful response. The server log records the
+provider's error for `ai_chat` with the configured key removed.
+Invalid kinds/configuration return `422`.
 The result's `message` is English. `message_key` names its entry in the shared
 translation catalog (`web.admin.common.connectionCheck.result.*`) and
 `message_args` fills that entry's placeholders by name, as decimal strings for
@@ -124,6 +135,23 @@ converted, because provider addresses are shown to administrators and the AI
 clients never handled a query; that job stays unconfigured and startup logs a
 warning naming the legacy setting. HTTP Basic authentication through the URL
 is not supported; such a proxy needs to accept the provider's API key.
+
+The deployment can also declare providers, in the `ai_providers` section of
+its deployment document (`SILO_CONFIG` or `SILO_CONFIG_FILE`, or the older
+names `SILO_PLUGINS` and `SILO_PLUGINS_FILE`). Each API server
+that reads the document stores them when it starts, in the same transaction as
+the settings its environment sets, so the last server to start wins, as for
+those settings: give every API server that reads the document the same one. A
+declared provider carries `managed_by_env_var`, the document's variable, and
+the update and delete operations below refuse it with `422` and code
+`managed_by_environment`. A provider stays declared until an API server starts
+with a document whose `ai_providers` section leaves it out, and
+`ai_providers: {}` releases them all; a server that starts without the
+document, or with one that has no `ai_providers` section, changes nothing, so
+removing the variable leaves the providers locked. At startup the provider
+bindings are checked only where the start can change them: those the
+environment sets and those naming a provider the document declares. The user
+manual covers writing the document.
 
 The following operations require an acting administrator:
 

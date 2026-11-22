@@ -118,3 +118,42 @@ func TestLoadInstallationRequireEnabledGateAppliesAfterCache(t *testing.T) {
 		t.Fatalf("GetByID calls = %d, want 1 (gate applied after cache)", store.getByIDCalls)
 	}
 }
+
+func TestLifecyclePollRecoversMissedEnablementCycleDB(t *testing.T) {
+	ctx := t.Context()
+	pool := builtinGuardTestPool(t)
+	id := seedResidentQueryInstallation(t, pool, true)
+	store := NewInstallationStore(pool)
+	service := &Service{installations: store}
+	service.reconcileLifecycle(ctx, false)
+
+	if err := store.Update(ctx, id, UpdateInstallationInput{Enabled: new(false)}); err != nil {
+		t.Fatal(err)
+	}
+	disabled, err := service.loadInstallation(ctx, id, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disabled.Enabled {
+		t.Fatal("peer did not cache the disabled row between polls")
+	}
+
+	if err := store.Update(ctx, id, UpdateInstallationInput{Enabled: new(true)}); err != nil {
+		t.Fatal(err)
+	}
+	service.reconcileLifecycle(ctx, false)
+	enabled, err := service.loadInstallation(ctx, id, true)
+	if err != nil {
+		t.Fatalf("peer kept the disabled row after re-enable: %v", err)
+	}
+
+	if err := store.Update(ctx, id, UpdateInstallationInput{Enabled: new(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if service.reconcileInstallations(ctx) {
+		t.Fatal("saving the already enabled value advanced the runtime")
+	}
+	if enabled.RuntimeGeneration != disabled.RuntimeGeneration+1 {
+		t.Fatalf("runtime generation on re-enable = %d, want %d", enabled.RuntimeGeneration, disabled.RuntimeGeneration+1)
+	}
+}

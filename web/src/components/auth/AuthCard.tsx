@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { AuthBackground } from "@/components/auth/AuthBackground";
 import { AuthLanguagePicker } from "@/components/auth/AuthLanguagePicker";
 import { useT } from "@/i18n";
+import { hasArabicScript } from "@/lib/direction";
 
 /** The signed-out account screens' card (password reset and its request). */
 export function AuthCard({
@@ -24,7 +25,10 @@ export function AuthCard({
       <Card className="auth-card glass panel-border w-full max-w-sm border-0">
         <CardHeader>
           {eyebrow && (
-            <p className="text-muted-foreground font-mono text-[11px] font-semibold tracking-[0.1em] uppercase">
+            <p
+              className="text-muted-foreground font-mono text-[11px] font-semibold tracking-[0.1em] uppercase"
+              data-cursive={hasArabicScript(eyebrow) || undefined}
+            >
               {eyebrow}
             </p>
           )}

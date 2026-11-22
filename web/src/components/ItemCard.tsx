@@ -401,12 +401,13 @@ export default function ItemCard({
         />
       </div>
       <div className={MEDIA_CARD_CAPTION_CLASS}>
-        <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
+        <ViewTransitionLink to={headingHref} dir="auto" className={MEDIA_CARD_TITLE_CLASS}>
           {displayTitle}
         </ViewTransitionLink>
         {authorLine ? (
           <ViewTransitionLink
             to={itemHref}
+            dir="auto"
             className="bidi-text text-muted-foreground mt-0.5 block truncate text-[0.75rem] hover:underline"
           >
             {authorLine}
@@ -415,6 +416,7 @@ export default function ItemCard({
         {episodeLabels?.episodeTitle ? (
           <ViewTransitionLink
             to={itemHref}
+            dir="auto"
             className="bidi-text text-muted-foreground mt-1 block truncate text-[0.75rem] font-medium hover:underline"
           >
             {episodeLabels.episodeTitle}

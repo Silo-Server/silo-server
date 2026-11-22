@@ -1,4 +1,5 @@
 import type { WatchTogetherRoomMember, WatchTogetherRoomSnapshot } from "@/lib/watchTogether";
+import { getInitial, leadingInitials } from "@/lib/text";
 
 /**
  * One colour per member, assigned by position in the room's member list
@@ -40,8 +41,8 @@ export function memberKey(member: Pick<WatchTogetherRoomMember, "user_id" | "pro
 export function memberInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
+  if (parts.length === 1) return leadingInitials(parts[0]!, 2);
+  return getInitial(parts[0]!) + getInitial(parts[parts.length - 1]!);
 }
 
 /** Tint lookup keyed by member, stable for the room's member ordering. */

@@ -59,6 +59,13 @@ export interface ValidationErrors {
 export const ANY_CONTENT_RATING_VALUE = "__any_content__";
 export const NO_ADVISORY_AGE_VALUE = "__no_advisory_limit__";
 
+/**
+ * A switch row's text column, in a row with flex-wrap: the switch moves under
+ * the text when the text would get narrower than 10rem, and a word too long
+ * for the row breaks instead of pushing the switch past the edge.
+ */
+export const SWITCH_ROW_TEXT = "min-w-0 flex-[1_1_10rem] space-y-0.5 wrap-anywhere";
+
 export function sortLibraryIDs(ids: number[]) {
   return [...new Set(ids)].sort((left, right) => left - right);
 }

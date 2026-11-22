@@ -7,8 +7,10 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
     <input
       type={type}
       data-slot="input"
+      // min-h (one line plus the borders) grows the box when a browser minimum
+      // font size makes the line taller than h-9, which rem doesn't follow.
       className={cn(
-        "border-input bg-background selection:bg-primary selection:text-primary-foreground file:text-foreground placeholder:text-muted-foreground h-9 w-full min-w-0 rounded-md border px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
+        "border-input bg-background selection:bg-primary selection:text-primary-foreground file:text-foreground placeholder:text-muted-foreground h-9 min-h-[calc(1lh+2px)] w-full min-w-0 rounded-md border px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
         "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
         "aria-invalid:border-destructive aria-invalid:ring-destructive/20",
         className,

@@ -29,9 +29,10 @@ function windowWith(matches: boolean | undefined) {
   };
 }
 
-function pointer(type: string, eventType = "pointermove") {
+function pointer(type: string, eventType = "pointermove", buttons = 0) {
   const event = new Event(eventType, { bubbles: true }) as PointerEvent;
   Object.defineProperty(event, "pointerType", { value: type });
+  Object.defineProperty(event, "buttons", { value: buttons });
   return event;
 }
 
@@ -49,10 +50,23 @@ afterEach(() => {
 });
 
 describe("initPointerCapability", () => {
-  it("treats a pen as a fine pointer", () => {
+  it("treats a pen that hovers as a fine pointer, contact included", () => {
     start(false);
     document.dispatchEvent(pointer("pen"));
     expect(document.documentElement.getAttribute(ATTR)).toBe("true");
+    document.dispatchEvent(pointer("touch", "pointerdown"));
+    document.dispatchEvent(pointer("pen", "pointermove", 1));
+    expect(document.documentElement.getAttribute(ATTR)).toBe("true");
+  });
+
+  it("treats a pen that only makes contact like touch", () => {
+    // A pen that can't hover could never uncover hover-only controls.
+    start(true);
+    document.dispatchEvent(pointer("pen", "pointerdown", 1));
+    expect(document.documentElement.getAttribute(ATTR)).toBe("false");
+    // Contact with the barrel button held reports only that button on Windows.
+    document.dispatchEvent(pointer("pen", "pointermove", 2));
+    expect(document.documentElement.getAttribute(ATTR)).toBe("false");
   });
 
   it("follows the last pointer used across a switch", () => {
@@ -115,6 +129,35 @@ describe("initPointerCapability", () => {
     stop();
     document.dispatchEvent(pointer("mouse"));
     expect(document.documentElement.getAttribute(ATTR)).toBe("false");
+  });
+
+  it("drops the click from a press that began on a hidden hover-only control", () => {
+    // A hybrid last used with a mouse hides `.pointer-reveal` controls, which
+    // still take hits. A touch there clears the flag and reveals the control
+    // before the tap's click arrives, so the click would run an action the user
+    // never saw.
+    start(true);
+    document.dispatchEvent(pointer("mouse"));
+    const control = document.createElement("button");
+    control.className = "pointer-reveal";
+    control.style.opacity = "0";
+    const activated = vi.fn();
+    control.addEventListener("click", activated);
+    document.body.append(control);
+    try {
+      control.dispatchEvent(pointer("touch", "pointerdown"));
+      control.style.opacity = "1";
+      control.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+      expect(activated).not.toHaveBeenCalled();
+
+      // Keyboard activation, and a press on the control once it shows, still work.
+      control.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
+      control.dispatchEvent(pointer("touch", "pointerdown"));
+      control.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+      expect(activated).toHaveBeenCalledTimes(2);
+    } finally {
+      control.remove();
+    }
   });
 
   it("does not throw when matchMedia is unavailable", () => {

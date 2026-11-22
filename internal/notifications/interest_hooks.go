@@ -418,6 +418,33 @@ func (s *interestTrackingStore) UpdateProgress(ctx context.Context, profileID, m
 	return err
 }
 
+var _ userstore.SequencedPlaybackProgressWriter = (*interestTrackingStore)(nil)
+
+func (s *interestTrackingStore) WriteSequencedPlaybackProgress(
+	ctx context.Context, sessionID string, sequence int64, profileID, mediaItemID string,
+	position, duration float64, thresholds userstore.ProgressThresholds, hints userstore.VersionHints,
+) (written, completed bool, err error) {
+	before := s.currentProgressState(ctx, profileID, mediaItemID)
+	written, completed, err = userstore.WritePlaybackProgress(ctx, s.UserStore, sessionID, sequence, profileID, mediaItemID, position, duration, thresholds, hints)
+	if written {
+		s.queueOnTransition(profileID, mediaItemID, before, progressStateFromValues(position, duration, thresholds), time.Now())
+	}
+	return written, completed, err
+}
+
+var _ userstore.PlaybackStopWriter = (*interestTrackingStore)(nil)
+
+func (s *interestTrackingStore) CommitPlaybackStop(ctx context.Context, stop userstore.PlaybackStopWrite) ([]userstore.WatchHistoryEntry, bool, error) {
+	spanned, alreadyRecorded, err := userstore.CommitPlaybackStop(ctx, s.UserStore, stop)
+	if err == nil && !alreadyRecorded {
+		s.updater.QueueItemMutation(s.userID, stop.Entry.ProfileID, stop.Entry.MediaItemID)
+		if stop.Entry.Completed {
+			s.queueItemMutations(stop.Entry.ProfileID, spanned)
+		}
+	}
+	return spanned, alreadyRecorded, err
+}
+
 func (s *interestTrackingStore) SetProgress(ctx context.Context, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	err := s.UserStore.SetProgress(ctx, profileID, mediaItemID, position, duration, thresholds)

@@ -151,7 +151,7 @@ func (c *SignatureChecker) checkBinary(
 	fetch func(ctx context.Context, url string) ([]byte, error),
 ) (Signature, error) {
 	policy, required := signaturePolicy(req.PluginID, req.Version, req.SourceRepoURL)
-	refusing := required && c.enforce
+	refusing := required && (c.enforce || req.requireVerified)
 	if required && (req.PluginID == "" || req.Version == "") {
 		cause := fmt.Errorf("catalog install of %q version %q names no plugin ID or version", req.PluginID, req.Version)
 		return c.outcome(ctx, req, refusing, SignatureStateInvalid, packageError(cause, signatureIdentityMessage))

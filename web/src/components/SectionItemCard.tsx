@@ -22,6 +22,7 @@ import type { SectionItem } from "@/api/types";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
+import { hasArabicScript } from "@/lib/direction";
 
 /**
  * A "next in series" card's book number. The server sends it as the English
@@ -133,7 +134,7 @@ export default memo(function SectionItemCard({
         />
       </div>
       <div className={MEDIA_CARD_CAPTION_CLASS}>
-        <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
+        <ViewTransitionLink to={headingHref} dir="auto" className={MEDIA_CARD_TITLE_CLASS}>
           {displayTitle}
         </ViewTransitionLink>
         {upcomingEvent ? (
@@ -153,7 +154,10 @@ export default memo(function SectionItemCard({
         ) : episodeLabels ? (
           <ViewTransitionLink to={itemHref} className="block hover:underline">
             {episodeLabels.episodeTitle ? (
-              <div className="bidi-text text-muted-foreground mt-1 truncate text-[0.75rem] font-medium">
+              <div
+                dir="auto"
+                className="bidi-text text-muted-foreground mt-1 truncate text-[0.75rem] font-medium"
+              >
                 {episodeLabels.episodeTitle}
               </div>
             ) : null}
@@ -162,7 +166,11 @@ export default memo(function SectionItemCard({
             </div>
           </ViewTransitionLink>
         ) : item.item_source === "next_in_series" && item.series_title ? (
-          <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
+          <ViewTransitionLink
+            to={itemHref}
+            className={MEDIA_CARD_META_CLASS}
+            data-cursive={hasArabicScript(item.series_title) || undefined}
+          >
             {[bookBadgeLabel(t, item.badges), item.series_title].filter(Boolean).join(" · ")}
           </ViewTransitionLink>
         ) : (

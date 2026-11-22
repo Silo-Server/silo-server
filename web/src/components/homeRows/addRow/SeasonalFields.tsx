@@ -289,6 +289,7 @@ function CustomHolidays({ config, onChange, max }: FieldProps & { max: number })
               })}
             </div>
             <Input
+              dir="ltr"
               aria-label={t("web.home.addRow.seasonal.listLabel", { holiday: label })}
               // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a URL, not text
               placeholder="https://mdblist.com/lists/…"

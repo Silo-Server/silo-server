@@ -167,3 +167,63 @@ func TestOneSeriesWatchCountsLooksUpHistoryPerEpisode(t *testing.T) {
 		}
 	}
 }
+
+// TestPostgresSeriesLatestViewedAtDB checks that a series is dated by the
+// latest visible finished play of any of its episodes, from history or a
+// completed progress row, in one grouped query (#4638).
+func TestPostgresSeriesLatestViewedAtDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One connection keeps the temporary tables below in scope.
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := pool.Exec(t.Context(), `
+		CREATE TEMP TABLE episodes (content_id text PRIMARY KEY, series_id text);
+		CREATE TEMP TABLE user_watch_progress (user_id integer, profile_id text, media_item_id text,
+			position_seconds double precision, completed boolean, updated_at timestamptz,
+			PRIMARY KEY (user_id, profile_id, media_item_id));
+		CREATE TEMP TABLE user_history_hidden_items (user_id integer, profile_id text, media_item_id text,
+			hidden_before timestamptz, PRIMARY KEY (user_id, profile_id, media_item_id));
+		CREATE TEMP TABLE user_watch_history (user_id integer, profile_id text, media_item_id text, completed boolean, watched_at timestamptz);
+		INSERT INTO episodes VALUES
+			('history-e1', 'series-history'), ('history-e2', 'series-history'),
+			('progress-e1', 'series-progress'),
+			('hidden-e1', 'series-hidden'),
+			('unfinished-e1', 'series-unfinished');
+		INSERT INTO user_watch_history VALUES
+			(1, 'p', 'history-e1', TRUE, '2026-05-27T10:00:00Z'),
+			(1, 'p', 'history-e2', TRUE, '2026-05-28T10:00:00Z'),
+			(1, 'p', 'history-e2', FALSE, '2026-05-30T10:00:00Z'),
+			(1, 'other', 'progress-e1', TRUE, '2026-06-01T10:00:00Z'),
+			(1, 'p', 'hidden-e1', TRUE, '2026-05-20T10:00:00Z');
+		INSERT INTO user_watch_progress VALUES
+			(1, 'p', 'progress-e1', 1500, TRUE, '2026-05-29T18:30:00Z'),
+			(1, 'p', 'unfinished-e1', 300, FALSE, '2026-05-29T19:00:00Z'),
+			(1, 'p', 'hidden-e1', 1500, TRUE, '2026-05-21T00:00:00Z');
+		INSERT INTO user_history_hidden_items VALUES (1, 'p', 'hidden-e1', '2026-05-21T00:00:00Z');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	got, err := newStore(pool, 1).SeriesLatestViewedAt(t.Context(), "p",
+		[]string{"series-history", "series-progress", "series-hidden", "series-unfinished", "series-missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"series-history":  "2026-05-28T10:00:00Z",
+		"series-progress": "2026-05-29T18:30:00Z",
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("SeriesLatestViewedAt = %v, want %v", got, want)
+	}
+}

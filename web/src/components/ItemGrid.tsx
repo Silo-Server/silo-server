@@ -57,9 +57,10 @@ export interface ItemGridHandle {
 
 /**
  * How much of the top of the viewport sticky page headers cover once stuck:
- * the mobile top bar, or the library header on wide screens. Headers opt in
- * with `data-sticky-header`; one that is hidden or scrolls with the page at
- * the current width covers nothing.
+ * the mobile top bar, or the library header on wide screens, and the
+ * impersonation banner above them. Headers opt in with `data-sticky-header`;
+ * one that is hidden or scrolls with the page at the current width covers
+ * nothing.
  */
 function stickyHeaderInset(): number {
   let inset = 0;

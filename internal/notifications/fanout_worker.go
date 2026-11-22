@@ -21,6 +21,12 @@ import (
 const (
 	fanoutPollInterval = 15 * time.Second
 	fanoutClaimLimit   = 100
+	// fanoutSettleDelay is how old a release event must be before fanout
+	// claims it. The Next Up rule reads which episodes the catalog lists
+	// when fanout runs; the delay lets file-by-file imports that land close
+	// together (E07 seconds before E06, with metadata not yet listing E06)
+	// all be listed first, so the earlier episode is the one that notifies.
+	fanoutSettleDelay = 30 * time.Second
 )
 
 // FanoutWorker consumes unprocessed release_events and materializes
@@ -38,6 +44,8 @@ type FanoutWorker struct {
 	dispatcher  Dispatcher
 	logger      *slog.Logger
 	nudge       chan struct{}
+	// settle is fanoutSettleDelay; tests set it to zero.
+	settle time.Duration
 
 	// Per-target outboxes: when set, the fanout transaction also enqueues
 	// `pending` attempt rows for each newly inserted delivery — one per
@@ -107,6 +115,7 @@ func NewFanoutWorker(
 		dispatcher:  dispatcher,
 		logger:      slog.Default().With("component", "notifications.fanout"),
 		nudge:       make(chan struct{}, 1),
+		settle:      fanoutSettleDelay,
 	}
 }
 
@@ -132,17 +141,12 @@ func (w *FanoutWorker) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 		case <-w.nudge:
-			// Wait out the settle delay so one scan's burst for a series
-			// lands in a single claim batch instead of trickling through.
-			settle := w.settings.SettleDelay(ctx)
+			// Wait out the settle delay so the nudging events are claimable.
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(settle + time.Second):
+			case <-time.After(w.settle + time.Second):
 			}
-		}
-		if !w.settings.FanoutEnabled(ctx) {
-			continue
 		}
 		for {
 			processed, err := w.processBatch(ctx)
@@ -166,7 +170,6 @@ func (w *FanoutWorker) Run(ctx context.Context) {
 // dedupe. Returns the number of events handled (fanned out + suppressed).
 func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr error) {
 	started := time.Now()
-	settle := w.settings.SettleDelay(ctx)
 
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
@@ -174,7 +177,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	claimed, err := w.releases.ClaimUnprocessed(ctx, tx, settle, fanoutClaimLimit)
+	claimed, err := w.releases.ClaimUnprocessed(ctx, tx, w.settle, fanoutClaimLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -196,14 +199,14 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	}
 
 	// Suppress events that aged past the staleness horizon before fanout
-	// could run (fanout disabled for a stretch, extended downtime): users
+	// could run (extended downtime, no node running fanout): users
 	// should not receive a backlog of long-stale "new episode" notifications
 	// when the worker comes back.
 	//
 	// No per-series cap applies to the rest: EvaluateRecipient lets only the
 	// lowest available episode at or after a profile's cursor notify, so a
 	// season pack tells each profile about one episode of the series.
-	staleCutoff := time.Now().Add(-w.settings.MaxEventAge(ctx))
+	staleCutoff := time.Now().Add(-maxReleaseEventAge)
 	// A fresh movie can still tell the profiles whose watchlist waits for it.
 	arrivalEvents := make([]ReleaseEvent, 0, len(others))
 	for _, event := range others {

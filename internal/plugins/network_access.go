@@ -178,7 +178,7 @@ func (s *Service) ListNetworkAccessProviders(ctx context.Context) ([]NetworkAcce
 // during a transient manifest read failure. Enabled rows still control membership;
 // a process from an older version cannot stand in for a replacement release.
 func (s *Service) networkAccessManifest(ctx context.Context, installation *Installation) (*pluginv1.PluginManifest, error) {
-	manifest, err := s.readInstalledManifest(ctx, installation)
+	manifest, err := s.ReadInstalledManifest(ctx, installation)
 	if err == nil || s.host == nil {
 		return manifest, err
 	}
@@ -486,7 +486,7 @@ func (s *Service) applyNetworkAccess(ctx context.Context, provider NetworkAccess
 	if reason := s.resident.GateError(); reason != "" {
 		return fail(reason)
 	}
-	pc, err := s.host.Client(provider.InstallationID)
+	pc, err := s.residentClient(ctx, provider.InstallationID)
 	if err != nil {
 		return fail(networkAccessUnavailableReason(err, s.RuntimeState(provider.InstallationID)))
 	}
@@ -509,12 +509,14 @@ func (s *Service) applyNetworkAccess(ctx context.Context, provider NetworkAccess
 
 func networkAccessUnavailableReason(err error, state RuntimeState) string {
 	switch {
-	case errors.Is(err, pluginhost.ErrPluginUnhealthy):
-		return "plugin process is unhealthy"
 	case state.LastError != "":
 		return fmt.Sprintf("plugin process is %s: %s", state.State, state.LastError)
 	case state.State != "" && state.State != ResidentRunning:
 		return "plugin process is " + string(state.State)
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return err.Error()
+	case errors.Is(err, pluginhost.ErrPluginUnhealthy):
+		return "plugin process is unhealthy"
 	}
 	return "plugin process is not running"
 }

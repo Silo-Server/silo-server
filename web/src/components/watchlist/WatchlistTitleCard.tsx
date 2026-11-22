@@ -101,7 +101,7 @@ export default function WatchlistTitleCard({
         ) : null}
       </div>
       <div className={MEDIA_CARD_CAPTION_CLASS}>
-        <ViewTransitionLink to={href} className={MEDIA_CARD_TITLE_CLASS}>
+        <ViewTransitionLink to={href} dir="auto" className={MEDIA_CARD_TITLE_CLASS}>
           {title.title}
         </ViewTransitionLink>
         <ViewTransitionLink to={href} className={MEDIA_CARD_META_CLASS}>

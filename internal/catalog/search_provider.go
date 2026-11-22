@@ -205,7 +205,13 @@ func DefaultCatalogSearchSettings() CatalogSearchSettings {
 	}
 }
 
-func LoadCatalogSearchSettings(ctx context.Context, store SettingsStore) (CatalogSearchSettings, error) {
+// SearchSettingsStore reads server settings for catalog search configuration.
+// Satisfied by *serversettings.ServerSettingsRepo and *serversettings.EncryptedSettingsRepo.
+type SearchSettingsStore interface {
+	GetAll(ctx context.Context) (map[string]string, error)
+}
+
+func LoadCatalogSearchSettings(ctx context.Context, store SearchSettingsStore) (CatalogSearchSettings, error) {
 	settings := DefaultCatalogSearchSettings()
 	if store == nil {
 		return settings, nil

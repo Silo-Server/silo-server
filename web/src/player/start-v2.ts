@@ -234,8 +234,9 @@ function startBody(cap: PlaybackCapabilitiesV2, body: StartRequestV3) {
 
 /**
  * Adds what the server's `features` allow: `buffering_quality_v1` with the
- * estimate's source and `learned_limit`, and `playback_plan_summary_v1`. A
- * server without the feature rejects those fields, so they are dropped. An
+ * estimate's source and `learned_limit`, `playback_plan_summary_v1`, and
+ * `parallel_range_origin_v1`. A server without the feature rejects those
+ * fields, so they are dropped. An
  * estimate without a source stays without one: a repeated step-down estimate
  * is not a new observation.
  */
@@ -258,5 +259,10 @@ export function bufferingQualityWire<T extends StartRequestV3 | ReplanRequestV3>
     !result.client_features.includes("playback_plan_summary_v1")
   )
     result.client_features.push("playback_plan_summary_v1");
+  if (
+    features.includes("parallel_range_origin_v1") &&
+    !result.client_features.includes("parallel_range_origin_v1")
+  )
+    result.client_features.push("parallel_range_origin_v1");
   return result;
 }

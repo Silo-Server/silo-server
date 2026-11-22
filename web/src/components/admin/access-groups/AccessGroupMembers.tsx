@@ -44,6 +44,7 @@ import { useRequestSettings } from "@/hooks/queries/admin/requests";
 import { useRequestGroupLimits } from "@/hooks/queries/admin/requestGroupLimits";
 import { adminUsersKey, useAdminUsers } from "@/hooks/queries/admin/users";
 import { useT } from "@/i18n";
+import { emailDir } from "@/lib/direction";
 import { TOUCH_TARGETS } from "@/lib/touchTargets";
 import {
   NO_GROUP_POLICY,
@@ -334,9 +335,20 @@ export function AccessGroupMembers({
                 to={`/admin/users/${member.id}`}
                 className="hover:bg-accent/40 focus-visible:ring-ring/50 flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-md px-2 py-1.5 outline-none focus-visible:ring-[3px]"
               >
-                <span className="truncate font-medium">{member.username}</span>
+                {/* A cut username keeps its start in either script; w-fit keeps a short
+                    one on the page's start side. */}
+                <span dir="auto" className="w-fit max-w-full truncate font-medium">
+                  {member.username}
+                </span>
+                {/* Left to right unless it starts in a right-to-left script, so a cut
+                    email keeps its start; w-fit keeps it on the page's start side. */}
                 {member.email ? (
-                  <span className="text-muted-foreground truncate text-xs">{member.email}</span>
+                  <span
+                    dir={emailDir(member.email)}
+                    className="text-muted-foreground w-fit max-w-full truncate text-xs"
+                  >
+                    {member.email}
+                  </span>
                 ) : null}
               </Link>
             </li>
@@ -512,12 +524,21 @@ function AddUsersDialog({
                         })
                       }
                     />
-                    <span className="min-w-0 truncate font-medium">{user.username}</span>
-                    <span className="text-muted-foreground ms-auto shrink-0 truncate text-xs">
-                      {user.access_group_id == null
-                        ? t("web.admin.access.groups.addUsers.noGroup")
-                        : (groupNames.get(String(user.access_group_id)) ??
-                          t("web.admin.access.groups.addUsers.unknownGroup"))}
+                    {/* The names grow from nothing in equal shares, each up to its full
+                        width: a short name shows whole and two long ones split the row.
+                        A cut name keeps its start in either script. */}
+                    <span dir="auto" className="max-w-max min-w-0 flex-1 truncate font-medium">
+                      {user.username}
+                    </span>
+                    {/* The outer span keeps the page's direction, so ms-auto still puts
+                        it at the row's end; the inner one takes the name's own. */}
+                    <span className="text-muted-foreground ms-auto max-w-max min-w-0 flex-1 text-xs">
+                      <span dir="auto" className="block truncate">
+                        {user.access_group_id == null
+                          ? t("web.admin.access.groups.addUsers.noGroup")
+                          : (groupNames.get(String(user.access_group_id)) ??
+                            t("web.admin.access.groups.addUsers.unknownGroup"))}
+                      </span>
                     </span>
                   </label>
                 </li>

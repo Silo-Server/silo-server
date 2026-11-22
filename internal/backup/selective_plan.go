@@ -84,7 +84,7 @@ type PreviewCollected struct {
 	UnknownItems int    `json:"unknown_items"`
 	LocalID      string `json:"local_id,omitempty"`
 	// TemplateID and BundleID name a template collection's template and
-	// bundle; Changes lists the admin's changes a restore writes.
+	// bundle; Changes the change codes of what a restore writes.
 	TemplateID string   `json:"template_id,omitempty"`
 	BundleID   string   `json:"bundle_id,omitempty"`
 	Changes    []string `json:"changes,omitempty"`
@@ -233,6 +233,50 @@ func (p *planner) planLibraries(ctx context.Context) ([]libraryPlan, error) {
 	return out, nil
 }
 
+// Change codes name what a restore replaces in a home or library page
+// section (PreviewHomeSection.Changes) or a template collection
+// (PreviewCollected.Changes). The API declares them; clients show each in
+// the interface language.
+const (
+	ChangeType               = "type"
+	ChangeTitle              = "title"
+	ChangeTitleTranslation   = "title_translation"
+	ChangePosition           = "position"
+	ChangeFeatured           = "featured"
+	ChangeItemLimit          = "item_limit"
+	ChangeEnabled            = "enabled"
+	ChangeWebOnly            = "web_only"
+	ChangeCollectionReplaced = "collection_replaced"
+	ChangeConfiguration      = "configuration"
+	// ChangeCollectionItems comes with the count of items the section's
+	// collection here lacks (PreviewHomeSection.MissingCollectionItems).
+	ChangeCollectionItems = "collection_items"
+
+	ChangeDescription  = "description"
+	ChangeVisibility   = "visibility"
+	ChangeSortOrder    = "sort_order"
+	ChangeItemSort     = "item_sort"
+	ChangeSource       = "source"
+	ChangeSyncSchedule = "sync_schedule"
+	ChangePoster       = "poster"
+	ChangeBackdrop     = "backdrop"
+	ChangeLibraries    = "libraries"
+)
+
+// changeWords is change codes as the English words of an item message:
+// "title, item limit, 3 collection items".
+func changeWords(codes []string, missingCollectionItems int) string {
+	words := make([]string, len(codes))
+	for i, code := range codes {
+		if code == ChangeCollectionItems {
+			words[i] = fmt.Sprintf("%d collection items", missingCollectionItems)
+		} else {
+			words[i] = strings.ReplaceAll(code, "_", " ")
+		}
+	}
+	return strings.Join(words, ", ")
+}
+
 // joinLabels joins labels as a list in a sentence: "a", "a and b",
 // "a, b, and c".
 func joinLabels(labels []string) string {
@@ -254,10 +298,13 @@ type localPlugin struct {
 	version string
 	enabled bool
 	configs map[string][]byte
+	owned   map[string][]string
 }
 
 func readLocalPlugins(ctx context.Context, q queryer) (map[string]localPlugin, error) {
-	rows, err := q.Query(ctx, `SELECT id, plugin_id, version, enabled FROM plugin_installations WHERE kind = 'plugin' ORDER BY id`)
+	rows, err := q.Query(ctx, `SELECT i.id, i.plugin_id, i.version, i.enabled, o.config_fields
+		FROM plugin_installations i LEFT JOIN plugin_provision_ownership o ON o.plugin_installation_id = i.id
+		WHERE i.kind = 'plugin' ORDER BY i.id`)
 	if err != nil {
 		return nil, fmt.Errorf("reading plugins: %w", err)
 	}
@@ -266,7 +313,7 @@ func readLocalPlugins(ctx context.Context, q queryer) (map[string]localPlugin, e
 	for rows.Next() {
 		var l localPlugin
 		var pluginID string
-		if err := rows.Scan(&l.id, &pluginID, &l.version, &l.enabled); err != nil {
+		if err := rows.Scan(&l.id, &pluginID, &l.version, &l.enabled, &l.owned); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -342,7 +389,12 @@ func (p *planner) planPlugin(doc PluginDocument, locals map[string]localPlugin) 
 		item.Message = "Its configuration was encrypted with another SECRET_KEY and cannot be read here."
 		return item
 	}
+	return p.comparePluginConfig(item, doc, local)
+}
+
+func (p *planner) comparePluginConfig(item PreviewItem, doc PluginDocument, local localPlugin) PreviewItem {
 	same := true
+	var skipped []string
 	for _, c := range doc.Configs {
 		backupValue, err := p.s.targets.Plugins.DecodeStoredConfig(doc.InstallationID, c.Key, c.Value)
 		if err != nil {
@@ -350,21 +402,39 @@ func (p *planner) planPlugin(doc PluginDocument, locals map[string]localPlugin) 
 			item.Message = "Its configuration cannot be decrypted with this server's key."
 			return item
 		}
-		stored, ok := local.configs[c.Key]
-		if !ok {
+		fields := local.owned[c.Key]
+		stored, exists := local.configs[c.Key]
+		var localValue map[string]any
+		if exists {
+			localValue, err = p.s.targets.Plugins.DecodeStoredConfig(local.id, c.Key, stored)
+		}
+		if err != nil && len(fields) > 0 {
+			skipped = append(skipped, c.Key+": the managed config entry cannot be read")
+			continue
+		}
+		if err != nil {
 			same = false
 			continue
 		}
-		localValue, err := p.s.targets.Plugins.DecodeStoredConfig(local.id, c.Key, stored)
-		if err != nil || !plugins.SameConfig(localValue, backupValue) {
+		next, blocked := plugins.MergeRestoreConfig(c.Key, fields, localValue, backupValue)
+		if blocked != nil {
+			skipped = append(skipped, blocked.Error())
+		}
+		if !exists && len(fields) > 0 && len(next) == 0 {
+			continue
+		}
+		if !exists || !plugins.SameConfig(localValue, next) {
 			same = false
 		}
 	}
 	if same {
 		item.Status, item.Reason, item.Message = ItemOnThisServer, ReasonSame, ""
-		return item
+	} else {
+		item.Status, item.Selectable = ItemDiffers, true
 	}
-	item.Status, item.Selectable = ItemDiffers, true
+	if len(skipped) > 0 {
+		item.Message = strings.TrimSpace(item.Message + " " + strings.Join(skipped, ". "))
+	}
 	return item
 }
 
