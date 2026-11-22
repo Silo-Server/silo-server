@@ -196,14 +196,23 @@ export default function AdminSubtitlesTable({
                     {providerLabel(subtitle.provider)}
                   </span>
                 </TableCell>
-                <TableCell
-                  className="max-w-[200px] truncate font-mono text-xs"
-                  title={subtitle.release_name}
-                >
-                  {subtitle.release_name || NONE}
+                <TableCell className="max-w-[200px] font-mono text-xs">
+                  {/* A release name takes its direction from its own text, and
+                      its tooltip reads the same way. */}
+                  <span
+                    dir="auto"
+                    title={subtitle.release_name || undefined}
+                    className="block w-fit max-w-full truncate"
+                  >
+                    {subtitle.release_name || NONE}
+                  </span>
                 </TableCell>
                 <TableCell>
-                  <span className={cn("inline-flex rounded px-2 py-0.5", formatChipClass())}>
+                  {/* Left to right, so the extension's dot stays in front. */}
+                  <span
+                    dir="ltr"
+                    className={cn("inline-flex rounded px-2 py-0.5", formatChipClass())}
+                  >
                     {formatExtension(subtitle.format)}
                   </span>
                 </TableCell>
