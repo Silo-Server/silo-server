@@ -164,11 +164,11 @@ export function SeriesDrilldown({
 }) {
   const t = useT();
   const detail = useCatalogItemDetail(series.content_id, series.library_id);
-  // A date-labeled series (sports) names the picked game by its air date.
-  const pickedAirDate = picked
-    ? episodeAirDateLabel(detail.data?.episode_labels, picked.episode.air_date)
-    : null;
   const item = detail.data;
+  // The series' episode labels: from the card, else from the fetched detail.
+  const episodeLabels = series.episode_labels ?? item?.episode_labels;
+  // A date-labeled series (sports) names the picked game by its air date.
+  const pickedAirDate = picked ? episodeAirDateLabel(episodeLabels, picked.episode.air_date) : null;
   const seasons = useSeasons(series.content_id);
   const spoilerPrefs = useEpisodeSpoilerPrefs();
   const seasonList = useMemo(() => seasons.data?.seasons ?? [], [seasons.data?.seasons]);
@@ -376,10 +376,7 @@ export function SeriesDrilldown({
                   const pick = () =>
                     onPick({
                       episode,
-                      series: {
-                        ...series,
-                        episode_labels: series.episode_labels ?? detail.data?.episode_labels,
-                      },
+                      series: { ...series, episode_labels: episodeLabels },
                       seasonNumber: season ?? episode.season_number,
                     });
                   return (
@@ -419,9 +416,11 @@ export function SeriesDrilldown({
                           ) : null}
                           <span className="flex items-baseline gap-2">
                             <span className="text-muted-foreground shrink-0 text-xs font-semibold tabular-nums">
-                              {t("web.watchTogether.common.episodeNumber", {
-                                number: codeNumber(episode.episode_number),
-                              })}
+                              {/* A date-labeled series (sports) names the game by its date. */}
+                              {episodeAirDateLabel(episodeLabels, episode.air_date) ??
+                                t("web.watchTogether.common.episodeNumber", {
+                                  number: codeNumber(episode.episode_number),
+                                })}
                             </span>
                             <span className="truncate text-sm font-medium">{episode.title}</span>
                             <span className="text-muted-foreground shrink-0 text-xs">
