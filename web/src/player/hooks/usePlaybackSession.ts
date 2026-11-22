@@ -644,7 +644,7 @@ export function usePlaybackSession(
   const latestNetworkTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
   latestNetworkTierRef.current = networkTier;
   const tierChangeSeqRef = useRef(0);
-  const manualPickSeqRef = useRef(0);
+  const qualitySelectionSeqRef = useRef(0);
   const userPickedQualityRef = useRef(false);
   const latestQualitySettingsRef = useRef({
     qualityPreference: normalizeQualityPreferenceV3(qualityPreference),
@@ -753,6 +753,7 @@ export function usePlaybackSession(
     ) => Promise<boolean>
   >(async () => false);
   const qualityRef = useRef(normalizeQualityPreferenceV3(qualityPreference));
+  const adoptedQualityRef = useRef(normalizeQualityPreferenceV3(qualityPreference));
   // The running mid-stream reconnect, if any. `generation` invalidates the
   // timer and any request of a cycle that has ended, so nothing it started can
   // act after the viewer left, a new start took over, or a plan was adopted.
@@ -1384,10 +1385,12 @@ export function usePlaybackSession(
     activePlanTierRef.current = networkTier;
     activeBandwidthCapRef.current = maxBitrateKbps ?? null;
     tierChangeSeqRef.current += 1;
-    manualPickSeqRef.current += 1;
+    qualitySelectionSeqRef.current += 1;
     userPickedQualityRef.current = false;
     versionPinnedRef.current = versionPicked;
-    qualityRef.current = normalizeQualityPreferenceV3(qualityPreference);
+    const initialQuality = normalizeQualityPreferenceV3(qualityPreference);
+    qualityRef.current = initialQuality;
+    adoptedQualityRef.current = initialQuality;
     playbackPositionRef.current = initialPosition;
     const intentAt = takePlaybackIntent(requestKey);
     startIntentRef.current = {
@@ -1916,8 +1919,8 @@ export function usePlaybackSession(
 
       const { qualityPreference: tierQuality, maxBitrateKbps: tierCap } =
         latestQualitySettingsRef.current;
-      const nextQuality = userPickedQualityRef.current ? qualityRef.current : tierQuality;
-      const qualityChanged = nextQuality !== qualityRef.current;
+      const nextQuality = userPickedQualityRef.current ? adoptedQualityRef.current : tierQuality;
+      const qualityChanged = nextQuality !== adoptedQualityRef.current;
       const capChanged = tierCap !== activeBandwidthCapRef.current;
       const leavingMetered =
         activePlanTierRef.current !== undefined &&
@@ -1940,8 +1943,11 @@ export function usePlaybackSession(
         );
       };
       const capTightened = stillTightened();
-      const previousPreference = qualityRef.current;
-      if (qualityChanged) {
+      const qualitySelectionSeq =
+        qualityChanged || qualityRef.current !== nextQuality
+          ? ++qualitySelectionSeqRef.current
+          : qualitySelectionSeqRef.current;
+      if (qualityRef.current !== nextQuality) {
         qualityRef.current = nextQuality;
         setState((current) => ({ ...current, qualityPreference: nextQuality }));
       }
@@ -1952,20 +1958,25 @@ export function usePlaybackSession(
             positionSeconds: playbackPositionRef.current,
           },
           capTightened ? { retireWhileTightened: stillTightened } : NO_RETIRE_POLICY,
+          false,
+          () => {
+            adoptedQualityRef.current = nextQuality;
+          },
         )
         .then((adopted) => {
           if (
             adopted ||
             !qualityChanged ||
             tierChangeSeq !== tierChangeSeqRef.current ||
-            qualityRef.current !== nextQuality
+            qualitySelectionSeq !== qualitySelectionSeqRef.current
           ) {
             return;
           }
-          qualityRef.current = previousPreference;
+          const rollbackPreference = adoptedQualityRef.current;
+          qualityRef.current = rollbackPreference;
           setState((current) =>
             current.qualityPreference === nextQuality
-              ? { ...current, qualityPreference: previousPreference }
+              ? { ...current, qualityPreference: rollbackPreference }
               : current,
           );
         });
@@ -2029,12 +2040,7 @@ export function usePlaybackSession(
         return;
       }
       const normalized = normalizeQualityPreferenceV3(label);
-      const previousPreference = qualityRef.current;
-      const previousUserPicked = userPickedQualityRef.current;
-      const manualPickSeq = !buffering ? ++manualPickSeqRef.current : manualPickSeqRef.current;
-      if (!buffering) {
-        userPickedQualityRef.current = true;
-      }
+      const qualitySelectionSeq = ++qualitySelectionSeqRef.current;
       qualityRef.current = normalized;
       setState((current) => ({ ...current, qualityPreference: normalized }));
       // The replan tells onAdopt as it adopts, before the new plan renders; a
@@ -2055,18 +2061,22 @@ export function usePlaybackSession(
           },
           NO_RETIRE_POLICY,
           false,
-          onAdopt,
+          (planRevision) => {
+            adoptedQualityRef.current = normalized;
+            if (!buffering) {
+              userPickedQualityRef.current = true;
+            }
+            onAdopt?.(planRevision);
+          },
         ).then((adopted) => {
           if (adopted) return;
           onAdopt?.(undefined);
-          if (qualityRef.current !== normalized) return;
-          qualityRef.current = previousPreference;
-          if (!buffering && manualPickSeq === manualPickSeqRef.current) {
-            userPickedQualityRef.current = previousUserPicked;
-          }
+          if (qualitySelectionSeq !== qualitySelectionSeqRef.current) return;
+          const rollbackPreference = adoptedQualityRef.current;
+          qualityRef.current = rollbackPreference;
           setState((current) =>
             current.qualityPreference === normalized
-              ? { ...current, qualityPreference: previousPreference }
+              ? { ...current, qualityPreference: rollbackPreference }
               : current,
           );
         });

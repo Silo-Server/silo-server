@@ -1218,6 +1218,108 @@ describe("usePlaybackSession quality changes", () => {
 
     unmount();
   });
+
+  it("still applies network-tier quality after repeated rejected manual quality picks", async () => {
+    let resolveFirstPick: ((response: Response) => void) | undefined;
+    const firstPickResponse = new Promise<Response>((resolve) => {
+      resolveFirstPick = resolve;
+    });
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = sessionFetch((init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      replanBodies.push(body);
+      if (replanBodies.length === 1) return firstPickResponse;
+      if (replanBodies.length === 2) {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "terminal",
+          terminal: { reason: "transcoding_disabled", message: "Transcoding disabled" },
+        });
+      }
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: "plan:tier-after-rejected-pick",
+            plan_attempt_key: "v3:tier-after-rejected-pick",
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({
+        quality,
+        cap,
+        tier,
+      }: {
+        quality: string;
+        cap: number | null;
+        tier: "unmetered" | "metered" | "low_data";
+      }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          quality,
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          quality: "auto",
+          cap: null as number | null,
+          tier: "unmetered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Two identical manual picks while the first is still in flight; both fail.
+    act(() => result.current.changeQuality("1080p", 30));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+    act(() => result.current.changeQuality("1080p", 31));
+
+    await act(async () => {
+      resolveFirstPick?.(
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "terminal",
+          terminal: { reason: "transcoding_disabled", message: "Transcoding disabled" },
+        }),
+      );
+      await firstPickResponse;
+    });
+
+    await waitFor(() => expect(replanBodies).toHaveLength(2));
+    await waitFor(() => expect(result.current.qualityPreference).toBe("auto"));
+
+    // Switching onto cellular must still apply the cellular tier's configured quality.
+    rerender({ quality: "720p", cap: 10_000, tier: "metered" });
+    await waitFor(() => expect(replanBodies).toHaveLength(3));
+    expect(replanBodies[2]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "720p",
+      bandwidth_cap_kbps: 10_000,
+    });
+    expect(result.current.qualityPreference).toBe("720p");
+
+    unmount();
+  });
 });
 
 describe("usePlaybackSession initial bitmap subtitles", () => {
