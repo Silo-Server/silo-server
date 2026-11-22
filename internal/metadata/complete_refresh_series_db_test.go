@@ -359,10 +359,19 @@ func TestCompleteRefreshDropsAClearedMatchsValuesDB(t *testing.T) {
 		t.Fatalf("complete refresh: %v", err)
 	}
 
-	// The rebuilt series is still the item that holds the files and history.
-	for name, link := range h.links(t, folderID) {
-		if link[0] != seriesID {
+	// The rebuilt series is still the item that holds both files and their
+	// history, and each file is still linked to an episode.
+	links := h.links(t, folderID)
+	for n := 1; n <= 2; n++ {
+		name := fmt.Sprintf("Race Series (2019) - S01E%02d.mkv", n)
+		link, ok := links[name]
+		switch {
+		case !ok:
+			t.Errorf("%s is missing after complete refresh", name)
+		case link[0] != seriesID:
 			t.Errorf("%s linked to %q after complete refresh, want %q", name, link[0], seriesID)
+		case link[1] == "":
+			t.Errorf("%s lost its episode link after complete refresh", name)
 		}
 	}
 	assertRebuiltSeries(t, h, seriesID, "sportarr="+wrong.sportarr)
