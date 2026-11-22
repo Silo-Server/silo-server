@@ -52,7 +52,11 @@ function listMeta(t: Translate, list: MDBListListSummary) {
   return (
     <MetaLine
       parts={[
-        t("web.collections.templateGallery.byUser", { user: <LineName name={list.user_name} /> }),
+        list.user_name.trim()
+          ? t("web.collections.templateGallery.byUser", {
+              user: <LineName name={list.user_name} />,
+            })
+          : null,
         kind,
         t("web.collections.metaLine.titleCount", {
           count: list.items,

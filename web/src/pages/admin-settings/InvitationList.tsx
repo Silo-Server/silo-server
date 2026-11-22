@@ -84,17 +84,15 @@ function useInvitationRow(
   // A link invitation's note is how the admin told it apart, so it stays
   // after acceptance fills in the address.
   const shared = invitation.delivery === "link";
-  const notes = [
+  const joinedByLink =
     !link && invitation.status === "accepted" && shared
       ? t("web.admin.settings.invitations.row.joinedByLink")
-      : "",
-    shared && invitation.note
-      ? t("web.admin.settings.invitations.row.note", { note: invitation.note })
-      : "",
-  ];
+      : "";
+  const note = shared ? invitation.note : undefined;
   const inviter = invitation.invited_by_name;
   const details = [
-    ...notes,
+    joinedByLink,
+    note ? t("web.admin.settings.invitations.row.note", { note }) : "",
     inviter ? t("web.admin.settings.invitations.row.invitedBy", { name: inviter }) : "",
   ].filter(Boolean);
 
@@ -138,21 +136,32 @@ function useInvitationRow(
     recipient: link ? t("web.admin.settings.invitations.row.linkInvitation") : invitation.email,
     /** The details as one string, for the card, where they wrap. */
     details: details.join(" · "),
-    /** The details for the table row, cut short on one line with the inviter's name kept apart. */
-    detailsLine:
-      details.length > 0 ? (
-        <MetaLine
-          className="text-muted-foreground text-xs"
-          parts={[
-            ...notes,
-            inviter
-              ? t("web.admin.settings.invitations.row.invitedBy", {
-                  name: <LineName name={inviter} />,
-                })
-              : "",
-          ]}
-        />
-      ) : null,
+    /**
+     * The details for the table row, cut short on one line. The note and the
+     * inviter's name each read in their own direction, so a cut one keeps its start.
+     */
+    detailsLine: (
+      <MetaLine
+        className="text-muted-foreground text-xs"
+        parts={[
+          joinedByLink,
+          note
+            ? t("web.admin.settings.invitations.row.note", {
+                note: (
+                  <span dir="auto" className="truncate">
+                    {note}
+                  </span>
+                ),
+              })
+            : "",
+          inviter
+            ? t("web.admin.settings.invitations.row.invitedBy", {
+                name: <LineName name={inviter} />,
+              })
+            : "",
+        ]}
+      />
+    ),
     badge: STATUS_BADGES[invitation.status],
     expires:
       invitation.status === "pending"
