@@ -52,9 +52,9 @@ function Poster({ index, className }: { index: number; className?: string }) {
   );
 }
 
-/* eslint-disable silo/text-size-in-rem -- A picture, not text: its sample rows
-   keep their size inside the fixed-height frame, as poster overlays follow
-   their card rather than the Text Size setting. */
+/* eslint-disable silo/text-size-in-rem -- A miniature drawn in a fixed-height
+   frame: its sample rows and posters keep pixel sizes so the picture fits at
+   every text size. */
 /** The decorative picture at the top of each card, after the mockup. */
 function Stage({ kind }: { kind: CollectionKind }) {
   const t = useT();
@@ -112,7 +112,7 @@ function Stage({ kind }: { kind: CollectionKind }) {
     );
   } else {
     picture = (
-      <span className="absolute inset-x-[18px] top-[18px] grid gap-2.5">
+      <span className="absolute inset-x-[18px] top-[18px] grid gap-[10px]">
         {[
           { mark: "M", color: "#1f6feb", name: "IMDb Top 250 Movies" },
           { mark: "T", color: "#0d8a6a", name: t("web.collections.newPicker.sampleTrending") },
@@ -139,7 +139,7 @@ function Stage({ kind }: { kind: CollectionKind }) {
         ))}
         <span className="flex gap-[7px]">
           {POSTERS.map((_, index) => (
-            <Poster key={index} index={index + 2} className="w-9" />
+            <Poster key={index} index={index + 2} className="w-[36px]" />
           ))}
         </span>
       </span>

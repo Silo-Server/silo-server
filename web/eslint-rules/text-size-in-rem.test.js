@@ -21,9 +21,12 @@ tester.run("text-size-in-rem", rule, {
   valid: [
     `<div className="text-sm text-[0.8125rem] text-[clamp(2rem,5vw,3.5rem)]" />`,
     // Other utilities that take pixels aren't font sizes.
-    `<div className="leading-[18px] tracking-[0.5px] h-[13px]" />`,
+    `<div className="leading-[18px] tracking-[0.5px] h-[13px] [line-height:18px]" />`,
     // Only a whole class token counts, not one glued to other text.
     `const hint = "Use text-[13px]. Or text-[13px]px";`,
+    // Tailwind reads an upper-case hint as a colour, not a size, so neither is a font size.
+    // Joined at runtime: Tailwind scans this file, and the whole token would emit invalid CSS.
+    ['const label = "TEXT-[13px] text-[', 'LENGTH:13px]";'].join(""),
   ],
   invalid: [
     fixed(
@@ -54,5 +57,10 @@ tester.run("text-size-in-rem", rule, {
       `<div className="[&_svg:not([class*='text-'])]:text-[0.8125rem]" />`,
     ),
     fixed(`<div className="text-[length:13px]" />`, `<div className="text-[length:0.8125rem]" />`),
+    // A leading-decimal number, and the arbitrary-property form of a font size.
+    fixed(
+      `<div className="text-[.5px] [font-size:13px] md:[font-size:12.5px]!" />`,
+      `<div className="text-[0.03125rem] [font-size:0.8125rem] md:[font-size:0.78125rem]!" />`,
+    ),
   ],
 });

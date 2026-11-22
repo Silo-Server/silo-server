@@ -7,15 +7,22 @@
 
 import { classParts, classTokenVisitors } from "./class-tokens.js";
 
+// A CSS number of pixels: `13px`, `12.5px` or `.5px`. Only the unit is
+// case-insensitive; Tailwind's `length:` hint and utility names are not.
+const PX = String.raw`(\d+(?:\.\d+)?|\.\d+)[pP][xX]`;
 // The whole utility: a pixel size, then optionally `/` and a line height.
-const PX_SIZE = /^text-\[(length:)?(\d+(?:\.\d+)?)px\](?:\/(.+))?$/i;
-const PX_LINE_HEIGHT = /^\[(\d+(?:\.\d+)?)px\]$/i;
+const PX_SIZE = new RegExp(String.raw`^text-\[(length:)?${PX}\](?:\/(.+))?$`);
+const PX_LINE_HEIGHT = new RegExp(String.raw`^\[${PX}\]$`);
+// The same size written as an arbitrary property.
+const PX_PROPERTY = new RegExp(String.raw`^\[font-size:${PX}\]$`);
 
 const rem = (px) => `${Number(px) / 16}rem`;
 
 /** The rem form of one class token, or null when it isn't a pixel font size. */
 function remClass(token) {
   const { variants, lead, utility, trail } = classParts(token);
+  const property = PX_PROPERTY.exec(utility);
+  if (property !== null) return `${variants}${lead}[font-size:${rem(property[1])}]${trail}`;
   const match = PX_SIZE.exec(utility);
   if (match === null) return null;
   const [, hint = "", px, lineHeight] = match;
