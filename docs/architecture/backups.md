@@ -134,7 +134,8 @@ the drill for that.
 The check value is HKDF-SHA256 over `SECRET_KEY` with info
 `silo/backup-key-check/v1`, 8 bytes, written as 16 hex digits in groups of 4
 (`secret.KeyCheckValue`, beside the data key derivation in
-`internal/secret/cipher.go`). `silo secret check` reads a key on stdin and
+`internal/secret/cipher.go`). `silo secret check` reads a key from the first line
+of stdin, or with `--file` from a key file read as `SECRET_KEY_FILE` is, and
 prints the value, so an operator can tell which key a backup needs without
 showing either key.
 
@@ -966,6 +967,20 @@ grouped by the admin page that edits each key: a key or prefix with its class.
   it and turns the service off (`email.enabled`) instead of sending this
   server's secret to the backup's address. The preview marks those settings
   `cleared`, and the secrets are expected unchanged under the settings lock.
+- A setting this server's environment sets (`internal/config/env_settings.go`)
+  is never written: the admin settings write path refuses it
+  (`managed_by_environment`, `AdminHandler.EnvironmentSetting`). A stored
+  one gets the environment's value back at the next start anyway; a
+  process one (`scanner.workers`, `matcher.workers`) is never stored, so
+  the row stays as other API servers read it. The preview compares the
+  backup with the environment's value (`RestoreTargets.EnvironmentValue`),
+  marks a difference `managed_by_environment`, and restores the rest of the
+  page. An outside-service connection the environment sets any setting of
+  (`outboundBundles`, the units the full restore carries) keeps every
+  setting of it as it is (`keepEnvironmentBundles`), so a restore never
+  pairs the environment's SMTP transport, address, or password with the
+  backup's. The server that runs the restore job plans it again with its own
+  environment, so the report says what that server did.
 - A backup this server cannot authenticate restores no setting that
   connects to an outside service (class `external_service`) and no plugin
   configuration, whatever the admin confirmed: the preview marks them
@@ -1117,12 +1132,13 @@ is ambiguous, and so is any candidate when two of the backup's sections
 share that page, type, and title, since the title then identifies neither.
 So two such sections restore as two, and a re-run finds each by its id. A matched section that differs lists what a restore replaces
 (title, position, featured, item limit, enabled, web only, configuration,
-and missing items of its managed collection), and a restore replaces its
+and missing items of its managed collection) as change codes, which clients
+show in the interface language, and a restore replaces its
 configuration as an admin save would. A restore writes `web_only` as the
 backup has it on a featured row, whether it creates or replaces the
 section, so a web-only hero row never comes back on the apps. Only a collection the section manages stands for the
 carried one: a managed section pointed at an ordinary collection since the
-backup lists "collection replaced", whatever that collection holds, and the
+backup lists `collection_replaced`, whatever that collection holds, and the
 restore points it back at its managed collection (the one still here with
 its management key, or a new one). The key's section id and each
 `library:<id>` it names are this server's (`remapManagementKey`), and a
@@ -1782,8 +1798,10 @@ create and list, so it does not depend on nightly backups running.
 ## Full restore
 
 Full restore is the offline `silo backup restore` command, never an API
-operation. `SECRET_KEY`, `DATABASE_URL`, and bucket credentials come from the
-environment (or `-env`); nothing comes from the database being replaced.
+operation. `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL` and bucket credentials
+come from the environment (or `-env`), each from the file its `_FILE` variant
+names when that is set, as the server reads them; nothing comes from the
+database being replaced.
 `--from` is a local backup folder (the folder at a local destination, or a
 downloaded copy), or a bucket folder,
 `s3://<bucket>/<key prefix>/backups/<server-id>/<id>`, reached with
@@ -2032,7 +2050,7 @@ fails on one in no list or in two, and on a listed name that is not a table,
 so a new table needs a decision before it ships; a layer that adds one
 classifies it.
 
-Sensitive settings (`catalog.SensitiveSettingKeys`) are classified the same
+Sensitive settings (`serversettings.SensitiveSettingKeys`) are classified the same
 way in `internal/backup/settings_secrets.go`. The signing keys Silo
 generates for the tokens it issues (`auth.jwt_secret`, which signs sessions,
 download and artwork links, backup object links, OAuth state, and cursors,

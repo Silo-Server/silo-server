@@ -420,7 +420,7 @@ export function lastRunProblem(lastRun: AdminBackupLastRun | undefined, now: Dat
  * Warnings for the status line. "Backups are off" is already the status
  * line's own second half, so it is not repeated as a warning. "No recent
  * backup" says nothing while one is being taken, or before any backup has
- * run at all, where the empty state already says so.
+ * run at all, where the status line already says so.
  */
 export function visibleWarnings(
   warnings: readonly AdminBackupWarning[],

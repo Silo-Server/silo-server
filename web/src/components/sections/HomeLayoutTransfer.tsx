@@ -407,7 +407,7 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
             placeholder={t("web.home.layout.pastePlaceholder")}
             spellCheck={false}
             disabled={applying}
-            className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring min-h-28 w-full rounded-md border px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+            className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring placeholder:font-ui min-h-28 w-full rounded-md border px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
           />
 
           {parsed && !parsed.ok ? <p className="text-destructive text-sm">{parsed.error}</p> : null}

@@ -6,11 +6,17 @@ import { t } from "@/i18n";
 
 type EpisodeIdentity = Pick<EpisodeListItem, "season_number" | "episode_number" | "title">;
 
-/** First caption line: "S01E02 · Pilot", or the code alone when the episode has no title. */
-export function episodeCardTitle(episode: EpisodeIdentity): string {
+/**
+ * First caption line, "S01E02 · Pilot", in two parts: the code with its
+ * separator, and the title. The code alone when the episode has no title.
+ */
+export function episodeCardTitleParts(episode: EpisodeIdentity): {
+  prefix: string;
+  title?: string;
+} {
   const code = formatEpisodeCode(episode.season_number, episode.episode_number);
   const title = episode.title?.trim();
-  return title ? `${code} · ${title}` : code;
+  return title ? { prefix: `${code} · `, title } : { prefix: code };
 }
 
 /**

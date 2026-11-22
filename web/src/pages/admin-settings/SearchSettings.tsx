@@ -174,6 +174,7 @@ export default function SearchSettings() {
                 value={form.getValue(MEILI_URL_KEY)}
                 onChange={(value) => form.setValue(MEILI_URL_KEY, value)}
                 hint={MEILI_URL_EXAMPLE}
+                dir="ltr"
                 disabled={!meiliEnabled || connectionUnknown}
                 managedByEnv={form.envVar(MEILI_URL_KEY)}
                 restartRequired={restartKeys.has(MEILI_URL_KEY)}

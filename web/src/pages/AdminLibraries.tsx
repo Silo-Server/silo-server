@@ -1,43 +1,53 @@
 import { JobPageControls } from "@/components/admin/JobPageControls";
-import { Fragment, useId, useState, useEffect, useMemo, type ComponentProps } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useSortableAccessibility } from "@/hooks/useSortableAccessibility";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import type { Library, LibraryRealtimeMonitoringEntry, ScanRun } from "@/api/types";
 import {
   useAdminLibraries,
-  useLibraryCapabilities,
-  useReorderLibraries,
   useDeleteLibrary,
-  useScanAllLibraries,
+  useLibraryCapabilities,
+  useLibraryMetadataMatchQueues,
   useLibraryRealtimeMonitoring,
   useLibraryRefreshJobs,
+  useReorderLibraries,
+  useScanAllLibraries,
+  useUnmatchedLibraryItems,
 } from "@/hooks/queries/admin/libraries";
 import { useAdminTrickplayLibraries } from "@/hooks/queries/admin/trickplay";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { buildLibraryReorderEntries, moveLibraryByOne } from "./adminLibraryOrder";
-import { LibraryEditorDialog } from "@/components/admin/libraries/LibraryEditorDialog";
-import { libraryTypeLabel } from "@/components/admin/libraries/libraryTypes";
+import {
+  LibraryEditorDialog,
+  type LibraryEditorSection,
+} from "@/components/admin/libraries/LibraryEditorDialog";
+import { findLibraryType, libraryTypeLabel } from "@/components/admin/libraries/libraryTypes";
 import { LibraryRefreshDialog } from "@/components/admin/libraries/LibraryRefreshDialog";
 import { LibraryCardList } from "@/components/admin/libraries/LibraryCardList";
 import {
-  LibraryActiveWork,
+  LibraryActivityPanel,
+  LiveActivitySummaryStrip,
+} from "@/components/admin/libraries/LibraryActivityPanel";
+import {
+  getLibraryScanGroupName,
+  libraryScanProgressPercent,
+  type LibraryRefreshEntry,
+  type LibraryScanGroup,
+} from "@/components/admin/libraries/libraryActivityHelpers";
+import { LibraryCatalogHealthPanel } from "@/components/admin/libraries/LibraryCatalogHealthPanel";
+import {
+  LibraryActionMenu,
   LibraryLastScanned,
   LibraryScanWarning,
   LibraryStatusBadges,
-  MountCheckButtonIcon,
 } from "@/components/admin/libraries/LibraryRowParts";
 import { useLibrariesTableLayout } from "@/components/admin/libraries/diagnosticsListState";
-import { useCollapsedScans } from "@/components/admin/libraries/useCollapsedScans";
 import { useLibraryRows, type LibraryRow } from "@/components/admin/libraries/useLibraryRows";
 import type { AdminTrickplayLibrary } from "@/hooks/queries/admin/trickplay";
-import { MetadataMatcherQueuesSection } from "@/components/admin/libraries/MetadataMatcherQueuesSection";
-import { AmbiguousRootsSection } from "@/components/admin/libraries/AmbiguousRootsSection";
-import { SkippedRootsSection } from "@/components/admin/libraries/SkippedRootsSection";
-import { UnmatchedItemsSection } from "@/components/admin/libraries/UnmatchedItemsSection";
-import { StaleIDsSection } from "@/components/admin/libraries/StaleIDsSection";
 import { PageHeader } from "@/components/page/PageHeader";
+import { PathText } from "@/components/PathText";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -46,46 +56,26 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Link, Navigate, useLocation } from "react-router";
-import {
-  Plus,
-  Pencil,
-  Trash2,
-  RefreshCw,
-  ScanLine,
-  DatabaseBackup,
-  GripVertical,
-  Wrench,
-  ChevronUp,
-  ChevronDown,
-  Square,
-} from "lucide-react";
+import { Navigate, useLocation, useSearchParams } from "react-router";
+import { FolderOpen, GripVertical, Plus, RefreshCw, ScanLine, Square } from "lucide-react";
 import { legacyLibrariesAutoscanTarget } from "@/pages/autoscanSearchParams";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { cn } from "@/lib/utils";
 import {
-  formatActiveScanMode,
-  formatActiveScanProgress,
-  formatActiveScanTarget,
-  formatActiveScanStarted,
-  formatActiveScanTrigger,
-} from "@/lib/scanRuns";
-import {
   DndContext,
   DragOverlay,
-  PointerSensor,
   KeyboardSensor,
+  PointerSensor,
   closestCenter,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import type { DragStartEvent, DragEndEvent, SensorDescriptor, SensorOptions } from "@dnd-kit/core";
-import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
+import type { DragEndEvent, DragStartEvent, SensorDescriptor, SensorOptions } from "@dnd-kit/core";
+import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useMotionSafeOverlay, useMotionSafeSortable } from "@/hooks/useSortableList";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 // Not translated: a separator glyph.
@@ -96,6 +86,13 @@ const SEPARATOR = "·";
 // until the query resolved.
 const NO_LIBRARIES: Library[] = [];
 const NO_ACTIVE_SCANS: ScanRun[] = [];
+
+type LibrariesTab = "libraries" | "activity" | "health";
+
+function parseLibrariesTab(value: string | null): LibrariesTab {
+  if (value === "activity" || value === "health") return value;
+  return "libraries";
+}
 
 export default function AdminLibraries() {
   // Autoscan was a tab here before it became its own sidebar topic.
@@ -108,6 +105,11 @@ export default function AdminLibraries() {
 function LibrariesPage() {
   const t = useT();
   useEventChannel("scans");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = parseLibrariesTab(searchParams.get("tab"));
+  const [activityLibraryFilter, setActivityLibraryFilter] = useState<number | null>(null);
+  const activityTabTriggerRef = useRef<HTMLButtonElement>(null);
+
   const {
     data: libraries = NO_LIBRARIES,
     isLoading,
@@ -117,6 +119,20 @@ function LibrariesPage() {
   const { data: activeScans = NO_ACTIVE_SCANS } = useActiveScans();
   const { data: realtimeMonitoring } = useLibraryRealtimeMonitoring();
   const { data: trickplayLibraries } = useAdminTrickplayLibraries();
+  const unmatchedQuery = useUnmatchedLibraryItems("", false);
+  const unmatchedTotal = unmatchedQuery.data?.pages[0]?.total;
+  const matcherQueuesQuery = useLibraryMetadataMatchQueues();
+  const matcherQueues = matcherQueuesQuery.data;
+  const matcherTotal = useMemo(
+    () =>
+      matcherQueues ? matcherQueues.reduce((sum, queue) => sum + queue.total_count, 0) : undefined,
+    [matcherQueues],
+  );
+  const catalogHealthBadgeCount =
+    unmatchedTotal === undefined && matcherTotal === undefined
+      ? undefined
+      : (unmatchedTotal ?? 0) + (matcherTotal ?? 0);
+
   const trickplayByLibraryId = useMemo(
     () => new Map(trickplayLibraries?.map((entry) => [Number(entry.library_id), entry]) ?? []),
     [trickplayLibraries],
@@ -129,6 +145,7 @@ function LibrariesPage() {
   const libraryRefreshJobs = useMemo(() => refreshJobsQuery.data ?? [], [refreshJobsQuery.data]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingLib, setEditingLib] = useState<Library | null>(null);
+  const [editorSection, setEditorSection] = useState<LibraryEditorSection>("general");
   const [confirmDeleteLib, setConfirmDeleteLib] = useState<Library | null>(null);
   const [confirmEmptyRootLib, setConfirmEmptyRootLib] = useState<Library | null>(null);
   const [refreshLib, setRefreshLib] = useState<Library | null>(null);
@@ -136,8 +153,31 @@ function LibrariesPage() {
   const scanAllMutation = useScanAllLibraries();
   const isDesktop = useLibrariesTableLayout();
 
-  function openEditor(lib: Library) {
+  function setActiveTab(nextTab: LibrariesTab) {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        if (nextTab === "libraries") {
+          next.delete("tab");
+        } else {
+          next.set("tab", nextTab);
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  }
+
+  function openActivityForLibrary(libraryId: number | null) {
+    setActivityLibraryFilter(libraryId);
+    setActiveTab("activity");
+    // Move focus to the Activity tab trigger once the Libraries panel hides.
+    requestAnimationFrame(() => activityTabTriggerRef.current?.focus());
+  }
+
+  function openEditor(lib: Library, section: LibraryEditorSection = "general") {
     setEditingLib(lib);
+    setEditorSection(section);
     setDialogOpen(true);
   }
 
@@ -209,7 +249,7 @@ function LibrariesPage() {
   }
 
   const activeLibrary = activeId != null ? orderedLibraries.find((l) => l.id === activeId) : null;
-  const activeScanGroups = useMemo(() => {
+  const activeScanGroups: LibraryScanGroup[] = useMemo(() => {
     return Array.from(activeScansByLibraryId.entries())
       .map(([libraryID, scans]) => {
         const library = libraries.find((entry) => entry.id === libraryID) ?? null;
@@ -235,12 +275,28 @@ function LibrariesPage() {
   if (isLoading) return <div className="pb-8">{t("web.admin.libraries.page.loading")}</div>;
 
   const rows = orderedLibraries.map(rowFor);
+  const activeRefreshEntries: LibraryRefreshEntry[] = rows
+    .filter((row) => row.activeRefreshJob !== undefined)
+    .map((row) => ({
+      libraryID: row.library.id,
+      library: row.library,
+      job: row.activeRefreshJob!,
+    }));
+  const cancellingJobID = rows[0]?.cancellingJobID;
+  const cancelJob = rows[0]?.cancelJob ?? (() => {});
+
+  const totalActiveScans = activeScanGroups.reduce((sum, group) => sum + group.scans.length, 0);
+  const totalActiveWork = totalActiveScans + activeRefreshEntries.length;
+  const hasRunningWork =
+    activeScanGroups.some((group) => group.runningCount > 0) ||
+    activeRefreshEntries.some((entry) => entry.job.status === "running");
+
   // Below lg the header buttons share rows at equal width and wrap as needed,
   // with Add Library on a row of its own; from lg they keep their natural size.
   const headerButtonClass = "max-lg:h-11 max-lg:min-w-fit max-lg:flex-1";
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <ConfirmDialog
         open={confirmDeleteLib !== null}
         onOpenChange={(open) => {
@@ -273,21 +329,12 @@ function LibrariesPage() {
           setConfirmEmptyRootLib(null);
         }}
       />
+
       <PageHeader
         title={t("web.admin.libraries.page.title")}
         subtitle={t("web.admin.libraries.page.subtitle")}
         actions={
           <div className="flex gap-2 max-lg:w-full max-lg:flex-wrap">
-            {activeScanGroups.length > 0 && (
-              <ScanQueuePopover
-                groups={activeScanGroups}
-                cancellingLibraryID={
-                  cancelScansMutation.isPending ? (cancelScansMutation.variables ?? null) : null
-                }
-                onCancel={(libraryID) => cancelScansMutation.mutate(libraryID)}
-                triggerClassName={headerButtonClass}
-              />
-            )}
             <Button
               variant="outline"
               size="sm"
@@ -295,32 +342,32 @@ function LibrariesPage() {
               onClick={() => scanAllMutation.mutate()}
               disabled={scanAllMutation.isPending}
             >
-              <ScanLine className="h-3.5 w-3.5" />
+              <ScanLine className="h-3.5 w-3.5" aria-hidden="true" />
               {t("web.admin.libraries.page.scanAll")}
-            </Button>
-            <Button variant="outline" size="sm" className={headerButtonClass} asChild>
-              <Link to="/admin/maintenance">
-                <Wrench className="me-1 h-4 w-4" />
-                {t("web.admin.libraries.page.catalogMaintenance")}
-              </Link>
             </Button>
             <Button
               size="sm"
               className="max-lg:h-11 max-lg:basis-full"
               onClick={() => {
                 setEditingLib(null);
+                setEditorSection("general");
                 setDialogOpen(true);
               }}
             >
-              <Plus className="me-1 h-4 w-4" /> {t("web.admin.libraries.page.addLibrary")}
+              <Plus className="me-1 h-4 w-4" aria-hidden="true" />
+              {t("web.admin.libraries.page.addLibrary")}
             </Button>
             <LibraryEditorDialog
               open={dialogOpen}
               onOpenChange={(open) => {
                 setDialogOpen(open);
-                if (!open) setEditingLib(null);
+                if (!open) {
+                  setEditingLib(null);
+                  setEditorSection("general");
+                }
               }}
               library={editingLib}
+              initialSection={editorSection}
               chapterThumbnailsSupported={
                 editingLib?.chapter_thumbnails_supported ??
                 libraries[0]?.chapter_thumbnails_supported ??
@@ -354,47 +401,130 @@ function LibrariesPage() {
         }
       />
 
-      <div className="space-y-6">
-        {isDesktop ? (
-          <LibraryTable
-            rows={rows}
-            activeLibrary={activeLibrary ?? null}
-            realtimeMonitoringByLibraryId={realtimeMonitoringByLibraryId}
-            trickplayByLibraryId={trickplayByLibraryId}
-            sensors={sensors}
-            accessibility={sortableAccessibility}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-            onDragCancel={handleDragCancel}
-          />
-        ) : (
-          <LibraryCardList
-            rows={rows}
-            realtimeMonitoringByLibraryId={realtimeMonitoringByLibraryId}
-            trickplayByLibraryId={trickplayByLibraryId}
-            onMove={handleMove}
-            // One move at a time: each sends the whole order, and the list it
-            // starts from must already include the previous move.
-            moving={reorderMutation.isPending || librariesFetching}
-          />
-        )}
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          const next = parseLibrariesTab(value);
+          if (next === "activity") setActivityLibraryFilter(null);
+          setActiveTab(next);
+        }}
+      >
+        <TabsList
+          variant="line"
+          className="border-border w-full justify-start overflow-x-auto border-b max-lg:h-auto! max-lg:[scrollbar-width:none] max-lg:[&::-webkit-scrollbar]:hidden"
+        >
+          <TabsTrigger value="libraries" className="flex-none shrink-0 gap-2 max-lg:h-11">
+            {t("web.admin.libraries.tabs.libraries")}
+            <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums">
+              {numberText(rows.length)}
+            </span>
+          </TabsTrigger>
 
-        <UnmatchedItemsSection />
-        <MetadataMatcherQueuesSection libraries={libraries} />
-        <AmbiguousRootsSection libraries={libraries} />
-        <SkippedRootsSection />
-        <StaleIDsSection />
-      </div>
-      {/* After the content so its padded row never pushes the page header down. */}
-      <JobPageControls
-        query={refreshJobsQuery}
-        label={t("web.admin.libraries.page.loadOlderRefreshJobs")}
-      />
+          <TabsTrigger
+            ref={activityTabTriggerRef}
+            value="activity"
+            className="flex-none shrink-0 gap-2 max-lg:h-11"
+          >
+            {t("web.admin.libraries.tabs.activity")}
+            {totalActiveWork > 0 ? (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums",
+                  hasRunningWork
+                    ? "bg-success/15 text-success"
+                    : "bg-secondary text-secondary-foreground",
+                )}
+              >
+                {hasRunningWork ? (
+                  <span className="bg-success inline-block h-1.5 w-1.5 rounded-full" />
+                ) : null}
+                {t("web.admin.libraries.tabs.activeCount", { count: totalActiveWork })}
+              </span>
+            ) : null}
+          </TabsTrigger>
+
+          <TabsTrigger value="health" className="flex-none shrink-0 gap-2 max-lg:h-11">
+            {t("web.admin.libraries.tabs.health")}
+            {catalogHealthBadgeCount !== undefined && catalogHealthBadgeCount > 0 ? (
+              <span className="bg-warning/15 text-warning rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums">
+                {numberText(catalogHealthBadgeCount)}
+              </span>
+            ) : null}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="libraries" className="space-y-4 pt-4">
+          <LiveActivitySummaryStrip
+            groups={activeScanGroups}
+            refreshEntries={activeRefreshEntries}
+            onViewQueue={() => openActivityForLibrary(null)}
+          />
+
+          {isDesktop ? (
+            <LibraryTable
+              rows={rows}
+              activeLibrary={activeLibrary ?? null}
+              realtimeMonitoringByLibraryId={realtimeMonitoringByLibraryId}
+              trickplayByLibraryId={trickplayByLibraryId}
+              sensors={sensors}
+              accessibility={sortableAccessibility}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onDragCancel={handleDragCancel}
+              onViewActivity={openActivityForLibrary}
+            />
+          ) : (
+            <LibraryCardList
+              rows={rows}
+              realtimeMonitoringByLibraryId={realtimeMonitoringByLibraryId}
+              trickplayByLibraryId={trickplayByLibraryId}
+              onMove={handleMove}
+              onViewActivity={openActivityForLibrary}
+              // One move at a time: each sends the whole order, and the list it
+              // starts from must already include the previous move.
+              moving={reorderMutation.isPending || librariesFetching}
+            />
+          )}
+        </TabsContent>
+
+        <TabsContent value="activity" className="pt-4">
+          <LibraryActivityPanel
+            groups={activeScanGroups}
+            refreshEntries={activeRefreshEntries}
+            refreshJobsLoading={refreshJobsQuery.isPending && refreshJobsQuery.data === undefined}
+            refreshJobsError={refreshJobsQuery.isError}
+            selectedLibraryID={activityLibraryFilter}
+            onSelectLibraryID={setActivityLibraryFilter}
+            cancellingLibraryID={
+              cancelScansMutation.isPending ? (cancelScansMutation.variables ?? null) : null
+            }
+            cancellingJobID={cancellingJobID}
+            onCancelScans={(libraryID) => cancelScansMutation.mutate(libraryID)}
+            onCancelJob={cancelJob}
+            footer={
+              <JobPageControls
+                query={refreshJobsQuery}
+                label={t("web.admin.libraries.page.loadOlderRefreshJobs")}
+              />
+            }
+          />
+        </TabsContent>
+
+        <TabsContent value="health" className="pt-4">
+          <LibraryCatalogHealthPanel
+            libraries={libraries}
+            unmatchedCount={unmatchedTotal}
+            unmatchedError={unmatchedQuery.isError && unmatchedQuery.data === undefined}
+            matcherCount={matcherTotal}
+            matcherError={matcherQueuesQuery.isError && matcherQueuesQuery.data === undefined}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
 
-/** The libraries list from the `lg` breakpoint: a table reordered by dragging. */
+/** The libraries list from the `lg` breakpoint: a calm table reordered by dragging. */
 function LibraryTable({
   rows,
   activeLibrary,
@@ -405,6 +535,7 @@ function LibraryTable({
   onDragStart,
   onDragEnd,
   onDragCancel,
+  onViewActivity,
 }: {
   rows: LibraryRow[];
   activeLibrary: Library | null;
@@ -415,10 +546,19 @@ function LibraryTable({
   onDragStart: (event: DragStartEvent) => void;
   onDragEnd: (event: DragEndEvent) => void;
   onDragCancel: () => void;
+  onViewActivity: (libraryId: number) => void;
 }) {
   const t = useT();
   const overlayMotion = useMotionSafeOverlay();
-  const nameIdBase = useId();
+
+  if (rows.length === 0) {
+    return (
+      <div className="surface-panel text-muted-foreground rounded-2xl border-0 px-6 py-10 text-center text-sm">
+        {t("web.admin.libraries.list.empty")}
+      </div>
+    );
+  }
+
   return (
     <DndContext
       sensors={sensors}
@@ -431,14 +571,16 @@ function LibraryTable({
       <div className="surface-panel overflow-x-auto rounded-2xl border-0">
         <Table>
           <TableHeader>
-            <TableRow>
+            <TableRow className="hover:bg-transparent">
               <TableHead className="w-10" />
-              <TableHead>{t("web.admin.libraries.column.name")}</TableHead>
-              <TableHead>{t("web.admin.libraries.column.paths")}</TableHead>
-              <TableHead>{t("web.admin.libraries.column.type")}</TableHead>
+              <TableHead>{t("web.admin.libraries.column.library")}</TableHead>
               <TableHead>{t("web.admin.libraries.column.status")}</TableHead>
-              <TableHead>{t("web.admin.libraries.column.lastScanned")}</TableHead>
-              <TableHead className="w-[15rem]">{t("web.admin.libraries.column.actions")}</TableHead>
+              <TableHead className="whitespace-nowrap">
+                {t("web.admin.libraries.column.lastScanned")}
+              </TableHead>
+              <TableHead className="w-[13.5rem] text-end">
+                {t("web.admin.libraries.column.actions")}
+              </TableHead>
             </TableRow>
           </TableHeader>
           <SortableContext
@@ -447,150 +589,115 @@ function LibraryTable({
           >
             <TableBody>
               {rows.map((row) => {
-                const { library: lib, scan, refresh, mountCheck, cleanup } = row;
-                const nameId = `${nameIdBase}-${lib.id}`;
+                const { library: lib, scan } = row;
+                const TypeIcon = findLibraryType(lib.type)?.icon ?? FolderOpen;
+                const singlePath = lib.paths.length === 1 ? lib.paths[0] : undefined;
+                const progressPct =
+                  row.runningScanCount > 0 ? libraryScanProgressPercent(row.activeScans) : null;
+
                 return (
                   <Fragment key={lib.id}>
-                    <SortableLibraryRow id={lib.id}>
-                      <TableCell id={nameId} className="font-medium">
-                        {lib.name}
-                      </TableCell>
-                      <TableCell className="text-xs">
-                        {lib.paths.length === 1 ? (
-                          <span dir="ltr" className="text-muted-foreground font-mono">
-                            {lib.paths[0]}
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            className="text-muted-foreground hover:text-foreground text-start transition-colors"
-                            onClick={row.edit}
-                          >
-                            {t("web.admin.libraries.list.folderCount", {
-                              count: lib.paths.length,
-                            })}
-                          </button>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{libraryTypeLabel(lib.type)}</Badge>
+                    <SortableLibraryRow id={lib.id} progressPercent={progressPct}>
+                      <TableCell className="max-w-[26rem] py-3">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="bg-secondary flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
+                            <TypeIcon
+                              className="text-muted-foreground h-4 w-4"
+                              aria-hidden="true"
+                            />
+                          </div>
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            <div dir="auto" className="bidi-text truncate font-medium">
+                              {lib.name}
+                            </div>
+                            <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
+                              <span className="shrink-0">{libraryTypeLabel(lib.type)}</span>
+                              <span aria-hidden="true">{SEPARATOR}</span>
+                              <button
+                                type="button"
+                                className="hover:text-foreground min-w-0 truncate text-start transition-colors"
+                                title={singlePath}
+                                onClick={row.editFolders}
+                              >
+                                {singlePath !== undefined ? (
+                                  <span dir="ltr" className="font-mono text-[11px]">
+                                    <PathText path={singlePath} />
+                                  </span>
+                                ) : (
+                                  t("web.admin.libraries.list.folderCount", {
+                                    count: lib.paths.length,
+                                  })
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       </TableCell>
                       <TableCell>
                         <LibraryStatusBadges
                           row={row}
                           realtimeMonitoring={realtimeMonitoringByLibraryId.get(lib.id)}
                           trickplay={trickplayByLibraryId.get(lib.id)}
+                          onViewActivity={onViewActivity}
+                          showIdle
                         />
                       </TableCell>
-                      <TableCell className="text-muted-foreground text-xs">
+                      <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
                         <LibraryLastScanned row={row} />
                       </TableCell>
-                      <TableCell className="w-[15rem] align-middle">
-                        <div className="flex flex-nowrap items-center justify-end gap-1">
+                      <TableCell className="w-[13.5rem] align-middle">
+                        <div className="flex flex-nowrap items-center justify-end gap-1.5">
                           <Button
-                            variant="ghost"
-                            size="icon"
-                            className={cn("h-7 w-7", scan.stop && "text-destructive")}
+                            variant="outline"
+                            size="sm"
+                            className={cn(
+                              "h-7 gap-1.5 px-2.5 text-xs",
+                              scan.stop &&
+                                "border-destructive/35 bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive",
+                            )}
                             title={scan.label}
                             aria-label={scan.label}
                             disabled={scan.disabled}
                             onClick={scan.run}
                           >
                             {scan.stop ? (
-                              <Square className="h-3 w-3 fill-current" />
+                              <>
+                                <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
+                                {t("web.admin.libraries.list.stopAction")}
+                              </>
                             ) : (
-                              <RefreshCw
-                                className={`h-3 w-3 ${scan.pending ? "animate-spin" : ""}`}
-                              />
+                              <>
+                                <RefreshCw
+                                  className={cn("h-3 w-3", scan.pending && "animate-spin")}
+                                  aria-hidden="true"
+                                />
+                                {t("web.admin.libraries.list.scanAction")}
+                              </>
                             )}
                           </Button>
                           <Button
                             variant="ghost"
-                            size="icon"
-                            className={cn("h-7 w-7", refresh.stop && "text-destructive")}
-                            title={refresh.label}
-                            aria-label={refresh.label}
-                            disabled={refresh.disabled}
-                            onClick={refresh.run}
-                          >
-                            {refresh.stop ? (
-                              <Square className="h-3 w-3 fill-current" />
-                            ) : (
-                              <DatabaseBackup className="h-3 w-3" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            title={mountCheck.message ?? t("web.admin.libraries.list.verifyMounts")}
-                            aria-label={
-                              mountCheck.message ?? t("web.admin.libraries.list.verifyMounts")
-                            }
-                            disabled={mountCheck.pending}
-                            onClick={mountCheck.run}
-                          >
-                            <MountCheckButtonIcon
-                              pending={mountCheck.pending}
-                              result={mountCheck.result}
-                            />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
+                            size="sm"
+                            className="text-muted-foreground hover:text-foreground h-7 px-2.5 text-xs"
                             aria-label={t("web.admin.libraries.list.edit", { name: lib.name })}
                             onClick={row.edit}
                           >
-                            <Pencil className="h-3 w-3" aria-hidden="true" />
+                            {t("web.admin.libraries.list.editAction")}
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            aria-label={t("web.admin.libraries.list.delete", {
-                              name: lib.name,
-                            })}
-                            onClick={row.remove}
-                          >
-                            <Trash2 className="h-3 w-3" aria-hidden="true" />
-                          </Button>
-                          {cleanup.available ? (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive h-7 w-7"
-                              title={t("web.admin.libraries.list.confirmCleanupTitle")}
-                              aria-label={t("web.admin.libraries.list.confirmCleanupTitle")}
-                              aria-describedby={nameId}
-                              disabled={cleanup.pending}
-                              onClick={cleanup.run}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          ) : null}
+                          <LibraryActionMenu row={row} />
                         </div>
                       </TableCell>
                     </SortableLibraryRow>
-                    {row.hasActiveWork ? (
+                    {row.hasScanWarning ? (
                       <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={7} className="bg-muted/20 px-4 py-2">
-                          <LibraryActiveWork row={row} className="ps-12" />
+                        <TableCell colSpan={5} className="bg-destructive/5 text-sm">
+                          <LibraryScanWarning row={row} />
                         </TableCell>
                       </TableRow>
                     ) : null}
                   </Fragment>
                 );
               })}
-              {rows
-                .filter((row) => row.hasScanWarning)
-                .map((row) => (
-                  <TableRow key={`${row.library.id}-warning`}>
-                    <TableCell colSpan={7} className="bg-destructive/5 text-sm">
-                      <LibraryScanWarning row={row} />
-                    </TableCell>
-                  </TableRow>
-                ))}
             </TableBody>
           </SortableContext>
         </Table>
@@ -603,20 +710,13 @@ function LibraryTable({
                 <TableCell className="w-10">
                   <GripVertical className="text-muted-foreground h-4 w-4" />
                 </TableCell>
-                <TableCell className="font-medium">{activeLibrary.name}</TableCell>
-                <TableCell className="text-muted-foreground text-xs">
-                  {activeLibrary.paths.length === 1 ? (
-                    <span dir="ltr" className="font-mono">
-                      {activeLibrary.paths[0]}
+                <TableCell className="font-medium">
+                  <div className="flex items-center gap-3">
+                    <span>{activeLibrary.name}</span>
+                    <span className="text-muted-foreground text-xs">
+                      {libraryTypeLabel(activeLibrary.type)}
                     </span>
-                  ) : (
-                    t("web.admin.libraries.list.folderCount", {
-                      count: activeLibrary.paths.length,
-                    })
-                  )}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="secondary">{libraryTypeLabel(activeLibrary.type)}</Badge>
+                  </div>
                 </TableCell>
                 <TableCell />
                 <TableCell />
@@ -630,243 +730,15 @@ function LibraryTable({
   );
 }
 
-function ScanQueuePopover({
-  groups,
-  cancellingLibraryID,
-  onCancel,
-  triggerClassName,
+function SortableLibraryRow({
+  id,
+  progressPercent,
+  children,
 }: {
-  groups: Array<{
-    libraryID: number;
-    library: Library | null;
-    scans: ScanRun[];
-    runningCount: number;
-    queuedCount: number;
-  }>;
-  cancellingLibraryID: number | null;
-  onCancel: (libraryID: number) => void;
-  triggerClassName?: string;
+  id: number;
+  progressPercent: number | null;
+  children: React.ReactNode;
 }) {
-  const t = useT();
-  const totalRunning = groups.reduce((sum, group) => sum + group.runningCount, 0);
-  const totalQueued = groups.reduce((sum, group) => sum + group.queuedCount, 0);
-  const totalScans = totalRunning + totalQueued;
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className={cn("gap-2", triggerClassName)}>
-          <span className="relative flex h-2 w-2">
-            <span className="bg-success absolute inline-flex h-full w-full animate-ping rounded-full opacity-75" />
-            <span className="bg-success relative inline-flex h-2 w-2 rounded-full" />
-          </span>
-          <span className="tabular-nums">
-            {t("web.admin.libraries.scanQueue.trigger", {
-              count: totalScans,
-              count_text: totalScans,
-            })}
-          </span>
-        </Button>
-      </PopoverTrigger>
-
-      <PopoverContent align="end" className="w-[400px] max-w-[calc(100vw-1rem)] p-0">
-        {/* Accent bar */}
-        <div className="scan-queue-accent absolute inset-x-0 top-0 h-px rounded-t-xl" />
-
-        {/* Header */}
-        <div className="border-border/40 flex items-center justify-between border-b px-4 py-3">
-          <div className="flex items-center gap-2.5">
-            <RefreshCw
-              className="text-primary h-3.5 w-3.5 animate-spin"
-              style={{ animationDuration: "3s" }}
-            />
-            <span className="text-sm font-semibold">
-              {t("web.admin.libraries.scanQueue.title")}
-            </span>
-          </div>
-          <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
-            {totalRunning > 0 && (
-              <>
-                <span className="bg-success inline-block h-1.5 w-1.5 rounded-full" />
-                <span className="tabular-nums">
-                  {t("web.admin.libraries.scans.running", {
-                    count: totalRunning,
-                    count_text: totalRunning,
-                  })}
-                </span>
-              </>
-            )}
-            {totalRunning > 0 && totalQueued > 0 && (
-              <span className="text-border">{SEPARATOR}</span>
-            )}
-            {totalQueued > 0 && (
-              <>
-                <span className="bg-muted-foreground/40 inline-block h-1.5 w-1.5 rounded-full" />
-                <span className="tabular-nums">
-                  {t("web.admin.libraries.scans.queued", {
-                    count: totalQueued,
-                    count_text: totalQueued,
-                  })}
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Library groups */}
-        <div className="max-h-[360px] overflow-y-auto px-3 py-2">
-          {groups.map((group, gi) => (
-            <ScanQueueGroup
-              key={group.libraryID}
-              group={group}
-              groupIndex={gi}
-              isLast={gi === groups.length - 1}
-              cancelling={cancellingLibraryID === group.libraryID}
-              onCancel={onCancel}
-            />
-          ))}
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function ScanQueueGroup({
-  group,
-  groupIndex,
-  isLast,
-  cancelling,
-  onCancel,
-}: {
-  group: {
-    libraryID: number;
-    library: Library | null;
-    scans: ScanRun[];
-    runningCount: number;
-    queuedCount: number;
-  };
-  groupIndex: number;
-  isLast: boolean;
-  cancelling: boolean;
-  onCancel: (libraryID: number) => void;
-}) {
-  const t = useT();
-  const { expanded, setExpanded, visibleScans, hiddenCount, collapsible } = useCollapsedScans(
-    group.scans,
-  );
-
-  return (
-    <div>
-      {/* Library header row */}
-      <div className="flex items-center gap-2 py-1.5">
-        <span className="text-muted-foreground/60 text-[10px] font-semibold tracking-widest uppercase">
-          {getLibraryScanGroupName(t, group.library, group.libraryID)}
-        </span>
-        <div className="bg-border/25 h-px flex-1" />
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground hover:text-destructive h-6 gap-1 px-2 text-[10px]"
-          disabled={cancelling}
-          onClick={() => onCancel(group.libraryID)}
-        >
-          <Square className="h-2.5 w-2.5" />
-          {t("common.cancel")}
-        </Button>
-      </div>
-
-      {/* Scan rows */}
-      {visibleScans.map((scan, si) => (
-        <div
-          key={scan.id}
-          className={cn(
-            "flex items-start gap-2.5 rounded-lg px-2.5 py-2 transition-colors",
-            scan.status === "running" ? "bg-primary/[0.04]" : "",
-          )}
-          style={{
-            animation: "fade-in 0.25s ease-out backwards",
-            animationDelay: `${Math.min(groupIndex * 4 + si, 12) * 40}ms`,
-          }}
-        >
-          {/* Status dot */}
-          <div className="relative mt-[5px] flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-            {scan.status === "running" ? (
-              <>
-                <span className="bg-success/20 absolute h-2.5 w-2.5 animate-ping rounded-full" />
-                <span className="bg-success shadow-success/30 relative h-[7px] w-[7px] rounded-full shadow-[0_0_5px_1px]" />
-              </>
-            ) : (
-              <span className="bg-muted-foreground/20 ring-muted-foreground/15 h-[5px] w-[5px] rounded-full ring-[1.5px]" />
-            )}
-          </div>
-
-          {/* Details */}
-          <div className="min-w-0 flex-1">
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-xs leading-snug font-medium">{formatActiveScanMode(scan)}</span>
-              {scan.trigger && (
-                <span className="bg-muted/50 text-muted-foreground rounded px-1 py-px text-[9px] font-medium">
-                  {formatActiveScanTrigger(scan.trigger)}
-                </span>
-              )}
-            </div>
-            <div className="text-muted-foreground mt-px flex items-center gap-1 text-[10px] leading-relaxed">
-              <code
-                className="text-muted-foreground/70 max-w-[200px] truncate font-mono"
-                title={scan.path}
-              >
-                {formatActiveScanTarget(scan)}
-              </code>
-              <span className="text-border/50 shrink-0">{SEPARATOR}</span>
-              <span className="shrink-0">
-                {scan.status === "running"
-                  ? formatActiveScanStarted(scan.started_at)
-                  : t("web.admin.libraries.scanQueue.waiting")}
-              </span>
-            </div>
-            {formatActiveScanProgress(scan) && (
-              <div className="text-muted-foreground/80 mt-1 truncate text-[10px] leading-relaxed">
-                {formatActiveScanProgress(scan)}
-              </div>
-            )}
-          </div>
-        </div>
-      ))}
-      {collapsible ? (
-        <button
-          type="button"
-          className="text-muted-foreground hover:text-foreground flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] transition-colors"
-          onClick={() => setExpanded((current) => !current)}
-        >
-          {expanded ? (
-            <>
-              {t("web.admin.libraries.scanQueue.showLess")} <ChevronUp className="h-3 w-3" />
-            </>
-          ) : (
-            <>
-              {t(
-                hiddenCount <= group.queuedCount
-                  ? "web.admin.libraries.scanQueue.moreQueued"
-                  : "web.admin.libraries.scanQueue.more",
-                { count: hiddenCount, count_text: hiddenCount },
-              )}{" "}
-              <ChevronDown className="h-3 w-3" />
-            </>
-          )}
-        </button>
-      ) : null}
-
-      {/* Separator between groups */}
-      {!isLast && <div className="bg-border/20 my-1 h-px" />}
-    </div>
-  );
-}
-
-function getLibraryScanGroupName(t: Translate, library: Library | null, libraryID: number) {
-  return library?.name ?? t("web.admin.libraries.scanQueue.libraryFallback", { id: libraryID });
-}
-
-function SortableLibraryRow({ id, children }: { id: number; children: React.ReactNode }) {
   const t = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useMotionSafeSortable({
@@ -877,15 +749,30 @@ function SortableLibraryRow({ id, children }: { id: number; children: React.Reac
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.4 : 1,
+    ...(progressPercent !== null
+      ? {
+          backgroundImage: `linear-gradient(to right, color-mix(in srgb, var(--success) 75%, transparent) ${progressPercent}%, transparent ${progressPercent}%)`,
+          backgroundSize: "100% 2px",
+          backgroundRepeat: "no-repeat",
+          backgroundPosition: "bottom left",
+        }
+      : {}),
   };
 
   return (
-    <TableRow ref={setNodeRef} style={style}>
+    <TableRow
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "group",
+        progressPercent !== null && "forced-colors:border-b-2 forced-colors:border-b-[Highlight]",
+      )}
+    >
       <TableCell className="w-10">
         <button
           type="button"
           aria-label={t("web.admin.libraries.list.dragToReorder")}
-          className="hover:bg-surface-hover cursor-grab touch-none rounded-md p-1 transition-colors"
+          className="hover:bg-surface-hover cursor-grab touch-none rounded-md p-1 opacity-45 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
           {...attributes}
           {...listeners}
         >

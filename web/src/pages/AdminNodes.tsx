@@ -97,6 +97,7 @@ import {
   nodeUsesCUDADevices,
   parseHWDeviceOverride,
   restoreEnvManagedFields,
+  nodeUsesVideoToolbox,
 } from "./adminNodesPresentation";
 import { NodeRoutingSettings } from "@/pages/admin-settings/NodeRoutingSettings";
 
@@ -260,7 +261,7 @@ function NodeDriftBadge({ node }: { node: StreamNode }) {
   return (
     <Badge
       variant="outline"
-      className="bg-warning/10 text-warning border-warning/15"
+      className="bg-warning/10 text-warning-label border-warning/15"
       title={drift.title}
     >
       {drift.label}
@@ -454,10 +455,7 @@ function GroupChip({
       )}
       <span className={cn(active && "font-medium")}>{label}</span>
       <span
-        className={cn(
-          "font-mono text-[10px] tabular-nums",
-          active ? "opacity-70" : "text-muted-foreground",
-        )}
+        className={cn("font-mono text-[10px] tabular-nums", !active && "text-muted-foreground")}
       >
         {count}
       </span>
@@ -962,7 +960,9 @@ function NodeDevicePicker({
               <p className={cn("truncate text-sm", !row.reported && "text-muted-foreground")}>
                 {row.description}
               </p>
-              <p className="text-muted-foreground truncate font-mono text-xs">{row.path}</p>
+              <p className="text-muted-foreground truncate font-mono text-xs">
+                <span dir="ltr">{row.path}</span>
+              </p>
             </div>
             <Switch
               checked={row.selected}
@@ -1056,6 +1056,9 @@ function NodeForm({
   const { data: serverSettings } = useAdminServerSettings();
   const clusterHWAccel = serverSettings?.["playback.hw_accel"];
   const usesCUDADevices = nodeUsesCUDADevices(node, hwAccelOverride, clusterHWAccel);
+  // VideoToolbox takes no device, so its control is hidden. The value stays in
+  // state and is saved as it was: hiding it clears nothing.
+  const showDeviceOverride = !nodeUsesVideoToolbox(node, hwAccelOverride, clusterHWAccel);
   // A device override written for one syntax means nothing in the other: a
   // render path is not a CUDA identity and neither is settable as the other, so
   // moving the selection between them drops the stored value rather than
@@ -1174,6 +1177,7 @@ function NodeForm({
         <div className="space-y-2">
           <Label>{t("web.admin.nodes.form.url")}</Label>
           <Input
+            dir="ltr"
             value={url}
             disabled={isLocked("url")}
             onChange={(e) => setUrl(e.target.value)}
@@ -1196,6 +1200,8 @@ function NodeForm({
           <div className="space-y-2">
             <Label>{t("web.admin.nodes.form.publicUrl")}</Label>
             <Input
+              // The URL reads left to right; the translated placeholder keeps the page's direction.
+              dir={publicUrl ? "ltr" : undefined}
               value={publicUrl}
               disabled={isLocked("public_url")}
               onChange={(e) => setPublicUrl(e.target.value)}
@@ -1317,59 +1323,63 @@ function NodeForm({
               {lockedNote("hw_accel_override")}
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor={hasDeviceInventory ? undefined : "node-hw-device-override"}>
-                {t("web.admin.nodes.form.gpuDevices")}
-              </Label>
-              {hasDeviceInventory ? (
-                <NodeDevicePicker
-                  rows={deviceRows}
-                  onToggle={(path) =>
-                    setHwDeviceOverride(toggleHWDevice(hwDeviceOverride, path, devicePaths))
-                  }
-                  onInherit={() => setHwDeviceOverride("")}
-                  disabled={isLocked("hw_device_override")}
-                />
-              ) : (
-                <>
-                  <Input
-                    id="node-hw-device-override"
-                    value={hwDeviceOverride}
+            {showDeviceOverride && (
+              <div className="space-y-2">
+                <Label htmlFor={hasDeviceInventory ? undefined : "node-hw-device-override"}>
+                  {t("web.admin.nodes.form.gpuDevices")}
+                </Label>
+                {hasDeviceInventory ? (
+                  <NodeDevicePicker
+                    rows={deviceRows}
+                    onToggle={(path) =>
+                      setHwDeviceOverride(toggleHWDevice(hwDeviceOverride, path, devicePaths))
+                    }
+                    onInherit={() => setHwDeviceOverride("")}
                     disabled={isLocked("hw_device_override")}
-                    onChange={(e) => setHwDeviceOverride(e.target.value)}
-                    placeholder={t("web.admin.nodes.form.gpuDevicesPlaceholder")}
                   />
-                  {/*
-                  Each branch is a whole sentence rather than a shared tail: an
-                  NVENC node reaches the free-text field *with* a reported
-                  inventory (its render devices are real, they are just not what
-                  NVENC addresses), so "no inventory yet" is only true of the
-                  other branch — and splitting one sentence across the
-                  conditional also lets JSX drop the space before "empty".
+                ) : (
+                  <>
+                    <Input
+                      id="node-hw-device-override"
+                      // Device paths read left to right; the translated placeholder keeps the page's direction.
+                      dir={hwDeviceOverride ? "ltr" : undefined}
+                      value={hwDeviceOverride}
+                      disabled={isLocked("hw_device_override")}
+                      onChange={(e) => setHwDeviceOverride(e.target.value)}
+                      placeholder={t("web.admin.nodes.form.gpuDevicesPlaceholder")}
+                    />
+                    {/*
+                    Each branch is a whole sentence rather than a shared tail: an
+                    NVENC node reaches the free-text field *with* a reported
+                    inventory (its render devices are real, they are just not what
+                    NVENC addresses), so "no inventory yet" is only true of the
+                    other branch — and splitting one sentence across the
+                    conditional also lets JSX drop the space before "empty".
 
-                  Neither branch says what leaving this empty resolves to. Empty
-                  inherits the cluster-wide playback.hw_device verbatim, and this
-                  form does not know that value — naming a default here would be
-                  a guess, and on the NVENC branch a dangerous one, since an
-                  inherited /dev/dri path reaches NVENC as a CUDA identity.
-                */}
-                  <p className="text-muted-foreground text-sm">
-                    {usesCUDADevices
-                      ? t("web.admin.nodes.form.cudaDeviceHelp", {
-                          index: "0",
-                          uuid: "GPU-a1b2c3d4",
-                          path: "/dev/dri",
-                          mono,
-                        })
-                      : t("web.admin.nodes.form.renderDeviceHelp", {
-                          example: "/dev/dri/renderD128,/dev/dri/renderD129",
-                          mono,
-                        })}
-                  </p>
-                </>
-              )}
-              {lockedNote("hw_device_override")}
-            </div>
+                    Neither branch says what leaving this empty resolves to. Empty
+                    inherits the cluster-wide playback.hw_device verbatim, and this
+                    form does not know that value — naming a default here would be
+                    a guess, and on the NVENC branch a dangerous one, since an
+                    inherited /dev/dri path reaches NVENC as a CUDA identity.
+                  */}
+                    <p className="text-muted-foreground text-sm">
+                      {usesCUDADevices
+                        ? t("web.admin.nodes.form.cudaDeviceHelp", {
+                            index: "0",
+                            uuid: "GPU-a1b2c3d4",
+                            path: "/dev/dri",
+                            mono,
+                          })
+                        : t("web.admin.nodes.form.renderDeviceHelp", {
+                            example: "/dev/dri/renderD128,/dev/dri/renderD129",
+                            mono,
+                          })}
+                    </p>
+                  </>
+                )}
+                {lockedNote("hw_device_override")}
+              </div>
+            )}
           </>
         )}
 
@@ -1383,7 +1393,7 @@ function NodeForm({
 
 /** Rich-text tag for the device examples in the form help. */
 function mono(chunks: ReactNode[]) {
-  return <span className="font-mono">{chunks}</span>;
+  return <code className="font-mono">{chunks}</code>;
 }
 
 /** The node the key dialog acts on, and whether it has a key to replace. */

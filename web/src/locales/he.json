@@ -281,6 +281,18 @@
       "value": "פג תוקף קוד ההתחברות. יש להתחיל מחדש."
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "החשבון הזה הגיע למגבלת המכשירים לחיבורים ישירים."
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "מכשיר אחר כבר משתמש במפתח החיבור הזה. אפשר לנסות שוב."
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -339,6 +351,12 @@
     {
       "type": 0,
       "value": "הערך נקבע בסביבה. יש לשנות אותו שם ולהפעיל מחדש את השירות המושפע."
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "הערך הזה חסר."
     }
   ],
   "error.field.out_of_range": [
@@ -13086,7 +13104,7 @@
   "web.admin.backups.key.explanation": [
     {
       "type": 0,
-      "value": "שחזור גיבוי דורש את SECRET_KEY של השרת הזה. Silo אף פעם לא מציג את המפתח ולא שומר ממנו עותק בשום מקום אחר. אם המפתח קיים רק בקובץ .env של השרת הזה והדיסק כושל, לא יהיה אפשר לשחזר את הגיבויים האלה, ואף אחד לא יוכל להציל אותם."
+      "value": "שחזור גיבוי דורש את SECRET_KEY של השרת הזה. Silo אף פעם לא מציג את המפתח ולא שומר ממנו עותק בשום מקום אחר. אם המפתח קיים רק בקובץ \u200E.env של השרת הזה והדיסק כושל, לא יהיה אפשר לשחזר את הגיבויים האלה, ואף אחד לא יוכל להציל אותם."
     }
   ],
   "web.admin.backups.key.heading": [
@@ -16145,10 +16163,10 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -16156,7 +16174,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -16172,9 +16190,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16359,10 +16375,10 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -16370,7 +16386,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -16386,9 +16402,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17213,10 +17227,10 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -17232,7 +17246,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -17264,17 +17278,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -17290,7 +17302,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -17322,9 +17334,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -19585,6 +19595,162 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "תמונת רקע"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "פריט אחד באוסף"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פריטים באוסף"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פריטים באוסף"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "האוסף הוחלף"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "תצורה"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "תיאור"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "מצב הפעלה"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "הבלטה"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "מגבלת פריטים"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "מיון פריטים"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "ספריות"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "מיקום"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "פוסטר"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "סדר מיון"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "מקור"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "לוח זמנים לסנכרון"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "כותרת"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "תרגום הכותרת"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "סוג"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "נראות"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "באפליקציית האינטרנט בלבד"
     }
   ],
   "web.admin.backups.restore.rows.changes": [
@@ -22317,10 +22483,10 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22328,7 +22494,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22344,9 +22510,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -22405,10 +22569,10 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22416,7 +22580,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22432,17 +22596,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22450,7 +22612,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22466,17 +22628,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22484,7 +22644,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22500,9 +22660,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -22569,6 +22727,426 @@
     {
       "type": 0,
       "value": "יש אליהם הפניות במסד הנתונים, אבל הם לא נמצאו באחסון; שחזורים לא כוללים אותם."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "קובץ מיתוג אחד"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי מיתוג"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי מיתוג"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "תמונת רקע אחת של אוסף"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " תמונות רקע של אוספים"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " תמונות רקע של אוספים"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "פוסטר אחד של אוסף"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פוסטרים של אוספים"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פוסטרים של אוספים"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "קובץ כתוביות אחד שהורד"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי כתוביות שהורדו"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי כתוביות שהורדו"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "פוסטר אחד של ספרייה"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פוסטרים של ספריות"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פוסטרים של ספריות"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "תמונת שכבת-על אחת"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " תמונות שכבת-על"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " תמונות שכבת-על"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "פוסטר אחד של אוסף אישי"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פוסטרים של אוספים אישיים"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " פוסטרים של אוספים אישיים"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "תמונת פרופיל אחת"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " תמונות פרופיל"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " תמונות פרופיל"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "קובץ תמונה אחד שהועלה"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי תמונה שהועלו"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי תמונה שהועלו"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "קובץ כתוביות אחד שהועלה"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי כתוביות שהועלו"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קובצי כתוביות שהועלו"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -22875,10 +23453,10 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22894,7 +23472,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22926,9 +23504,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -22943,10 +23519,10 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22954,7 +23530,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22970,9 +23546,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -23027,10 +23601,10 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -23038,7 +23612,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -23054,17 +23628,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -23072,7 +23644,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -23088,17 +23660,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -23106,7 +23676,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -23122,9 +23692,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -25796,7 +26364,7 @@
   "web.admin.common.connectionCheck.result.meilisearchRedirected": [
     {
       "type": 0,
-      "value": "שרת Meilisearch הפנה את הבדיקה לכתובת אחרת. יש להזין את הכתובת שאליה הוא מפנה, כמו כתובת ה-https:// שלו, ולהזין שוב את מפתח ה-API."
+      "value": "שרת Meilisearch הפנה את הבדיקה לכתובת אחרת. יש להזין את הכתובת שאליה הוא מפנה, כמו כתובת ה-https://\u200E שלו, ולהזין שוב את מפתח ה-API."
     }
   ],
   "web.admin.common.connectionCheck.result.redisConnected": [
@@ -25871,6 +26439,12 @@
       "value": "ספק המרת הדיבור לטקסט לא זמין באופן זמני. אפשר לנסות שוב מאוחר יותר."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "לספק ה-AI לטקסט אין קרדיט זמין, או שהושגה מגבלת שימוש או הוצאות. יש לבדוק את היתרה ואת המגבלות אצל הספק, או את הגדרות השימוש ב-ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -25881,6 +26455,80 @@
     {
       "type": 0,
       "value": "החיבור לשירות ה-AI לטקסט נכשל. יש לבדוק את המודל, רמת החשיבה, רמת השירות, חיבור החשבון ומגבלות השימוש אצל הספק."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "הגישה לשירות ה-AI לטקסט נדחתה. יש לוודא שמפתח ה-API או חשבון ה-ChatGPT מורשים להשתמש במודל הזה."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "נקודת הקצה או המודל של שירות ה-AI לטקסט לא זמינים. יש לבדוק את כתובת ה-URL הבסיסית של הספק ואת המודל."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "חשבון ה-ChatGPT המחובר לא יכול לשתף את השימוש בתוכנית שלו. יש לבדוק את הגדרות השימוש ב-ChatGPT, או לחבר חשבון אחר."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "ספק ה-AI לטקסט מגביל את קצב הבקשות. אפשר לנסות שוב מאוחר יותר."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "ספק ה-AI לטקסט סירב לבקשת הבדיקה. יש לבדוק את המודל, את רמת החשיבה ואת הגדרות השימוש של החשבון. השגיאה של הספק מופיעה ביומן השרת."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "ספק ה-AI לטקסט דחה את בקשת הבדיקה (סטטוס "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). יש לבדוק את המודל, רמת החשיבה ורמת השירות. השגיאה של הספק מופיעה ביומן השרת."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "הזמן הקצוב לבדיקת החיבור לשירות ה-AI לטקסט פג. יש לבדוק שהספק זמין ולנסות שוב."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "ספק ה-AI לטקסט דחה את פרטי הכניסה. יש להחליף את מפתח ה-API של הספק, או להתחבר שוב עם ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "ספק ה-AI לטקסט לא זמין באופן זמני. אפשר לנסות שוב מאוחר יותר."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה להתחבר מ-Silo לספק ה-AI לטקסט. יש לבדוק את כתובת ה-URL הבסיסית של הספק ושהשרת הזה יכול להתחבר אליו."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "מודל הטקסט החזיר תגובה ש-Silo לא יכול להשתמש בה. יש לבחור מודל אחר."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -25977,6 +26625,12 @@
     {
       "type": 0,
       "value": "ניקוי המגבלה"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "ישיר"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -28020,7 +28674,7 @@
   "web.admin.common.libraryEditor.metadata.localMetadataDescription": [
     {
       "type": 0,
-      "value": "קורא קובצי .nfo ותמונות שנשמרו לצד המדיה שלך. רץ ראשון בכל רמה, ולכן הערכים שלו גוברים על ספקים מרוחקים; שדות שננעלו בעריכת פריט גוברים על שניהם."
+      "value": "קורא קובצי \u200E.nfo ותמונות שנשמרו לצד המדיה שלך. רץ ראשון בכל רמה, ולכן הערכים שלו גוברים על ספקים מרוחקים; שדות שננעלו בעריכת פריט גוברים על שניהם."
     }
   ],
   "web.admin.common.libraryEditor.metadata.noProviders": [
@@ -50536,6 +51190,122 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "סריקות ורענוני מטא-נתונים מופיעים כאן בזמן שהם פועלים."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "אין סריקות או רענונים פעילים"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "הכול ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "הסתרת התור"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ ספרייה נוספת אחת"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ספריות נוספות"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ספריות נוספות"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "רענוני מטא-נתונים"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "מתבצע רענון מטא-נתונים…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "הצגת התור"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "גבוהה"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "נמוכה"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "בינונית"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -51034,6 +51804,30 @@
       "value": "אישור ניקוי של תיקיות שורש ריקות"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "בדיקה"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "אין פריטים שממתינים בתור ההתאמה של המטא-נתונים."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "לא נרשמו תיקיות שורש שדולגו."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "לא נרשמו מזהים חיצוניים לא תקפים."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -51070,6 +51864,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "עריכה"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "עדיין לא הוגדרו ספריות."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -51130,6 +51936,12 @@
       "value": "הסתרת נתיבים"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "לא פעילה"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -51164,6 +51976,12 @@
       "value": "סריקה חלקית"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "השלמת מטא-נתונים חסרים או החלפת כל המטא-נתונים"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -51176,6 +51994,12 @@
       "value": "תיקיית שורש לא נגישה"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "סריקה"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -51186,6 +52010,12 @@
     {
       "type": 0,
       "value": "הצגת נתיבים"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "עצירה"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -51204,6 +52034,22 @@
     {
       "type": 0,
       "value": "אימות נקודות עיגון"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "בדיקה שכל תיקיות הספרייה נגישות"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "הצגת הסריקות הפעילות בספרייה "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -51307,7 +52153,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "ניהול תיקיות השורש והסריקות של הספריות. ייבוא וייצוא של הקטלוג נמצאים עכשיו בדף ”תחזוקה”."
+      "value": "ניהול תיקיות מדיה, מעקב אחר סריקות ופתרון בעיות התאמה."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -51854,6 +52700,67 @@
       "value": "מזהים חיצוניים לא תקפים"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " פעילה"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " פעילות"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " פעילות"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "פעילות סריקה"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "תקינות הקטלוג"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "ספריות"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -52320,6 +53227,24 @@
     {
       "type": 0,
       "value": "חיפוש בפריטים המוחרגים לפי שם, ספרייה או סוג…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "לא חד-משמעי"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "ממתין"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "לא הותאם"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -68559,7 +69484,7 @@
   "web.admin.settings.libraryMetadata.ratings.description": [
     {
       "type": 0,
-      "value": "לציוני IMDb ו-TMDB אין מתג: הם מוצגים בפריט בכל פעם שתוסף מטא-נתונים נתמך או קובץ ה-.nfo של הפריט מספקים אותם. ספקי מטא-נתונים יכולים להוסיף דירוגים אחרים; אפשר להפעיל דירוג כדי להציג את הציונים שלו בדפי הפריטים בכל האפליקציות. דף פריט מציג עד שלושה דירוגים, בסדר הזה, כך שדירוג מופעל מוצג רק כשיש לפניו פחות משלושה דירוגים. ציוני Rotten Tomatoes מוצגים גם בתגים על הפוסטרים. יש לבדוק את התנאים של דירוג לפני הפעלתו: חלק מהם, כמו Rotten Tomatoes, מגבילים את האופן שבו אחרים רשאים להציג את הציונים שלהם."
+      "value": "לציוני IMDb ו-TMDB אין מתג: הם מוצגים בפריט בכל פעם שתוסף מטא-נתונים נתמך או קובץ ה-\u200E.nfo של הפריט מספקים אותם. ספקי מטא-נתונים יכולים להוסיף דירוגים אחרים; אפשר להפעיל דירוג כדי להציג את הציונים שלו בדפי הפריטים בכל האפליקציות. דף פריט מציג עד שלושה דירוגים, בסדר הזה, כך שדירוג מופעל מוצג רק כשיש לפניו פחות משלושה דירוגים. ציוני Rotten Tomatoes מוצגים גם בתגים על הפוסטרים. יש לבדוק את התנאים של דירוג לפני הפעלתו: חלק מהם, כמו Rotten Tomatoes, מגבילים את האופן שבו אחרים רשאים להציג את הציונים שלהם."
     }
   ],
   "web.admin.settings.libraryMetadata.ratings.empty": [
@@ -69386,6 +70311,612 @@
     {
       "type": 0,
       "value": "סנכרון סמנים מקוונים"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "אלגוריתם: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "מבוקש: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; פעיל: "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "ערכים מותרים: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "בקרת עומס: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "חשבון"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "בנתיב הזה מאז"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "מכשיר"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "אין מכשיר שמחובר ישירות."
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "נקודת הקצה של העמית"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "מכשירים מחוברים"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "ליציאה "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "ברירת מחדל: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "אפשר לבדוק כאן את המוכנות של השרת הזה לחיבורים ישירים."
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "בתוקף: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "הפעלת חיבורים ישירים"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "יכולת NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "מנוע החיבורים הישירים"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "לולאת NAT (hairpin)"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "מיפוי NAT"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "חלופת PMTU"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "נגישות מהאינטרנט"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "מאגר קבלה של socket"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "מאגר שליחה של socket"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "כוונון המחשב המארח"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "דילול ACK"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "מדיניות אובדן מנות ב-BBR"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "הסטת פילוח UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "חלון הקבלה של הלקוח"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "יציאת UDP לחיבורים ישירים"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "בקרת עומס TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "מאגר שליחה של TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "בדיקה אחרונה: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "פרוקסי"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "נקודות האזנה"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "כתובת ציבורית שזוהתה: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "בדיקה אם הנתב תומך ב-UPnP, ב-NAT-PMP או ב-PCP."
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "מיפוי יציאות"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "בדיקות מוכנות לא מתחילות הפעלה ישירה."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "הושבת על ידי מנהל"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "מושבת"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה להפעיל את מנוע החיבורים הישירים"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה להגדיל את המאגר הזמני"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "הנתב לא תומך במיפוי יציאות"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "המאגר הזמני קטן מהמבוקש"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "רכיב העזר לכוונון הרשת לא זמין"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "ערך לא תקין; ההגדרה כבויה"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "המערכת לא הצליחה להחיל או לקרוא את ההגדרה הזו"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "לא נתמך בליבת המערכת הזו"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "המאגר הזמני הגיע למגבלה של המחשב המארח"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לקרוא את מגבלות המאגר הזמני של המחשב המארח"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "הכתובת הציבורית משתנה לפי היעד"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "מודול BBR לא זמין"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "מודול BBR לא נטען או לא מותר"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "פועל יותר משרת API אחד"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "יכולת NET_ADMIN בוטלה"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "חסרה יכולת NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "לא נמצא נתב"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "חסרה יכולת NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "ההרשאה נדחתה"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "לא זמין"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "לא נמדד"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "לא נדרשה הגדלה"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "המדיניות של המחשב המארח בחרה אלגוריתם אחר"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "הבדיקה נכשלה"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לבדוק אם פועלים שרתי API אחרים"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "שרת API אחר מארח את החיבורים הישירים"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "השרת ממתין להפוך למארח החיבורים הישירים"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "מצב החיבורים הישירים לא זמין"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לפתוח את יציאת ה-UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "יציאת ה-UDP לא תקינה"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "לא נתמך בפלטפורמה הזו"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "ערך מבוקש: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "מבוקש: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; הוקצה: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "הרצת בדיקה"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "מאגר שליחה: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "מוגבל"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "במצב ירוד"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "שיטה חלופית"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "לא נדרש"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "כבוי"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "מופעל"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "לא ידוע"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "רשימה מופרדת בפסיקים של עד שמונה רשומות host:port. אפשר להשאיר אותה ריקה כדי להשתמש בברירות המחדל."
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "שרתי STUN"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "חיבורים ישירים"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "ההגדרה מאפשרת למכשירים לגשת לשרת הזה דרך נתיב UDP ישיר. יציאת ה-UDP נקבעת במשתנה "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " וניתנת כאן לקריאה בלבד."
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -70991,7 +72522,7 @@
   "web.admin.settings.notifications.serverChannels.namePlaceholder": [
     {
       "type": 0,
-      "value": "קהילה #new-content"
+      "value": "קהילה \u200E#new-content"
     }
   ],
   "web.admin.settings.notifications.serverChannels.noEvents": [
@@ -79848,7 +81379,7 @@
   "web.admin.settings.security.localNetwork.description": [
     {
       "type": 0,
-      "value": "מאפשר לכל חשבון לייבא היסטוריה משרתי Plex, Emby ו-Jellyfin ולהסתנכרן איתם בכתובות של הרשת המקומית, כמו 192.168.x.x או localhost. למנהלים זה תמיד מותר."
+      "value": "מאפשר לכל חשבון לייבא היסטוריה משרתי Plex, Emby ו-Jellyfin ולהסתנכרן איתם בכתובות של הרשת המקומית, כמו \u200E192.168.x.x או localhost. למנהלים זה תמיד מותר."
     }
   ],
   "web.admin.settings.security.localNetwork.group": [
@@ -84409,13 +85940,13 @@
   "web.admin.tasks.task.backfill_hdr10_plus.description": [
     {
       "type": 0,
-      "value": "קריאת הפריים הראשון של סרטוני HDR שנסרקו לפני ש-Silo זיהה HDR10+, פעם אחת לכל קובץ, כדי שקובצי HDR10+ יסומנו HDR10+ ולא HDR10."
+      "value": "קריאת הפריים הראשון של סרטוני HDR שנסרקו לפני ש-Silo זיהה HDR10+\u200E, פעם אחת לכל קובץ, כדי שקובצי HDR10+\u200E יסומנו HDR10+\u200E ולא HDR10."
     }
   ],
   "web.admin.tasks.task.backfill_hdr10_plus.name": [
     {
       "type": 0,
-      "value": "זיהוי סרטוני HDR10+"
+      "value": "זיהוי סרטוני HDR10+\u200E"
     }
   ],
   "web.admin.tasks.task.backfill_matroska_track_numbers.description": [
@@ -94678,7 +96209,7 @@
   "web.audiobooks.player.speedTitle": [
     {
       "type": 0,
-      "value": "מהירות הפעלה (shift+. / shift+,)"
+      "value": "מהירות הפעלה (shift+\u200E. / shift+\u200E,\u200E)"
     }
   ],
   "web.audiobooks.player.startFailed": [
@@ -102792,7 +104323,7 @@
   "web.collections.copy.mdblistLinkInvalid": [
     {
       "type": 0,
-      "value": "יש להדביק קישור לרשימה ב-mdblist.com, למשל https://mdblist.com/lists/…"
+      "value": "יש להדביק קישור לרשימה ב-mdblist.com, למשל https://mdblist.com/lists/…\u200E"
     }
   ],
   "web.collections.copy.mdblistSearchOffProfile": [
@@ -124032,7 +125563,7 @@
   "web.home.rows.seasonal.listInvalid": [
     {
       "type": 0,
-      "value": "יש להשתמש בקישור לרשימה ציבורית ב-MDBList (https://mdblist.com/lists/…)."
+      "value": "יש להשתמש בקישור לרשימה ציבורית ב-MDBList (https://mdblist.com/lists/…\u200E)."
     }
   ],
   "web.home.rows.seasonal.nameMissing": [
@@ -126726,7 +128257,7 @@
   "web.item.split.imdbPlaceholder": [
     {
       "type": 0,
-      "value": "מזהה IMDb (tt…)"
+      "value": "מזהה IMDb (tt…\u200E)"
     }
   ],
   "web.item.split.loadingFiles": [
@@ -137060,6 +138591,16 @@
       "value": "חזרה לדף 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "מעבר לדף "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -137150,6 +138691,20 @@
     {
       "type": 0,
       "value": "דפי בקשה להוספה"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "דף "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " נמצא אחרי סוף התוצאות האלה."
     }
   ],
   "web.requests.toAdd.series": [
@@ -138846,6 +140401,12 @@
       "value": "קריאת ההתראות של הפרופיל כשהן מגיעות וסימון שלהן כנקראו."
     }
   ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "הצגת מה שמופעל כרגע בפרופיל, או בכל הפרופילים בחשבון כשהמפתח לא מציין פרופיל: שם הפריט, המיקום בהפעלה, מצב ההשהיה, המכשיר ושיטת ההפעלה. ללא שליטה בהפעלה וללא פרטי רשת."
+    }
+  ],
   "web.settings.apiKeys.scope.requests": [
     {
       "type": 0,
@@ -139207,7 +140768,7 @@
   "web.settings.connectApps.glance.needsPin": [
     {
       "type": 0,
-      "value": "נדרש #PIN"
+      "value": "נדרש \u200E#PIN"
     }
   ],
   "web.settings.connectApps.glance.rename": [
@@ -139533,7 +141094,7 @@
   "web.settings.connectApps.troubleshooting.hashPasswordAnswer": [
     {
       "type": 0,
-      "value": "יש להקליד אותה במלואה ולצרף בכל זאת #PIN. Silo מפצל רק לפי ה-# האחרון."
+      "value": "יש להקליד אותה במלואה ולצרף בכל זאת \u200E#PIN. Silo מפצל רק לפי ה-# האחרון."
     }
   ],
   "web.settings.connectApps.troubleshooting.hashPasswordQuestion": [
@@ -139561,7 +141122,7 @@
     },
     {
       "type": 0,
-      "value": "”, או אם בדיוק לפרופיל אחד אין PIN. הוספה של #ProfileName תמיד עובדת."
+      "value": "”, או אם בדיוק לפרופיל אחד אין PIN. הוספה של \u200E#ProfileName תמיד עובדת."
     }
   ],
   "web.settings.connectApps.troubleshooting.noProfileQuestion": [
@@ -144469,7 +146030,7 @@
   "web.settings.overlays.badge.resolutionHdr.description": [
     {
       "type": 0,
-      "value": "תג אחד שמשלב רזולוציה וטווח דינמי (לדוגמה ”4K DV”, ”4K HDR10+”, ”1080p HDR”)"
+      "value": "תג אחד שמשלב רזולוציה וטווח דינמי (לדוגמה ”4K DV”, ”4K HDR10+\u200E”, ”1080p HDR”)"
     }
   ],
   "web.settings.overlays.badge.resolutionHdr.label": [
@@ -150303,7 +151864,7 @@
   "web.settings.yourData.import.fileHint": [
     {
       "type": 0,
-      "value": "קובץ .json שנוצר באמצעות ”ייצוא הנתונים שלי”, עד "
+      "value": "קובץ \u200E.json שנוצר באמצעות ”ייצוא הנתונים שלי”, עד "
     },
     {
       "type": 1,

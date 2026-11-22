@@ -157,7 +157,11 @@ function StatusLine({
   const t = useT();
   return (
     <div className="flex min-h-9 items-center justify-between gap-4 py-2 text-sm">
-      <span className="text-muted-foreground">{label}</span>
+      <span
+        className={mono ? "text-muted-foreground max-w-[60%] shrink-0" : "text-muted-foreground"}
+      >
+        {label}
+      </span>
       <span className={mono ? "max-w-[60%] truncate font-mono text-xs" : "text-end"}>
         {typeof value === "boolean"
           ? value
@@ -267,6 +271,7 @@ export default function CompatibilityProxiesSettings() {
           <SettingField
             label={t("web.admin.settings.compatibilityProxies.jellyfin.address")}
             hint={PUBLIC_URL_HINT}
+            dir="ltr"
             value={publicURL}
             onChange={(v) => form.setValue("jellyfin_compat.public_url", v)}
             status={
@@ -450,7 +455,7 @@ export default function CompatibilityProxiesSettings() {
               id="compatibility.jellyfin.web-details"
               title={t("web.admin.settings.compatibilityProxies.details.title")}
             >
-              <div className="grid gap-x-8 py-2 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-8 py-2 md:grid-cols-2">
                 <StatusLine
                   label={t("web.admin.settings.compatibilityProxies.details.apiState")}
                   value={status ? statusLabel(status.api_state) : ""}
@@ -594,6 +599,7 @@ export default function CompatibilityProxiesSettings() {
             <SettingField
               label={t("web.admin.settings.compatibilityProxies.advanced.webDir")}
               description={t("web.admin.settings.compatibilityProxies.advanced.webDirDescription")}
+              dir="ltr"
               value={form.getValue("jellyfin_compat.web_install_dir")}
               onChange={(v) => form.setValue("jellyfin_compat.web_install_dir", v)}
               restartRequired={restartKeys.has("jellyfin_compat.web_install_dir")}

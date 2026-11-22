@@ -594,6 +594,10 @@
           "id": {
             "type": "string"
           },
+          "managed_by_env_var": {
+            "description": "The variable in the server's environment that declares this provider, such as SILO_CONFIG_FILE, when the deployment declares it. Updating or deleting such a provider is 422 validation_failed with code managed_by_environment.",
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -4031,6 +4035,7 @@
             "type": "string"
           },
           "local_username": {
+            "description": "The matched account's username, or its email when it has none",
             "type": "string"
           },
           "match": {
@@ -4120,8 +4125,21 @@
             "type": "string"
           },
           "changes": {
-            "description": "A template collection's fields the admin changed from the template's defaults that a restore writes here: title, description, visibility, featured, sort order, item sort, source, sync schedule, poster, backdrop",
+            "description": "What a restore writes to a template collection here: the fields the admin changed from the template's defaults, and libraries when it adds the collection to more of them",
             "items": {
+              "enum": [
+                "title",
+                "description",
+                "visibility",
+                "featured",
+                "sort_order",
+                "item_sort",
+                "source",
+                "sync_schedule",
+                "poster",
+                "backdrop",
+                "libraries"
+              ],
               "type": "string"
             },
             "type": "array"
@@ -4232,8 +4250,21 @@
         "additionalProperties": false,
         "properties": {
           "changes": {
-            "description": "What a restore replaces in the section here: title, position, featured, item limit, enabled, web only, configuration, and N collection items",
+            "description": "What a restore replaces in the section here",
             "items": {
+              "enum": [
+                "type",
+                "title",
+                "title_translation",
+                "position",
+                "featured",
+                "item_limit",
+                "enabled",
+                "web_only",
+                "collection_replaced",
+                "configuration",
+                "collection_items"
+              ],
               "type": "string"
             },
             "type": "array"
@@ -4249,6 +4280,11 @@
           "local_id": {
             "description": "The matching section here: the same id on the server that took the backup, else the one section of the page with the same type and title",
             "type": "string"
+          },
+          "missing_collection_items": {
+            "description": "With the collection_items change: the items of the backup's collection, in this server's catalog, that the section's collection here lacks and a restore adds",
+            "format": "int64",
+            "type": "integer"
           },
           "scope": {
             "enum": [
@@ -4351,7 +4387,8 @@
               "kept_stricter",
               "unverified_backup",
               "over_restore_budget",
-              "needs_primary_profile"
+              "needs_primary_profile",
+              "managed_by_environment"
             ],
             "type": "string"
           },
@@ -4871,7 +4908,8 @@
               "kept_stricter",
               "unverified_backup",
               "over_restore_budget",
-              "needs_primary_profile"
+              "needs_primary_profile",
+              "managed_by_environment"
             ],
             "type": "string"
           },
@@ -5201,14 +5239,15 @@
             "type": "boolean"
           },
           "status": {
-            "description": "on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores",
+            "description": "on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores; managed_by_environment: this server's environment sets it, or sets another setting of the outside-service connection it belongs to (mail's SMTP settings, for example), so a restore never writes it and this server keeps its value",
             "enum": [
               "on_this_server",
               "differs",
               "needs_another_key",
               "kept_stricter",
               "cleared",
-              "unverified_backup"
+              "unverified_backup",
+              "managed_by_environment"
             ],
             "type": "string"
           }
@@ -22996,6 +23035,11 @@
             "minLength": 1,
             "type": "string"
           },
+          "episode_number": {
+            "description": "Episode number for an episode that still exists; absent otherwise",
+            "format": "int64",
+            "type": "integer"
+          },
           "last_attempt_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -23017,10 +23061,20 @@
             "format": "int64",
             "type": "integer"
           },
+          "season_number": {
+            "description": "Season number for a season or episode that still exists; absent otherwise",
+            "format": "int64",
+            "type": "integer"
+          },
+          "series_title": {
+            "description": "Series title for a season or episode that still exists; absent otherwise",
+            "type": "string"
+          },
           "target_type": {
             "type": "string"
           },
           "title": {
+            "description": "The target's own title as stored: the item's, the season's or the episode's, without its series. Empty when the target has no title or no longer exists",
             "type": "string"
           },
           "type": {
@@ -65433,7 +65487,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Disconnect a provider and discard its key. A provider a job uses cannot be deleted.",
+        "summary": "Disconnect a provider and discard its key. A provider a job uses cannot be deleted, and one the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment.",
         "tags": [
           "admin-ai"
         ],
@@ -65625,7 +65679,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request.",
+        "summary": "Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request. A provider the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment.",
         "tags": [
           "admin-ai"
         ],
@@ -252315,6 +252369,7 @@
               "qsv",
               "vaapi",
               "nvenc",
+              "videotoolbox",
               "none"
             ],
             "type": "string"

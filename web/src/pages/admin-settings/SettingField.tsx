@@ -48,7 +48,9 @@ export const SETTINGS_NUMBER_WIDTH = "w-full sm:w-[var(--settings-control-w-num)
  * The text may wrap. Items align to the top, and each direct `svg` child (a
  * `size-3.5` icon) is offset to center on the first line. When the icon is
  * taller than a line, as with a large browser font size, the top padding lowers
- * the text instead, so the icon stays inside the status.
+ * the text instead, so the icon stays inside the status. A word wider than the
+ * line, such as a folder path, breaks inside the word: `wrap-anywhere`, unlike
+ * `break-words`, lets the text (a flex item) shrink below its longest word.
  */
 export function SettingFieldStatus({
   tone = "ok",
@@ -61,7 +63,7 @@ export function SettingFieldStatus({
   return (
     <span
       className={cn(
-        "inline-flex items-start gap-1.5 text-[13px] leading-snug has-[>svg]:pt-[max(0px,calc((0.875rem-1lh)/2))] [&>svg]:mt-[calc((1lh-0.875rem)/2)]",
+        "inline-flex items-start gap-1.5 text-[13px] leading-snug wrap-anywhere has-[>svg]:pt-[max(0px,calc((0.875rem-1lh)/2))] [&>svg]:mt-[calc((1lh-0.875rem)/2)]",
         tone === "ok" && "text-green-600 dark:text-green-400",
         tone === "warn" && "text-amber-600 dark:text-amber-400",
         tone === "muted" && "text-muted-foreground",
@@ -216,6 +218,8 @@ interface SettingFieldProps {
   restartRequired?: boolean;
   /** See {@link SettingFieldRowProps.managedByEnv}; disables the control. */
   managedByEnv?: string;
+  /** Direction of a `text` input. Pass `"ltr"` for a path, URL, or network address, which reads left to right in every language. */
+  dir?: "ltr";
   className?: string;
 }
 
@@ -234,6 +238,7 @@ export function SettingField({
   disabled: disabledProp,
   restartRequired,
   managedByEnv,
+  dir,
   className,
 }: SettingFieldProps) {
   const t = useT();
@@ -336,6 +341,7 @@ export function SettingField({
     <Input
       id={controlId}
       type="text"
+      dir={dir}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
