@@ -5832,14 +5832,18 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				subtitleSelectionDiffersFromStartV3(req.SelectedTracks, start)
 		case qualityChange:
 			nextQuality, _ := playback.NormalizeQualityV3(req.QualityPreference)
-			intentChange = nextQuality != start.QualityPreference || req.LearnedLimit == playback.LearnedLimitClearV3
+			intentChange = nextQuality != start.QualityPreference ||
+				optionalPositiveIntV3(req.BandwidthCapKbps) != optionalPositiveIntV3(start.BandwidthCapKbps) ||
+				req.LearnedLimit == playback.LearnedLimitClearV3
 		case outputChange:
 			intentChange = true
 		default:
 			switch req.Failure.Classification {
 			case "quality_changed":
 				nextQuality, _ := playback.NormalizeQualityV3(req.QualityPreference)
-				intentChange = nextQuality != start.QualityPreference || req.LearnedLimit == playback.LearnedLimitClearV3
+				intentChange = nextQuality != start.QualityPreference ||
+					optionalPositiveIntV3(req.BandwidthCapKbps) != optionalPositiveIntV3(start.BandwidthCapKbps) ||
+					req.LearnedLimit == playback.LearnedLimitClearV3
 			case "audio_track_changed":
 				intentChange = audioSelectionDiffersFromStartV3(req.SelectedTracks, start)
 			case "subtitle_track_changed":
@@ -6993,6 +6997,13 @@ func copyOptionalIntV3(value *int) *int {
 	}
 	copy := *value
 	return &copy
+}
+
+func optionalPositiveIntV3(value *int) int {
+	if value == nil || *value <= 0 {
+		return 0
+	}
+	return *value
 }
 
 // lowerVersionV3 finds the version that serves lower qualities of a 4K

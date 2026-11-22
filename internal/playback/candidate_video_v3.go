@@ -183,12 +183,13 @@ func (p *candidatePlannerV3) videoBase(videoClaims VideoClaimsV3, passthrough, s
 }
 
 // routeFacts decides which routes get candidates. An automatic quality
-// reduction that only an encode could deliver, when no encode can run and no
-// lower version serves it, is dropped with a warning so the source plays.
+// reduction from a bandwidth estimate or device limit that only an encode could
+// deliver, when no encode can run and no lower version serves it, is dropped
+// with a warning so the source plays. An explicit bandwidth cap is not dropped.
 func (p *candidatePlannerV3) routeFacts(evidenceInsufficient bool) {
 	in, source, f := p.input, p.source, &p.video
 	anySubtitle := f.originalSubtitleOK || f.remuxSubtitleOK || f.hlsSubtitleOK
-	if in.ServerBitrateCapKbps == 0 && f.quality.RequiresTranscode && !f.quality.ExplicitRung && anySubtitle && f.videoOK &&
+	if in.ServerBitrateCapKbps == 0 && f.quality.RequiresTranscode && !f.quality.ExplicitRung && !f.quality.CapApplied && anySubtitle && f.videoOK &&
 		f.anyCopyRange() && !encodeCanRunV3(in, source) && !lowerVersionServesQualitiesV3(in) {
 		warnings := append(f.quality.Warnings, DegradationWarningV3{Code: "quality_reduction_unavailable", Message: "Reduced-quality transcoding is unavailable for this source; it is delivered at original quality."})
 		f.quality = originalQualityResultV3(source)

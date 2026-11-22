@@ -90,7 +90,7 @@ import {
 } from "@/pages/watchRouteHelpers";
 import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
 import { markPlaybackIntent } from "@/player/first-frame";
-import { onMeteredConnection } from "@/player/bandwidth-probe";
+import { playbackNetworkTier } from "@/player/bandwidth-probe";
 import { isInNextUpPromptWindow } from "./nextUpPrompt";
 import { playbackQualitySettings } from "./playbackQualitySettings";
 
@@ -1224,7 +1224,7 @@ function WatchPlaybackHostContent() {
 
   const { qualityPreference: canonicalQuality, maxBitrateKbps } = playbackQualitySettings(
     effectivePlaybackSettings,
-    onMeteredConnection(),
+    playbackNetworkTier(),
   );
   const watchPageProps = buildWatchPageProps({
     request: activeRequest,
