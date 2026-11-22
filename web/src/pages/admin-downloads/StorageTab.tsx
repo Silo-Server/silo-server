@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import type { AdminDownloadStorageLocation } from "@/api/v2/adminDownloadStorage";
 import { V2ProblemError } from "@/api/v2/request";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { PathCode } from "@/components/PathText";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -403,7 +404,7 @@ function LocationCard({
           {t("web.admin.downloads.storage.card.pendingDir", {
             dir: location.pending_dir,
             name: location.name,
-            code: (chunks) => <code className="font-mono break-all">{chunks}</code>,
+            code: (chunks) => <PathCode className="font-mono wrap-anywhere">{chunks}</PathCode>,
           })}
         </p>
       ) : null}
