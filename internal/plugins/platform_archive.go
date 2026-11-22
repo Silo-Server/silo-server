@@ -151,7 +151,8 @@ func (p *platformArchives) archiveFor(ctx context.Context, installation *Install
 	// install or update replaced it meanwhile, or the write failed so nothing
 	// shows it wasn't, this build may be for a release that is no longer
 	// installed: refuse it rather than run it. The caller's next load reads
-	// the current installation and fetches again.
+	// the current installation and fetches again, after the retry delay when
+	// the write failed.
 	saved, err := p.store.SavePlatformArchive(ctx, SavePlatformArchiveInput{
 		Installation: installation,
 		OS:           goos,
@@ -162,7 +163,9 @@ func (p *platformArchives) archiveFor(ctx context.Context, installation *Install
 	})
 	switch {
 	case err != nil:
-		return nil, fmt.Errorf("store the %s/%s build of plugin %s %s: %w", goos, goarch, installation.PluginID, installation.Version, err)
+		err = fmt.Errorf("store the %s/%s build of plugin %s %s: %w", goos, goarch, installation.PluginID, installation.Version, err)
+		p.recordFailure(key, err)
+		return nil, err
 	case !saved:
 		return nil, fmt.Errorf("plugin %s %s was replaced while this server fetched its %s/%s build: %w",
 			installation.PluginID, installation.Version, goos, goarch, ErrInstallationChanged)

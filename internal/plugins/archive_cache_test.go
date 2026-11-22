@@ -1050,8 +1050,9 @@ func TestArchiveCacheRefusesAPlatformBuildItCannotTrust(t *testing.T) {
 		// The fetched build is for a release no longer installed, so it
 		// isn't run; the next start fetches for the current one.
 		{name: "installation replaced during the fetch", wantFetches: 2, setup: func(f *platformBuildFixture) { f.store.replaced = true }},
-		// Nothing shows the installation is still the one fetched for.
-		{name: "storing the build fails", wantFetches: 2, setup: func(f *platformBuildFixture) { f.store.saveErr = errors.New("database unavailable") }},
+		// Nothing shows the installation is still the one fetched for, and
+		// the next start waits out the retry delay like a failed fetch.
+		{name: "storing the build fails", wantFetches: 1, setup: func(f *platformBuildFixture) { f.store.saveErr = errors.New("database unavailable") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newPlatformBuildFixture(t)
