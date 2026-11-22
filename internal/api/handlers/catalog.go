@@ -215,6 +215,10 @@ func applyEpisodeBrowseMetadata(resp *itemListResponse, meta episodeBrowseMetada
 	resp.SeriesTitle = meta.SeriesTitle
 	resp.SeasonNumber = meta.SeasonNumber
 	resp.EpisodeNumber = meta.EpisodeNumber
+	resp.EpisodeLabels = meta.EpisodeLabels
+	if meta.EpisodeLabels != "" {
+		resp.AirDate = meta.AirDate
+	}
 }
 
 type groupedCatalogEntry struct {

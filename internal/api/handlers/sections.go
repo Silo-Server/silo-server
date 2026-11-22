@@ -1445,7 +1445,7 @@ func (h *SectionHandler) listSectionMangaChapterItemMeta(ctx context.Context, it
 	if h == nil || h.fetcher == nil {
 		return map[string]sections.SectionItemMeta{}
 	}
-	ids := sectionItemIDs(items, func(item *models.MediaItem) bool { return item.Type == "ebook" })
+	ids := sectionItemIDs(items, func(item *models.MediaItem) bool { return item.Type == itemTypeEbook })
 	meta, err := h.fetcher.FetchMangaChapterSeriesMeta(ctx, ids)
 	if err != nil {
 		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "loading section manga chapter metadata", "component", "api", "error", err)
@@ -1478,7 +1478,7 @@ func (h *SectionHandler) listSectionEpisodeLabels(ctx context.Context, items []*
 	if h == nil || h.fetcher == nil {
 		return map[string]catalog.EpisodeLabel{}
 	}
-	ids := sectionItemIDs(items, func(item *models.MediaItem) bool { return item.Type == "episode" || item.Type == "series" })
+	ids := sectionItemIDs(items, func(item *models.MediaItem) bool { return item.Type == itemTypeEpisode || item.Type == itemTypeSeries })
 	labels, err := h.fetcher.FetchEpisodeLabels(ctx, ids)
 	if err != nil {
 		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "loading section episode labels", "component", "api", "error", err)
