@@ -1880,18 +1880,31 @@ export function usePlaybackSession(
         return;
       }
 
+      const capTightened =
+        tierCap !== null &&
+        (activeBandwidthCapRef.current === null || tierCap < activeBandwidthCapRef.current);
       const previousPreference = qualityRef.current;
       if (qualityChanged) {
         qualityRef.current = nextQuality;
         setState((current) => ({ ...current, qualityPreference: nextQuality }));
       }
       void issueReplanRef
-        .current({
-          operation: "quality_change",
-          positionSeconds: playbackPositionRef.current,
-        })
+        .current(
+          {
+            operation: "quality_change",
+            positionSeconds: playbackPositionRef.current,
+          },
+          capTightened,
+        )
         .then((adopted) => {
-          if (adopted || !qualityChanged || qualityRef.current !== nextQuality) return;
+          if (
+            adopted ||
+            !qualityChanged ||
+            tierChangeSeq !== tierChangeSeqRef.current ||
+            qualityRef.current !== nextQuality
+          ) {
+            return;
+          }
           qualityRef.current = previousPreference;
           setState((current) =>
             current.qualityPreference === nextQuality

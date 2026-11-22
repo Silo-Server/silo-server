@@ -972,6 +972,62 @@ describe("usePlaybackSession quality changes", () => {
 
     unmount();
   });
+
+  it("retires the over-cap session when a stricter Data Saver replan is refused", async () => {
+    const fetchMock = sessionFetch(
+      () =>
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3", "output_change_v1"],
+          outcome: "transcoding_disabled",
+          playback_plan: null,
+          terminal: {
+            reason: "transcoding_disabled",
+            message: "Transcoding is disabled on this server.",
+            retryable: false,
+          },
+        }),
+      fixturePlanV3(),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    rerender({ cap: 2_000, tier: "low_data" });
+    await waitFor(() => expect(result.current.errorReason).toBe("transcoding_disabled"));
+    expect(result.current.plan).toBeNull();
+    expect(result.current.streamUrl).toBeNull();
+
+    unmount();
+  });
 });
 
 describe("usePlaybackSession initial bitmap subtitles", () => {
