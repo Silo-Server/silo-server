@@ -87,8 +87,14 @@ which needs the `search` action and an index scope covering Silo's indexes.
 A key Meilisearch refuses for either request, or a missing one on a secured
 instance, fails with a message asking for another key. The check does not
 prove the key can write documents.
-Provider failures return `success: false` with a generic message that excludes
-provider error bodies and credentials. Invalid kinds/configuration return `422`.
+Provider failures return `success: false` with a message written by Silo that
+excludes provider error bodies and credentials. The `ai_chat` and
+`ai_transcription` checks name the kind of failure when they can classify it,
+such as a rejected key, an unknown model, a billing or rate limit, or a timeout.
+A refused `ai_chat` request of any other kind carries its status code as the
+`status` argument, and the server log records the provider's error for
+`ai_chat` with the configured key removed.
+Invalid kinds/configuration return `422`.
 The result's `message` is English. `message_key` names its entry in the shared
 translation catalog (`web.admin.common.connectionCheck.result.*`) and
 `message_args` fills that entry's placeholders by name, as decimal strings for

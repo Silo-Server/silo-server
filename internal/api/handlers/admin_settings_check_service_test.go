@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -186,6 +188,8 @@ func TestTextAICheckNamesProviderFailure(t *testing.T) {
 		{name: "rejected request", err: &llm.HTTPError{StatusCode: 400, Code: "SYNTHETIC_PROVIDER_DETAIL"}, wantKey: "textAIRejected", wantArgs: map[string]string{"status": "400"}},
 		{name: "unknown model", err: &llm.HTTPError{StatusCode: 404}, wantKey: "textAINotFound"},
 		{name: "key echoed in error fields", err: &llm.HTTPError{StatusCode: 400, Code: "bad_key_SYNTHETIC_KEY", Param: "SYNTHETIC_KEY"}, wantKey: "textAIRejected", wantArgs: map[string]string{"status": "400"}},
+		{name: "request too large", err: &llm.HTTPError{StatusCode: 413}, wantKey: "textAIRejected", wantArgs: map[string]string{"status": "413"}},
+		{name: "ChatGPT unavailable", err: chatgpt.ErrProvider, wantKey: "textAIUnavailable"},
 		{name: "unclassified", err: errors.New("SYNTHETIC_PROVIDER_DETAIL"), wantKey: "textAIFailed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -208,5 +212,25 @@ func TestTextAICheckNamesProviderFailure(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "SYNTHETIC_PROVIDER_DETAIL") || strings.Contains(logs.String(), "SYNTHETIC_KEY") {
 		t.Fatalf("server log must keep the provider's error without the API key:\n%s", logs.String())
+	}
+}
+
+// A failure the provider reports inside a successful response has no HTTP
+// status, so the check must not show one.
+func TestTextAICheckDoesNotInventStatusForFailureInResponse(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":{"code":"SYNTHETIC_CODE","message":"SYNTHETIC_PROVIDER_DETAIL"}}`))
+	}))
+	t.Cleanup(provider.Close)
+	registry := `{"providers":[{"id":"openai-1","type":"openai","name":"OpenAI","base_url":"` + provider.URL + `/v1","api_key":"SYNTHETIC_KEY","capabilities":["chat"]}]}`
+	store := &fakeServerSettingsStore{values: map[string]string{"ai.providers": registry, "ai.text_provider_id": "openai-1", "ai.chat_model": "local-chat", "ai.service_tier": "ultrafast"}}
+	h := &AdminHandler{SettingsRepo: store}
+	result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_chat", nil, nil)
+	if err != nil || result.Success {
+		t.Fatalf("check=%+v, %v", result, err)
+	}
+	if result.MessageKey != checkMessageKeyPrefix+"textAIRefused" || len(result.MessageArgs) != 0 {
+		t.Fatalf("message key=%q args=%v, want textAIRefused without a status", result.MessageKey, result.MessageArgs)
 	}
 }

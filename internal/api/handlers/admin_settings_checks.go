@@ -57,6 +57,7 @@ var (
 	checkMessageFailed                = newCheckMessage("failed", "Connection check failed. Verify the submitted settings and provider availability.")
 	checkMessageChatGPTSignInRequired = newCheckMessage("chatGPTSignInRequired", adminChatGPTSignInRequiredMessage)
 	checkMessageTextAIFailed          = newCheckMessage("textAIFailed", adminTextAIConnectionFailureMessage)
+	checkMessageTextAIUnavailable     = newCheckMessage("textAIUnavailable", "Text AI provider is temporarily unavailable. Try again later.")
 	checkMessageMeilisearchRedirected = newCheckMessage("meilisearchRedirected", adminMeilisearchRedirectMessage)
 	checkMessageMeilisearchKey        = newCheckMessage("meilisearchKeyRejected", adminMeilisearchKeyRejectedMessage)
 	checkMessageS3Verified            = newCheckMessage("s3Verified", "S3 connection and object read/write/delete permissions verified.")
@@ -231,18 +232,17 @@ func textCheckFailed(ctx context.Context, err error, apiKey string) connectionCh
 	apiKey = strings.TrimSpace(apiKey)
 	redact := func(text string) string {
 		if apiKey != "" {
-			text = strings.ReplaceAll(text, apiKey, "[redacted]")
+			text = strings.ReplaceAll(text, apiKey, logredact.Placeholder)
 		}
 		return logredact.SanitizeText(text)
 	}
 	// A streamed ChatGPT or Responses API failure carries its cause only in
 	// the provider's error code, not in the error text.
-	var status, code, param any
+	attrs := []any{logComponentKey, "api", "error", redact(err.Error())}
 	if httpErr, ok := errors.AsType[*llm.HTTPError](err); ok {
-		status, code, param = httpErr.StatusCode, redact(httpErr.Code), redact(httpErr.Param)
+		attrs = append(attrs, "status", httpErr.StatusCode, "provider_code", redact(httpErr.Code), "provider_param", redact(httpErr.Param))
 	}
-	slog.WarnContext(ctx, "text AI connection check failed", logComponentKey, "api", "error", redact(err.Error()),
-		"status", status, "provider_code", code, "provider_param", param)
+	slog.WarnContext(ctx, "text AI connection check failed", attrs...)
 	return checkFailed(textCheckFailureMessage(err))
 }
 
@@ -254,6 +254,8 @@ func textCheckFailureMessage(err error) checkMessage {
 		return checkMessageChatGPTSignInRequired
 	case errors.Is(err, llm.ErrPlanIneligible):
 		return newCheckMessage("textAIPlanIneligible", "The connected ChatGPT account can't share its plan usage. Check ChatGPT usage settings, or connect another account.")
+	case errors.Is(err, chatgpt.ErrProvider):
+		return checkMessageTextAIUnavailable
 	}
 	switch llm.Classify(err) {
 	case llm.FailureQuotaExhausted, llm.FailurePaymentRequired:
@@ -261,21 +263,27 @@ func textCheckFailureMessage(err error) checkMessage {
 	case llm.FailureUnauthorized:
 		return newCheckMessage("textAIUnauthorized", "Text AI provider rejected the credentials. Replace the provider's API key, or sign in with ChatGPT again.")
 	case llm.FailureForbidden:
-		return newCheckMessage("textAIForbidden", "Text AI access was denied. Check that the API key may use this model.")
+		return newCheckMessage("textAIForbidden", "Text AI access was denied. Check that the API key or ChatGPT account may use this model.")
 	case llm.FailureNotFound:
 		return newCheckMessage("textAINotFound", "Text AI endpoint or model is unavailable. Check the provider's base URL and the model.")
 	case llm.FailureRateLimited:
 		return newCheckMessage("textAIRateLimited", "Text AI provider is rate limiting requests. Try again later.")
 	case llm.FailureUnavailable:
-		return newCheckMessage("textAIUnavailable", "Text AI provider is temporarily unavailable. Try again later.")
+		return checkMessageTextAIUnavailable
 	case llm.FailureTimeout:
 		return newCheckMessage("textAITimedOut", "Text AI connection check timed out. Check provider availability and try again.")
 	case llm.FailureUnreachable:
 		return newCheckMessage("textAIUnreachable", "Silo could not reach the text AI provider. Check the provider's base URL and that this server can connect to it.")
 	case llm.FailureUnusableResponse:
 		return newCheckMessage("textAIUnusableResponse", "Text model returned a response Silo cannot use. Choose another model.")
-	case llm.FailureRejected:
-		if status, ok := errors.AsType[*llm.HTTPError](err); ok {
+	case llm.FailureRejected, llm.FailureTooLarge:
+		status, ok := errors.AsType[*llm.HTTPError](err)
+		if ok && status.InResponse {
+			// The provider answered, then reported the failure in its response,
+			// so there is no HTTP status to show.
+			return newCheckMessage("textAIRefused", "Text AI provider refused the check request. Check the model, the reasoning level, and the account's usage settings. The server log has the provider's error.")
+		}
+		if ok {
 			m := newCheckMessage("textAIRejected", fmt.Sprintf("Text AI provider rejected the check request (status %d). Check the model, reasoning level, and service tier. The server log has the provider's error.", status.StatusCode))
 			m.args = map[string]string{"status": strconv.Itoa(status.StatusCode)}
 			return m
