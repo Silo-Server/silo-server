@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect } from "react";
+import { createContext, useContext, useEffect, useMemo } from "react";
 import type { AdminJob, EventChannel } from "@/api/types";
 
 export type RealtimeConnectionState = "connecting" | "live" | "disconnected";
@@ -8,26 +8,49 @@ export interface EventChannelHandlers {
   onEvent?: (message: unknown) => void;
 }
 
-export interface RealtimeEventsContextValue {
-  connectionState: RealtimeConnectionState;
+export interface RealtimeEventsActionsContextValue {
   awaitAdminJob: (jobId: string) => Promise<AdminJob>;
   subscribeChannel: (channel: EventChannel, handlers?: EventChannelHandlers) => () => void;
 }
 
-export const RealtimeEventsContext = createContext<RealtimeEventsContextValue>({
-  connectionState: "disconnected",
+export interface RealtimeEventsContextValue extends RealtimeEventsActionsContextValue {
+  connectionState: RealtimeConnectionState;
+}
+
+export const RealtimeConnectionStateContext =
+  createContext<RealtimeConnectionState>("disconnected");
+
+export const RealtimeEventsActionsContext = createContext<RealtimeEventsActionsContextValue>({
   awaitAdminJob: async () => {
     throw new Error("Realtime events provider is not mounted");
   },
   subscribeChannel: () => () => {},
 });
 
-export function useRealtimeEvents() {
-  return useContext(RealtimeEventsContext);
+export function useRealtimeConnectionState() {
+  return useContext(RealtimeConnectionStateContext);
+}
+
+export function useRealtimeEventsActions() {
+  return useContext(RealtimeEventsActionsContext);
+}
+
+export function useRealtimeEvents(): RealtimeEventsContextValue {
+  const connectionState = useRealtimeConnectionState();
+  const { awaitAdminJob, subscribeChannel } = useRealtimeEventsActions();
+
+  return useMemo(
+    () => ({
+      connectionState,
+      awaitAdminJob,
+      subscribeChannel,
+    }),
+    [awaitAdminJob, connectionState, subscribeChannel],
+  );
 }
 
 export function useEventChannel(channel: EventChannel, handlers?: EventChannelHandlers) {
-  const { subscribeChannel } = useRealtimeEvents();
+  const { subscribeChannel } = useRealtimeEventsActions();
 
   useEffect(() => subscribeChannel(channel, handlers), [channel, handlers, subscribeChannel]);
 }

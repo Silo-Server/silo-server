@@ -51,9 +51,9 @@ Within item detail this covers cast and crew headshots too: they follow the
 same 500px image. Without the parameter they are that 500px image as well.
 
 Without the parameter, an episode still standing in for a backdrop in a section
-hero or Continue Watching uses the widest still rung that fits, 1280px. On
-`/api/v2` a Continue Watching or Next Up episode card shows a still only when
-its season and series have no backdrop (see below).
+hero or Continue Watching uses the widest still rung that fits, 1280px. A
+Continue Watching or Next Up episode card shows a still only when its season
+and series have no backdrop (see below).
 
 The `/api/v2/catalog/people` operations do **not** take the parameter — their headshots are
 always the 500px variant. Browsing a person's filmography does honor it, because
@@ -276,6 +276,35 @@ link and answers `404` until the image cache has stored it. Proxied bytes carry
 `Cache-Control: private, max-age=300`; the redirect is `no-store`, since its
 target is a signed URL with its own lifetime.
 
+### Admin request posters
+
+A media request's title is usually not in the library, so its poster has no
+catalog item to cache it. Admin request reads (`GET /api/v2/admin/requests`
+and the admin approve, decline, cancel and retry responses) return
+`poster_url` on each request with a TMDB poster: the path
+`/api/v2/admin/requests/{id}/poster` (`getAdminRequestPoster`).
+`GET /api/v2/admin/requests/capabilities` reports `request_posters: true` when
+the server returns it.
+
+This URL follows a different rule from the catalog and session posters above:
+
+- It needs the credentials that read the row: an admin session, an admin API
+  key, or a key with the `admin:monitor:read` scope. Do not send those
+  credentials to the catalog and session poster URLs, which can be the artwork
+  store's own signed URLs.
+- It never expires, so a tool can store it with the request.
+
+The route downloads the request's TMDB poster (`w500`) through the server and
+answers `200` with its bytes, with the limits above: the shared download slots
+and five-minute memory, the 4 MiB cap, the image check, and the
+`auth_endpoints.item_poster` budget per client address. Each request also
+counts against the caller's account budget, as any authenticated request does.
+A missing request, a request without a TMDB poster and a failed download answer
+`404`; busy downloads answer
+`503` with `Retry-After`. The route reads the stored request only, so it keeps
+answering while requests are turned off. Silo's own request pages still load
+TMDB images directly.
+
 ## Season selectors without artwork
 
 `GET /api/v2/catalog/series/{id}/seasons?include_artwork=false` (`listSeriesSeasons`)
@@ -331,9 +360,9 @@ and season's artwork next to their own: `series_poster_url`,
 `*_thumbhash`. A client can draw an episode's hero from `series_backdrop_url`
 without fetching the episode's detail, since an episode card's `backdrop_url`
 is usually the episode still. In Continue Watching and Next Up rows,
-`/api/v2` episode cards instead carry the season backdrop as `backdrop_url`, or
+episode cards instead carry the season backdrop as `backdrop_url`, or
 the series backdrop when the season has none, and keep the still only when
-neither exists. Frozen `/api/v1` cards keep the still. The poster fields follow
+neither exists. The poster fields follow
 `poster_width` and the backdrop field follows `backdrop_width`, like
 `poster_url` and `backdrop_url` on the same card.
 
@@ -348,7 +377,6 @@ and Next Up included), catalog browse and search, Watch Tonight, and on episode
 detail (`getCatalogItem`). Each field is absent when the series or season has
 no such image. There is no season backdrop field; Continue Watching and Next Up
 rows show it as `backdrop_url`.
-The frozen `/api/v1` responses do not carry them.
 
 ## Jellyfin compatibility
 

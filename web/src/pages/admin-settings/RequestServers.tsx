@@ -882,6 +882,7 @@ export function RequestServerEditor({
           status={<FieldError>{urlError}</FieldError>}
         >
           <Input
+            dir="ltr"
             id={urlId}
             value={form.base_url}
             onChange={(event) => patch({ base_url: event.target.value })}
@@ -1075,7 +1076,7 @@ export function RequestServerEditor({
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
               disabled={deleteServer.isPending || conflict || !etag}
               onClick={(event) => {
                 // Stay open until the server answers, so a refused delete can

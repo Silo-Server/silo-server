@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -101,7 +102,7 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 	if req.BackupID != "" {
 		pinned[req.BackupID] = true
 	}
-	result, err := s.backupWith(work, held, KindBeforeRestore, "", nil, pinned, nil)
+	result, err := s.backupWith(work, held, KindBeforeRestore, "", time.Time{}, nil, pinned, nil)
 	if err != nil {
 		return fail(fmt.Errorf("%w: %w", errBeforeRestoreBackup, err))
 	}

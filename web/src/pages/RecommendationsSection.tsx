@@ -55,7 +55,7 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
       <p className="text-muted-foreground text-sm">{t("web.recommendations.sectionLoadFailed")}</p>
       <button
         onClick={onRetry}
-        className="text-primary hover:text-primary/80 inline-flex items-center gap-2 text-sm font-medium"
+        className="text-primary inline-flex items-center gap-2 text-sm font-medium hover:underline"
       >
         <RefreshCw className="h-4 w-4" />
         {t("common.retry")}

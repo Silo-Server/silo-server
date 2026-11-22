@@ -11,7 +11,7 @@ export function MobileDockBar({ more, addRow }: { more: ReactNode; addRow: React
     <div
       role="region"
       aria-label={t("web.home.rows.page.actionsRegion")}
-      className="from-background/0 to-background fixed inset-x-0 bottom-0 z-30 grid grid-cols-[48px_1fr] gap-2.5 bg-gradient-to-b to-30% px-4 pt-[22px] pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+      className="from-background/0 to-background fixed inset-x-0 bottom-(--playback-bar-clearance,0px) z-30 grid grid-cols-[48px_1fr] gap-2.5 bg-gradient-to-b to-30% px-4 pt-[22px] pb-[max(1.25rem,env(safe-area-inset-bottom))]"
     >
       {more}
       {addRow}

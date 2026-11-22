@@ -222,6 +222,7 @@ type MediaRequest struct {
 	Overview             string                  `json:"overview,omitempty"`
 	PosterPath           string                  `json:"poster_path,omitempty" doc:"TMDB image path"`
 	BackdropPath         string                  `json:"backdrop_path,omitempty" doc:"TMDB image path"`
+	PosterURL            string                  `json:"poster_url,omitempty" format:"uri-reference" doc:"Admin request reads only (listAdminRequests and the admin request actions): the poster as a root-relative path on this server, getAdminRequestPoster, which serves the TMDB poster through the server. Fetch it with the credentials that read the row. It does not expire. Absent when the request has no TMDB poster, and on a server that cannot fetch posters (the admin request capabilities then report request_posters false)" example:"/api/v2/admin/requests/1834729/poster"`
 	Status               string                  `json:"status" doc:"pending, approved, queued, downloading, completed" example:"pending"`
 	Outcome              string                  `json:"outcome" doc:"active, declined, cancelled, failed" example:"active"`                                                                                                                                                    //nolint:misspell // the store's spelling
 	State                string                  `json:"state" doc:"The one state to show a user: pending, approved, processing, partially_available (some requested seasons are in the library), available (in the library), declined, cancelled or failed" example:"pending"` //nolint:misspell // the store's spelling
@@ -897,16 +898,19 @@ func withholdRequestDeployment(r *MediaRequest) {
 // left out while the size is unknown (a total of 0). Progress with no report
 // time, which only an out-of-band database edit can leave behind, is left out
 // whole: a zero Instant cannot be marshaled and would fail the entire response.
-// It stays on the domain value so the download refresh pass can still clear it.
+// A zero estimate is left out for the same reason. Both stay on the domain value
+// so the download refresh pass can still clear them.
 func requestDownloadOf(d *mediarequests.DownloadProgress) *RequestDownload {
 	if d == nil || d.UpdatedAt.IsZero() {
 		return nil
 	}
 	out := &RequestDownload{
-		Phase:                 string(d.Phase),
-		EstimatedCompletionAt: instantPtr(d.EstimatedCompletion),
-		Downloads:             max(d.Downloads, 0),
-		UpdatedAt:             NewInstant(d.UpdatedAt),
+		Phase:     string(d.Phase),
+		Downloads: max(d.Downloads, 0),
+		UpdatedAt: NewInstant(d.UpdatedAt),
+	}
+	if d.EstimatedCompletion != nil && !d.EstimatedCompletion.IsZero() {
+		out.EstimatedCompletionAt = instantPtr(d.EstimatedCompletion)
 	}
 	if d.BytesTotal > 0 {
 		total, left := d.BytesTotal, min(max(d.BytesLeft, 0), d.BytesTotal)

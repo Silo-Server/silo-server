@@ -165,6 +165,12 @@ and a failure for 30 seconds. A request can queue the item's image-cache
 job once per item per ten minutes on each server. The queue upsert preserves
 a failed job's backoff.
 
+The admin request poster route (`getAdminRequestPoster`) uses the same
+fetcher. It builds the TMDB URL itself from a request's stored poster path,
+which must be a single TMDB file name, so a caller never chooses the address
+it downloads. Requests for one TMDB poster share a download whichever request
+names it.
+
 ## Collection artwork
 
 Collection artwork downloads use the netguard transport with no fallback

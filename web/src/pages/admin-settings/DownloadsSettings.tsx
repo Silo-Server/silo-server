@@ -161,6 +161,7 @@ export default function DownloadsSettings() {
             value={form.getValue("download.artifact_max_bytes")}
             onChange={(v) => form.setValue("download.artifact_max_bytes", v)}
             restartRequired={restartKeys.has("download.artifact_max_bytes")}
+            managedByEnv={form.envVar("download.artifact_max_bytes")}
           />
           <SettingField
             label={t("web.admin.settings.downloads.diskCeiling.label")}

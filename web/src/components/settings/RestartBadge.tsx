@@ -23,7 +23,8 @@ export function RestartBadge({ className }: { className?: string }) {
       )}
     >
       <RotateCw className="size-2.5" aria-hidden="true" />
-      {t("web.settings.restartBadge.label")}
+      {/* The label, not the icon, is the badge's baseline, so text aligned on it lines up. */}
+      <span className="self-baseline">{t("web.settings.restartBadge.label")}</span>
     </span>
   );
 }

@@ -1773,6 +1773,7 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, deviceLoginBindingFixtureCases()...)
 	cases = append(cases, adminDashboardLayoutFixtureCases()...)
 	cases = append(cases, catalogItemCollectionsFixtureCases()...)
+	cases = append(cases, directConnectionsFixtureCases()...)
 	return append(cases,
 		fixtureCase{name: "get_admin_plugin_capabilities_ok", operationID: "getAdminPluginCapabilities",
 			scenario: "An administrator discovers deployment-managed plugin settings.",
@@ -1782,6 +1783,10 @@ func fixtureCases() []fixtureCase {
 			scenario: "The declaration is pending before the plugin is installed.",
 			method:   http.MethodGet, path: Prefix + "/admin/plugins/provisioning-status", headers: actingRequestAdmin,
 			status: http.StatusOK, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/CollectionAdminPluginProvisionStatus"},
+		fixtureCase{name: "get_profile_section_baseline_ok", operationID: "getProfileSectionBaseline",
+			scenario: "The home page's pre-override server section baseline: opaque tokens for the server rows in libraries the profile is allowed, plus the pre-override visible server rows.",
+			method:   http.MethodGet, path: "/api/v2/profile/sections/baseline", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileSectionBaseline"},
 	)
 }
 
@@ -2118,6 +2123,7 @@ func profileOwner() map[string]string { return with(bearer(memberToken), "X-Prof
 func fixtureDeps() Dependencies {
 	deps := pilotDeps(&fakeProgress{entries: progressRows()}, nil)
 	deps.NetworkAccess = newFakeNetworkAccess()
+	deps.DirectConnections = fakeDirectConnections{}
 	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
 	deps.AdminPluginProvisionStatus = func(context.Context) ([]plugins.ProvisionStatus, error) {
 		return []plugins.ProvisionStatus{{PluginID: "silo.auth.oidc", Version: "0.1.2", State: "pending"}}, nil

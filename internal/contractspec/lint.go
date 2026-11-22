@@ -52,7 +52,8 @@ const componentSchemas = "components.schemas."
 // scheme and public ones carry no security; no schema is a free-form object
 // unless it is marked as an extension bag; date, URL, and language or
 // country members declare their shape (lintValueShape); a nullable enum
-// lists null (lintNullableEnum).
+// lists null (lintNullableEnum); a oneOf of named variants keeps a tag's
+// values disjoint (lintVariantTags).
 func Lint(doc []byte) []string {
 	var d document
 	if err := json.Unmarshal(doc, &d); err != nil {
@@ -101,7 +102,10 @@ func Lint(doc []byte) []string {
 		}
 		lintFreeForm(fail, componentSchemas+name, d.Components.Schemas[name])
 		lintMemberShapes(fail, componentSchemas+name, d.Components.Schemas[name])
-		lintNullableEnums(fail, componentSchemas+name, d.Components.Schemas[name])
+		walkSchema(componentSchemas+name, d.Components.Schemas[name], func(where string, s *schema) {
+			lintNullableEnum(fail, where, s)
+			lintVariantTags(fail, where, s, d.Components.Schemas)
+		})
 	}
 	if _, ok := d.Components.SecuritySchemes[securityScheme]; !ok {
 		fail("components.securitySchemes.%s is missing", securityScheme)
@@ -364,29 +368,78 @@ func lintMemberShapes(fail func(string, ...any), where string, s *schema) {
 	lintMemberShapes(fail, where+".items", s.Items)
 }
 
-// lintNullableEnums walks a schema tree through its members, array items,
-// typed map values, and oneOf, anyOf and allOf branches (every place the
-// generator adds null), and applies lintNullableEnum to each schema; a $ref
-// is checked as its own component.
-func lintNullableEnums(fail func(string, ...any), where string, s *schema) {
+// walkSchema visits a schema tree through its members, array items, typed
+// map values, and oneOf, anyOf and allOf branches (every place the generator
+// adds null); a $ref is visited as its own component.
+func walkSchema(where string, s *schema, visit func(where string, s *schema)) {
 	if s == nil || s.Ref != "" {
 		return
 	}
-	lintNullableEnum(fail, where, s)
+	visit(where, s)
 	for _, name := range sortedKeys(s.Properties) {
-		lintNullableEnums(fail, where+"."+name, s.Properties[name])
+		walkSchema(where+"."+name, s.Properties[name], visit)
 	}
-	lintNullableEnums(fail, where+".items", s.Items)
+	walkSchema(where+".items", s.Items, visit)
 	if ap, ok := s.AdditionalProperties.(map[string]any); ok {
 		var value schema
 		if raw, err := json.Marshal(ap); err == nil && json.Unmarshal(raw, &value) == nil {
-			lintNullableEnums(fail, where+".additionalProperties", &value)
+			walkSchema(where+".additionalProperties", &value, visit)
 		}
 	}
 	for keyword, branches := range map[string][]*schema{"oneOf": s.OneOf, "anyOf": s.AnyOf, "allOf": s.AllOf} {
 		for i, branch := range branches {
-			lintNullableEnums(fail, fmt.Sprintf("%s.%s[%d]", where, keyword, i), branch)
+			walkSchema(fmt.Sprintf("%s.%s[%d]", where, keyword, i), branch, visit)
 		}
+	}
+}
+
+// lintVariantTags requires a oneOf of named variants that share a required
+// enum member (a tag such as kind or status) to keep at least one such tag's
+// values disjoint across the variants. Response variants are additive, so a
+// tag value may be added, but one that another variant already uses makes a
+// response match two variants, and a client dispatching on the tag picks the
+// wrong one.
+func lintVariantTags(fail func(string, ...any), where string, s *schema, components map[string]*schema) {
+	if len(s.OneOf) < 2 {
+		return
+	}
+	var variants []*schema
+	for _, branch := range s.OneOf {
+		v := components[strings.TrimPrefix(branch.Ref, "#/components/schemas/")]
+		if branch.Ref == "" || v == nil {
+			return
+		}
+		variants = append(variants, v)
+	}
+	var tags []string
+	for _, name := range sortedKeys(variants[0].Properties) {
+		shared := true
+		for _, v := range variants {
+			if p := v.Properties[name]; p == nil || len(p.Enum) == 0 || !slices.Contains(v.Required, name) {
+				shared = false
+				break
+			}
+		}
+		if !shared {
+			continue
+		}
+		tags = append(tags, name)
+		seen := map[any]bool{}
+		disjoint := true
+		for _, v := range variants {
+			for _, value := range v.Properties[name].Enum {
+				if value != nil && seen[value] {
+					disjoint = false
+				}
+				seen[value] = true
+			}
+		}
+		if disjoint {
+			return
+		}
+	}
+	if len(tags) > 0 {
+		fail("%s: oneOf variants share values of every tag (%s), so a response can match more than one", where, strings.Join(tags, ", "))
 	}
 }
 
@@ -518,6 +571,7 @@ type schema struct {
 	Items                *schema            `json:"items"`
 	AdditionalProperties any                `json:"additionalProperties"`
 	Enum                 []any              `json:"enum"`
+	Required             []string           `json:"required"`
 	OneOf                []*schema          `json:"oneOf"`
 	AnyOf                []*schema          `json:"anyOf"`
 	AllOf                []*schema          `json:"allOf"`

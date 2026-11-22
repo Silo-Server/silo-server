@@ -332,8 +332,12 @@ function GridVariant({
   function changePage(next: number) {
     onPageChange(next);
     // The pager sits below the grid; bring the new page's first row into view.
+    // Scroll whenever the section starts above where scrolling would land it:
+    // its scroll margin clears the phone header pinned over the page below lg.
     const section = sectionRef.current;
-    if (section && section.getBoundingClientRect().top < 0) {
+    if (!section) return;
+    const landingTop = Number.parseFloat(getComputedStyle(section).scrollMarginTop) || 0;
+    if (section.getBoundingClientRect().top < landingTop) {
       section.scrollIntoView?.({ block: "start", behavior: motionScrollBehavior() });
     }
   }
@@ -343,7 +347,7 @@ function GridVariant({
     <section
       ref={sectionRef}
       aria-label={t("web.requests.toAdd.heading")}
-      className="scroll-mt-4 space-y-3"
+      className="scroll-mt-24 space-y-3 lg:scroll-mt-4"
     >
       <div className="space-y-1">
         <h2 className="text-lg font-semibold">{t("web.requests.toAdd.heading")}</h2>

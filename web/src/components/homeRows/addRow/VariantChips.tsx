@@ -33,7 +33,8 @@ export function VariantChips({
         </button>
       ))}
       {hidden > 0 ? (
-        <span className="border-border text-muted-foreground inline-flex h-[26px] items-center rounded-full border border-dashed px-2.5 text-[13px] font-medium">
+        // Not text-muted-foreground: high contrast pins that brighter than the /80 chips.
+        <span className="border-border text-foreground/65 inline-flex h-[26px] items-center rounded-full border border-dashed px-2.5 text-[13px] font-medium">
           {t("web.home.addRow.chips.more", { count: hidden })}
         </span>
       ) : null}

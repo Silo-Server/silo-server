@@ -422,3 +422,47 @@ export function storageEventLocation(event: AdminDownloadStorageEvent): string {
     return t("web.admin.downloads.presentation.event.locationServer");
   return event.location_name || event.location;
 }
+
+/**
+ * The label and badge colours for a download row's status (`downloads.status`),
+ * shared by the device copies list and a preparation's requesters. An unknown
+ * status shows as sent.
+ */
+export function downloadEntryStatus(status: string) {
+  switch (status) {
+    case "completed":
+      return {
+        label: t("web.admin.downloads.deviceCopies.status.finished"),
+        className: "bg-muted text-foreground",
+      };
+    case "queued":
+    case "preparing":
+    case "ready":
+      return {
+        label: t("web.admin.downloads.deviceCopies.status.waiting"),
+        className: "text-foreground bg-chart-1/30",
+      };
+    case "downloading":
+      return {
+        label: t("web.admin.downloads.deviceCopies.status.downloading"),
+        className: "text-foreground bg-chart-1/30",
+      };
+    case "revoked":
+      return {
+        label: t("web.admin.downloads.deviceCopies.status.revoked"),
+        className: "text-warning-label bg-warning/10",
+      };
+    case "failed":
+      return {
+        label: t("web.admin.downloads.deviceCopies.status.failed"),
+        className: "text-destructive-label bg-destructive/10",
+      };
+    case "cancelled":
+      return {
+        label: t("web.admin.downloads.deviceCopies.status.cancelled"),
+        className: "bg-muted text-muted-foreground",
+      };
+    default:
+      return { label: status, className: "bg-muted text-muted-foreground" };
+  }
+}

@@ -37,6 +37,7 @@ import { formatCodecLabel, formatFileSize } from "@/lib/mediaFormat";
 import { cn } from "@/lib/utils";
 import { activityMethodMeta } from "@/pages/adminActivityPresentation";
 import { CHECKBOX } from "./controls";
+import { downloadEntryStatus } from "./downloadStoragePresentation";
 import {
   cancelPreparationsPrompt,
   canPausePreparation,
@@ -72,6 +73,7 @@ import {
 import { formatLocale } from "@/lib/appLocale";
 
 const K = "web.admin.downloads.preparation";
+const SEPARATOR = " · ";
 // Product and stream names, not translated.
 const FFMPEG = "FFmpeg";
 const STDERR = "stderr";
@@ -212,7 +214,7 @@ export default function PreparationTab() {
           <div
             role="img"
             aria-label={t(`${K}.stateBarLabel`)}
-            className="flex h-1.5 overflow-hidden rounded-full"
+            className="flex h-1.5 gap-0.5 overflow-hidden rounded-full"
           >
             {PREPARATION_STATES.filter((state) => counts[state] > 0).map((state) => (
               <div
@@ -263,11 +265,15 @@ export default function PreparationTab() {
                         : workerFilter && "opacity-30",
                     )}
                   >
-                    <span className="text-muted-foreground me-1">{worker.label}</span>
-                    {worker.name}
-                    <span className="text-muted-foreground ms-1.5 tabular-nums">
-                      {worker.count}
-                    </span>
+                    {/* Spaces, not only margins, separate the parts, so the button's
+                        accessible name reads "Node gpu-01 2", not "Nodegpu-012". */}
+                    {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
+                    <span className="text-muted-foreground me-0.5">{worker.label}</span>{" "}
+                    {/* Isolated, so a count after a left-to-right name doesn't join its
+                        run in a right-to-left language ("gpu-01" and "3" as "gpu-013"). */}
+                    {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
+                    <bdi>{worker.name}</bdi>{" "}
+                    <span className="text-muted-foreground ms-1 tabular-nums">{worker.count}</span>
                   </button>
                 ))}
               </div>
@@ -508,7 +514,8 @@ function PreparationRow({
 
   const titleBlock = (
     <>
-      <div className="truncate text-[13px] font-medium">{title}</div>
+      {/* Underlines only the title when the row links to its item. */}
+      <div className="truncate text-[13px] font-medium group-hover/item:underline">{title}</div>
       <div className="text-muted-foreground truncate text-[10px]">{subtitle}</div>
       <div className="text-muted-foreground truncate text-[10px]">
         {formatPreparationSource(prep)}
@@ -563,7 +570,10 @@ function PreparationRow({
         {checkbox}
         <div className="min-w-0">
           {itemHref ? (
-            <Link to={itemHref} className="hover:text-primary block min-w-0 transition-colors">
+            <Link
+              to={itemHref}
+              className="group/item hover:text-primary block min-w-0 transition-colors"
+            >
               {titleBlock}
             </Link>
           ) : (
@@ -603,7 +613,7 @@ function PreparationRow({
           <span className="truncate">{formatPreparationOutput(prep)}</span>
         </div>
         <div className="text-muted-foreground flex items-center justify-between gap-2 text-[10px]">
-          <span className="truncate">{requesterSummary(t, prep)}</span>
+          <span className="flex overflow-hidden whitespace-pre">{requesterSummary(t, prep)}</span>
           <div className="flex shrink-0 items-center gap-1">
             {rowActions}
             {detailsButton}
@@ -718,8 +728,13 @@ function WorkerBadge({ prep }: { prep: AdminDownloadPreparation }) {
   }
   return (
     <span className="border-primary/20 bg-primary/10 text-primary inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold">
-      <span className="opacity-70">{worker.label}</span>
-      <span className="truncate">{worker.name}</span>
+      {/* Same label treatment as the playback route badges (PlaybackRouteBadges). */}
+      <span className="text-foreground/75 [html[data-high-contrast=true]_&]:text-muted-foreground font-normal">
+        {worker.label}
+      </span>
+      <span dir="auto" className="truncate">
+        {worker.name}
+      </span>
     </span>
   );
 }
@@ -847,12 +862,40 @@ function ProgressCell({ prep }: { prep: AdminDownloadPreparation }) {
   }
 }
 
-function requesterSummary(t: Translate, prep: AdminDownloadPreparation): string {
+/** The first requester's device, and how many others asked ("Alex's iPhone · +2 more"). */
+function requesterDevices(
+  t: Translate,
+  first: AdminDownloadPreparation["requesters"][number],
+  others: number,
+): ReactNode {
+  // Its own element, so a device name reads in its own direction and is cut at its own end.
+  const device = (
+    <span dir="auto" className="truncate">
+      {requesterDevice(first)}
+    </span>
+  );
+  return others > 0
+    ? t(`${K}.requesters.deviceMore`, { count: others, count_text: others, device })
+    : device;
+}
+
+/**
+ * The phone row's requester line, in a `flex whitespace-pre` box. The name and
+ * the device read in their own directions; the device is cut first, and the
+ * name only when it alone fills the line.
+ */
+function requesterSummary(t: Translate, prep: AdminDownloadPreparation): ReactNode {
   const [first, ...rest] = prep.requesters;
   if (!first) return t(`${K}.requesters.none`);
-  return [requesterName(first), requesterDevice(first), rest.length > 0 ? `+${rest.length}` : ""]
-    .filter(Boolean)
-    .join(" · ");
+  return (
+    <>
+      <span dir="auto" className="max-w-full shrink-0 truncate">
+        {requesterName(first)}
+      </span>
+      {SEPARATOR}
+      {requesterDevices(t, first, rest.length)}
+    </>
+  );
 }
 
 function Requesters({ prep }: { prep: AdminDownloadPreparation }) {
@@ -866,24 +909,22 @@ function Requesters({ prep }: { prep: AdminDownloadPreparation }) {
       <div className="flex min-w-0 items-center gap-1.5">
         <Link
           to={`/admin/users/${first.user_id}`}
-          className="hover:text-primary truncate font-medium transition-colors"
+          dir="auto"
+          className="hover:text-primary truncate font-medium transition-colors hover:underline"
         >
           {requesterName(first)}
         </Link>
         {first.profile_name && (
-          <span className="border-primary/30 bg-primary/15 text-primary max-w-[6rem] truncate rounded border px-1.5 py-0.5 text-[10px] leading-none">
+          <span
+            dir="auto"
+            className="border-primary/30 bg-primary/15 text-primary max-w-[6rem] truncate rounded border px-1.5 py-0.5 text-[10px] leading-none"
+          >
             {first.profile_name}
           </span>
         )}
       </div>
-      <div className="text-muted-foreground truncate text-[10px]">
-        {rest.length > 0
-          ? t(`${K}.requesters.deviceMore`, {
-              count: rest.length,
-              count_text: rest.length,
-              device: requesterDevice(first),
-            })
-          : requesterDevice(first)}
+      <div className="text-muted-foreground flex overflow-hidden text-[10px] whitespace-pre">
+        {requesterDevices(t, first, rest.length)}
       </div>
     </div>
   );
@@ -1049,21 +1090,22 @@ function PreparationDetails({
             prep.requesters.map((r, i) => (
               <div
                 key={`${r.user_id}-${r.device_id ?? "web"}-${i}`}
-                className="grid min-w-0 grid-cols-[1fr_auto] gap-2"
+                className="flex min-w-0 flex-wrap items-baseline gap-x-2"
               >
-                <span className="min-w-0 truncate font-medium text-[var(--terminal-fg)]">
+                <span className="min-w-0 font-medium wrap-anywhere text-[var(--terminal-fg)]">
                   {r.profile_name
                     ? t(`${K}.details.requesterProfile`, {
                         name: requesterName(r),
                         profile: r.profile_name,
                       })
                     : requesterName(r)}
-                  <span className="block truncate text-[10px] font-normal text-[var(--terminal-muted)]">
-                    {requesterDevice(r)}
-                  </span>
                 </span>
-                <span className="text-[10px] text-[var(--terminal-muted)] capitalize">
-                  {r.status === "preparing" ? t(`${K}.details.requesterWaiting`) : r.status}
+                {/* Moves under the name when both don't fit, rather than squeezing it. */}
+                <span className="ms-auto min-w-0 text-end text-[10px] wrap-anywhere text-[var(--terminal-muted)]">
+                  {downloadEntryStatus(r.status).label}
+                </span>
+                <span className="basis-full truncate text-[10px] text-[var(--terminal-muted)]">
+                  {requesterDevice(r)}
                 </span>
               </div>
             ))

@@ -36,7 +36,7 @@ export function upcomingBadgeClass(badge: string): string {
   switch (badge) {
     case "series_premiere":
     case "season_premiere":
-      return "border-primary/40 bg-primary/20 text-primary";
+      return "border-primary/40 bg-[color-mix(in_srgb,var(--primary)_12%,var(--background))] text-primary shadow-sm";
     case "finale":
       return "border-orange-800/55 bg-orange-950/90 text-orange-50 shadow-sm backdrop-blur-none";
     case "digital":
