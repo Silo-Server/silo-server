@@ -10,7 +10,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  alertDialogButtonWrap,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -152,7 +151,6 @@ export function DeleteCollectionDialog({
             <AlertDialogCancel disabled={isPending}>{t("common.cancel")}</AlertDialogCancel>
             <Button
               variant="destructive"
-              className={alertDialogButtonWrap}
               disabled={isPending || rows.status !== "ready"}
               onClick={onConfirm}
             >

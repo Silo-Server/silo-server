@@ -85,6 +85,12 @@ function AlertDialogFooter({ className, ...props }: React.ComponentProps<"div">)
         // From sm up, buttons that don't fit one line wrap onto the next instead
         // of widening the dialog.
         "flex flex-col-reverse gap-2 group-data-[size=sm]/alert-dialog-content:grid group-data-[size=sm]/alert-dialog-content:grid-cols-2 sm:flex-row sm:flex-wrap sm:justify-end",
+        // Below sm, where buttons stack at full width, a default-size button's
+        // label wraps when it's too long for the dialog (a phone with the largest
+        // text size) instead of widening it. This reaches every button in the
+        // footer, including plain Buttons and ones nested in a group. min-h-9
+        // keeps a one-line button at its usual height; py-1.5 pads a wrapped one.
+        "max-sm:[&_[data-variant][data-size=default]]:h-auto max-sm:[&_[data-variant][data-size=default]]:min-h-9 max-sm:[&_[data-variant][data-size=default]]:py-1.5 max-sm:[&_[data-variant][data-size=default]]:text-center max-sm:[&_[data-variant][data-size=default]]:whitespace-normal",
         className,
       )}
       {...props}
@@ -139,15 +145,6 @@ function AlertDialogMedia({ className, ...props }: React.ComponentProps<"div">) 
   );
 }
 
-// Below sm, where footers stack their buttons at full width, a label too long
-// for the dialog (a phone with the largest text size) wraps instead of widening
-// it. min-h-9 keeps a one-line button at the default size's height, border
-// included; py-1.5 pads a wrapped one. From sm up the buttons sit in a row and
-// keep their one-line labels. AlertDialogAction and AlertDialogCancel apply it;
-// pass it to a default-size Button that a footer uses in their place.
-export const alertDialogButtonWrap =
-  "max-sm:h-auto max-sm:min-h-9 max-sm:py-1.5 max-sm:whitespace-normal max-sm:text-center";
-
 function AlertDialogAction({
   className,
   variant = "default",
@@ -156,12 +153,7 @@ function AlertDialogAction({
 }: React.ComponentProps<typeof AlertDialogPrimitive.Action> &
   Pick<React.ComponentProps<typeof Button>, "variant" | "size">) {
   return (
-    <Button
-      variant={variant}
-      size={size}
-      className={size === "default" ? alertDialogButtonWrap : undefined}
-      asChild
-    >
+    <Button variant={variant} size={size} asChild>
       <AlertDialogPrimitive.Action
         data-slot="alert-dialog-action"
         className={cn(className)}
@@ -179,12 +171,7 @@ function AlertDialogCancel({
 }: React.ComponentProps<typeof AlertDialogPrimitive.Cancel> &
   Pick<React.ComponentProps<typeof Button>, "variant" | "size">) {
   return (
-    <Button
-      variant={variant}
-      size={size}
-      className={size === "default" ? alertDialogButtonWrap : undefined}
-      asChild
-    >
+    <Button variant={variant} size={size} asChild>
       <AlertDialogPrimitive.Cancel
         data-slot="alert-dialog-cancel"
         className={cn(className)}
