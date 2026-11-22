@@ -157,7 +157,7 @@ export function DeleteCollectionDialog({
               {isPending ? (
                 <span
                   aria-hidden
-                  className="me-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+                  className="me-2 inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
                 />
               ) : null}
               {rows.status !== "ready"

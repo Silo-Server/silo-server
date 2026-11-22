@@ -77,7 +77,7 @@ export function ConfirmDialog({
       >
         {isPending ? (
           <>
-            <span className="me-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            <span className="me-2 inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent" />
             {confirmText}
           </>
         ) : (
