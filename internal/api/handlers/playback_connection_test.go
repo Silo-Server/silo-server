@@ -564,9 +564,13 @@ func TestTranscodeOutputBoundAsksTheRemoteNode(t *testing.T) {
 		body        string
 		unreachable bool
 		// deadProxy is an egress proxy the replan found not answering.
-		deadProxy   bool
-		local       bool
-		hls         bool
+		deadProxy bool
+		local     bool
+		hls       bool
+		// direct is original-file playback, which has no transcode.
+		direct bool
+		// gone is a playback session removed while the replan ran.
+		gone        bool
 		progressive bool
 		want        bool
 	}{
@@ -576,11 +580,12 @@ func TestTranscodeOutputBoundAsksTheRemoteNode(t *testing.T) {
 		{name: "node fails the read", status: http.StatusServiceUnavailable, want: true},
 		{name: "node answers garbage", status: http.StatusOK, body: `not json`, want: true},
 		{name: "replan found the node unreachable", status: http.StatusOK, body: `{"output_bound":false}`, unreachable: true, want: true},
-		{name: "direct play with no transcode on this replica or a node", local: true, want: false},
-		{name: "direct play through an egress proxy the replan found unreachable", local: true, deadProxy: true, want: true},
+		{name: "direct play with no transcode on this replica or a node", local: true, direct: true, want: false},
+		{name: "direct play through an egress proxy the replan found unreachable", local: true, direct: true, deadProxy: true, want: true},
 		// The session plays HLS, but its transcode is on no node and not on
 		// this replica, as while it is being rebuilt: the answer is unknown.
 		{name: "HLS session with no transcode on this replica or a node", local: true, hls: true, want: true},
+		{name: "playback session gone while the replan ran", local: true, gone: true, want: true},
 		{name: "remote progressive remux on a node the replan found unreachable", status: http.StatusNotFound, progressive: true, unreachable: true, want: true},
 		// A progressive remux has no segment lead, as on this replica, and
 		// its request may already have ended, so the node is not asked.
@@ -603,10 +608,15 @@ func TestTranscodeOutputBoundAsksTheRemoteNode(t *testing.T) {
 			if tc.progressive {
 				session.OutputContainer, session.OutputProtocol = playback.OutputContainerFMP4, playback.OutputProtocolHTTP
 			}
+			if tc.direct {
+				session.PlayMethod, session.OutputProtocol = playback.PlayDirect, playback.OutputProtocolHTTP
+			}
 			if tc.hls {
 				session.OutputProtocol = playback.OutputProtocolHLS
 			}
-			manager.RegisterReconstructed(session)
+			if !tc.gone {
+				manager.RegisterReconstructed(session)
+			}
 			handler := newKeyedPlaybackHandler(manager)
 			var unreachable map[string]struct{}
 			if tc.unreachable {

@@ -518,7 +518,8 @@ silent and then sends it quickly; that is server work, not a slow link.
   Apple still sends none on server HLS (see *Playback samples*).
 - A client has slow-link evidence when that throughput for the playing plan is
   below its delivered bitrate. This applies before and after the plan's first
-  frame.
+  frame. A reading taken before the network changed while the plan played is
+  no evidence: the server would record it against the connection in use now.
 - A lowering without evidence still lowers: a smaller output also eases a
   server that cannot keep up. It carries the estimate with no source, so the
   server plans under it and records nothing.
