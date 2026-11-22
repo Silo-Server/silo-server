@@ -642,8 +642,10 @@ export function usePlaybackSession(
   const requestedCapRef = useRef<number | null>(maxBitrateKbps ?? null);
   const requestedTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
   const requestedQualityRef = useRef(normalizeQualityPreferenceV3(qualityPreference));
+  const requestedAppliesCapRef = useRef(true);
   const requestedAppliesQualityPolicyRef = useRef(true);
   const activeBandwidthCapRef = useRef<number | null>(maxBitrateKbps ?? null);
+  const activeQualityCapRef = useRef<number | null>(maxBitrateKbps ?? null);
   const activePlanTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
   const activeNetworkTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
   const latestNetworkTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
@@ -976,8 +978,11 @@ export function usePlaybackSession(
         if (oldest) summaryIdentitiesRef.current.delete(oldest);
       }
       hasAdoptedPlanRef.current = true;
-      if (requestedAppliesQualityPolicyRef.current) {
+      if (requestedAppliesCapRef.current) {
         activeBandwidthCapRef.current = requestedCapRef.current;
+      }
+      if (requestedAppliesQualityPolicyRef.current) {
+        activeQualityCapRef.current = requestedCapRef.current;
         activePlanTierRef.current = requestedTierRef.current;
         adoptedQualityRef.current = requestedQualityRef.current;
         if (pendingReplanRef.current?.options.operation !== "quality_change") {
@@ -1039,6 +1044,7 @@ export function usePlaybackSession(
       requestedCapRef.current = maxBitrateKbps ?? null;
       requestedTierRef.current = latestNetworkTierRef.current;
       requestedQualityRef.current = startQuality;
+      requestedAppliesCapRef.current = true;
       requestedAppliesQualityPolicyRef.current = true;
       // An owed Restore's `clear` goes out once, on this start.
       const clearOwed = clearOwedRef.current;
@@ -1336,6 +1342,7 @@ export function usePlaybackSession(
         }
 
         requestedQualityRef.current = startQuality;
+        requestedAppliesCapRef.current = true;
         requestedAppliesQualityPolicyRef.current = true;
         const adopted = adoptDecision(decisionToAdopt, initialSubtitleFailure, onAdopt);
         if (adopted) {
@@ -1447,6 +1454,7 @@ export function usePlaybackSession(
     activeNetworkTierRef.current = networkTier;
     activePlanTierRef.current = networkTier;
     activeBandwidthCapRef.current = maxBitrateKbps ?? null;
+    activeQualityCapRef.current = maxBitrateKbps ?? null;
     tierChangeSeqRef.current += 1;
     const resetQualitySeq = ++qualitySelectionSeqRef.current;
     activeQualityOwnerSeqRef.current = resetQualitySeq;
@@ -1673,6 +1681,10 @@ export function usePlaybackSession(
       requestedCapRef.current = maxBitrateKbps ?? null;
       requestedTierRef.current = latestNetworkTierRef.current;
       requestedQualityRef.current = qualityRef.current;
+      // Non-seek replans enforce bandwidthCapKbps server-side even though only
+      // start and quality_change reselect alternate versions or adopt a tier.
+      requestedAppliesCapRef.current =
+        options.operation !== "seek_reanchor" && options.operation !== "seek_failure_recovery";
       requestedAppliesQualityPolicyRef.current = options.operation === "quality_change";
       // A Restore that could not go at once rides its `clear` on the request
       // that replaced it.
@@ -2017,16 +2029,25 @@ export function usePlaybackSession(
         latestQualitySettingsRef.current;
       const nextQuality = userPickedQualityRef.current ? adoptedQualityRef.current : tierQuality;
       const qualityChanged = nextQuality !== adoptedQualityRef.current;
-      const capChanged = tierCap !== activeBandwidthCapRef.current;
+      const capChanged =
+        tierCap !== activeBandwidthCapRef.current || tierCap !== activeQualityCapRef.current;
       const leavingMetered =
         activePlanTierRef.current !== undefined &&
         activePlanTierRef.current !== "unmetered" &&
         activeNetworkTierRef.current === "unmetered";
-      const reselectSiblingOnUnmetered =
-        leavingMetered &&
+      const tierRelaxed =
+        leavingMetered ||
+        (activePlanTierRef.current === "low_data" && activeNetworkTierRef.current === "metered");
+      const reselectSiblingOnRelaxedTier =
+        tierRelaxed &&
         planRef.current.effective_media_file_id !== planRef.current.requested_media_file_id;
       const clearMeteredEstimate = leavingMetered && keptEstimateRef.current !== undefined;
-      if (!qualityChanged && !capChanged && !clearMeteredEstimate && !reselectSiblingOnUnmetered) {
+      if (
+        !qualityChanged &&
+        !capChanged &&
+        !clearMeteredEstimate &&
+        !reselectSiblingOnRelaxedTier
+      ) {
         activePlanTierRef.current = activeNetworkTierRef.current;
         return;
       }

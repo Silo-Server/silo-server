@@ -1767,6 +1767,116 @@ describe("usePlaybackSession quality changes", () => {
 
     unmount();
   });
+
+  it("issues a corrective 2 Mbps replan after a queued track change adopts a 10 Mbps cap", async () => {
+    let resolveFirstReplan: ((response: Response) => void) | undefined;
+    const firstReplanResponse = new Promise<Response>((resolve) => {
+      resolveFirstReplan = resolve;
+    });
+    let resolveTrackReplan: ((response: Response) => void) | undefined;
+    const trackReplanResponse = new Promise<Response>((resolve) => {
+      resolveTrackReplan = resolve;
+    });
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = sessionFetch((init) => {
+      replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      if (replanBodies.length === 1) return firstReplanResponse;
+      if (replanBodies.length === 2) return trackReplanResponse;
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: "plan:corrected-2mbps",
+            plan_attempt_key: "v3:corrected-2mbps",
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 2_000 as number | null,
+          tier: "low_data" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Start an initial replan and queue a track change behind it.
+    act(() => result.current.switchAudioTrack(1, 20));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+    act(() => result.current.switchAudioTrack(2, 21));
+
+    // Disable Data Saver so the queued track change dispatches with 10 Mbps.
+    rerender({ cap: 10_000, tier: "metered" });
+    await act(async () => {
+      resolveFirstReplan?.(
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:audio-1",
+              plan_attempt_key: "v3:audio-1",
+            }),
+          ),
+        ),
+      );
+      await firstReplanResponse;
+    });
+    await waitFor(() => expect(replanBodies).toHaveLength(2));
+    expect(replanBodies[1]).toMatchObject({
+      operation: "track_change",
+      bandwidth_cap_kbps: 10_000,
+    });
+
+    // Re-enable Data Saver before the 10 Mbps track change adopts.
+    rerender({ cap: 2_000, tier: "low_data" });
+    await act(async () => {
+      resolveTrackReplan?.(
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:audio-2-10mbps",
+              plan_attempt_key: "v3:audio-2-10mbps",
+            }),
+          ),
+        ),
+      );
+      await trackReplanResponse;
+    });
+
+    // Reconciler must see the adopted 10 Mbps cap and issue a corrective 2 Mbps quality_change.
+    await waitFor(() => expect(replanBodies).toHaveLength(3));
+    expect(replanBodies[2]).toMatchObject({
+      operation: "quality_change",
+      bandwidth_cap_kbps: 2_000,
+    });
+
+    unmount();
+  });
 });
 
 describe("usePlaybackSession initial bitmap subtitles", () => {
