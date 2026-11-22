@@ -195,9 +195,10 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   clamp cuts it, or Chrome drops its "…" (`app.css`). Take it from `useClampCut`
   (`src/hooks/useClampCut.ts`), or from a measurement the component already
   makes, as `DetailOverview` and `DetailTitle` do.
-- A path shown as text, cut or not, takes `dir="ltr"` and renders through
-  `PathText` (`src/components/PathText.tsx`), which keeps each folder name in its
-  own direction; without it, folders named in Arabic swap places. An email cut with
+- A path or URL shown as text, cut or not, takes `dir="ltr"` and renders through
+  `PathText` (`src/components/PathText.tsx`), which keeps each folder name, and each
+  part of an http(s) URL's query and fragment, in its own direction; without it,
+  folders named in Arabic swap places. An email cut with
   `truncate` takes `dir={emailDir(email)}` (`src/lib/direction.ts`), which keeps one
   with an Arabic name part in the page's direction; `dir="auto"` would turn it right
   to left on a left-to-right page. Size a cut one as for a name, above; a path that
