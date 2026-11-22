@@ -149,6 +149,7 @@ These are the protocol-v3 feature strings this server version advertises:
 | `hls_subtitle_renditions_all_v1` | Only with `hls_subtitle_renditions_v1` (and `hls_remux_subtitle_renditions_v1` for a remux). Every embedded text track the source's index can read, up to 64, becomes a WebVTT rendition of the HLS plan's stream, read on demand; those inventory rows carry `hls_rendition`, and switching among them keeps the stream (§8) |
 | `progressive_range_refusal_v1` | Sent by the client in `deliveries.progressive.features` rather than `client_features`. The client reopens a progressive remux at its current position when the stream refuses a mid-stream range. Its `server_remux_progressive` URLs then carry `remux_range=refuse`, except one served by a proxy that does not advertise `remux_range_refusal_v1` (§4.1), and a GET whose `Range` starts past byte 0, or is a suffix range, answers `409` before the remux starts instead of streaming from the origin, which a browser would read again from byte zero ([playback API](../playback-api.md#delivery)) |
 | `surround_bitstream_conversion_v1` | Advertised only. A client whose exact audio evidence shows it would decode a surround track to PCM, while its sink validates E-AC-3 or AC-3 5.1 but not the source codec, may receive a copy-video `server_remux_hls` that converts the track to that codec (`decision_reason: surround_bitstream_conversion`, §11) |
+| `hls_transport_marker_v1` | Sent by the client in `deliveries.hls.features` rather than `client_features`. The client accepts `silo_transport` on the HLS URLs a plan publishes and follows the playlist's URIs as given; a request from a playlist a replan replaced then answers `404 playback_transport_superseded` instead of driving the new transport. Without it the URLs stay unmarked (§6, superseded transports) |
 | `parallel_range_origin_v1` | The client sends it in `client_features`; the plan's `stream.parallel_range_url` may then name where to read the file's ranges over several connections (§4.2), unless the client also sends `header_authenticated_media_v1`. The client promises to use that URL exactly as given, adding no account token to it, and to read `stream.url` when the plan has none |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
@@ -1345,12 +1346,15 @@ the same `/playback/transcode/{session_id}/segment/{name}` path. Segment
 numbers alone cannot tell those requests apart, so the server binds every HLS
 URL to its transport:
 
-- The `master.m3u8` URL a plan publishes carries `silo_transport`, an opaque
+- When the attempt's hls delivery lists `hls_transport_marker_v1`, the
+  `master.m3u8` URL a plan publishes carries `silo_transport`, an opaque
   token naming the transport generation (the plan's output directory, or its
   transcode-node transport id). The playlist echoes its query into every
   segment and rendition URI, so a client that follows playlist-relative URLs
   carries the marker without knowing it exists. A client must not compose,
-  strip or move it (§4.2).
+  strip or move it (§4.2). Without the feature the URL carries no marker: a
+  client that checks a media URL's query against the parameters it knows
+  (header-authenticated clients do) would refuse it.
 - A replan that reuses the running transport (a sidecar-only track change, a
   subtitle rendition switch) returns the same URL with the same marker. A
   replan that starts a new transport returns a new marker, and a replan to a
@@ -1370,7 +1374,8 @@ URL to its transport:
   transport by the token. The answer is terminal for that URL, not for the
   session: the client stops the superseded player and plays the current plan.
   It must not treat the code as `playback_session_ended`.
-- A request without the marker (a URL issued before this rule) and a session
+- A request without the marker (a client without the feature, or a URL issued
+  before this rule) and a session
   without a recorded transport keep the old behavior: the request is served
   by, and can restart, the session's current transport. A session rebuilt
   after an API restart has no recorded transport until its next replan; a

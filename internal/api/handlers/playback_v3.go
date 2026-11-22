@@ -252,13 +252,21 @@ type mediaAuthModeV3 struct {
 	// mid-stream range instead of restarting at its origin. It changes the
 	// stream URL only, so it is not part of plan identity.
 	progressiveRangeRefusal bool
+	// hlsTransportMarker is the hls delivery's hls_transport_marker_v1
+	// feature: the plan's HLS URL carries playback.TransportQueryParam, so a
+	// request from a playlist a replan replaced is refused instead of driving
+	// the new transport. It changes the stream URL only, so it is not part of
+	// plan identity.
+	hlsTransportMarker bool
 }
 
 // withNativeDeliveryFeaturesV3 adds the request's delivery opt-ins to mode:
-// the hls playlist-substitution form and the progressive range refusal.
+// the hls playlist-substitution form, the hls transport marker, and the
+// progressive range refusal.
 func withNativeDeliveryFeaturesV3(mode mediaAuthModeV3, req playback.StartRequestV3) mediaAuthModeV3 {
 	mode.hlsVariableSubstitution = playback.HLSVariableSubstitutionV3(req)
 	mode.progressiveRangeRefusal = playback.ProgressiveRangeRefusalV3(req)
+	mode.hlsTransportMarker = playback.HLSTransportMarkerV3(req)
 	return mode
 }
 
@@ -4456,7 +4464,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	previousNodeURL, previousTransportID := h.liveTranscodeRouteV3(session)
 	return preparedTransportV3{
 		sessionRecipe:    sessionRecipe,
-		url:              withTransportMarkerV3(url, session.ID, outputSubdir),
+		url:              withTransportMarkerV3(url, session.ID, outputSubdir, mode),
 		generation:       outputSubdir,
 		hwAccel:          ts.Opts().EffectiveEncoderHWAccel(),
 		toneMapMode:      ts.Opts().ToneMapMode,
@@ -4798,7 +4806,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	if mode.headerAuth {
 		sessionRecipe = sessionRecipeCardV3(card, session, result)
 	}
-	return preparedTransportV3{sessionRecipe: sessionRecipe, url: withTransportMarkerV3(url, session.ID, transportID), generation: transportID, nodeURL: node.URL, transportID: transportID, hwAccel: confirmedHWAccel, toneMapMode: confirmedToneMapMode,
+	return preparedTransportV3{sessionRecipe: sessionRecipe, url: withTransportMarkerV3(url, session.ID, transportID, mode), generation: transportID, nodeURL: node.URL, transportID: transportID, hwAccel: confirmedHWAccel, toneMapMode: confirmedToneMapMode,
 		routingWorkload: routingWorkloadV3(result), routingExecution: noderouting.ExecutionTranscode, routingExecutorID: node.ID, routingExecutorURL: node.URL,
 		routingEgress: routingEgress, routingEgressID: egressNodeID, routingEgressURL: egressNodeURL, commit: func() *transportErrorV3 {
 			if committed {
@@ -5047,12 +5055,14 @@ func plannedAudioTrackIndexV3(result playback.PlannerResultV3, fallback int) int
 }
 
 // withTransportMarkerV3 names an HLS transport generation on the stream URL a
-// plan publishes. The playlist echoes the query into its segment URIs, so a
-// player's requests keep naming the transport its playlist came from after a
-// replan replaces it (playback.TransportSuperseded).
-func withTransportMarkerV3(rawURL, sessionID, generation string) string {
+// plan publishes, when the attempt negotiated hls_transport_marker_v1. The
+// playlist echoes the query into its segment URIs, so a player's requests keep
+// naming the transport its playlist came from after a replan replaces it
+// (playback.TransportSuperseded). Without the opt-in the URL stays unmarked,
+// and an unmarked request is never refused.
+func withTransportMarkerV3(rawURL, sessionID, generation string, mode mediaAuthModeV3) string {
 	marker := playback.TransportMarker(sessionID, generation)
-	if marker == "" {
+	if marker == "" || !mode.hlsTransportMarker {
 		return rawURL
 	}
 	return appendPlaybackQueryV3(rawURL, playback.TransportQueryParam, url.QueryEscape(marker))

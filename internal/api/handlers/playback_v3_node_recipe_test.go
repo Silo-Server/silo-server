@@ -766,7 +766,7 @@ func TestPrepareTransportV3ReleasesTheProxyHalfWhenTheManifestIsNotProxyServed(t
 			}
 			defer transport.rollback()
 
-			if transport.url != withTransportMarkerV3("/playback/transcode/session-proxy-half/master.m3u8", "session-proxy-half", transport.generation) {
+			if transport.url != "/playback/transcode/session-proxy-half/master.m3u8" {
 				t.Fatalf("manifest url = %q, want the API-relayed manifest", transport.url)
 			}
 			wantProxyReleases := 0
@@ -805,7 +805,7 @@ func TestPrepareTransportV3KeepsTheProxyReservationWhenTheProxyServes(t *testing
 	}
 	defer transport.rollback()
 
-	if transport.url != withTransportMarkerV3("http://proxy-1/stream/v3/session-proxy-served/master.m3u8", "session-proxy-served", transport.generation) {
+	if transport.url != "http://proxy-1/stream/v3/session-proxy-served/master.m3u8" {
 		t.Fatalf("manifest url = %q, want the proxy manifest", transport.url)
 	}
 	if len(planner.releasedProxy) != 0 {

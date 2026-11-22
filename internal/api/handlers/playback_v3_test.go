@@ -990,7 +990,7 @@ func TestPrepareTransportV3KeepsHeaderAuthenticatedRemoteHLSBehindAPI(t *testing
 				if !parsed.IsAbs() || parsed.Host != "proxy.example" || !strings.HasPrefix(parsed.Path, "/stream/transcode/") {
 					t.Fatalf("legacy HLS URL = %q, want signed proxy route", transport.url)
 				}
-			} else if parsed.IsAbs() || parsed.Path != "/playback/transcode/session-remote-auth/master.m3u8" || parsed.RawQuery != playback.TransportQueryParam+"="+playback.TransportMarker("session-remote-auth", transport.generation) || strings.Contains(transport.url, "proxy.example") {
+			} else if parsed.IsAbs() || parsed.Path != "/playback/transcode/session-remote-auth/master.m3u8" || parsed.RawQuery != "" || strings.Contains(transport.url, "proxy.example") {
 				t.Fatalf("header-authenticated HLS URL = %q, want tokenless API-local manifest", transport.url)
 			}
 			if transport.nodeURL != remote.URL {
@@ -5265,7 +5265,7 @@ func TestReplanPlaybackV2SupersedesThePreviousTransportsURLs(t *testing.T) {
 	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureHeaderAuthenticatedMediaV3)
 	start.ClientPlaybackContext.Deliveries = map[string]playback.DeliveryCapabilityV3{playback.DeliveryClassHLSV3: {
 		Enabled: true, SupportedOnDevice: true, Containers: []string{"hls"},
-		VideoCodecs: []string{"h264"}, AudioDecodeCodecs: []string{"aac"},
+		VideoCodecs: []string{"h264"}, AudioDecodeCodecs: []string{"aac"}, Features: []string{playback.FeatureHLSTransportMarkerV3},
 	}}
 	started := startPlayableDecisionV2(t, handler, marshalV3StartRequest(t, start))
 	t.Cleanup(func() {
