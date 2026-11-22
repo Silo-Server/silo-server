@@ -10,8 +10,14 @@ import (
 )
 
 type fakeCopySafetyScanner struct {
-	mu        sync.Mutex
-	needs     bool
+	mu    sync.Mutex
+	needs bool
+	// staleScans is how many scans report a superseded generation before
+	// one reaches a verdict.
+	staleScans int
+	// settled holds the files whose verdict a scan persisted; like the real
+	// scanner, they need no further scan.
+	settled   map[int]bool
 	scans     int
 	active    int
 	maxActive int
@@ -19,13 +25,13 @@ type fakeCopySafetyScanner struct {
 	scanning  chan struct{}
 }
 
-func (s *fakeCopySafetyScanner) NeedsCopySafetyScan(*models.MediaFile) bool {
+func (s *fakeCopySafetyScanner) NeedsCopySafetyScan(file *models.MediaFile) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.needs
+	return s.needs && !s.settled[file.ID]
 }
 
-func (s *fakeCopySafetyScanner) ScanCopySafety(context.Context, *models.MediaFile) (bool, bool, error) {
+func (s *fakeCopySafetyScanner) ScanCopySafety(_ context.Context, file *models.MediaFile) (bool, bool, error) {
 	s.mu.Lock()
 	s.scans++
 	s.active++
@@ -44,6 +50,16 @@ func (s *fakeCopySafetyScanner) ScanCopySafety(context.Context, *models.MediaFil
 	if s.release != nil {
 		<-s.release
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.staleScans > 0 {
+		s.staleScans--
+		return false, true, nil
+	}
+	if s.settled == nil {
+		s.settled = map[int]bool{}
+	}
+	s.settled[file.ID] = true
 	return false, false, nil
 }
 
@@ -65,18 +81,18 @@ func (s *fakeCopySafetyScanner) peakConcurrency() int {
 	return s.maxActive
 }
 
-type fakeFileLoader struct{ file *models.MediaFile }
+type fakeFileLoader struct{}
 
-func (l *fakeFileLoader) GetByID(context.Context, int) (*models.MediaFile, error) {
-	return l.file, nil
+func (fakeFileLoader) GetByID(_ context.Context, id int) (*models.MediaFile, error) {
+	return &models.MediaFile{
+		ID:          id,
+		CodecVideo:  "h264",
+		VideoTracks: []models.VideoTrack{{Codec: "h264"}},
+	}, nil
 }
 
 func raceFixture(scanner *fakeCopySafetyScanner) *CopySafetyRace {
-	return NewCopySafetyRace(scanner, &fakeFileLoader{file: &models.MediaFile{
-		ID:          100,
-		CodecVideo:  "h264",
-		VideoTracks: []models.VideoTrack{{Codec: "h264"}},
-	}})
+	return NewCopySafetyRace(scanner, fakeFileLoader{})
 }
 
 // Every start, replan and watch-page load for a popular file asks for the same
@@ -99,6 +115,25 @@ func TestCopySafetyRaceDedupesInFlightScans(t *testing.T) {
 	if got := scanner.scanCount(); got != 1 {
 		t.Fatalf("scans = %d, want 1 for the whole burst", got)
 	}
+}
+
+// A file rewritten in place mid-scan makes that scan stale, so it persists
+// nothing. The request for the replacement that the dedupe absorbed must still
+// get its scan rather than wait for some later play to ask again.
+func TestCopySafetyRaceRescansAfterAStaleScanAbsorbedARequest(t *testing.T) {
+	scanner := &fakeCopySafetyScanner{
+		needs:      true,
+		staleScans: 1,
+		release:    make(chan struct{}),
+		scanning:   make(chan struct{}, 8),
+	}
+	race := raceFixture(scanner)
+
+	race.RaceScan(100)
+	<-scanner.scanning
+	race.RaceScan(100)
+	close(scanner.release)
+	waitForScans(t, scanner, 2)
 }
 
 // Per-file dedupe bounds the races for one popular file; nothing bounds the

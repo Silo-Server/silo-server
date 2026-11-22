@@ -66,7 +66,7 @@ type CopySafetyRace struct {
 	// already collapses concurrent scans, but every start, replan and watch-page
 	// load for a popular file would otherwise stack a goroutine that does
 	// nothing but wait on it.
-	inFlight sync.Map // file ID -> struct{}
+	inFlight sync.Map // file ID -> *copySafetyRaceState
 	// slots is the replica-wide scan semaphore. A goroutine holds its per-file
 	// inFlight entry while it waits for a slot, so queueing never lets a second
 	// goroutine for the same file through.
@@ -88,10 +88,33 @@ func NewCopySafetyRace(scanner CopySafetyScanner, files CopySafetyFileLoader) *C
 	}
 }
 
+// copySafetyRaceState is the per-file entry in inFlight. It exists so a request
+// that arrives while a scan is running is remembered rather than dropped.
+//
+// Dropping it loses a verdict when the file is rewritten in place mid-scan: the
+// running scan reads the old generation and comes back stale without persisting
+// anything, and the request for the replacement was swallowed by the dedupe, so
+// the replacement stays unscanned until some later play asks again.
+type copySafetyRaceState struct {
+	mu sync.Mutex
+	// recheck records that somebody asked for this file while the owner was
+	// mid-pass, so the owner owes one more pass before it lets go.
+	recheck bool
+	// done marks the owner as retired and its map entry as already removed;
+	// a request that sees it must store a fresh state instead.
+	done bool
+}
+
 // RaceScan resolves the copy-safety verdict for fileID in the background. It
 // returns immediately, and does nothing when the verdict is already known or
-// the file is not H.264. A request that lands while a scan for the same file is
-// running is dropped: that scan already answers it.
+// the file is not H.264.
+//
+// A request that lands while a scan for the same file is running does not start
+// a second scan, and is not dropped either: it is folded into one follow-up
+// pass the running goroutine makes before it retires. That pass normally costs
+// no ffmpeg at all, because the verdict is by then persisted and the pass takes
+// the known-verdict path; it scans again only when the first scan left the
+// verdict unknown (failed, or read a superseded generation of the file).
 //
 // The caller's request context is deliberately not used: the scan outlives the
 // request that noticed the verdict was missing, and the whole point is that no
@@ -100,17 +123,53 @@ func (r *CopySafetyRace) RaceScan(fileID int) {
 	if r == nil || fileID <= 0 {
 		return
 	}
-	if _, running := r.inFlight.LoadOrStore(fileID, struct{}{}); running {
+	for {
+		actual, running := r.inFlight.LoadOrStore(fileID, &copySafetyRaceState{})
+		state, _ := actual.(*copySafetyRaceState)
+		if state == nil {
+			return
+		}
+		if !running {
+			go r.runRace(fileID, state)
+			return
+		}
+		state.mu.Lock()
+		if !state.done {
+			state.recheck = true
+			state.mu.Unlock()
+			return
+		}
+		state.mu.Unlock()
+		// The owner retired between the load and the lock. It deletes its map
+		// entry before marking itself done, both under this lock, so observing
+		// done proves the entry is gone and the next LoadOrStore installs a
+		// fresh state: this loop runs at most twice.
+	}
+}
+
+// runRace owns one file's races until nothing is left asking for it.
+func (r *CopySafetyRace) runRace(fileID int, state *copySafetyRaceState) {
+	// The slot is taken before the scan's own deadline starts: time spent
+	// queueing behind other files is not time the scan was given to run.
+	r.acquireSlot()
+	defer r.releaseSlot()
+	for {
+		r.scan(fileID)
+
+		state.mu.Lock()
+		if state.recheck {
+			state.recheck = false
+			state.mu.Unlock()
+			continue
+		}
+		// Retire under the lock, deleting first: a request that already holds
+		// this state can then tell, from done alone, that it has to install a
+		// new one.
+		r.inFlight.Delete(fileID)
+		state.done = true
+		state.mu.Unlock()
 		return
 	}
-	go func() {
-		defer r.inFlight.Delete(fileID)
-		// The slot is taken before the scan's own deadline starts: time spent
-		// queueing behind other files is not time the scan was given to run.
-		r.acquireSlot()
-		defer r.releaseSlot()
-		r.scan(fileID)
-	}()
 }
 
 func (r *CopySafetyRace) acquireSlot() {
@@ -159,8 +218,9 @@ func (r *CopySafetyRace) scan(fileID int) {
 			"component", "playback", "file_id", fileID, "error", err)
 	case stale:
 		// The scan read a generation of the file the row has since moved past.
-		// The replacement's verdict is unknown again, and the next start,
-		// replan or watch-page load for it asks for a fresh race.
+		// The replacement's verdict is unknown again. A request for it that
+		// arrived during this scan gets the follow-up pass; otherwise the next
+		// start, replan or watch-page load asks for a fresh race.
 		slog.InfoContext(ctx, "discarding a video copy-safety verdict for a superseded generation of the file",
 			"component", "playback", "file_id", fileID)
 	case multi:
