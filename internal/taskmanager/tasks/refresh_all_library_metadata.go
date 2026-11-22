@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -80,14 +81,15 @@ func (l advisoryClusterLock) TryAcquire(ctx context.Context) (func(), bool, erro
 		_ = closeSession()
 		return nil, false, nil
 	}
-	return func() {
+	// A second call is a no-op, as it was with pglock.Lock.Release.
+	return sync.OnceFunc(func() {
 		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clusterLockSessionTimeout)
 		_, unlockErr := session.Exec(unlockCtx, `SELECT pg_advisory_unlock($1)`, l.key)
 		cancel()
 		if err := errors.Join(unlockErr, closeSession()); err != nil {
 			slog.WarnContext(ctx, "releasing cluster task advisory lock failed", "component", "taskmanager", "work", l.name, "error", err)
 		}
-	}, true, nil
+	}), true, nil
 }
 
 // RefreshAllLibraryMetadataTask re-fetches provider metadata for every item in
