@@ -310,11 +310,23 @@ func TestSampleAcceptedAtDB(t *testing.T) {
 
 	// A stop whose final sample is newer than the row's dates it to the stop,
 	// so a finalizer that reads the stopped row judges it against then.
-	ctx, _, store, session = newLifecycleAttemptDB(t)
+	ctx, pool, store, session := newLifecycleAttemptDB(t)
 	if _, err := store.ApplyProgress(ctx, session, playback.ProgressSampleV3{Sequence: 1, Position: 400}); err != nil {
 		t.Fatal(err)
 	}
 	accepted = read().SampleAcceptedAt
+
+	// A sample accepted before the time was recorded has none, whatever else
+	// moved the row since.
+	if _, err := pool.Exec(ctx, `UPDATE playback_v3_attempts SET sample_accepted_at = NULL, updated_at = NOW() WHERE session_id = $1::uuid`, session); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); !got.SampleAcceptedAt.IsZero() {
+		t.Fatalf("a sample from before the column reads time %v, want none", got.SampleAcceptedAt)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE playback_v3_attempts SET sample_accepted_at = $2 WHERE session_id = $1::uuid`, session, accepted); err != nil {
+		t.Fatal(err)
+	}
 	if _, _, err := store.StopAttempt(ctx, session, uuid.NewString(), &playback.ProgressSampleV3{Sequence: 2, Position: 1000}); err != nil {
 		t.Fatal(err)
 	}
