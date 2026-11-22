@@ -12,6 +12,7 @@ import {
 } from "./authPage.test-support";
 import InviteClaim from "./InviteClaim";
 import accepted from "../../../contracts/api/v2/fixtures/invitation_accepted.json";
+import policyFixture from "../../../contracts/api/v2/fixtures/get_password_policy_ok.json";
 const auth = vi.hoisted(() => ({ completeLogin: vi.fn() }));
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ user: null, loading: false, completeLogin: auth.completeLogin }),
@@ -77,6 +78,7 @@ beforeEach(() => {
     if (String(url).endsWith("/accept")) return submit();
     if (String(url).endsWith("/capabilities"))
       return json({ revision: "1", state: "available", default_profile: true, profileless: true });
+    if (String(url).endsWith("/auth/password-policy")) return json(policyFixture);
     return lookup();
   });
   vi.stubGlobal("fetch", fetchMock);

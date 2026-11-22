@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { V2ProblemError } from "@/api/v2/request";
 import { useUpdateAdminUserSignIn } from "@/hooks/queries/admin/externalSignIn";
+import { usePasswordPolicy } from "@/hooks/queries/account";
 import { useT } from "@/i18n";
 import { TOUCH_TARGETS } from "@/lib/touchTargets";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,7 @@ export function AdminUserSetPasswordDialog({
   onDone?: (message: string) => void;
 }) {
   const t = useT();
+  const passwordPolicy = usePasswordPolicy();
   const update = useUpdateAdminUserSignIn();
   const [password, setPassword] = useState("");
   const [temporary, setTemporary] = useState(true);
@@ -58,7 +60,7 @@ export function AdminUserSetPasswordDialog({
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    const problem = newPasswordProblem(password, password);
+    const problem = newPasswordProblem(password, password, passwordPolicy);
     if (problem) {
       setError(problem);
       return;

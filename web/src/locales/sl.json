@@ -521,6 +521,12 @@
       "value": "Ta seja predvajanja se je končala. Znova začnite predvajanje."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Ta pretok je bil zamenjan. Predvajanje se nadaljuje s trenutnim pretokom."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

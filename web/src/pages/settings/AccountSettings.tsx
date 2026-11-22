@@ -9,17 +9,20 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAccountPasswordCapability, useChangeAccountPassword } from "@/hooks/queries/account";
+import {
+  useAccountPasswordCapability,
+  useChangeAccountPassword,
+  usePasswordPolicy,
+} from "@/hooks/queries/account";
 import { useT } from "@/i18n";
+import { newPasswordPolicyProblem, newPasswordRuleHint } from "@/lib/newPassword";
 import { AccountSignInSection } from "./AccountSignInSection";
-
-function passwordByteLength(value: string) {
-  return new TextEncoder().encode(value).length;
-}
 
 export default function AccountSettings() {
   const t = useT();
   const capability = useAccountPasswordCapability();
+  const passwordPolicy = usePasswordPolicy();
+  const ruleHint = newPasswordRuleHint(passwordPolicy);
   const changePassword = useChangeAccountPassword();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -40,21 +43,9 @@ export default function AccountSettings() {
       setFormError(t("web.settings.account.password.error.mismatch"));
       return;
     }
-    if (Array.from(newPassword).length < limits.minimum_password_length) {
-      setFormError(
-        t("web.settings.account.password.error.tooShort", {
-          minimum: limits.minimum_password_length,
-          minimum_text: limits.minimum_password_length,
-        }),
-      );
-      return;
-    }
-    if (passwordByteLength(newPassword) > limits.maximum_password_bytes) {
-      setFormError(
-        t("web.settings.account.password.error.tooLong", {
-          maximum: limits.maximum_password_bytes,
-        }),
-      );
+    const ruleProblem = newPasswordPolicyProblem(newPassword, passwordPolicy);
+    if (ruleProblem) {
+      setFormError(ruleProblem);
       return;
     }
 
@@ -142,10 +133,11 @@ export default function AccountSettings() {
               />
               <p id="account-password-requirements" className="text-muted-foreground text-xs">
                 {t("web.settings.account.password.requirements", {
-                  minimum: capability.data.minimum_password_length,
-                  minimum_text: capability.data.minimum_password_length,
-                  maximum: capability.data.maximum_password_bytes,
+                  minimum: passwordPolicy.minimum_length,
+                  minimum_text: passwordPolicy.minimum_length,
+                  maximum: passwordPolicy.maximum_bytes,
                 })}
+                {ruleHint ? <> {ruleHint}</> : null}
               </p>
             </div>
 

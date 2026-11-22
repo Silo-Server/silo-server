@@ -521,6 +521,12 @@
       "value": "Questa sessione di riproduzione è terminata. Avvia di nuovo la riproduzione."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Questo stream è stato sostituito. La riproduzione continua su quello attuale."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

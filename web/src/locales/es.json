@@ -521,6 +521,12 @@
       "value": "Esta sesión de reproducción terminó. Vuelve a reproducir."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Se reemplazó esta transmisión. La reproducción continúa en la actual."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

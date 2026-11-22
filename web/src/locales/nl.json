@@ -521,6 +521,12 @@
       "value": "Deze afspeelsessie is beëindigd. Start het afspelen opnieuw."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Deze stream is vervangen. Het afspelen gaat verder op de huidige stream."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

@@ -154,6 +154,21 @@ type SignupStatus struct {
 	Enabled bool `json:"enabled" doc:"True when signup accepts invite codes" example:"false"`
 }
 
+// PasswordPolicy is the rule set a new local password must meet. It applies
+// to setupServer, signup, changePassword, a password reset and an
+// administrator setting a password; passwords already stored keep working.
+type PasswordPolicy struct {
+	MinimumLength    int  `json:"minimum_length" doc:"Fewest characters a new password may have; never fewer than 8" example:"8"`
+	MaximumBytes     int  `json:"maximum_bytes" doc:"Most UTF-8 bytes a new password may have" example:"72"`
+	RequireUppercase bool `json:"require_uppercase" doc:"Whether a new password needs a capital letter (Unicode category Lu)" example:"false"`
+	RequireSpecial   bool `json:"require_special" doc:"Whether a new password needs a punctuation mark or symbol (Unicode categories P and S); letters, digits and spaces do not count" example:"false"`
+}
+
+// PasswordPolicyOutput is the getPasswordPolicy response.
+type PasswordPolicyOutput struct {
+	Body PasswordPolicy
+}
+
 // SignupStatusOutput is the getSignupStatus response.
 type SignupStatusOutput struct {
 	Body SignupStatus
@@ -226,6 +241,11 @@ func registerAuthSessions(reg *Registry) {
 			"Report whether public invited signup is enabled."),
 		Class: ClassPublic, ServiceBacked: true,
 	}, reg.getSignupStatus)
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodGet, Prefix+"/auth/password-policy", "getPasswordPolicy", "auth",
+			"Describe the rules a new password must meet."),
+		Class: ClassPublic, ServiceBacked: true,
+	}, reg.getPasswordPolicy)
 	signup := humaOp(http.MethodPost, Prefix+"/auth/signup", opSignup, "auth",
 		"Create an account from an invite code and open its session.")
 	signup.DefaultStatus = http.StatusCreated
@@ -431,6 +451,22 @@ func (reg *Registry) getSignupStatus(ctx context.Context, _ *struct{}) (*SignupS
 		return nil, serviceProblem(err)
 	}
 	return &SignupStatusOutput{Body: SignupStatus{Enabled: enabled}}, nil
+}
+
+func (reg *Registry) getPasswordPolicy(ctx context.Context, _ *struct{}) (*PasswordPolicyOutput, error) {
+	if reg.deps.Sessions == nil {
+		return nil, unavailable("account")
+	}
+	policy, err := reg.deps.Sessions.PasswordPolicy(ctx)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	return &PasswordPolicyOutput{Body: PasswordPolicy{
+		MinimumLength:    policy.MinimumLength,
+		MaximumBytes:     auth.MaximumPasswordBytes,
+		RequireUppercase: policy.RequireUppercase,
+		RequireSpecial:   policy.RequireSpecial,
+	}}, nil
 }
 
 func (reg *Registry) signup(ctx context.Context, in *SignupInput) (*TokenPairOutput, error) {

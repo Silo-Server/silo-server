@@ -178,11 +178,11 @@ func (h *AuthHandler) SetupInitialUser(ctx context.Context, in RegistrationInput
 	if in.Username == "" || in.Email == "" || in.Password == "" {
 		return TokenPairView{}, apiError(http.StatusBadRequest, "bad_request", "Username, email, and password are required")
 	}
-	if err := validateRegistrationPassword(in.Password); err != nil {
-		return TokenPairView{}, err
-	}
 	pair, user, err := h.service.SetupInitialUser(ctx, in.Username, in.Email, in.Password, in.CreateDefaultProfile, in.DefaultProfileName, in.DeviceName, in.IP)
 	if err != nil {
+		if apiErr := passwordPolicyError(err, fieldPassword); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
 		if errors.Is(err, auth.ErrSetupAlreadyComplete) {
 			return TokenPairView{}, apiError(http.StatusUnauthorized, "setup_complete", "Initial setup has already been completed")
 		}
@@ -213,11 +213,11 @@ func (h *AuthHandler) Signup(ctx context.Context, in RegistrationInput) (TokenPa
 	if in.Username == "" || in.Email == "" || in.Password == "" || in.InviteCode == "" {
 		return TokenPairView{}, apiError(http.StatusBadRequest, "bad_request", "Username, email, password, and invite code are required")
 	}
-	if err := validateRegistrationPassword(in.Password); err != nil {
-		return TokenPairView{}, err
-	}
 	pair, user, err := h.service.Signup(ctx, in.Username, in.Email, in.Password, in.InviteCode, in.CreateDefaultProfile, in.DefaultProfileName, in.DeviceName, in.IP)
 	if err != nil {
+		if apiErr := passwordPolicyError(err, fieldPassword); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
 		switch {
 		case errors.Is(err, auth.ErrSignupDisabled):
 			return TokenPairView{}, apiError(http.StatusForbidden, "signup_disabled", "Public signups are not currently enabled")
@@ -280,13 +280,27 @@ func (h *AuthHandler) PluginLaunchToken(ctx context.Context, claims *auth.Claims
 // PluginAccessCookieName is the cookie the plugin launch issues.
 const PluginAccessCookieName = auth.PluginAccessCookieName
 
-func validateRegistrationPassword(password string) error {
-	switch err := auth.ValidateNewPassword(password); {
-	case errors.Is(err, auth.ErrPasswordTooShort):
-		return &APIError{Status: http.StatusBadRequest, Code: codeWeakPassword, Message: "Password must be at least 8 characters", Field: fieldPassword}
-	case errors.Is(err, auth.ErrPasswordTooLong):
-		return &APIError{Status: http.StatusBadRequest, Code: codePasswordTooLong, Message: "Password must be at most 72 bytes", Field: fieldPassword}
-	default:
-		return err
+// PasswordPolicy reads the server's password policy; a handler without an
+// auth service applies the default one. v2 getPasswordPolicy calls it.
+func (h *AuthHandler) PasswordPolicy(ctx context.Context) (auth.PasswordPolicy, error) {
+	if h.service == nil {
+		return auth.DefaultPasswordPolicy(), nil
 	}
+	return h.service.PasswordPolicy(ctx)
+}
+
+// passwordPolicyError is the API error for a password the policy refused,
+// reported at field, or nil when err is not such a refusal. The message has
+// no full stop: the v1 and v2 surfaces render it as their other messages.
+func passwordPolicyError(err error, field string) *APIError {
+	message, ok := auth.PasswordRuleMessage(err)
+	if !ok {
+		return nil
+	}
+	message = strings.TrimSuffix(message, ".")
+	code := codeWeakPassword
+	if errors.Is(err, auth.ErrPasswordTooLong) {
+		code = codePasswordTooLong
+	}
+	return &APIError{Status: http.StatusBadRequest, Code: code, Message: message, Field: field}
 }

@@ -5,11 +5,15 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/auth"
 )
 
-func TestRegistrationPasswordRejectedBeforeService(t *testing.T) {
+// The auth service refuses the password before reading any store (it has
+// none here); the handler reports it at the password member.
+func TestRegistrationPasswordRejectedAtPasswordMember(t *testing.T) {
 	t.Parallel()
-	h := &AuthHandler{}
+	h := &AuthHandler{service: &auth.Service{}}
 	for _, tt := range []struct{ password, code string }{
 		{"short", codeWeakPassword},
 		{strings.Repeat("界", 25), codePasswordTooLong},

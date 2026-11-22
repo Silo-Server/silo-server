@@ -13,6 +13,7 @@ import PasswordReset from "./PasswordReset";
 import completed from "../../../contracts/api/v2/fixtures/password_reset_completed.json";
 import lookupFixture from "../../../contracts/api/v2/fixtures/password_reset_lookup.json";
 import capabilityFixture from "../../../contracts/api/v2/fixtures/password_reset_capability.json";
+import policyFixture from "../../../contracts/api/v2/fixtures/get_password_policy_ok.json";
 
 const auth = vi.hoisted(() => ({
   user: null as null | { username: string },
@@ -34,6 +35,7 @@ const problem = (status: number, type = "failure", errors?: unknown[]) =>
 let submit: () => Promise<Response>;
 let lookup: () => Promise<Response>;
 let selfService: string;
+let policy: Record<string, unknown>;
 const fetchMock = vi.fn<typeof fetch>();
 
 function mount(link = "/reset-password#secret-token") {
@@ -64,10 +66,12 @@ beforeEach(() => {
   submit = async () => json(completed);
   lookup = async () => json(lookupFixture);
   selfService = "disabled";
+  policy = { ...policyFixture };
   fetchMock.mockImplementation(async (url, options) => {
     if (String(url).includes("/capabilities/password-reset")) {
       return json({ ...capabilityFixture, state: selfService });
     }
+    if (String(url).includes("/auth/password-policy")) return json(policy);
     return options?.method === "POST" && !String(url).endsWith("/lookup") ? submit() : lookup();
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -109,6 +113,21 @@ it("checks the new password before spending the link", async () => {
   await fill("short");
   send();
   await screen.findByText("Use at least 8 characters.");
+  expect(completions()).toHaveLength(0);
+});
+
+it("checks the new password against the server's password policy", async () => {
+  policy = { ...policyFixture, minimum_length: 10, require_special: true };
+  mount();
+  await screen.findByText(
+    "At least 10 characters. Include at least one special character, such as ! or #.",
+  );
+  await fill("password1");
+  send();
+  await screen.findByText("Use at least 10 characters.");
+  await fill("password12");
+  send();
+  await screen.findByText("Include at least one special character, such as ! or #.");
   expect(completions()).toHaveLength(0);
 });
 

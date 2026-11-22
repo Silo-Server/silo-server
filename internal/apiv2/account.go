@@ -44,7 +44,7 @@ type AccountOutput struct {
 type AccountPasswordCapability struct {
 	Capability
 	RequiresCurrentPassword bool `json:"requires_current_password" doc:"Whether changePassword needs current_password; always true today" example:"true"`
-	MinimumPasswordLength   int  `json:"minimum_password_length" doc:"Fewest characters a new password may have" example:"8"`
+	MinimumPasswordLength   int  `json:"minimum_password_length" doc:"Fewest characters a new password may have. getPasswordPolicy describes the rest of the password policy" example:"8"`
 	MaximumPasswordBytes    int  `json:"maximum_password_bytes" doc:"Most UTF-8 bytes a new password may have" example:"72"`
 	SignOutOtherSessions    bool `json:"sign_out_other_sessions" doc:"Whether changePassword accepts sign_out_other_sessions. A server that omits this field rejects the member with 422, so send it only when this is true" example:"true"`
 }

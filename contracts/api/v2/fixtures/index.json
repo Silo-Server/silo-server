@@ -8260,6 +8260,23 @@
       "body_file": "get_overlay_config_ok.json"
     },
     {
+      "name": "get_password_policy_ok",
+      "operation_id": "getPasswordPolicy",
+      "scenario": "The rules a new password must meet, before login: setup, signup and a password reset read them.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/password-policy"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PasswordPolicy",
+      "body_file": "get_password_policy_ok.json"
+    },
+    {
       "name": "get_person_authentication_required",
       "operation_id": "getPerson",
       "scenario": "A person without a credential.",

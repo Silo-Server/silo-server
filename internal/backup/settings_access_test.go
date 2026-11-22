@@ -19,3 +19,26 @@ func TestAccessSettingsAreClassified(t *testing.T) {
 		}
 	}
 }
+
+// A restored password policy that is weaker than the live one is wider, so a
+// restore keeps the live rules.
+func TestPasswordPolicyRestoreNeverWeakens(t *testing.T) {
+	for _, tt := range []struct {
+		key, restored, live string
+		wider               bool
+	}{
+		{config.AuthPasswordMinLengthSettingKey, "8", "12", true},
+		{config.AuthPasswordMinLengthSettingKey, "", "12", true},
+		{config.AuthPasswordMinLengthSettingKey, "16", "12", false},
+		{config.AuthPasswordMinLengthSettingKey, "12", "", false},
+		{config.AuthPasswordRequireUppercaseSettingKey, "false", "true", true},
+		{config.AuthPasswordRequireUppercaseSettingKey, "true", "", false},
+		{config.AuthPasswordRequireSpecialSettingKey, "", "true", true},
+		{config.AuthPasswordRequireSpecialSettingKey, "true", "false", false},
+	} {
+		access, wider := AccessSettingWider(tt.key, tt.restored, tt.live)
+		if !access || wider != tt.wider {
+			t.Errorf("AccessSettingWider(%s, %q, %q) = %v, %v; want true, %v", tt.key, tt.restored, tt.live, access, wider, tt.wider)
+		}
+	}
+}

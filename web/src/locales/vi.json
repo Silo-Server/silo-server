@@ -521,6 +521,12 @@
       "value": "Phiên phát này đã kết thúc. Bắt đầu phát lại."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Luồng này đã được thay thế. Nội dung vẫn tiếp tục phát trên luồng hiện tại."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

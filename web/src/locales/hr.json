@@ -521,6 +521,12 @@
       "value": "Ova je sesija reprodukcije završila. Ponovno pokrenite reprodukciju."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Ovaj je stream zamijenjen. Reprodukcija se nastavlja na trenutačnom."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

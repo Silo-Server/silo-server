@@ -405,3 +405,25 @@ func TestAcceptLinkInvitationUsesSignupEmailRule(t *testing.T) {
 		t.Fatalf("err = %v, want ErrInvalidEmail", err)
 	}
 }
+
+func TestAcceptAppliesThePasswordPolicy(t *testing.T) {
+	repo := newFakeRepo()
+	accounts := &fakeAccounts{}
+	sessions := &fakeSessions{}
+	settings := fakeSettings{"auth.password_require_uppercase": "true"}
+	svc := newTestService(repo, adminInviter(), accounts, sessions, &fakeMail{configured: true}, settings)
+	sent, err := svc.Send(context.Background(), SendInput{Email: testInvitee, InvitedBy: 1})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite#")
+	if _, _, err := svc.Accept(context.Background(), token, "", "hunter2hunter2", "d", ""); !errors.Is(err, auth.ErrPasswordNeedsUppercase) {
+		t.Fatalf("accept = %v, want ErrPasswordNeedsUppercase", err)
+	}
+	if len(accounts.created) != 0 {
+		t.Fatalf("created %d accounts before the password passed", len(accounts.created))
+	}
+	if _, _, err := svc.Accept(context.Background(), token, "", "Hunter2hunter2", "d", ""); err != nil {
+		t.Fatalf("accept with a policy-compliant password: %v", err)
+	}
+}

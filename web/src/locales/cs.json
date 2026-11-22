@@ -521,6 +521,12 @@
       "value": "Tato relace přehrávání skončila. Spusťte přehrávání znovu."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Tento stream byl nahrazen. Přehrávání pokračuje v aktuálním streamu."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

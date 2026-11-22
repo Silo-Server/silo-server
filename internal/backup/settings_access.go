@@ -29,9 +29,13 @@ import (
 var accessSettings = func() map[string]widerFunc {
 	m := map[string]widerFunc{
 		// Who may sign in, and how.
-		settingLocalPasswordLogin:             on,
-		"auth.email_auto_match":               on,
-		config.AuthUserAPIKeysSettingKey:      on,
+		settingLocalPasswordLogin:        on,
+		"auth.email_auto_match":          on,
+		config.AuthUserAPIKeysSettingKey: on,
+		// What a new password must contain: a weaker policy grants more.
+		config.AuthPasswordMinLengthSettingKey:        shorter,
+		config.AuthPasswordRequireUppercaseSettingKey: off,
+		config.AuthPasswordRequireSpecialSettingKey:   off,
 		"signup.enabled":                      on,
 		"password_reset.self_service_enabled": on,
 		"jellyfin_compat.enabled":             on,
@@ -135,6 +139,16 @@ func on(restored, live string) bool {
 	r, rerr := strconv.ParseBool(restored)
 	l, lerr := strconv.ParseBool(live)
 	return rerr != nil || lerr != nil || r && !l
+}
+
+// off: a requirement that grants more when false.
+func off(restored, live string) bool { return on(live, restored) }
+
+// shorter: a minimum length that grants more when shorter.
+func shorter(restored, live string) bool {
+	r, rerr := strconv.Atoi(restored)
+	l, lerr := strconv.Atoi(live)
+	return rerr != nil || lerr != nil || r < l
 }
 
 // longer: a duration that grants more when longer.

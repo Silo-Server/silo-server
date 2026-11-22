@@ -521,6 +521,12 @@
       "value": "Diese Wiedergabesitzung ist beendet. Starte die Wiedergabe erneut."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Dieser Stream wurde ersetzt. Die Wiedergabe läuft mit dem aktuellen Stream weiter."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

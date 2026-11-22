@@ -12,6 +12,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/hooks/queries/account", () => ({
   useAccountPasswordCapability: () => mocks.useCapability(),
   useChangeAccountPassword: () => mocks.useChangePassword(),
+  usePasswordPolicy: () => ({
+    minimum_length: 8,
+    maximum_bytes: 72,
+    require_uppercase: false,
+    require_special: false,
+  }),
 }));
 
 // The Sign-in section has its own tests (AccountSignInSection.test.tsx).

@@ -183,6 +183,9 @@ func invitationOf(inv *models.Invitation) AdminInvitation {
 	return out
 }
 func invitationProblem(err error, public bool) *Problem {
+	if message, ok := auth.PasswordRuleMessage(err); ok && public {
+		return passwordMemberProblem(message)
+	}
 	switch {
 	case errors.Is(err, invitations.ErrNotFound):
 		return NewProblem(TypeNotFound, "Invitation not found or no longer available.")

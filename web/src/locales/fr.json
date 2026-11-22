@@ -521,6 +521,12 @@
       "value": "Cette session de lecture est terminée. Relancez la lecture."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Ce flux a été remplacé. La lecture se poursuit sur le flux actuel."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

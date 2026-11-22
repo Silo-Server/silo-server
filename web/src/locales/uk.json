@@ -521,6 +521,12 @@
       "value": "Цей сеанс відтворення завершено. Почніть відтворення знову."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Цей потік замінено. Відтворення триває в поточному потоці."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,

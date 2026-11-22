@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
@@ -62,7 +61,7 @@ func sessionCheckUnavailable(op string, err error) error {
 }
 
 const (
-	MinimumPasswordLength = 8
+	MinimumPasswordLength = config.PasswordMinLengthFloor
 	MaximumPasswordBytes  = 72
 )
 
@@ -992,7 +991,7 @@ func (s *Service) SetupInitialUser(
 	defaultProfileName string,
 	deviceName, ip string,
 ) (*TokenPair, *models.User, error) {
-	if err := ValidateNewPassword(password); err != nil {
+	if err := CheckNewPassword(ctx, s.settings, password); err != nil {
 		return nil, nil, err
 	}
 
@@ -1057,7 +1056,7 @@ func (s *Service) Signup(
 	defaultProfileName string,
 	deviceName, ip string,
 ) (*TokenPair, *models.User, error) {
-	if err := ValidateNewPassword(password); err != nil {
+	if err := CheckNewPassword(ctx, s.settings, password); err != nil {
 		return nil, nil, err
 	}
 	// Check global signup toggle.
@@ -1511,7 +1510,11 @@ func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, cur
 	if err != nil {
 		return fmt.Errorf("getting user: %w", err)
 	}
-	if err := validatePasswordChange(ctx, user, currentPassword, newPassword); err != nil {
+	policy, err := s.PasswordPolicy(ctx)
+	if err != nil {
+		return err
+	}
+	if err := validatePasswordChange(ctx, user, policy, currentPassword, newPassword); err != nil {
 		return err
 	}
 
@@ -1534,7 +1537,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, cur
 	return nil
 }
 
-func validatePasswordChange(ctx context.Context, user *models.User, currentPassword, newPassword string) error {
+func validatePasswordChange(ctx context.Context, user *models.User, policy PasswordPolicy, currentPassword, newPassword string) error {
 	if !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
 		return ErrPasswordLoginDisabled
 	}
@@ -1545,7 +1548,7 @@ func validatePasswordChange(ctx context.Context, user *models.User, currentPassw
 	if !ok {
 		return ErrCurrentPasswordInvalid
 	}
-	if err := ValidateNewPassword(newPassword); err != nil {
+	if err := policy.Check(newPassword); err != nil {
 		return err
 	}
 	if user.PasswordChangeRequired && newPassword == currentPassword {
@@ -1554,17 +1557,9 @@ func validatePasswordChange(ctx context.Context, user *models.User, currentPassw
 	return nil
 }
 
-// ValidateNewPassword applies the shared local credential policy before a new
-// account or password is persisted. The minimum counts characters; bcrypt
-// limits the UTF-8 encoding to 72 bytes.
-func ValidateNewPassword(password string) error {
-	if utf8.RuneCountInString(password) < MinimumPasswordLength {
-		return ErrPasswordTooShort
-	}
-	if len(password) > MaximumPasswordBytes {
-		return ErrPasswordTooLong
-	}
-	return nil
+// PasswordPolicy reads the server's current password policy.
+func (s *Service) PasswordPolicy(ctx context.Context) (PasswordPolicy, error) {
+	return LoadPasswordPolicy(ctx, s.settings)
 }
 
 // GetSessionsPage returns one keyset page of the user's live sessions; see

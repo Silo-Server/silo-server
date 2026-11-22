@@ -37,6 +37,8 @@ import {
   useViewerIsOwner,
 } from "@/hooks/queries/admin/users";
 import { useAuth } from "@/hooks/useAuth";
+import { usePasswordPolicy } from "@/hooks/queries/account";
+import { newPasswordPolicyProblem } from "@/lib/newPassword";
 import { useT } from "@/i18n";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import {
@@ -116,6 +118,7 @@ function CreateUserForm({
   onBusy: (busy: boolean) => void;
 }) {
   const t = useT();
+  const passwordPolicy = usePasswordPolicy();
   const [authority] = useState(captureAdminUserAuthority);
   const busy = useRef(false);
   const [error, setError] = useState("");
@@ -203,6 +206,11 @@ function CreateUserForm({
       return;
     if (!isValidEmail(email)) {
       setError(invalidEmailMessage());
+      return;
+    }
+    const passwordProblem = newPasswordPolicyProblem(password, passwordPolicy);
+    if (passwordProblem) {
+      setError(passwordProblem);
       return;
     }
     // A cleared or half-typed limit is not in the policy state, which still
