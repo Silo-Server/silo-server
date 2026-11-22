@@ -99,6 +99,25 @@ describe("RedisGroup", () => {
     expect(screen.queryByLabelText("Connection URL")).not.toBeInTheDocument();
   });
 
+  it("keeps a staged database number in view when the saved URL is removed elsewhere", async () => {
+    sensitiveStatus.current = { configured: ["redis.url"], managed_by_env: [] };
+    const { rerender } = render(<Harness />);
+    const useRedis = screen.getByRole("switch", { name: "Use Redis" });
+    await userEvent.click(useRedis);
+    await userEvent.click(useRedis);
+    await userEvent.clear(screen.getByLabelText("Database number"));
+    await userEvent.type(screen.getByLabelText("Database number"), "3");
+    expect(screen.getByText("1 staged")).toBeInTheDocument();
+
+    // Another admin removes the URL while the number is still staged.
+    sensitiveStatus.current = { configured: [], managed_by_env: [] };
+    rerender(<Harness />);
+
+    expect(screen.getByRole("switch", { name: "Use Redis" })).toBeChecked();
+    expect(screen.getByLabelText("Database number")).toHaveValue(3);
+    expect(screen.getByText("1 staged")).toBeInTheDocument();
+  });
+
   it("keeps Use Redis on while a URL typed with nothing saved is erased", async () => {
     render(<Harness />);
     const useRedis = screen.getByRole("switch", { name: "Use Redis" });

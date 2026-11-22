@@ -58,7 +58,11 @@ export function RedisGroup({
   // Once REDIS_URL sets the connection the switch is locked, so a choice
   // made before it took over no longer applies.
   if (urlEnv && enabledOverride !== null) setEnabledOverride(null);
-  const enabled = enabledOverride ?? (redisUrl.trim() !== "" || configured);
+  // A staged Redis edit keeps the fields in view, so a URL removed elsewhere
+  // can't hide a number that would then be dropped on save.
+  const enabled =
+    enabledOverride ??
+    (redisUrl.trim() !== "" || configured || REDIS_KEYS.some((key) => form.isDirty(key)));
   // URL edits go through the page's editors, which drop a keystroke that
   // arrives while a save is in flight.
   const urlDraft = { ...form, setValue: secrets.setSecret, resetValue: secrets.keepSaved };
