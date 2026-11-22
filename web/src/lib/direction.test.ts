@@ -33,6 +33,7 @@ describe("mixesDirections", () => {
     // A line with nothing that sets direction runs left to right.
     ["Arabic with a line of digits and punctuation", "مجموعة أفلام.\n1999–2004\n***", true],
     ["English with a line of digits", "A collection.\n1999–2004", false],
+    ["Arabic with a line of only a zero-width space", "مجموعة أفلام.\n\u200b", false],
     ["English with an Arabic word inside a line", "The film was called باب الحارة.", false],
     ["Windows line endings", "A collection.\r\nFrodo and Sam set out.", false],
     ["an RLM before an English line", "A collection.\n\u200fFrodo and Sam set out.", true],

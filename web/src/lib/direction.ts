@@ -10,8 +10,9 @@ const RTL_CHAR = /[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff\u{10800}-\u{10fff}\u{
 // The characters that set a line's direction (bidi classes L, R and AL): letters,
 // the Hebrew maqaf, paseq, sof pasuq, nun hafukha, geresh and gershayim, the Arabic
 // question mark, semicolon, full stop and other Arabic, Syriac, Samaritan and
-// Mandaic punctuation and signs of those classes, and the N'Ko, Garay and Adlam
-// digits. Other digits and punctuation don't.
+// Mandaic punctuation and signs of those classes (Unicode 15, Basic Multilingual
+// Plane), and the N'Ko, Garay and Adlam digits. Most other digits and punctuation
+// don't.
 const STRONG =
   /[\p{L}\u05be\u05c0\u05c3\u05c6\u05f3\u05f4\u0608\u060b\u060d\u061b\u061d-\u061f\u066d\u06d4\u06fd\u06fe\u0700-\u070d\u070f\u07c0-\u07c9\u07fe\u07ff\u0830-\u083e\u085e\u0888\ufbb2-\ufbc2\ufdfc\u{10d40}-\u{10d49}\u{1e950}-\u{1e959}]/u;
 // Arabic-Indic, Hanifi Rohingya and Rumi digits (bidi class AN), which join the
@@ -42,16 +43,19 @@ export function emailDir(email: string): "ltr" | undefined {
 // to left (ALM is inside RTL_CHAR's range).
 const STRONG_OR_MARK = new RegExp(`[${STRONG.source.slice(1, -1)}\\u200e\\u200f\\u061c]`, "u");
 
+// A line with nothing to show: spaces, zero-width characters and directional marks.
+const INVISIBLE = /^[\s\u200b-\u200f\u2060\ufeff]*$/u;
+
 /**
  * Whether the lines of text run different ways, judged as `unicode-bidi:
  * plaintext` judges each paragraph of text shown with its line breaks: by its
  * first character that sets direction, or left to right when it has none
- * (digits, punctuation). A blank line shows nothing and takes no side.
+ * (digits, punctuation). A line with nothing to show takes no side.
  */
 export function mixesDirections(text: string): boolean {
   const directions = new Set<boolean>();
   for (const line of text.split("\n")) {
-    if (line.trim() === "") continue;
+    if (INVISIBLE.test(line)) continue;
     const first = STRONG_OR_MARK.exec(line)?.[0];
     directions.add(first !== undefined && (first === "\u200f" || RTL_CHAR.test(first)));
   }
