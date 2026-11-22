@@ -496,3 +496,30 @@ func TestControlRelayRefreshRepairsADroppedTakeover(t *testing.T) {
 		t.Fatalf("owner after refreshes = %q, want the newest connection's replica", got)
 	}
 }
+
+// TestControlRelayWaitsLongerOnlyForARequestThatWaitsForThePlayer: a message
+// gets the extra reply time its owner spends waiting for the player, and other
+// requests keep the usual reply timeout, so a terminate whose owner died falls
+// back on schedule.
+func TestControlRelayWaitsLongerOnlyForARequestThatWaitsForThePlayer(t *testing.T) {
+	bus, owners := &relayTestBus{}, newRelayTestOwners()
+	a := startRelayTestReplica(t, bus, owners)
+	b := startRelayTestReplica(t, bus, owners)
+	b.relay.replyTimeout = 50 * time.Millisecond
+
+	a.relay.Handle(func(context.Context, string, string, json.RawMessage) json.RawMessage {
+		//nolint:forbidigo // Stands in for the owner's wait for the player.
+		time.Sleep(150 * time.Millisecond)
+		return json.RawMessage(`{}`)
+	})
+	reg := a.hub.Register("s1", registrationTestConn{})
+	t.Cleanup(func() { a.hub.Unregister(reg) })
+	waitForRelayOwner(t, owners, "s1", a.relay.id)
+
+	if _, outcome := b.relay.Forward(context.Background(), "s1", "terminate", nil); outcome != ControlRelayNoReply {
+		t.Fatalf("a request without the extra wait = %v, want no reply", outcome)
+	}
+	if _, outcome := b.relay.ForwardWaiting(context.Background(), "s1", "command", nil, time.Second); outcome != ControlRelayHandled {
+		t.Fatalf("a request with the extra wait = %v, want handled", outcome)
+	}
+}

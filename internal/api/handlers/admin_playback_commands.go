@@ -140,6 +140,18 @@ type adminPlaybackCommandReceipt struct {
 	actorID  int
 	payload  string
 	delivery string
+	// answer is set for a message: its wait for the player's result, which
+	// decides the delivery a replay reports.
+	answer *adminPlaybackMessageAnswer
+}
+
+// adminPlaybackMessageAnswer is the outcome of one message's wait for the
+// player's result. delivery is written once, before done closes, and read
+// only after done closes, so the request that sent the message and every
+// replay of it report the same answer without taking the ledger lock.
+type adminPlaybackMessageAnswer struct {
+	done     chan struct{}
+	delivery string
 }
 
 type adminPlaybackCommandLedger struct {
@@ -224,8 +236,8 @@ func (h *AdminPlaybackControlHandler) commandLocal(ctx context.Context, in Admin
 	// lookup is under the lock too, so a session that ends between lookup and
 	// admission cannot be given a fresh ledger after its own was dropped.
 	// A message then waits for the player's result after the lock is
-	// released, so one unresponsive player never delays other commands; its
-	// receipt reads "dispatched" until an answer upgrades it.
+	// released, so one unresponsive player never delays other commands; a
+	// replay of it waits for the same answer, also outside the lock.
 	h.commandMu.Lock()
 	locked := true
 	defer func() {
@@ -253,7 +265,16 @@ func (h *AdminPlaybackControlHandler) commandLocal(ctx context.Context, in Admin
 		if prior.sequence != receipt.sequence || prior.name != receipt.name || prior.actorID != receipt.actorID || prior.payload != receipt.payload {
 			return AdminPlaybackCommandView{}, ErrAdminPlaybackCommandConflict
 		}
-		return AdminPlaybackCommandView{CommandID: in.CommandID, Sequence: in.Sequence, Outcome: AdminPlaybackCommandReplayed, Delivery: prior.delivery}, nil
+		view := AdminPlaybackCommandView{CommandID: in.CommandID, Sequence: in.Sequence, Outcome: AdminPlaybackCommandReplayed, Delivery: prior.delivery}
+		if prior.answer != nil {
+			// A retry while the first request still waits must not report
+			// "dispatched" before the player's time is up.
+			locked = false
+			h.commandMu.Unlock()
+			<-prior.answer.done
+			view.Delivery = prior.answer.delivery
+		}
+		return view, nil
 	}
 	if in.Sequence <= ledger.latest {
 		return AdminPlaybackCommandView{}, &AdminPlaybackCommandStaleError{Latest: ledger.latest}
@@ -272,6 +293,9 @@ func (h *AdminPlaybackControlHandler) commandLocal(ctx context.Context, in Admin
 		return AdminPlaybackCommandView{}, err
 	}
 	receipt.delivery = delivery
+	if answered != nil {
+		receipt.answer = &adminPlaybackMessageAnswer{done: make(chan struct{})}
+	}
 	ledger.latest = in.Sequence
 	ledger.receipts[in.CommandID] = receipt
 	ledger.trim()
@@ -281,16 +305,20 @@ func (h *AdminPlaybackControlHandler) commandLocal(ctx context.Context, in Admin
 	}
 	locked = false
 	h.commandMu.Unlock()
-	view.Delivery = h.awaitMessageResult(in, answered)
+	awaitMessageResult(receipt.answer, answered)
+	view.Delivery = receipt.answer.delivery
 	return view, nil
 }
 
 // awaitMessageResult waits a bounded time for the player's result to a
-// message that was written to its lane, and records an answer on the
-// receipt. A replay during the wait reports the receipt as it stands. The
-// wait does not follow the caller's context: it is short, and stopping early
-// would report a healthy player as unconfirmed.
-func (h *AdminPlaybackControlHandler) awaitMessageResult(in AdminPlaybackCommandInput, answered <-chan struct{}) string {
+// message that was written to its lane and records the outcome on answer. It
+// takes no lock, so a player's answer is reported without queuing behind
+// other sessions' lane writes. The wait does not follow the caller's context:
+// it is short, and stopping early would report a healthy player as
+// unconfirmed.
+func awaitMessageResult(answer *adminPlaybackMessageAnswer, answered <-chan struct{}) {
+	defer close(answer.done)
+	answer.delivery = AdminPlaybackDeliveryAcknowledged
 	timer := time.NewTimer(adminPlaybackMessageResultWait)
 	defer timer.Stop()
 	select {
@@ -300,19 +328,9 @@ func (h *AdminPlaybackControlHandler) awaitMessageResult(in AdminPlaybackCommand
 		select {
 		case <-answered:
 		default:
-			return AdminPlaybackDeliveryDispatched
+			answer.delivery = AdminPlaybackDeliveryDispatched
 		}
 	}
-	h.commandMu.Lock()
-	defer h.commandMu.Unlock()
-	// The ledger can be dropped or trimmed meanwhile; never recreate it.
-	if ledger := h.commandLedgers[in.SessionID]; ledger != nil {
-		if receipt, ok := ledger.receipts[in.CommandID]; ok && receipt.sequence == in.Sequence {
-			receipt.delivery = AdminPlaybackDeliveryAcknowledged
-			ledger.receipts[in.CommandID] = receipt
-		}
-	}
-	return AdminPlaybackDeliveryAcknowledged
 }
 
 // dispatchSequenced sends the command exactly as the frozen v1 handlers do:

@@ -553,3 +553,70 @@ func waitForPendingMessages(t *testing.T, control *AdminPlaybackControlHandler, 
 		}
 	}
 }
+
+// A player's answer is reported at once even while other sessions' commands
+// hold the ledger lock (a lane write can hold it for seconds), so a relayed
+// message is not turned into a no-reply by unrelated traffic.
+func TestAnsweredMessageDoesNotQueueBehindOtherCommands(t *testing.T) {
+	control, _, hub, session := newAdminPlaybackControlTestHandler(t)
+	conn := sequencedLane(t, control, hub, session)
+	message := sequencedInput(session.ID, sequencedCommandA, 1, playback.CommandDisplayMessage)
+	message.Message = "Movie night ends at nine"
+	done := make(chan AdminPlaybackCommandView, 1)
+	go func() {
+		view, err := control.Command(context.Background(), message)
+		if err != nil {
+			t.Error(err)
+		}
+		done <- view
+	}()
+	waitForPendingMessages(t, control, session.ID)
+	env := conn.messages[len(conn.messages)-1].(playback.CommandEnvelope)
+
+	control.commandMu.Lock()
+	answerAsPlayer(t, control, playback.RealtimeResultStatusCompleted)(env)
+	select {
+	case view := <-done:
+		control.commandMu.Unlock()
+		if view.Delivery != deliveryAcknowledged {
+			t.Fatalf("message = %+v", view)
+		}
+	case <-time.After(time.Second):
+		control.commandMu.Unlock()
+		<-done
+		t.Fatal("an answered message waited for the ledger lock")
+	}
+}
+
+// A retry that arrives while the first request still waits for the player
+// reports the player's answer, not the provisional "dispatched".
+func TestReplayDuringTheWaitReportsThePlayersAnswer(t *testing.T) {
+	control, _, hub, session := newAdminPlaybackControlTestHandler(t)
+	conn := sequencedLane(t, control, hub, session)
+	message := sequencedInput(session.ID, sequencedCommandA, 1, playback.CommandDisplayMessage)
+	message.Message = "Movie night ends at nine"
+	first, replay := make(chan AdminPlaybackCommandView, 1), make(chan AdminPlaybackCommandView, 1)
+	send := func(out chan<- AdminPlaybackCommandView) {
+		view, err := control.Command(context.Background(), message)
+		if err != nil {
+			t.Error(err)
+		}
+		out <- view
+	}
+	go send(first)
+	waitForPendingMessages(t, control, session.ID)
+	env := conn.messages[len(conn.messages)-1].(playback.CommandEnvelope)
+
+	go send(replay)
+	select {
+	case view := <-replay:
+		t.Fatalf("replay answered %+v before the player did", view)
+	case <-time.After(100 * time.Millisecond):
+	}
+	answerAsPlayer(t, control, playback.RealtimeResultStatusCompleted)(env)
+	for name, out := range map[string]chan AdminPlaybackCommandView{"first": first, "replay": replay} {
+		if view := <-out; view.Delivery != deliveryAcknowledged {
+			t.Fatalf("%s = %+v", name, view)
+		}
+	}
+}
