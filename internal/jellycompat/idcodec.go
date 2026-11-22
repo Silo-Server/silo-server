@@ -157,6 +157,38 @@ func jellyfinGUID(id uuid.UUID) string {
 	return hex.EncodeToString(id[:])
 }
 
+// canonicalCompatID spells a compat id in the dashed form every id had before
+// media-source ids dropped their dashes. Keys that compare ids as text (the
+// negotiation variant and the negotiation advisory locks) use it, so a session
+// negotiated before an upgrade still matches one negotiated after it, and
+// processes on either version take the same lock. A value that is not a UUID
+// comes back unchanged.
+func canonicalCompatID(id string) string {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return id
+	}
+	return parsed.String()
+}
+
+// compatIDSpellings lists the text forms a stored compat id can take: the value
+// itself, its dashed form, and its compact form. Durable rows hold ids as text,
+// so a query that must also match rows written before the format change
+// compares against all of them.
+func compatIDSpellings(id string) []string {
+	spellings := []string{id}
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return spellings
+	}
+	for _, spelling := range []string{parsed.String(), jellyfinGUID(parsed)} {
+		if spelling != id {
+			spellings = append(spellings, spelling)
+		}
+	}
+	return spellings
+}
+
 // DecodeStringID decodes a compat UUID back to the original native string ID.
 //
 // A reversibly packed content_id is decoded first (and re-packed to confirm the
