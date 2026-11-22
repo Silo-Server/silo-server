@@ -114,13 +114,15 @@ function MarkerHistoryRow({ row }: { row: MarkerEditAuditEntry }) {
     row.media_title ||
     fileName(row.file_path) ||
     t("web.admin.markers.history.fileFallback", { id: String(row.media_file_id) });
+  // The label as text, for the tooltip of a row with a type.
   const itemLabel = row.item_type
     ? t("web.admin.markers.history.itemWithType", { title, type: row.item_type })
-    : title;
+    : undefined;
   // The title on its own element takes its own direction without turning the
-  // translated words around it.
+  // translated words around it. Without a type the title is the whole label, so
+  // it carries the tooltip, which then reads in the title's direction too.
   const titleNode = (
-    <span dir="auto" className="truncate">
+    <span dir="auto" className="truncate" title={row.item_type ? undefined : title}>
       {title}
     </span>
   );

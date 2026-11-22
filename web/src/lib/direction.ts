@@ -67,8 +67,8 @@ export function mixesDirections(text: string): boolean {
  * direction (a letter, a right-to-left digit or punctuation mark, or a
  * directional mark) as `dir="auto"` does; other digits, spaces and punctuation
  * don't count. For text the browser can't judge itself, such as an empty
- * field's placeholder, which `dir="auto"` ignores, or a name inside a
- * translated template.
+ * field's placeholder, which `dir="auto"` ignores. A name inside translated
+ * text takes `dir="auto"` on its own element instead (src/i18n/README.md).
  */
 export function startsRightToLeft(text: string): boolean {
   const strong = STRONG_OR_MARK.exec(text)?.[0];
