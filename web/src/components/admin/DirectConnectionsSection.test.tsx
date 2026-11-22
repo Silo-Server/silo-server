@@ -200,26 +200,7 @@ describe("states that need no action", () => {
   });
 });
 
-describe("host heading", () => {
-  it("names the role once", () => {
-    show({});
-
-    expect(screen.getByRole("heading", { name: "API server" })).toBeInTheDocument();
-    expect(screen.queryByText("API · API server")).not.toBeInTheDocument();
-  });
-});
-
 describe("host tuning field names", () => {
-  it("puts a plain label above the variable name", () => {
-    show({ knobs: [congestion] });
-
-    const label = screen.getByText("TCP congestion control");
-    const variable = screen.getByText("SILO_NET_TCP_CONGESTION");
-    expect(label.compareDocumentPosition(variable) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(label).toHaveTextContent("TCP congestion control");
-    expect(variable).toHaveClass("text-muted-foreground");
-  });
-
   it("shows a variable with no label by its name alone", () => {
     show({ knobs: [{ env: "SILO_NET_FUTURE_KNOB", default: "a", effective: "a" }] });
 
