@@ -230,14 +230,20 @@ it("keeps each row's unit when a row above it is removed", async () => {
 
 it("keeps a typed Max runtime as typed, and shows a stored one rounded", async () => {
   const writes = renderScheduleEditor([
-    { type: "interval", interval_ms: 120_000, max_runtime_ms: 74_074 },
+    { type: "interval", interval_ms: 120_000, max_runtime_ms: 74_075 },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "Edit Schedule" }));
   const box = (await screen.findByPlaceholderText("None")) as HTMLInputElement;
-  expect(box.value).toBe("1.23457");
+  expect(box.value).toBe("1.23458");
 
   // A negative limit is saved as 0 (no limit), so the box shows 0.
   fireEvent.change(box, { target: { value: "-5" } });
+  expect(box.value).toBe("0");
+
+  // So is a positive one under half a millisecond, once the admin leaves the box.
+  fireEvent.change(box, { target: { value: "0.000008" } });
+  expect(box.value).toBe("0.000008");
+  fireEvent.blur(box);
   expect(box.value).toBe("0");
 
   const typed = "1.23456";

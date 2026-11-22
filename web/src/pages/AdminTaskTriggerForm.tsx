@@ -250,6 +250,14 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
                 setMaxRuntimeDraft({ ms, text: Number(raw) < 0 ? "0" : raw });
                 onChange({ ...trigger, max_runtime_ms: ms });
               }}
+              onBlur={() => {
+                // An entry under half a millisecond, such as "0.000008" or "-0",
+                // saves as 0 (no limit). Show that 0 once the admin leaves the box,
+                // not while they type, so "0.00001" can still be entered.
+                if (maxRuntimeDraft.ms === 0 && maxRuntimeDraft.text !== "0") {
+                  setMaxRuntimeDraft({ ms: 0, text: "0" });
+                }
+              }}
             />
             <span className="text-muted-foreground text-xs">
               {t("web.admin.tasks.detail.maxRuntimeUnit")}
