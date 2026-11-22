@@ -85,9 +85,7 @@ export function episodeSubtitle(
   seasonNumber: number,
   episodeNumber: number,
 ): string {
-  const date = labelsEpisodesByAirDate(episodeLabels)
-    ? parseCalendarDate(airDate)
-    : null;
+  const date = labelsEpisodesByAirDate(episodeLabels) ? parseCalendarDate(airDate) : null;
   return date
     ? date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     : `S${seasonNumber} E${episodeNumber}`;
