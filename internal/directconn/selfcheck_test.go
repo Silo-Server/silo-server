@@ -488,6 +488,39 @@ func retryUnchangedValues(t *testing.T) {
 	}
 }
 
+// A settings change whose event this replica missed reaches the snapshot once the
+// last settings read is settingsRecheck old, and not before.
+func TestStatusRereadsSettingsAfterMissedEvent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		svc, store, probes := newRetryService(t)
+		first, err := svc.Status(t.Context(), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Another replica saves a change; no SettingsChanged call reaches this one.
+		store.set("direct_connections.stun_servers", "second.example:3478")
+		if _, err := svc.Status(t.Context(), false); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		if n, _ := probes(); n != 1 {
+			t.Fatalf("a recent read was repeated: probes=%d", n)
+		}
+		time.Sleep(settingsRecheck) //nolint:forbidigo // Fake clock inside the synctest bubble: it ages the last read, no wall time passes.
+		got, err := svc.Status(t.Context(), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.CheckedAt.Equal(first.CheckedAt) {
+			t.Fatalf("status waited for the reread: got the check from %s, want the snapshot from %s", got.CheckedAt, first.CheckedAt)
+		}
+		synctest.Wait()
+		if n, servers := probes(); n != 2 || servers != "second.example:3478" {
+			t.Fatalf("after the recheck: probes=%d servers=%q", n, servers)
+		}
+	})
+}
+
 // stalledSettings fails reads like failingSettings, and once block is set it
 // blocks every read until release closes or the read's context ends. entered
 // receives one value per read that blocks.

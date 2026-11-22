@@ -50,8 +50,9 @@ type Service struct {
 	running      *checkRun
 	last         *checkRun
 	followUp     bool
-	readPending  bool // a settings read failed; the next Status reads again
-	rereading    bool // a background reread runs; Status starts no second
+	readPending  bool      // a settings read failed; the next Status reads again
+	rereading    bool      // a background reread runs; Status starts no second
+	readAt       time.Time // last successful settings read; Status rereads after settingsRecheck
 	listeners    []Listener
 	logged       map[string]logKey
 
@@ -150,6 +151,7 @@ func (s *Service) readAndStart(ctx context.Context, refresh bool) (*checkRun, er
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.readAt = time.Now()
 	if s.readFailures.Load() == failuresBefore {
 		s.readPending = false
 	}
@@ -183,7 +185,9 @@ func (s *Service) startLocked(values settings) *checkRun {
 // at a time, on the service's lifetime context, bounded by checkTimeout). The
 // reread starts a check when the values changed; a later call returns it once it
 // completes. If the reread fails, the snapshot stands and the next call tries
-// again.
+// again. The same background reread runs once the last successful settings read
+// is settingsRecheck old, so a missed settings-change event cannot hold the
+// snapshot on old settings indefinitely.
 func (s *Service) Status(ctx context.Context, refresh bool) (Status, error) {
 	if err := ctx.Err(); err != nil {
 		return Status{}, err
@@ -195,7 +199,8 @@ func (s *Service) Status(ctx context.Context, refresh bool) (Status, error) {
 		run = s.running
 	}
 	pending := s.readPending
-	reread := snapshot && pending && !s.rereading
+	aged := time.Since(s.readAt) >= settingsRecheck
+	reread := snapshot && (pending || aged) && !s.rereading
 	if reread {
 		s.rereading = true
 	}
@@ -246,6 +251,10 @@ func (s *Service) rereadSettings() {
 }
 
 const checkTimeout = 15 * time.Second
+
+// settingsRecheck bounds how long a missed settings-change event can leave the
+// snapshot on old settings while someone reads the status.
+const settingsRecheck = time.Minute
 
 func (s *Service) run(run *checkRun) {
 	ctx, cancel := context.WithTimeout(s.ctx, checkTimeout)

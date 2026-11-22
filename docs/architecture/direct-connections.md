@@ -34,7 +34,10 @@ completed snapshot it returns that snapshot at once, without waiting for the rer
 or the new check. The reread runs in the background on the service's lifetime
 context under the same fifteen seconds, one at a time; the following read returns
 the check once it completes. If the reread fails, the snapshot stands and the next
-read tries again. A refresh starts a check even when the values are unchanged, or
+read tries again. The same background reread runs once the last successful settings
+read is a minute old, because Redis drops a settings-change event published while a
+subscriber reconnects. A missed change therefore reaches the snapshot through the
+first status read after that minute instead of waiting for a refresh or a restart. A refresh starts a check even when the values are unchanged, or
 joins the running one, and returns the read error if its own read fails. A refresh
 that joins a running check reads settings first only after a failed read, and
 schedules a follow-up check when the values differ from the running check's.
