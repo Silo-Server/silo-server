@@ -271,9 +271,8 @@ root that is itself a link, so a recorded root replaced by a link to another
 directory is a different location and still needs the managed transition.
 The reconcile task certifies the same row after a manual sweep, and the storage
 sweep scopes its cursor to it. Once recorded, the admin settings API rejects
-any write that would resolve to a different identity with `409` (problem type
-`conflict` in `/api/v2`, error code `artwork_storage_locked` in frozen
-`/api/v1`): a different backend, `artwork.local_path` for a
+any write that would resolve to a different identity with `409 conflict`: a
+different backend, `artwork.local_path` for a
 local store, or the public endpoint, bucket, or key prefix for an S3 store. The
 saved settings can already name another location than the recorded one, when a
 location was saved without a restart and the running store then made the first

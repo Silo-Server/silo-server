@@ -281,6 +281,18 @@
       "value": "Bu oturum açma kodunun süresi doldu. Baştan başlayın."
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "Bu hesap, doğrudan bağlantılar için cihaz sınırına ulaştı."
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "Bu bağlantı anahtarını zaten başka bir cihaz kullanıyor. Tekrar deneyin."
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -339,6 +351,12 @@
     {
       "type": 0,
       "value": "Ortam tarafından ayarlanır. Orada değiştirip ilgili hizmeti yeniden başlatın."
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "Bu değer eksik."
     }
   ],
   "error.field.out_of_range": [
@@ -24015,6 +24033,12 @@
       "value": "Konuşmayı metne dönüştürme sağlayıcısı geçici olarak kullanılamıyor. Daha sonra tekrar deneyin."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı sağlayıcısında kullanılabilir kredi yok veya bir kullanım ya da harcama sınırına ulaşıldı. Sağlayıcı bakiyesini ve sınırlarını ya da ChatGPT kullanım ayarlarını kontrol edin."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24025,6 +24049,80 @@
     {
       "type": 0,
       "value": "Metin yapay zekâsı bağlantısı başarısız oldu. Modeli, akıl yürütme düzeyini, hizmet katmanını, hesap bağlantısını ve sağlayıcı kullanım sınırlarını kontrol edin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı erişimi reddedildi. API anahtarının veya ChatGPT hesabının bu modeli kullanma izni olup olmadığını kontrol edin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı uç noktası veya modeli kullanılamıyor. Sağlayıcının temel URL’sini ve modeli kontrol edin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Bağlı ChatGPT hesabı plan kullanımını paylaşamıyor. ChatGPT kullanım ayarlarını kontrol edin veya başka bir hesap bağlayın."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı sağlayıcısı istekleri hız sınırlamasına tabi tutuyor. Daha sonra tekrar deneyin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı sağlayıcısı kontrol isteğini reddetti. Modeli, akıl yürütme düzeyini ve hesabın kullanım ayarlarını kontrol edin. Sağlayıcının hata mesajı sunucu günlüğünde yer alıyor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı sağlayıcısı kontrol isteğini reddetti (durum: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Modeli, akıl yürütme düzeyini ve hizmet katmanını kontrol edin. Sağlayıcının hata mesajı sunucu günlüğünde yer alıyor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı bağlantı kontrolü zaman aşımına uğradı. Sağlayıcının erişilebilir olup olmadığını kontrol edip tekrar deneyin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı sağlayıcısı kimlik bilgilerini reddetti. Sağlayıcının API anahtarını değiştirin veya ChatGPT ile yeniden oturum açın."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı sağlayıcısı geçici olarak kullanılamıyor. Daha sonra tekrar deneyin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo, metin yapay zekâsı sağlayıcısına ulaşamadı. Sağlayıcının temel URL’sini ve bu sunucunun sağlayıcıya bağlanabildiğini kontrol edin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Metin modeli Silo’nun kullanamayacağı bir yanıt döndürdü. Başka bir model seçin."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -24113,6 +24211,12 @@
     {
       "type": 0,
       "value": "Sınırı kaldır"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "Doğrudan"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -45644,6 +45748,96 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Taramalar ve meta veri yenilemeleri çalışırken burada görünür."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Etkin tarama veya yenileme yok"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Tümü ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Kuyruğu gizle"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " diğer kitaplık"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " diğer kitaplık"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Meta veri yenilemeleri"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Meta veriler yenileniyor"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Kuyruğu görüntüle"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.confidence.high": [
     {
       "type": 0,
@@ -46092,6 +46286,30 @@
       "value": "Boş kök temizliğini onayla"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "İncele"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Meta veri eşleştirici kuyruğunda bekleyen öğe yok."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Kaydedilmiş atlanan kök yok."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Kaydedilmiş geçersiz harici kimlik yok."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -46128,6 +46346,18 @@
     {
       "type": 0,
       "value": " kitaplığını düzenle"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Düzenle"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Henüz yapılandırılmış kitaplık yok."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -46180,6 +46410,12 @@
       "value": "Yolları gizle"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Boşta"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -46214,6 +46450,12 @@
       "value": "Kısmi tarama"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Eksik meta verileri doldur veya tümünü değiştir"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -46226,6 +46468,12 @@
       "value": "Köke erişilemiyor"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Tara"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -46236,6 +46484,12 @@
     {
       "type": 0,
       "value": "Yolları göster"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Durdur"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -46254,6 +46508,22 @@
     {
       "type": 0,
       "value": "Bağlama noktalarını doğrula"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Tüm kitaplık klasörlerine erişilebildiğini denetle"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kitaplığının etkin taramalarını görüntüle"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -46357,7 +46627,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Kitaplık köklerini ve taramalarını yönetin. Katalog içe/dışa aktarma artık Bakım altında."
+      "value": "Medya klasörlerini yönetin, taramaları izleyin ve eşleştirme sorunlarını çözün."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -46832,6 +47102,56 @@
       "value": "Geçersiz harici kimlikler"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktif"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktif"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Tarama etkinliği"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Katalog durumu"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Kitaplıklar"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -47274,6 +47594,24 @@
     {
       "type": 0,
       "value": "Yok sayılan öğelerde başlığa, kitaplığa veya türe göre ara…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Belirsiz"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Beklemede"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Eşleşmedi"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -63195,6 +63533,612 @@
     {
       "type": 0,
       "value": "Çevrimiçi işaretçileri eşitle"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "Algoritma: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "istenen: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; etkin: "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "İzin verilenler: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "Tıkanıklık denetimi: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "Hesap"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "Bu yolda başlangıç"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "Cihaz"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "Doğrudan bağlı cihaz yok."
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "Eş uç noktası"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "Bağlı cihazlar"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 1,
+      "value": "port"
+    },
+    {
+      "type": 0,
+      "value": " numaralı bağlantı noktasına"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "Varsayılan: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "Bu sunucunun doğrudan bağlantılara hazır olup olmadığını kontrol edin."
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "Uygulanan: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "Doğrudan bağlantıları etkinleştir"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN yetkisi"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "Doğrudan bağlantı motoru"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NAT hairpin"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "NAT eşlemesi"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "PMTU yedek yöntemi"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "Erişilebilirlik"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "Soket alma arabelleği"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "Soket gönderme arabelleği"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "Ana makine ince ayarları"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "ACK seyreltme"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "BBR kayıp politikası"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "UDP segmentasyon boşaltma"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "İstemci alma penceresi"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "Doğrudan bağlantı UDP bağlantı noktası"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "TCP tıkanıklık denetimi"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "TCP gönderme arabelleği"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "Son kontrol: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "Proxy"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "Dinleyiciler"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "Gözlenen genel adres: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "Yönlendiricinin UPnP, NAT-PMP veya PCP desteğini kontrol eder."
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "Bağlantı noktası eşleme"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "Hazırlık kontrolleri doğrudan oynatmayı başlatmaz."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "Yönetici tarafından devre dışı bırakıldı"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "Devre dışı"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "Doğrudan bağlantı motoru başlatılamadı"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "Arabellek büyütülemedi"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "Yönlendirici bağlantı noktası eşlemeyi desteklemiyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "Arabellek istenenden küçük"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "Ağ ayarı yardımcısı kullanılamıyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "Geçersiz değer; kapalı olarak uygulanıyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "Sistem bu ayarı uygulayamadı veya okuyamadı"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "Bu çekirdek tarafından desteklenmiyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "Ana makine arabellek sınırına ulaşıldı"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "Ana makine arabellek sınırları okunamadı"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "Genel adres hedefe göre değişiyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBR kullanılamıyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR yüklü değil veya izin verilmiyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "Birden fazla API sunucusu çalışıyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN yetkisi bırakıldı"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN yetkisi eksik"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "Yönlendirici bulunamadı"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN yetkisi eksik"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "İzin reddedildi"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "Kullanılamıyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "Ölçülmedi"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "Artırma gerekmiyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "Ana makine politikası başka bir algoritma seçti"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "Kontrol başarısız"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "Diğer API sunucuları kontrol edilemedi"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "Doğrudan bağlantıları başka bir API sunucusu barındırıyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "Doğrudan bağlantıları barındıran sunucu olmayı bekliyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "Doğrudan bağlantı durumu kullanılamıyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "UDP bağlantı noktası açılamadı"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "UDP bağlantı noktası geçersiz"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "Bu platformda desteklenmiyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "İstenen: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "İstenen: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; verilen: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "Kontrolü çalıştır"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "Gönderme arabelleği: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "Sınırlı"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "Düşük performanslı"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "Yedek yöntem"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "Gerekmiyor"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "Kapalı"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "Açık"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "Bilinmiyor"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "En fazla sekiz host:port girdisinden oluşan, virgülle ayrılmış bir liste. Varsayılanları kullanmak için boş bırakın."
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "STUN sunucuları"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "Doğrudan bağlantılar"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "Cihazların bu sunucuya doğrudan bir UDP yolu üzerinden erişmesine izin verin. UDP bağlantı noktası "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " değişkeninden gelir ve burada salt okunurdur."
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -100812,6 +101756,20 @@
       "value": "series"
     }
   ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -127999,6 +128957,12 @@
     {
       "type": 0,
       "value": "Profilin bildirimlerini geldikçe okuma ve okundu olarak işaretleme."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Profilde şu anda neyin oynatıldığını görme; anahtar bir profil belirtmiyorsa hesaptaki tüm profillerde: içerik, konum, duraklatılma durumu, cihaz ve oynatma yöntemi. Oynatma denetimi veya ağ ayrıntıları içermez."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

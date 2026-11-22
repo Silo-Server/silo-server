@@ -30,10 +30,13 @@ export function RedisGroup({
   form,
   restartKeys,
   secrets,
+  savesAndDiscards,
 }: {
   form: ReturnType<typeof useSettingsForm>;
   restartKeys: RestartKeyMatcher;
   secrets: RedisUrlEditors;
+  /** Counts the page's completed saves and its discards. */
+  savesAndDiscards: number;
 }) {
   const t = useT();
   const checkConnection = useCheckAdminSettingsConnection();
@@ -43,17 +46,23 @@ export function RedisGroup({
   const configured = form.sensitiveConfigured.includes("redis.url");
   const [enabledOverride, setEnabledOverride] = useState<boolean | null>(null);
   // Saving or discarding clears the toggle override so it follows the stored
-  // URL again. Adjusting during render (rather than in an effect) keeps the
-  // override alive while the admin is still editing.
-  const [lastDirtyCount, setLastDirtyCount] = useState(form.dirtyCount);
-  if (lastDirtyCount !== form.dirtyCount) {
-    setLastDirtyCount(form.dirtyCount);
-    if (form.dirtyCount === 0) setEnabledOverride(null);
+  // URL again. Running out of unsaved changes is not the same: erasing what
+  // was typed into a field with nothing saved takes back its edit while the
+  // admin is still working. Adjusting during render (rather than in an effect)
+  // keeps the override alive while the admin is still editing.
+  const [lastSavesAndDiscards, setLastSavesAndDiscards] = useState(savesAndDiscards);
+  if (lastSavesAndDiscards !== savesAndDiscards) {
+    setLastSavesAndDiscards(savesAndDiscards);
+    setEnabledOverride(null);
   }
   // Once REDIS_URL sets the connection the switch is locked, so a choice
   // made before it took over no longer applies.
   if (urlEnv && enabledOverride !== null) setEnabledOverride(null);
-  const enabled = enabledOverride ?? (redisUrl.trim() !== "" || configured);
+  // A staged Redis edit keeps the fields in view, so a URL removed elsewhere
+  // can't hide a number that would then be dropped on save.
+  const enabled =
+    enabledOverride ??
+    (redisUrl.trim() !== "" || configured || REDIS_KEYS.some((key) => form.isDirty(key)));
   // URL edits go through the page's editors, which drop a keystroke that
   // arrives while a save is in flight.
   const urlDraft = { ...form, setValue: secrets.setSecret, resetValue: secrets.keepSaved };
@@ -93,20 +102,26 @@ export function RedisGroup({
           // while a save is in flight, like the URL field below.
           if (secrets.disabled) return;
           if (value === "true") {
-            setEnabledOverride(true);
+            // With a URL saved, taking back the switch-off leaves nothing
+            // staged, so the switch follows what is saved again. With none
+            // saved, it stays on so a URL can be typed.
+            setEnabledOverride(configured ? null : true);
             // Takes back a staged switch-off, which cleared the number too.
             form.resetValue("redis.url");
             form.resetValue("redis.db");
             return;
           }
-          setEnabledOverride(false);
           // With no saved URL there is nothing to switch off: drop what was
-          // typed, since the fields that showed it are about to hide.
+          // typed, since the fields that showed it are about to hide. The
+          // switch then follows what is saved again, so a URL saved elsewhere
+          // later still shows.
           if (!configured) {
+            setEnabledOverride(null);
             form.resetValue("redis.url");
             form.resetValue("redis.db");
             return;
           }
+          setEnabledOverride(false);
           stageRedisUrl(form, "");
         }}
         disabled={secrets.disabled}
