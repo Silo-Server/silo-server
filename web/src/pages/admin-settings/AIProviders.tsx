@@ -362,7 +362,8 @@ function AddAIProviderSteps({
           <p className="text-xs font-semibold tracking-wide text-[var(--settings-accent)] uppercase">
             {t("web.admin.settings.ai.providers.step", { current: "2", total: "2" })}
           </p>
-          <DialogTitle className="flex flex-wrap items-center gap-2">
+          {/* A flex title ignores the header's text-center, so center it on phones. */}
+          <DialogTitle className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
             {type.label}
             <CapabilityChips capabilities={type.capabilities} />
           </DialogTitle>

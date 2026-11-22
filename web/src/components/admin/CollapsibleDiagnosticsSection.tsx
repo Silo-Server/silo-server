@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 // Glyphs that stand in for the count; their meaning is in sr-only text.
@@ -45,7 +45,7 @@ export function CollapsibleDiagnosticsSection({
         <span className="sr-only">{t("web.admin.common.diagnosticsSection.countNotLoaded")}</span>
       </>
     ) : (
-      count
+      numberText(count)
     );
   return (
     <section className="surface-panel-subtle overflow-hidden rounded-2xl">

@@ -478,7 +478,7 @@ function GroupRows({
           <th scope="rowgroup" className="pt-1.5 pb-0.5 text-start text-[0.6875rem] font-bold">
             <div className="flex min-w-0 items-center gap-1.5">
               <StatusIcon state={group.state} />
-              <span className="min-w-0 truncate" title={group.name || undefined}>
+              <span dir="auto" className="min-w-0 truncate" title={group.name || undefined}>
                 {group.label}
               </span>
             </div>

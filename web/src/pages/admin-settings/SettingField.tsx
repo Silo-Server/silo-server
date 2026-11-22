@@ -221,7 +221,7 @@ interface SettingFieldProps {
   restartRequired?: boolean;
   /** See {@link SettingFieldRowProps.managedByEnv}; disables the control. */
   managedByEnv?: string;
-  /** Direction of a `text` input. Pass `"ltr"` for a path or URL, which reads left to right in every language. */
+  /** Direction of a `text` input. Pass `"ltr"` for a path, URL, or network address, which reads left to right in every language. */
   dir?: "ltr";
   className?: string;
 }

@@ -195,7 +195,15 @@ function CardBody({
       <span id={sentenceId} className="text-foreground/75 text-[0.84375rem] leading-normal">
         {kindSentence(kind)}
       </span>
-      <span id={noteId} className="text-muted-foreground mt-1.5 text-[0.78125rem] leading-normal">
+      {/* Not text-muted-foreground: high contrast pins that brighter than the /75 sentence.
+          A note sits on a card faded to 60%, so it takes the full foreground to stay readable. */}
+      <span
+        id={noteId}
+        className={cn(
+          note ? "text-foreground" : "text-foreground/65",
+          "mt-1.5 text-[0.78125rem] leading-normal",
+        )}
+      >
         {note ?? (
           <>
             <b className="text-foreground/70 font-medium">
@@ -246,7 +254,8 @@ function TypeCard({
       />
       <ChevronRight
         aria-hidden
-        className="text-muted-foreground absolute end-[18px] bottom-5 size-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 max-lg:opacity-100"
+        // The same tone as the note.
+        className="text-foreground/65 absolute end-[18px] bottom-5 size-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 max-lg:opacity-100"
       />
     </Link>
   );

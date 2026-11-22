@@ -14809,10 +14809,18 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη"
+            }
+          ]
+        },
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -14828,9 +14836,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14979,10 +14985,18 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση"
+            }
+          ]
+        },
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -14998,9 +15012,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -15709,14 +15721,14 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Επιλέχθηκε επίσης "
+              "value": "Επιλέχθηκε επίσης ό,τι απαιτείται από την επιλογή σας: "
             },
             {
               "type": 1,
@@ -15724,7 +15736,23 @@
             },
             {
               "type": 0,
-              "value": ", που απαιτείται από ό,τι επιλέξατε."
+              "value": "."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Επιλέχθηκαν επίσης όσα απαιτούνται από την επιλογή σας: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "."
             }
           ]
         },
@@ -15732,7 +15760,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Επιλέχθηκαν επίσης "
+              "value": "Επιλέχθηκαν επίσης όσα απαιτούνται από την επιλογή σας: "
             },
             {
               "type": 1,
@@ -15740,25 +15768,23 @@
             },
             {
               "type": 0,
-              "value": ", που απαιτούνται από ό,τι επιλέξατε."
+              "value": "."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Αποεπιλέχθηκε επίσης "
+              "value": "Αποεπιλέχθηκε επίσης ό,τι εξαρτάται από όσα αποεπιλέξατε: "
             },
             {
               "type": 1,
@@ -15766,7 +15792,23 @@
             },
             {
               "type": 0,
-              "value": ", που απαιτεί ό,τι αποεπιλέξατε."
+              "value": "."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Αποεπιλέχθηκαν επίσης όσα εξαρτώνται από όσα αποεπιλέξατε: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "."
             }
           ]
         },
@@ -15774,7 +15816,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Αποεπιλέχθηκαν επίσης "
+              "value": "Αποεπιλέχθηκαν επίσης όσα εξαρτώνται από όσα αποεπιλέξατε: "
             },
             {
               "type": 1,
@@ -15782,13 +15824,11 @@
             },
             {
               "type": 0,
-              "value": ", που απαιτούν ό,τι αποεπιλέξατε."
+              "value": "."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -20471,14 +20511,22 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "δεν ήταν δυνατή η ανάγνωση των δεδομένων του"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "δεν ήταν δυνατή η ανάγνωση των δεδομένων τους"
             }
           ]
         },
@@ -20490,9 +20538,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -20693,6 +20739,346 @@
     {
       "type": 0,
       "value": "Αναφέρονται στη βάση δεδομένων αλλά δεν βρέθηκαν στον χώρο αποθήκευσης. Οι επαναφορές τα παραλείπουν."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " στοιχείο επωνυμίας"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " στοιχεία επωνυμίας"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " φόντο συλλογής"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " φόντα συλλογών"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αφίσα συλλογής"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αφίσες συλλογών"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " υπότιτλος από λήψη"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " υπότιτλοι από λήψη"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αφίσα βιβλιοθήκης"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αφίσες βιβλιοθηκών"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " εικόνα επικάλυψης"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " εικόνες επικάλυψης"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αφίσα προσωπικής συλλογής"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αφίσες προσωπικών συλλογών"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " εικόνα προφίλ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " εικόνες προφίλ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αρχείο εικαστικών που έχει αποσταλεί"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αρχεία εικαστικών που έχουν αποσταλεί"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " υπότιτλος που έχει αποσταλεί"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " υπότιτλοι που έχουν αποσταλεί"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -20943,14 +21329,26 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "δεν ήταν δυνατή η ανάγνωση των δεδομένων του: "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "δεν ήταν δυνατή η ανάγνωση των δεδομένων τους: "
             },
             {
               "type": 1,
@@ -20970,9 +21368,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -21125,14 +21521,22 @@
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "τα δεδομένα του είναι πολύ μεγάλα για το σύνολο επαναφοράς"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "τα δεδομένα τους είναι πολύ μεγάλα για το σύνολο επαναφοράς"
             }
           ]
         },
@@ -21144,9 +21548,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -45942,6 +46344,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Οι σαρώσεις και οι ανανεώσεις μεταδεδομένων εμφανίζονται εδώ όσο εκτελούνται."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Δεν υπάρχουν ενεργές σαρώσεις ή ανανεώσεις"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Όλα ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Απόκρυψη ουράς"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ακόμη βιβλιοθήκη"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ακόμη βιβλιοθήκες"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Ανανεώσεις μεταδεδομένων"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Ανανέωση μεταδεδομένων…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Προβολή ουράς"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Υψηλή"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Χαμηλή"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Μέτρια"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -46380,6 +46890,30 @@
       "value": "Επιβεβαίωση εκκαθάρισης κενών ριζικών φακέλων"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Έλεγχος"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Δεν υπάρχουν στοιχεία σε αναμονή στην ουρά αντιστοίχισης μεταδεδομένων."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Δεν έχουν καταγραφεί ριζικοί φάκελοι που παραλείφθηκαν."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Δεν έχουν καταγραφεί παρωχημένα εξωτερικά αναγνωριστικά."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -46416,6 +46950,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Επεξεργασία"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Δεν έχουν ρυθμιστεί ακόμη βιβλιοθήκες."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -46468,6 +47014,12 @@
       "value": "Απόκρυψη διαδρομών"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Σε αδράνεια"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -46502,6 +47054,12 @@
       "value": "Μερική σάρωση"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Συμπλήρωση όσων λείπουν ή αντικατάσταση όλων των μεταδεδομένων"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -46514,6 +47072,12 @@
       "value": "Μη προσβάσιμος ριζικός φάκελος"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Σάρωση"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -46524,6 +47088,12 @@
     {
       "type": 0,
       "value": "Εμφάνιση διαδρομών"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Διακοπή"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -46542,6 +47112,22 @@
     {
       "type": 0,
       "value": "Επαλήθευση προσαρτήσεων"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Έλεγχος ότι όλοι οι φάκελοι της βιβλιοθήκης είναι προσβάσιμοι"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Προβολή ενεργών σαρώσεων της βιβλιοθήκης "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -46645,7 +47231,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Διαχείριση ριζικών φακέλων βιβλιοθηκών και σαρώσεων. Η εισαγωγή/εξαγωγή καταλόγου βρίσκεται πλέον στην ενότητα «Συντήρηση»."
+      "value": "Διαχείριση φακέλων πολυμέσων, παρακολούθηση σαρώσεων και επίλυση προβλημάτων αντιστοίχισης."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -47132,6 +47718,56 @@
       "value": "Παρωχημένα εξωτερικά αναγνωριστικά"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ενεργή"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ενεργές"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Δραστηριότητα σαρώσεων"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Κατάσταση καταλόγου"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Βιβλιοθήκες"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -47574,6 +48210,24 @@
     {
       "type": 0,
       "value": "Αναζήτηση στοιχείων σε παράβλεψη κατά τίτλο, βιβλιοθήκη ή τύπο…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Αμφίσημη αντιστοίχιση"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Σε εκκρεμότητα"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Χωρίς αντιστοίχιση"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -127887,6 +128541,16 @@
       "value": "Επιστροφή στη σελίδα 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Μετάβαση στη σελίδα "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -127977,6 +128641,20 @@
     {
       "type": 0,
       "value": "Σελίδες αιτημάτων για προσθήκη"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Η σελίδα "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " είναι πέρα από το τέλος αυτών των αποτελεσμάτων."
     }
   ],
   "web.requests.toAdd.series": [
@@ -129569,6 +130247,12 @@
     {
       "type": 0,
       "value": "Ανάγνωση των ειδοποιήσεων του προφίλ καθώς φτάνουν και επισήμανσή τους ως αναγνωσμένων."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Προβολή όσων αναπαράγονται αυτή τη στιγμή στο προφίλ ή σε όλα τα προφίλ του λογαριασμού, όταν το κλειδί δεν ορίζει προφίλ: τίτλος, σημείο αναπαραγωγής, κατάσταση παύσης, συσκευή και μέθοδος αναπαραγωγής. Χωρίς έλεγχο της αναπαραγωγής ή στοιχεία δικτύου."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

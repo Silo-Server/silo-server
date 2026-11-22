@@ -16396,22 +16396,22 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Paslēpt tos"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Paslēpt to"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Paslēpt tos"
             }
           ]
         },
@@ -16423,9 +16423,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16610,22 +16608,22 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Rādīt tos"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Rādīt to"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt tos"
             }
           ]
         },
@@ -16637,9 +16635,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17500,26 +17496,10 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Silo izvēlējās arī: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ". Tie ir nepieciešami tam, ko izvēlējāties."
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -17535,6 +17515,22 @@
             }
           ]
         },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Silo izvēlējās arī: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ". Tie ir nepieciešami tam, ko izvēlējāties."
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -17551,33 +17547,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Silo noņēma atlasi arī: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ". Tiem ir nepieciešams tas, kam noņēmāt atlasi."
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -17590,6 +17568,22 @@
             {
               "type": 0,
               "value": ". Tam ir nepieciešams tas, kam noņēmāt atlasi."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Silo noņēma atlasi arī: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ". Tiem ir nepieciešams tas, kam noņēmāt atlasi."
             }
           ]
         },
@@ -17609,9 +17603,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -22996,22 +22988,22 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "neizdevās nolasīt to datus"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "neizdevās nolasīt tā datus"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "neizdevās nolasīt to datus"
             }
           ]
         },
@@ -23023,9 +23015,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -23262,6 +23252,466 @@
     {
       "type": 0,
       "value": "Uz tiem ir atsauces datubāzē, bet krātuvē tie netika atrasti; atjaunošana tos izlaiž."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " zīmola elementi"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " zīmola elements"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " zīmola elementi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekciju fona attēli"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijas fona attēls"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekciju fona attēli"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekciju plakāti"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijas plakāts"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekciju plakāti"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " lejupielādēti subtitru faili"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " lejupielādēts subtitru fails"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " lejupielādēti subtitru faili"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " bibliotēku plakāti"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " bibliotēkas plakāts"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " bibliotēku plakāti"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pārklājuma attēli"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pārklājuma attēls"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pārklājuma attēli"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " personīgo kolekciju plakāti"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " personīgās kolekcijas plakāts"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " personīgo kolekciju plakāti"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profilu avatāri"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profila avatārs"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profilu avatāri"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " augšupielādēti attēlu faili"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " augšupielādēts attēla fails"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " augšupielādēti attēlu faili"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " augšupielādēti subtitru faili"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " augšupielādēts subtitru fails"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " augšupielādēti subtitru faili"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -23616,14 +24066,14 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "neizdevās nolasīt to datus: "
+              "value": "neizdevās nolasīt tā datus: "
             },
             {
               "type": 1,
@@ -23631,11 +24081,11 @@
             }
           ]
         },
-        "one": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "neizdevās nolasīt tā datus: "
+              "value": "neizdevās nolasīt to datus: "
             },
             {
               "type": 1,
@@ -23655,9 +24105,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -23826,22 +24274,22 @@
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "to dati ir pārāk lieli atjaunošanas kopai"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "tā dati ir pārāk lieli atjaunošanas kopai"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "to dati ir pārāk lieli atjaunošanas kopai"
             }
           ]
         },
@@ -23853,9 +24301,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -52124,6 +52570,129 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Šeit tiek rādīta skenēšana un metadatu atsvaidzināšana, kamēr tā notiek."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Nav aktīvu skenēšanu vai atsvaidzināšanu"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Visas ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Slēpt rindu"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ vēl "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " bibliotēkas"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ vēl "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " bibliotēka"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ vēl "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " bibliotēkas"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Metadatu atsvaidzināšana"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Notiek metadatu atsvaidzināšana…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Skatīt rindu"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Augsta"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Zema"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Vidēja"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -52634,6 +53203,30 @@
       "value": "Apstiprināt tukšo sakņu tīrīšanu"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Pārbaudīt"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Metadatu saskaņošanas rindā nav gaidošu vienumu."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Nav reģistrētu izlaisto sakņu."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Nav reģistrētu novecojušu ārējo ID."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -52678,6 +53271,18 @@
     {
       "type": 0,
       "value": "”"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Rediģēt"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Vēl nav konfigurēta neviena bibliotēka."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -52741,6 +53346,12 @@
       "value": "Slēpt ceļus"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Dīkstāvē"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -52775,6 +53386,12 @@
       "value": "Daļēja skenēšana"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Aizpildīt trūkstošos vai aizstāt visus metadatus"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -52787,6 +53404,12 @@
       "value": "Sakne nav sasniedzama"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Skenēt"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -52797,6 +53420,12 @@
     {
       "type": 0,
       "value": "Rādīt ceļus"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Apturēt"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -52815,6 +53444,26 @@
     {
       "type": 0,
       "value": "Pārbaudīt montējumus"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Pārbaudīt, vai visas bibliotēku mapes ir sasniedzamas"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Skatīt bibliotēkas „"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "” aktīvās skenēšanas"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -52918,7 +53567,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Pārvaldiet bibliotēku saknes un skenēšanu. Kataloga importēšana/eksportēšana tagad atrodas sadaļā „Uzturēšana”."
+      "value": "Pārvaldiet multivides mapes, uzraugiet skenēšanu un novērsiet saskaņošanas problēmas."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -53477,6 +54126,67 @@
       "value": "Novecojuši ārējie ID"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktīvi"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktīvs"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktīvi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Skenēšanas aktivitāte"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Kataloga stāvoklis"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Bibliotēkas"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -53959,6 +54669,24 @@
     {
       "type": 0,
       "value": "Meklēt ignorētos vienumus pēc nosaukuma, bibliotēkas vai veida…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Neviennozīmīgs"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Gaida"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Nesaskaņots"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -140470,6 +141198,16 @@
       "value": "Atpakaļ uz 1. lapu"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Pāriet uz lapu "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -140560,6 +141298,20 @@
     {
       "type": 0,
       "value": "Sadaļas „Pieprasīt pievienošanu” lapas"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Lapa "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " ir aiz šo rezultātu beigām."
     }
   ],
   "web.requests.toAdd.series": [
@@ -142305,6 +143057,12 @@
     {
       "type": 0,
       "value": "Lasīt profila paziņojumus, kad tie pienāk, un atzīmēt tos kā izlasītus."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Redzēt, kas pašlaik tiek atskaņots profilā vai, ja atslēgā nav norādīts neviens profils, visos konta profilos: nosaukums, pozīcija, pauzes stāvoklis, ierīce un atskaņošanas metode. Bez atskaņošanas vadības un tīkla informācijas."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

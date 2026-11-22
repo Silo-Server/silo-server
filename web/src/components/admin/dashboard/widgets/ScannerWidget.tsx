@@ -155,7 +155,10 @@ export function ScannerWidget() {
                       key={group.libraryID}
                       className="bg-surface border-border rounded-md border p-2.5"
                     >
-                      <div className="truncate text-[0.8125rem] font-semibold">
+                      <div
+                        dir="auto"
+                        className="w-fit max-w-full truncate text-[0.8125rem] font-semibold"
+                      >
                         {libraryNames.get(group.libraryID) ??
                           t("web.admin.dashboard.widgets.scanner.libraryFallback", {
                             id: group.libraryID,

@@ -29,7 +29,8 @@ import { LibraryPosterSection } from "./LibraryPosterSection";
 import { useLibraryForm } from "./useLibraryForm";
 import type { LibraryFormErrors } from "./useLibraryForm";
 
-type SectionId = "general" | "folders" | "metadata" | "advanced";
+export type LibraryEditorSection = "general" | "folders" | "metadata" | "advanced";
+type SectionId = LibraryEditorSection;
 
 const SECTIONS: Array<{
   id: SectionId;
@@ -73,6 +74,7 @@ export interface LibraryEditorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   library: Library | null;
+  initialSection?: LibraryEditorSection;
   chapterThumbnailsSupported: boolean;
   /** Undefined when the server does not offer seek previews. */
   trickplaySupported?: boolean;
@@ -82,6 +84,7 @@ export function LibraryEditorDialog({
   open,
   onOpenChange,
   library,
+  initialSection = "general",
   chapterThumbnailsSupported,
   trickplaySupported,
 }: LibraryEditorDialogProps) {
@@ -97,8 +100,9 @@ export function LibraryEditorDialog({
         )}
       >
         <LibraryEditorBody
-          key={library?.id ?? "new"}
+          key={`${library?.id ?? "new"}:${initialSection}`}
           library={library}
+          initialSection={initialSection}
           chapterThumbnailsSupported={chapterThumbnailsSupported}
           trickplaySupported={trickplaySupported}
           onClose={() => onOpenChange(false)}
@@ -110,17 +114,19 @@ export function LibraryEditorDialog({
 
 function LibraryEditorBody({
   library,
+  initialSection,
   chapterThumbnailsSupported,
   trickplaySupported,
   onClose,
 }: {
   library: Library | null;
+  initialSection: LibraryEditorSection;
   chapterThumbnailsSupported: boolean;
   trickplaySupported?: boolean;
   onClose: () => void;
 }) {
   const t = useT();
-  const [section, setSection] = useState<SectionId>("general");
+  const [section, setSection] = useState<SectionId>(initialSection);
   const form = useLibraryForm({ library, onClose });
   // Radix needs the orientation as a prop for arrow-key navigation; the layout
   // itself switches at the same breakpoint (Tailwind's sm) through classes.

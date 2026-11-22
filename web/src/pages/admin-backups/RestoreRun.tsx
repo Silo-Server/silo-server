@@ -18,6 +18,7 @@ import type {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
 import { useT, type MessageKey } from "@/i18n";
 import { formatTime } from "@/lib/datetime";
 import { DATA_TYPE_LABELS, dataCountsPhrase, titleList } from "@/lib/profileDataTypes";
@@ -88,13 +89,21 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
         ? t("web.admin.backups.restore.run.restart")
         : null,
   ].filter((detail): detail is string => Boolean(detail));
+  const label = displayLabel(item);
+  const [columnRef, columnOverflows] = useOverflowsInline<HTMLDivElement>(item);
   return (
     <li className="border-border/60 flex items-start gap-3 border-b py-3 last:border-b-0">
       <outcome.Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", outcome.tone)} />
-      <div className="min-w-0 flex-1">
+      {/* Only while a line is still wider than the row after wrapping, such as one holding a
+          long run of joined emoji in a name or a note, does the row clip sideways at its end
+          edge; the words around the run still wrap, and a name's title shows it in full. */}
+      <div ref={columnRef} className={cn("min-w-0 flex-1", columnOverflows && OVERFLOW_CLIP)}>
         <p className="text-sm wrap-anywhere">
           {t("web.admin.backups.restore.run.itemLine", {
-            label: displayLabel(item),
+            // <bdi>, not the isolate characters a string value gets in right-to-left languages:
+            // the line could break after the opening isolate, before a name that can't wrap,
+            // and leave the first line empty.
+            label: <bdi>{label}</bdi>,
             section: t(SECTION_TITLES[item.section]),
             // The status stays whole: no break at its spaces or between its Chinese, Japanese,
             // or Korean characters. One wider than the line still breaks, through
@@ -102,7 +111,13 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
             // the message's "·" at the end of a line.) <bdi> keeps the direction isolation a
             // string value gets in right-to-left languages.
             outcome: <bdi className="break-keep">{nonBreaking(t(outcome.label))}</bdi>,
-            b: (chunks) => <span className="font-medium">{chunks}</span>,
+            // The label is isolated in every language, so a right-to-left name or one with a
+            // direction override can't reorder the " · section · outcome" text after it.
+            b: (chunks) => (
+              <bdi title={label} className="font-medium">
+                {chunks}
+              </bdi>
+            ),
             muted: (chunks) => (
               <span className="text-muted-foreground">{keepSeparatorsWithNext(chunks)}</span>
             ),
@@ -168,19 +183,22 @@ function AccountReport({
                   <span className="min-w-0 wrap-anywhere">
                     {/* The outcome moves to the next line as a unit, so its "·" stays with the
                         word it introduces, and wraps inside itself only when it can't fit on a
-                        line. The gap is the name's margin, left behind at the end of the line. */}
+                        line; a no-break space keeps the "·" with the word then too. The gap is
+                        the name's margin, left behind at the end of the line. */}
                     <span className="me-1.5 font-medium">
                       {/* <bdi> isolates the name's direction. It sits inside the span, so the
                           margin follows the page's direction, not the name's. */}
-                      <bdi>{profile.label}</bdi>
+                      <bdi title={profile.label}>{profile.label}</bdi>
                     </span>
                     <wbr />
                     <span className="text-muted-foreground inline-block">
-                      {t("web.admin.backups.restore.run.profileOutcome", {
-                        outcome: profile.created
-                          ? t("web.admin.backups.restore.outcome.created")
-                          : t(outcome.label),
-                      })}
+                      {keepSeparatorsWithNext(
+                        t("web.admin.backups.restore.run.profileOutcome", {
+                          outcome: profile.created
+                            ? t("web.admin.backups.restore.outcome.created")
+                            : t(outcome.label),
+                        }),
+                      )}
                     </span>
                   </span>
                 </p>
@@ -253,6 +271,13 @@ function downloadReport(job: RestoreJob) {
   anchor.remove();
   URL.revokeObjectURL(url);
 }
+
+/**
+ * The report's actions are never wider than the page: a label too long for
+ * the row wraps inside its button instead of running past the right edge.
+ */
+const RUN_ACTION =
+  "h-auto min-h-9 max-w-full py-1.5 text-start text-balance wrap-anywhere whitespace-normal";
 
 export interface RestoreRunProps {
   job: RestoreJob;
@@ -393,12 +418,12 @@ export function RestoreRun({
 
       <div className="flex flex-wrap gap-2">
         {report ? (
-          <Button variant="outline" onClick={() => downloadReport(job)}>
+          <Button variant="outline" className={RUN_ACTION} onClick={() => downloadReport(job)}>
             <Download data-icon="inline-start" aria-hidden="true" />
             {t("web.admin.backups.restore.run.downloadReport")}
           </Button>
         ) : null}
-        <Button variant="outline" onClick={onChooseAgain}>
+        <Button variant="outline" className={RUN_ACTION} onClick={onChooseAgain}>
           {t("web.admin.backups.restore.run.chooseAgain")}
         </Button>
       </div>

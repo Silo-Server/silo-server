@@ -1378,10 +1378,16 @@ export function WatchPlaybackBar() {
   const subtitle = buildPlaybackSubtitle(t, request, item);
   const displayedTime = scrubValue ?? snapshot?.currentTime ?? 0;
 
+  // Starts where the shell's sidebar ends (`--app-sidebar-offset` is 0 where
+  // none shows), so the bar centres on the content column, like the page's own
+  // floating bars, instead of covering the foot of the sidebar. The offset
+  // snaps when the sidebar collapses or expands; `follows-sidebar-collapse`
+  // (app.css) moves the bar with the sidebar's animation instead. Its centre
+  // moves half the sidebar's travel, hence the 98px.
   return (
     <div
       ref={barRef}
-      className="pointer-events-none fixed inset-x-3 bottom-3 z-40 flex justify-center"
+      className="follows-sidebar-collapse pointer-events-none fixed start-[calc(var(--app-sidebar-offset,0px)+0.75rem)] end-3 bottom-3 z-40 flex justify-center [--sidebar-follow-shift:98px]"
     >
       <div className="glass-dark border-border/70 pointer-events-auto w-full max-w-4xl rounded-2xl border px-4 py-3 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.7)] backdrop-blur-xl">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">

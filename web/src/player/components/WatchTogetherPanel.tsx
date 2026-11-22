@@ -18,6 +18,18 @@ interface WatchTogetherPanelProps {
   onStopPlayback: () => void;
 }
 
+/**
+ * A member's name in its own direction, the part of the row cut short; "(you)"
+ * and the rest of the row keep the page's.
+ */
+function MemberName({ name }: { name: string }) {
+  return (
+    <span dir="auto" className="truncate">
+      {name}
+    </span>
+  );
+}
+
 export function WatchTogetherPanel({
   room,
   connectionState,
@@ -88,12 +100,18 @@ export function WatchTogetherPanel({
               key={`${member.user_id}:${member.profile_id}`}
               className="flex items-center justify-between gap-2"
             >
-              <span className="truncate">
-                {member.is_self
-                  ? t("web.player.watchTogether.selfName", { name: member.display_name })
-                  : member.display_name}
+              <span className="flex overflow-hidden whitespace-pre">
+                {member.is_self ? (
+                  t("web.player.watchTogether.selfName", {
+                    name: <MemberName name={member.display_name} />,
+                  })
+                ) : (
+                  <MemberName name={member.display_name} />
+                )}
               </span>
-              <span className="shrink-0 text-white/60">
+              {/* A long status ("Mise en mémoire tampon") is cut at half the row, so
+                  the name and "(you)" always keep the other half. */}
+              <span className="max-w-1/2 shrink-0 truncate text-white/60">
                 {member.is_buffering
                   ? t("web.player.watchTogether.member.buffering")
                   : member.is_syncing

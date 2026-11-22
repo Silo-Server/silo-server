@@ -22,7 +22,9 @@ import { useT } from "@/i18n";
 import {
   effectiveValue,
   evaluateShowWhen,
+  isSecretField,
   ownValue,
+  rendersMultiline,
   textDirection,
   validateSchemaValues,
   type SchemaOption,
@@ -322,11 +324,11 @@ export function SchemaForm({
     }
 
     const text = String(effectiveValue(field, values) ?? "");
-    const masked = field.control === "PASSWORD" || field.secret;
+    const masked = isSecretField(field);
     const alwaysLeftToRight = masked || pathKeys.includes(field.key);
     const textDir = textDirection(pageDir, text, field.placeholder, alwaysLeftToRight);
 
-    if (field.control === "TEXTAREA" || field.multiline) {
+    if (rendersMultiline(field)) {
       return (
         <textarea
           id={id}

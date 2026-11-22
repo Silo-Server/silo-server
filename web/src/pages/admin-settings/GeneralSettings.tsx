@@ -188,6 +188,7 @@ export default function GeneralSettings() {
             description={t("web.admin.settings.general.network.trustedProxies.description")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="172.16.0.0/12, 203.0.113.7/32"
+            dir="ltr"
             value={form.getValue(TRUSTED_PROXIES_KEY)}
             onChange={(v) => form.setValue(TRUSTED_PROXIES_KEY, v)}
             restartRequired={restartKeys.has(TRUSTED_PROXIES_KEY)}

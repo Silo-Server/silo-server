@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { RefreshCw } from "lucide-react";
 import type { MarkerEditAuditEntry, MarkerSegment } from "@/api/types";
 import { PageHeader } from "@/components/page/PageHeader";
+import { PathText } from "@/components/PathText";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -136,9 +137,19 @@ function MarkerHistoryRow({ row }: { row: MarkerEditAuditEntry }) {
             <span title={itemLabel}>{itemLabel}</span>
           )}
         </div>
-        <div className="text-muted-foreground max-w-[18rem] truncate text-xs">
-          {row.file_path ||
-            t("web.admin.markers.history.mediaFileFallback", { id: String(row.media_file_id) })}
+        {/* A path reads left to right in any language, so a cut one keeps its
+            start; w-fit keeps it on the page's start side, and the tooltip
+            shows the rest. The fallback label follows the page. */}
+        <div
+          dir={row.file_path ? "ltr" : undefined}
+          className="text-muted-foreground w-fit max-w-[18rem] truncate text-xs"
+          title={row.file_path || undefined}
+        >
+          {row.file_path ? (
+            <PathText path={row.file_path} />
+          ) : (
+            t("web.admin.markers.history.mediaFileFallback", { id: String(row.media_file_id) })
+          )}
         </div>
       </TableCell>
       <TableCell>{t(MARKER_LABEL_KEYS[row.segment])}</TableCell>

@@ -8,6 +8,7 @@ import { formatRelativeTime } from "@/lib/date";
 import { SectionError } from "../feedback";
 import { formatLocale } from "@/lib/appLocale";
 import { useT } from "@/i18n";
+import { leadingGraphemes } from "@/lib/text";
 
 /**
  * Connection and 24h sync status for every watch provider.
@@ -153,7 +154,7 @@ function ProviderActivity({ provider }: { provider: WatchProviderStats }) {
  */
 function ProviderMark({ provider }: { provider: WatchProviderStats }) {
   const source = provider.display_name || provider.provider;
-  const initials = source.slice(0, 2).toUpperCase();
+  const initials = leadingGraphemes(source, 2).toUpperCase();
 
   return (
     <span

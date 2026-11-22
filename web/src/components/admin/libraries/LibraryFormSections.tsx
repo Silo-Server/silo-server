@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useLibraryRealtimeMonitoring } from "@/hooks/queries/admin/libraries";
-import { useAppLanguage, useT, type Translate } from "@/i18n";
+import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { extraKindGroupLabel, PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
 import { languageOptions } from "@/player/utils/languageNames";
@@ -443,7 +443,7 @@ function BoxSetFields({ form }: { form: LibraryFormController }) {
                         : "text-muted-foreground hover:text-foreground",
                     )}
                   >
-                    {count}
+                    {numberText(count)}
                   </button>
                 );
               })}

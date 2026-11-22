@@ -12,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import type { FileVersion, ItemDetail, ItemMatchSearchRequest, MatchCandidate } from "@/api/types";
 import MediaLocations from "@/components/MediaLocations";
 import { ItemLibraryPicker } from "@/components/ItemLibraryPicker";
+import { PathText } from "@/components/PathText";
 import {
   useApplyItemMatch,
   useItemFiles,
@@ -653,11 +654,16 @@ function FolderPathsList({ paths }: { paths: string[] }) {
               {t("web.item.match.rootPath")}
             </div>
             <div className="flex items-center gap-2">
-              <span
-                className="text-muted-foreground min-w-0 flex-1 truncate font-mono text-xs"
-                title={folderData.rootPath}
-              >
-                {folderData.rootPath}
+              {/* The outer span takes the free space so the button stays at the end.
+                  The path inside reads left to right in any language, so a cut one
+                  keeps its start, and w-fit keeps it on the page's start side. */}
+              <span className="min-w-0 flex-1" title={folderData.rootPath}>
+                <span
+                  dir="ltr"
+                  className="text-muted-foreground block w-fit max-w-full truncate font-mono text-xs"
+                >
+                  <PathText path={folderData.rootPath} />
+                </span>
               </span>
               <Button
                 type="button"
@@ -684,11 +690,16 @@ function FolderPathsList({ paths }: { paths: string[] }) {
           {folderData.folders.map(({ fullPath, displayName }) => (
             <div key={fullPath} className="group flex items-center gap-2 px-3 py-2">
               <Folder className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-              <span
-                className="min-w-0 flex-1 truncate font-mono text-xs font-medium"
-                title={fullPath}
-              >
-                {displayName}
+              {/* The outer span takes the free space so the button stays at the end.
+                  The name inside keeps its start when cut, in either script, and
+                  w-fit keeps a short one on the page's start side. */}
+              <span className="min-w-0 flex-1" title={fullPath}>
+                <span
+                  dir="auto"
+                  className="block w-fit max-w-full truncate font-mono text-xs font-medium"
+                >
+                  {displayName}
+                </span>
               </span>
               <Button
                 type="button"

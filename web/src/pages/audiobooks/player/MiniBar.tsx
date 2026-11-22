@@ -9,6 +9,7 @@ import { SleepTimerMenu } from "@/player/components/SleepTimerMenu";
 import { VolumeControl } from "@/player/components/VolumeControl";
 import { CoverExpandTile } from "./CoverExpandTile";
 import { PlayerSettingsMenu } from "./PlayerSettingsMenu";
+import { AUDIOBOOK_BAR_HEIGHT_PROPERTY } from "./audiobookPlaybackContext";
 import { SkipIcon } from "./SkipIcon";
 import { SpeedControl } from "./SpeedControl";
 import type { AudiobookPlayback } from "./useAudiobookPlayback";
@@ -40,7 +41,14 @@ export function MiniBar({
   autoFocusExpand,
 }: MiniBarProps) {
   const t = useT();
-  const barRef = useRootHeightProperty("--audiobook-bar-height", { includeBottomInset: true });
+  // Now Listening unmounts the bar while it covers the page. The height stays
+  // published meanwhile, so the padding that clears the bar doesn't drop and
+  // pull a page scrolled to its end up under it. AudiobookPlaybackProvider
+  // clears it when playback ends.
+  const barRef = useRootHeightProperty(AUDIOBOOK_BAR_HEIGHT_PROPERTY, {
+    includeBottomInset: true,
+    keepAfterUnmount: true,
+  });
   const hasChapters = playback.chapters.length > 0;
   const hasNextChapter =
     playback.currentChapter != null && playback.currentChapter.index + 1 < playback.chapters.length;

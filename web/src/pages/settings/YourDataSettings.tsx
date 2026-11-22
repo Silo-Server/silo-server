@@ -87,7 +87,7 @@ function ImportSummary({ result }: { result: ProfileImportResult }) {
                 ),
               })}
               {data.notes.map((note, position) => (
-                <span key={position} className="text-muted-foreground block text-xs">
+                <span key={position} className="text-muted-foreground block text-xs wrap-anywhere">
                   {note}
                 </span>
               ))}

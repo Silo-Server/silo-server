@@ -675,6 +675,7 @@ export const HW_ACCEL_INHERIT = "inherit";
 const QSV_LABEL = "Intel Quick Sync (QSV)";
 const VAAPI_LABEL = "VA-API";
 const NVENC_LABEL = "NVIDIA NVENC";
+const VIDEOTOOLBOX_LABEL = "VideoToolbox";
 
 /**
  * The acceleration choices a node may be pinned to, inherit first. The backend
@@ -689,6 +690,7 @@ export function hwAccelOverrideOptions(): { value: string; label: string }[] {
     { value: "qsv", label: QSV_LABEL },
     { value: "vaapi", label: VAAPI_LABEL },
     { value: "nvenc", label: NVENC_LABEL },
+    { value: "videotoolbox", label: VIDEOTOOLBOX_LABEL },
     { value: "none", label: t("web.admin.nodes.hwAccel.software") },
   ];
 }
@@ -723,20 +725,44 @@ export function nodeUsesCUDADevices(
   override: string | null | undefined,
   clusterHWAccel?: string | null,
 ): boolean {
+  return nodeBackend(node, override, clusterHWAccel) === "nvenc";
+}
+
+/**
+ * The backend this node will run under the editor's selection: an explicit
+ * backend, the cluster's backend while inheriting one, and otherwise what the
+ * node resolves to itself (an explicit `auto`, or inheriting an `auto`
+ * cluster). See nodeUsesCUDADevices for why inheritance follows the cluster.
+ */
+function nodeBackend(
+  node: StreamNode | null | undefined,
+  override: string | null | undefined,
+  clusterHWAccel?: string | null,
+): string {
   const selected = override?.trim().toLowerCase() ?? "";
-  if (selected === "nvenc") {
-    return true;
-  }
   if (selected !== "" && selected !== HW_ACCEL_INHERIT && selected !== "auto") {
-    return false;
+    return selected;
   }
   if (selected === "" || selected === HW_ACCEL_INHERIT) {
     const cluster = clusterHWAccel?.trim().toLowerCase() ?? "";
     if (cluster !== "" && cluster !== "auto") {
-      return cluster === "nvenc";
+      return cluster;
     }
   }
-  return node?.capabilities?.resolved?.trim().toLowerCase() === "nvenc";
+  return node?.capabilities?.resolved?.trim().toLowerCase() ?? "";
+}
+
+/**
+ * Whether this node will run VideoToolbox, which takes no device: its FFmpeg
+ * arguments name none, so the device control has nothing to set. A Mac node on
+ * the cluster default or Auto resolves VideoToolbox itself.
+ */
+export function nodeUsesVideoToolbox(
+  node: StreamNode | null | undefined,
+  override: string | null | undefined,
+  clusterHWAccel?: string | null,
+): boolean {
+  return nodeBackend(node, override, clusterHWAccel) === "videotoolbox";
 }
 
 /**

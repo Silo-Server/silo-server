@@ -179,8 +179,7 @@ export function RestoreDialog({
   return (
     <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <DialogContent className="gap-5 sm:max-w-[640px]">
-        {/* Keeps the title clear of the close button. */}
-        <DialogHeader className="px-6 sm:ps-0 sm:pe-6">
+        <DialogHeader>
           <DialogTitle>{t("web.home.rows.restore.title", target)}</DialogTitle>
           <DialogDescription>{t("web.home.rows.restore.description", target)}</DialogDescription>
         </DialogHeader>

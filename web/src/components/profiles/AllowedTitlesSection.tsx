@@ -92,24 +92,34 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
           <p className="text-muted-foreground text-sm">{t("web.profiles.allowedTitles.none")}</p>
         )
       ) : (
+        // grid-cols-1 (like sm:grid-cols-2) holds the column to the list's width.
+        // An implicit auto column grows to fit the longest name instead of cutting it.
         <ul
           aria-label={t("web.profiles.allowedTitles.heading")}
-          className="grid gap-2 sm:grid-cols-2"
+          className="grid grid-cols-1 gap-2 sm:grid-cols-2"
         >
           {(allowedTitles ?? []).map((item) => (
             <li
               key={item.content_id}
-              className="border-border flex items-center gap-3 rounded-md border px-2 py-2"
+              className="border-border @container flex items-center gap-3 rounded-md border px-2 py-2"
             >
+              {/* The poster hides when it would leave the title under 5rem
+                  (poster, gaps, and button take 6rem), so on a narrow phone
+                  with large text the year keeps clear of the remove button. */}
               <PosterArt
                 posterUrl={item.poster_url || undefined}
                 thumbhash={item.poster_thumbhash}
-                className="ring-border/60 aspect-[2/3] w-9 shrink-0 rounded-md ring-1 ring-inset"
+                className="ring-border/60 aspect-[2/3] w-9 shrink-0 rounded-md ring-1 ring-inset @max-[11rem]:hidden"
               />
-              <span className="min-w-0 flex-1 truncate text-sm">
-                {item.title}
+              {/* The year sits under the title, as a collection's count does,
+                  so the title has the whole width however narrow the row or
+                  large the text. */}
+              <span className="min-w-0 flex-1">
+                <span dir="auto" className="bidi-text block truncate text-sm">
+                  {item.title}
+                </span>
                 {item.year ? (
-                  <span className="text-muted-foreground ms-1.5 text-xs">
+                  <span className="text-muted-foreground block text-xs">
                     {numberText(item.year)}
                   </span>
                 ) : null}
@@ -157,9 +167,10 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
           <h4 className="text-sm font-medium">
             {t("web.profiles.allowedTitles.collectionsHeading")}
           </h4>
+          {/* grid-cols-1: see the title list above. */}
           <ul
             aria-label={t("web.profiles.allowedTitles.collectionsHeading")}
-            className="grid gap-2"
+            className="grid grid-cols-1 gap-2"
           >
             {(collections.data ?? []).map((collection) => (
               <li
@@ -167,8 +178,10 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
                 className="border-border flex items-center gap-3 rounded-md border px-3 py-2"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm">{collection.name}</span>
-                  <span className="text-muted-foreground text-xs">
+                  <span dir="auto" className="block w-fit max-w-full truncate text-sm">
+                    {collection.name}
+                  </span>
+                  <span className="text-muted-foreground block text-xs text-pretty break-words">
                     {collection.live
                       ? t("web.profiles.allowedTitles.titleCount", {
                           count: collection.item_count,
@@ -293,10 +306,22 @@ function AddAllowedTitle({
           {found.map((item) => {
             const already = allowedIds.has(item.content_id);
             return (
-              <li key={item.content_id} className="flex items-center gap-2 px-3 py-2 text-sm">
-                <span className="min-w-0 flex-1 truncate">
-                  {item.title}
-                  <span className="text-muted-foreground ms-1.5 text-xs">
+              // Wraps like the allow-collection dialog's rows: when the title
+              // would get under 5rem beside the button, the button moves to the
+              // end of its own line, and its label wraps if that is too narrow,
+              // hyphenating a long word ("Freigegeben" at 320 px with large text).
+              <li
+                key={item.content_id}
+                className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm"
+              >
+                {/* The year and type sit under the title, as in the list above,
+                    so the title has the whole width however narrow the row or
+                    large the text. */}
+                <span className="min-w-[min(5rem,100%)] flex-1">
+                  <span dir="auto" className="bidi-text block truncate">
+                    {item.title}
+                  </span>
+                  <span className="text-muted-foreground block text-xs">
                     {[
                       item.year ? numberText(item.year) : null,
                       t("web.profiles.allowedTitles.resultType", { type: item.type }),
@@ -309,17 +334,18 @@ function AddAllowedTitle({
                   type="button"
                   variant="outline"
                   size="sm"
+                  className="ms-auto h-auto min-h-8 max-w-full py-1 text-center hyphens-auto whitespace-normal"
                   disabled={already}
                   onClick={() => onPick(item)}
                 >
-                  {already ? (
-                    t("web.profiles.allowedTitles.allowed")
-                  ) : (
-                    <>
-                      <Plus className="size-3.5" />
-                      {t("web.profiles.allowedTitles.allow")}
-                    </>
-                  )}
+                  {already ? null : <Plus className="size-3.5" />}
+                  {/* min-w-0 lets a word with no hyphenation point (Bulgarian
+                      has no dictionary) break rather than overflow the button. */}
+                  <span className="min-w-0 break-words">
+                    {already
+                      ? t("web.profiles.allowedTitles.allowed")
+                      : t("web.profiles.allowedTitles.allow")}
+                  </span>
                 </Button>
               </li>
             );

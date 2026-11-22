@@ -53,6 +53,7 @@ import { FieldGroup } from "./FieldGroup";
 import { MarkerProviderTiles } from "./MarkerProviderTiles";
 import { SettingField } from "./SettingField";
 import { WatchProviderTiles } from "./WatchProviderTiles";
+import { leadingGraphemes } from "@/lib/text";
 
 /**
  * MDBList is the only provider on this page whose credential is a server
@@ -156,7 +157,7 @@ function presentationFor(providerName: string): SubtitleProviderPresentation {
     SUBTITLE_PROVIDERS[providerName] ?? {
       name: providerName,
       tagline: "web.admin.settings.providers.subtitles.taglineGeneric",
-      monogram: providerName.slice(0, 2),
+      monogram: leadingGraphemes(providerName, 2),
       monogramClass: "bg-muted text-muted-foreground",
     }
   );
