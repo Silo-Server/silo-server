@@ -743,9 +743,8 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 			refreshTarget = e.refresher.ResetTargetForLibrary
 		case req.Mode == ItemRefreshModeComplete && refreshTargetType == "item" &&
 			(req.RequestedType == "movie" || req.RequestedType == "series"):
-			// The rebuilt item may be an existing one the scan's match merged
-			// onto, holding values from a match the admin has since removed.
-			// The rebuild leaves only what the providers send now.
+			// The scan's match may have merged onto an item holding values from a
+			// match the admin has since removed; the rebuild keeps only today's.
 			refreshTarget = func(ctx context.Context, _, contentID string, folderID int) error {
 				return e.refresher.RebuildItemForLibrary(ctx, contentID, folderID)
 			}
