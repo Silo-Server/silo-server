@@ -76,10 +76,16 @@ func TestAdminStoredSubtitleListContract(t *testing.T) {
 		t.Fatalf("refused requests reached store: %d -> %d", calls, fake.calls)
 	}
 	fake.err = errors.New("PRIVATE store details")
+	logs := captureLogs(t)
 	failed := do(t, h, http.MethodGet, path, "", actingRequestAdmin)
 	requireProblem(t, failed, TypeInternalError)
 	if strings.Contains(failed.Body.String(), "PRIVATE") {
 		t.Fatal("private error leaked")
+	}
+	// The 500 stays generic for the client, but the request log must name the
+	// underlying failure: a store error with no cause is undiagnosable.
+	if !strings.Contains(logs.String(), "PRIVATE store details") {
+		t.Fatalf("request log does not carry the store error: %s", logs.String())
 	}
 	deps.AdminSubtitleList = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, path, "", actingRequestAdmin), TypeDependencyUnavailable)

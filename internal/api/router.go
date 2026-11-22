@@ -2870,11 +2870,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 
 	// Admin subtitle config handler only needs the DB repo — no S3 required.
-	var adminSubtitleHandler *handlers.AdminSubtitleHandler
 	var subtitleSearchHandler *handlers.SubtitleSearchHandler
-	if subtitleRepo != nil {
-		adminSubtitleHandler = handlers.NewAdminSubtitleHandler(subtitleRepo)
-	}
+	adminSubtitleHandler := newAdminSubtitleHandler(deps, subtitleRepo, subtitleManager)
 	if deps.DB != nil && subtitleBlobs != nil && subtitleRepo != nil {
 		mediaResolver := &pgSubtitleMediaResolver{pool: deps.DB}
 		subtitleSearchHandler = handlers.NewSubtitleSearchHandler(subtitleManager, subtitleRepo, mediaResolver)
@@ -2888,10 +2885,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 				deps.SubtitlePlaySync.Set(syncService)
 			}
 		}
-	}
-
-	if adminSubtitleHandler != nil && deps.DB != nil && subtitleManager != nil {
-		adminSubtitleHandler.SetDownloadedSubtitleDeps(deps.DB, subtitleManager)
 	}
 
 	// Build the AI subtitle handler (on-demand translation). Generated tracks are
@@ -4902,6 +4895,22 @@ func newPersonalAPIKeyHandler(repo *auth.APIKeyRepository, stores userstore.User
 func newDiscordNotificationsHandler(deps Dependencies) *handlers.DiscordNotificationsHandler {
 	h := handlers.NewDiscordNotificationsHandler(deps.Notifications, deps.PublicURL)
 	h.Stores = deps.UserStoreProvider
+	return h
+}
+
+// newAdminSubtitleHandler builds the stored-subtitle admin handler. Reading the
+// stored subtitle rows needs only the database, so the pool is wired whenever
+// one exists. The manager stays optional: only byte and metadata changes need
+// subtitle storage, so a deployment without S3 still lists and counts the rows
+// the database holds.
+func newAdminSubtitleHandler(deps Dependencies, repo *subtitles.PgRepository, manager *subtitles.Manager) *handlers.AdminSubtitleHandler {
+	if repo == nil {
+		return nil
+	}
+	h := handlers.NewAdminSubtitleHandler(repo)
+	if deps.DB != nil {
+		h.SetDownloadedSubtitleDeps(deps.DB, manager)
+	}
 	return h
 }
 
