@@ -402,6 +402,7 @@ function ActivityLibraryCard({
           {runningScans.map((scan) => {
             const pct = scanProgressPercent(scan);
             const progressText = formatActiveScanProgress(scan);
+            const scanLabelId = `scan-progress-label-${scan.id}`;
             return (
               <div
                 key={scan.id}
@@ -413,16 +414,18 @@ function ActivityLibraryCard({
                       <span className="bg-success absolute inline-flex h-full w-full animate-ping rounded-full opacity-75" />
                       <span className="bg-success relative inline-flex h-2 w-2 rounded-full" />
                     </span>
-                    <span className="shrink-0 text-xs font-medium">
-                      {formatActiveScanMode(scan)}
+                    <span id={scanLabelId} className="flex min-w-0 items-center gap-2">
+                      <span className="shrink-0 text-xs font-medium">
+                        {formatActiveScanMode(scan)}
+                      </span>
+                      <code
+                        dir="ltr"
+                        className="text-foreground/90 truncate font-mono text-xs"
+                        title={scan.path}
+                      >
+                        <PathText path={formatActiveScanTarget(scan)} />
+                      </code>
                     </span>
-                    <code
-                      dir="ltr"
-                      className="text-foreground/90 truncate font-mono text-xs"
-                      title={scan.path}
-                    >
-                      <PathText path={formatActiveScanTarget(scan)} />
-                    </code>
                     {scan.trigger ? (
                       <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
                         {formatActiveScanTrigger(scan.trigger)}
@@ -436,6 +439,7 @@ function ActivityLibraryCard({
                 {pct !== null ? (
                   <div
                     role="progressbar"
+                    aria-labelledby={scanLabelId}
                     aria-valuemin={0}
                     aria-valuemax={100}
                     aria-valuenow={pct}
