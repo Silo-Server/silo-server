@@ -76,6 +76,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -242,18 +243,31 @@ describe("HeroBanner hover and focus hold", () => {
     expect(announced()).toBe("Slide 1");
   });
 
-  it("resumes after a focused control goes without a blur and a press elsewhere", async () => {
+  it.each([
+    ["a press elsewhere", (other: HTMLElement) => fireEvent.pointerDown(other)],
+    ["focus elsewhere", (other: HTMLElement) => fireEvent.focusIn(other)],
+    ["a tap on the hero's title", () => fireEvent.pointerDown(screen.getByRole("heading"))],
+  ])("resumes after a focused control goes without a blur and %s", async (_, trigger) => {
     show();
     await tabToNext(userEvent.setup());
     // Removing a focused element moves focus to the body with no blur.
     const activeElement = vi.spyOn(document, "activeElement", "get").mockReturnValue(document.body);
-    // A control elsewhere on the page that keeps its press to itself.
-    const elsewhere = document.body.appendChild(document.createElement("button"));
-    elsewhere.addEventListener("pointerdown", (event) => event.stopPropagation());
-    fireEvent.pointerDown(elsewhere);
+    // A control elsewhere on the page that keeps its events to itself.
+    const other = document.body.appendChild(document.createElement("button"));
+    other.addEventListener("pointerdown", (event) => event.stopPropagation());
+    other.addEventListener("focusin", (event) => event.stopPropagation());
+    trigger(other);
     activeElement.mockRestore();
-    elsewhere.remove();
+    other.remove();
     wait(8100);
     expect(announced()).toBe("Slide 2");
+  });
+
+  it("stays held after a press elsewhere that leaves focus inside", async () => {
+    show();
+    await tabToNext(userEvent.setup());
+    fireEvent.pointerDown(document.body);
+    wait(20000);
+    expect(announced()).toBe("Slide 1");
   });
 });

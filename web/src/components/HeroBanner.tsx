@@ -270,13 +270,11 @@ export default function HeroBanner({
 
   // A browser removes a focused control (Translate, once pressed) without a
   // blur, leaving focus on the page body. While a focus hold is on, the next
-  // focus or press elsewhere ends it once focus is no longer inside.
+  // focus or press anywhere ends it once focus is no longer inside.
   useEffect(() => {
     if (!holds.focus) return;
-    const releaseIfOutside = (event: Event) => {
-      const section = sectionRef.current;
-      if (!section || section.contains(event.target as Node)) return;
-      if (!section.contains(document.activeElement)) release("focus");
+    const releaseIfOutside = () => {
+      if (!sectionRef.current?.contains(document.activeElement)) release("focus");
     };
     // Capture, so a control elsewhere that stops its press still counts.
     document.addEventListener("focusin", releaseIfOutside, true);
