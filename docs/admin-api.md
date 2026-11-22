@@ -1867,7 +1867,13 @@ was recorded still gets its row, without the item and duration only the file gav
 an attempt is finalized more than once (copies on several servers, a retried stop), the
 end that stopped the session's lifecycle first sets the reason, and `lifecycle_seq` is
 that end's sequence number on the sessions channel (null on rows recorded before
-lifecycle numbers existed). Every one of these fields is
+lifecycle numbers existed). `subtitle` is the subtitle the play's plan delivered when it
+ended, in the live session rows' shape, or null when it showed none. Of several
+finalizations, the one that ended latest decides it, even one that did not get further
+into the play, and a subtitle change on its own never moves `ended_at`. When the lifecycle
+sweep ends a play whose attempt is gone, it only knows the subtitle the play's live or
+start row last synced, and counts it from that sync, so a subtitle a later finalization
+recorded is kept. Every one of these fields is
 null when unknown, which includes every attempt recorded before it existed; `end_reason`
 is also null for a server teardown the client never recovered from (an encoder exit, a
 withdrawn plan).
