@@ -55,10 +55,10 @@ The service's internal processing retry is separate from caller replay.
 `available` when the ingress service exists, otherwise `not_configured`. It does not reveal
 source configuration, delivery tokens or whether a particular source is enabled.
 
-The retired `/api/v1/autoscan/webhooks/{token}` answers `410 Gone` without
-resolving the token. Operations administration owns source-management UI and
-callback URL projection, which emit the v2 URL. Existing external webhook
-configurations that still name the v1 URL require an explicit update; this
-implementation does not contact providers or modify their registered
-destinations. There is no first-party
+The retired `/api/v1/autoscan/webhooks/{token}` answers the `/api/v1` retirement
+`410 Gone` without resolving the token, and the request and activity logs redact
+the token segment. Operations administration owns source-management UI and
+callback URL projection, which emit the `/api/v2` URL. An external webhook
+configuration that still names the retired URL needs an explicit update; the
+server does not contact providers or modify their registered destinations. There is no first-party
 native or Jellyfin delivery consumer.

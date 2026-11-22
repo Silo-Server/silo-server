@@ -1,7 +1,7 @@
 # Direct Connections API
 
 `GET /api/v2/admin/direct-connections/status` requires an acting administrator.
-Operation ID: `getAdminDirectConnectionsStatus`. There is no v1 equivalent.
+Operation ID: `getAdminDirectConnectionsStatus`.
 The hidden self-check is a readiness diagnostic; it starts no direct engine.
 `GET /api/v2/admin/direct-connections/capabilities` (operation ID
 `getAdminDirectConnectionsCapabilities`) requires the same acting administrator.
