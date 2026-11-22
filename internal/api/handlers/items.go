@@ -333,6 +333,12 @@ type itemListResponse struct {
 	TvdbID                 string   `json:"-"`
 	Status                 string   `json:"status"`
 	ShowStatus             string   `json:"show_status,omitempty"`
+	// EpisodeLabels is a date-labeled series' choice (see
+	// models.EpisodeLabelsAirDate), on the series card and its episode cards;
+	// AirDate is an episode card's air date. json:"-" because /api/v1 is
+	// frozen; apiv2 emits both.
+	EpisodeLabels string `json:"-"`
+	AirDate       string `json:"-"`
 	RatingIMDB             *float64 `json:"rating_imdb,omitempty"`
 	RatingTMDB             *float64 `json:"rating_tmdb,omitempty"`
 	RatingRTCritic         *int     `json:"rating_rt_critic,omitempty"`
@@ -699,6 +705,11 @@ func itemListResponseShell(item *models.MediaItem, overlaySummary *models.Overla
 	resp.MangaVolumeCount = item.MangaVolumeCount
 	resp.ReleaseDate = item.ReleaseDate
 	resp.LastAirDate = item.LastAirDate
+	resp.EpisodeLabels = item.EpisodeLabels
+	if item.Type == itemTypeEpisode && item.EpisodeLabels != "" && item.ReleaseDate != nil {
+		// An episode row's release date is its air date.
+		resp.AirDate = *item.ReleaseDate
+	}
 	if resp.Genres == nil {
 		resp.Genres = []string{}
 	}

@@ -31,9 +31,15 @@ export function formatEpisodeCode(seasonNumber: number, episodeNumber: number): 
  * Whether a series labels its episodes by air date instead of season and
  * episode numbers: a sports league Sportarr numbers S2026E296, for one.
  */
-export function labelsEpisodesByAirDate(item: { episode_labels?: string }): boolean {
-  return item.episode_labels === "air_date";
+export function labelsEpisodesByAirDate(episodeLabels: string | undefined): boolean {
+  return episodeLabels === "air_date";
 }
+
+/**
+ * The separator between an air date and a title. The space after the bullet
+ * doesn't break, so it survives before a title rendered as its own box.
+ */
+export const AIR_DATE_TITLE_SEPARATOR = " •\u00a0";
 
 /**
  * The air date ("Nov 20, 2026") that labels an episode of a date-labeled
@@ -43,7 +49,7 @@ export function episodeAirDateLabel(
   episodeLabels: string | undefined,
   airDate: string | null | undefined,
 ): string | null {
-  if (!labelsEpisodesByAirDate({ episode_labels: episodeLabels }) || !airDate) return null;
+  if (!labelsEpisodesByAirDate(episodeLabels) || !airDate) return null;
   return formatDate(airDate, "medium") || null;
 }
 
@@ -65,7 +71,7 @@ export function formatEpisodeLabel(item: {
 
 /** "Nov 20, 2026 • Chicago Bulls vs Washington Wizards", or the date alone. */
 export function airDateWithTitle(airDateLabel: string, title?: string | null): string {
-  return title ? `${airDateLabel} • ${title}` : airDateLabel;
+  return title ? `${airDateLabel}${AIR_DATE_TITLE_SEPARATOR}${title}` : airDateLabel;
 }
 
 /**

@@ -2176,6 +2176,7 @@ func (h *LibraryCollectionHandler) itemListResponseOf(ctx context.Context, item 
 		AdvisoryAge:       item.AdvisoryAge,
 		AdvisorySource:    item.AdvisorySource,
 		Status:            item.Status,
+		EpisodeLabels:     item.EpisodeLabels,
 		RatingIMDB:        item.RatingIMDB,
 		ImdbID:            item.ImdbID,
 		TmdbID:            item.TmdbID,

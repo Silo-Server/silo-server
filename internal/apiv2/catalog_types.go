@@ -1,8 +1,6 @@
 package apiv2
 
 import (
-	"context"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -271,7 +269,7 @@ func catalogItemOfListing(v handlers.CollectionItemView, sel ratingsources.Selec
 		SeriesID: v.SeriesID, SeriesTitle: v.SeriesTitle, SeasonNumber: v.SeasonNumber, EpisodeNumber: v.EpisodeNumber,
 		Year: v.Year, Runtime: v.Runtime, Genres: NonNil(v.Genres), Keywords: NonNil(v.Keywords), Studios: v.Studios, Networks: v.Networks,
 		ContentRating: v.ContentRating, AdvisoryAge: v.AdvisoryAge, AdvisorySource: v.AdvisorySource,
-		Status: v.Status, ShowStatus: v.ShowStatus,
+		Status: v.Status, ShowStatus: v.ShowStatus, EpisodeLabels: v.EpisodeLabels, AirDate: datePtr(calendarDate(v.AirDate)),
 		RatingIMDB: v.RatingIMDB, RatingTMDB: v.RatingTMDB, RatingRTCritic: v.RatingRTCritic, RatingRTAudience: v.RatingRTAudience,
 		ImdbID: v.ImdbID, TmdbID: v.TmdbID, TvdbID: v.TvdbID,
 		OriginalLanguage: v.OriginalLanguage, Overview: v.Overview, ReleaseDate: calendarDatePtr(v.ReleaseDate), LastAirDate: calendarDatePtr(v.LastAirDate), AddedAt: instantPtr(v.AddedAt),
@@ -318,49 +316,4 @@ func withShownRatings(item CatalogItem, sel ratingsources.Selection) CatalogItem
 		item.RatingRTAudience = nil
 	}
 	return item
-}
-
-// EpisodeLabelService loads the episode labels of date-labeled series and of
-// their episodes (see catalog.EpisodeLabelReader).
-type EpisodeLabelService interface {
-	EpisodeLabels(ctx context.Context, ids []string) (map[string]catalogpkg.EpisodeLabel, error)
-}
-
-// withEpisodeLabels gives the series and episode cards of a date-labeled series
-// their episode_labels, and the episodes their air_date, in one lookup. Listing
-// surfaces (browse, search, history, favorites, collections) don't load them
-// with the card. A failed lookup leaves the cards numbered.
-func (reg *Registry) withEpisodeLabels(ctx context.Context, cards []*CatalogItem) {
-	if reg.deps.EpisodeLabels == nil {
-		return
-	}
-	ids := make([]string, 0, len(cards))
-	for _, card := range cards {
-		if (card.Type == "episode" || card.Type == "series") && card.EpisodeLabels == "" {
-			ids = append(ids, card.ContentID)
-		}
-	}
-	if len(ids) == 0 {
-		return
-	}
-	labels, err := reg.deps.EpisodeLabels.EpisodeLabels(ctx, ids)
-	if err != nil {
-		slog.WarnContext(ctx, "loading card episode labels", "component", "apiv2", "error", err)
-		return
-	}
-	for _, card := range cards {
-		if label, ok := labels[card.ContentID]; ok {
-			card.EpisodeLabels = label.Labels
-			card.AirDate = datePtr(calendarDate(label.AirDate))
-		}
-	}
-}
-
-// catalogItemPointers addresses each card of items for withEpisodeLabels.
-func catalogItemPointers(items []CatalogItem) []*CatalogItem {
-	out := make([]*CatalogItem, len(items))
-	for i := range items {
-		out[i] = &items[i]
-	}
-	return out
 }

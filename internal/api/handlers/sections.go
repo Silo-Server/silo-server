@@ -1445,18 +1445,7 @@ func (h *SectionHandler) listSectionMangaChapterItemMeta(ctx context.Context, it
 	if h == nil || h.fetcher == nil {
 		return map[string]sections.SectionItemMeta{}
 	}
-	ids := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, item := range items {
-		if item == nil || item.Type != "ebook" || strings.TrimSpace(item.ContentID) == "" {
-			continue
-		}
-		if _, ok := seen[item.ContentID]; ok {
-			continue
-		}
-		seen[item.ContentID] = struct{}{}
-		ids = append(ids, item.ContentID)
-	}
+	ids := sectionItemIDs(items, func(item *models.MediaItem) bool { return item.Type == "ebook" })
 	meta, err := h.fetcher.FetchMangaChapterSeriesMeta(ctx, ids)
 	if err != nil {
 		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "loading section manga chapter metadata", "component", "api", "error", err)
@@ -1465,16 +1454,13 @@ func (h *SectionHandler) listSectionMangaChapterItemMeta(ctx context.Context, it
 	return meta
 }
 
-// listSectionEpisodeLabels finds the series and episodes among the section
-// items whose episodes are labeled by air date instead of numbers.
-func (h *SectionHandler) listSectionEpisodeLabels(ctx context.Context, items []*models.MediaItem) map[string]catalog.EpisodeLabel {
-	if h == nil || h.fetcher == nil {
-		return map[string]catalog.EpisodeLabel{}
-	}
+// sectionItemIDs returns the distinct, non-blank content IDs of the items
+// keep accepts, in order.
+func sectionItemIDs(items []*models.MediaItem, keep func(*models.MediaItem) bool) []string {
 	ids := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, item := range items {
-		if item == nil || (item.Type != "episode" && item.Type != "series") || strings.TrimSpace(item.ContentID) == "" {
+		if item == nil || strings.TrimSpace(item.ContentID) == "" || !keep(item) {
 			continue
 		}
 		if _, ok := seen[item.ContentID]; ok {
@@ -1483,6 +1469,16 @@ func (h *SectionHandler) listSectionEpisodeLabels(ctx context.Context, items []*
 		seen[item.ContentID] = struct{}{}
 		ids = append(ids, item.ContentID)
 	}
+	return ids
+}
+
+// listSectionEpisodeLabels finds the series and episodes among the section
+// items whose episodes are labeled by air date instead of numbers.
+func (h *SectionHandler) listSectionEpisodeLabels(ctx context.Context, items []*models.MediaItem) map[string]catalog.EpisodeLabel {
+	if h == nil || h.fetcher == nil {
+		return map[string]catalog.EpisodeLabel{}
+	}
+	ids := sectionItemIDs(items, func(item *models.MediaItem) bool { return item.Type == "episode" || item.Type == "series" })
 	labels, err := h.fetcher.FetchEpisodeLabels(ctx, ids)
 	if err != nil {
 		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "loading section episode labels", "component", "api", "error", err)

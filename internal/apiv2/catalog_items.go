@@ -1049,7 +1049,6 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 	for _, item := range view.Items {
 		items = append(items, catalogItemOfListing(item, sel))
 	}
-	reg.withEpisodeLabels(ctx, catalogItemPointers(items))
 	window, err := cursors.Encode(scope, catalogBrowsePosition{Snapshot: view.Snapshot, Sort: req.ResolvedSort, After: view.CursorScope})
 	if err != nil {
 		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")

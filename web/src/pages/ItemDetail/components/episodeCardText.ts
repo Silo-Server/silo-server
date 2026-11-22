@@ -25,7 +25,7 @@ export function episodeCardTitleParts(
   title?: string;
 } {
   const title = episode.title?.trim();
-  if (labelsEpisodesByAirDate({ episode_labels: episodeLabels })) {
+  if (labelsEpisodesByAirDate(episodeLabels)) {
     // The air date is on the line below, so the title leads on its own; an
     // untitled episode shows the date (or its code when undated).
     return title
@@ -44,7 +44,7 @@ export function episodeCardTitleParts(
 export function episodeCardSpokenTitle(episode: EpisodeIdentity, episodeLabels?: string): string {
   const episodeNumber = episode.episode_number;
   const title = episode.title?.trim();
-  if (labelsEpisodesByAirDate({ episode_labels: episodeLabels })) {
+  if (labelsEpisodesByAirDate(episodeLabels)) {
     return title || formatEpisodeLabel({ ...episode, episode_labels: episodeLabels });
   }
   if (episode.season_number === 0) {

@@ -3020,15 +3020,15 @@ func (s *MetadataService) mergeAndPersist(
 					"content_id", contentID, "error", creditsErr)
 			}
 		}
-		// A correction's stored values describe another title, and a reset's
-		// are what the admin asked to replace: either way a value the
-		// providers lack must not stay behind.
 		// Episode labels belong to whichever provider the series is matched
 		// to. An Identify picks that provider anew, even when no trusted ID
 		// differs (a Sportarr league has none), so only its answer counts.
 		if req.Mode == ModeIdentify {
 			existingResult.EpisodeLabels = ""
 		}
+		// A correction's stored values describe another title, and a reset's
+		// are what the admin asked to replace: either way a value the
+		// providers lack must not stay behind.
 		if corrected || resetsRow {
 			sortTitle, overview, tagline := existingResult.SortTitle, existingResult.Overview, existingResult.Tagline
 			clearPreviousMatch(existingResult, mergeLocked)

@@ -145,11 +145,6 @@ func (reg *Registry) listHistory(ctx context.Context, cursors *Cursors, in *Hist
 		}
 		items = append(items, card)
 	}
-	labeled := make([]*CatalogItem, len(items))
-	for i := range items {
-		labeled[i] = &items[i].CatalogItem
-	}
-	reg.withEpisodeLabels(ctx, labeled)
 	return &HistoryCollectionOutput{Body: HistoryCollection{Collection: Paginated(items, next)}}, nil
 }
 

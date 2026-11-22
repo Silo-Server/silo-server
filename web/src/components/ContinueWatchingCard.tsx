@@ -1,5 +1,5 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
-import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
+import { AIR_DATE_TITLE_SEPARATOR, episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import { BookOpen, Play } from "lucide-react";
 import { Children, memo, useCallback, useRef } from "react";
 import { useLocation } from "react-router";
@@ -181,7 +181,7 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
       card.title && card.seriesTitle ? (
         <>
           {card.airDateLabel}
-          {" •\u00a0"}
+          {AIR_DATE_TITLE_SEPARATOR}
           {episodeTitle}
         </>
       ) : (

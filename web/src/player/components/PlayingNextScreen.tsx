@@ -1,5 +1,9 @@
 import "@/styles/player-hud.css";
-import { airDateWithTitle, episodeAirDateLabel } from "@/lib/episodeCardLabels";
+import {
+  AIR_DATE_TITLE_SEPARATOR,
+  airDateWithTitle,
+  episodeAirDateLabel,
+} from "@/lib/episodeCardLabels";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { MotionConfig, motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Play, Shuffle, X } from "lucide-react";
@@ -544,7 +548,7 @@ function OnDeckCarousel({
               hasEpisodeNumber && titledEpisode && airDateLabel ? (
                 <>
                   {airDateLabel}
-                  {" • "}
+                  {AIR_DATE_TITLE_SEPARATOR}
                   <LineTitle>{titledEpisode}</LineTitle>
                 </>
               ) : hasEpisodeNumber && titledEpisode ? (

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { episodeAirDateLabel, episodeSubtitle } from "@/lib/episodeCardLabels";
+import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import { useLocation, useNavigate } from "react-router";
 import { leafUserData, type FileVersion, type ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature } from "@/player/types";
@@ -233,14 +233,10 @@ export default function EpisodeContent({
             content_id: item.content_id,
             title: item.title,
             subtitle:
-              item.season_number != null && item.episode_number != null
-                ? episodeSubtitle(
-                    item.episode_labels,
-                    item.air_date,
-                    item.season_number,
-                    item.episode_number,
-                  )
-                : (episodeAirDateLabel(item.episode_labels, item.air_date) ?? undefined),
+              episodeAirDateLabel(item.episode_labels, item.air_date) ??
+              (item.season_number != null && item.episode_number != null
+                ? `S${item.season_number} E${item.episode_number}`
+                : undefined),
             poster_url: item.poster_url,
             poster_thumbhash: item.poster_thumbhash,
           }
