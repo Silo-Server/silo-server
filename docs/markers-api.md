@@ -250,7 +250,8 @@ supply a default end.
 Credits from every source follow the placement local detection uses, because
 skipping credits that run to the end of the file finishes the item, and playback
 that reaches stored credits in the tail window marks the item watched for the
-profile even below the watched threshold. When the
+profile even below the watched threshold. Offline progress sync, which doesn't
+name the played file, keeps the watched threshold alone. When the
 duration is known, credits
 must start in the file's tail window (for an episode the last 450 seconds or
 40% of the file, whichever is shorter; for anything else the last 900 seconds
