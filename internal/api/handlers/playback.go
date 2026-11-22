@@ -501,10 +501,14 @@ func (h *PlaybackHandler) playbackThresholds(ctx context.Context) userstore.Prog
 // longer timeline such as a whole audiobook, keeps the percentage rule.
 func (h *PlaybackHandler) playbackThresholdsForFile(ctx context.Context, session *playback.Session, file *models.MediaFile, duration float64) userstore.ProgressThresholds {
 	t := h.playbackThresholds(ctx)
-	streams := session == nil || session.MediaFileID <= 0 || (file != nil && file.ID == session.MediaFileID)
-	if file != nil && streams && duration == float64(file.Duration) {
-		t.CreditsStartSeconds = markers.CreditsLimitsForFile(file).EndCreditsStart(models.EffectiveMarkerSegments(file), duration)
+	if file == nil || duration != float64(file.Duration) {
+		return t
 	}
+	if session != nil && (session.MediaFileID > 0 && file.ID != session.MediaFileID ||
+		session.TimelineDuration > 0 && session.TimelineDuration != duration) {
+		return t
+	}
+	t.CreditsStartSeconds = markers.CreditsLimitsForFile(file).EndCreditsStart(models.EffectiveMarkerSegments(file), duration)
 	return t
 }
 
