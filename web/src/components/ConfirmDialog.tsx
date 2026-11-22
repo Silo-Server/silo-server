@@ -121,8 +121,9 @@ export function ConfirmDialog({
             {/* Below sm the buttons stack at full width, as in the default footer,
                 so a long label can't push one past the dialog's edge. From sm up
                 they sit at the end beside the note, which keeps at least 8rem:
-                with less room the buttons move below it instead of squeezing it. */}
-            <div className="flex w-full flex-col-reverse gap-2 sm:ms-auto sm:w-auto sm:flex-row">
+                with less room the buttons move below it instead of squeezing it,
+                and wrap onto a second line when they don't fit side by side. */}
+            <div className="flex w-full flex-col-reverse gap-2 sm:ms-auto sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
               {buttons}
             </div>
           </AlertDialogFooter>

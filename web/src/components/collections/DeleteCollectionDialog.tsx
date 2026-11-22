@@ -147,7 +147,7 @@ export function DeleteCollectionDialog({
           </p>
           {/* The buttons stack below sm and wrap below the note when they don't
               fit beside it, as in ConfirmDialog. */}
-          <div className="flex w-full flex-col-reverse gap-2 sm:ms-auto sm:w-auto sm:flex-row">
+          <div className="flex w-full flex-col-reverse gap-2 sm:ms-auto sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
             <AlertDialogCancel disabled={isPending}>{t("common.cancel")}</AlertDialogCancel>
             <Button
               variant="destructive"
