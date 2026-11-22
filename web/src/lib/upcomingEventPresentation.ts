@@ -52,9 +52,13 @@ export function upcomingBadgeClass(badge: string): string {
 
 /**
  * The episode or season line under an upcoming title. Its episode title is a
- * `LineTitle`; render it with `TitleLineParts`.
+ * `LineTitle`; render it with `TitleLineParts`. It takes a component's `useT()`,
+ * since the module's `t` returns text only.
  */
-export function formatUpcomingSubtitle(event: UpcomingPresentationEvent, t: Translate): ReactNode {
+export function formatUpcomingSubtitle(
+  event: UpcomingPresentationEvent,
+  translate: Translate,
+): ReactNode {
   if (
     (event.type === "episode" || event.type === "season_premiere") &&
     event.season_number != null
@@ -64,16 +68,16 @@ export function formatUpcomingSubtitle(event: UpcomingPresentationEvent, t: Tran
     if (event.episode_number != null) {
       const code = { season: codeNumber(season), episode: codeNumber(event.episode_number) };
       return title
-        ? t("web.calendar.event.episodeTitled", { ...code, title })
-        : t("web.calendar.event.episode", code);
+        ? translate("web.calendar.event.episodeTitled", { ...code, title })
+        : translate("web.calendar.event.episode", code);
     }
     return title
-      ? t("web.calendar.event.seasonTitled", { season, title })
-      : t("web.calendar.event.season", { season });
+      ? translate("web.calendar.event.seasonTitled", { season, title })
+      : translate("web.calendar.event.season", { season });
   }
 
   if (event.type === "movie") {
-    return t("web.calendar.event.movie");
+    return translate("web.calendar.event.movie");
   }
 
   return "";

@@ -1,4 +1,5 @@
 import { Children, type ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
 /**
  * A metadata title inside a line of translated words ("S01E02 · Title",
@@ -6,11 +7,12 @@ import { Children, type ReactNode } from "react";
  * title after Arabic words keeps its start. Pass it to `t()` as the title and
  * render the result with `TitleLineParts`. It takes what the words leave, up
  * to its own width, and in a wrapping line moves to a second line when not
- * even its first letter and "…" fit.
+ * even its first letter and "…" fit. `basis-auto` gives a title the line
+ * first: what follows it moves to the next line before the title is cut.
  */
-export function LineTitle({ children }: { children: ReactNode }) {
+export function LineTitle({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <span dir="auto" className="bidi-text max-w-max grow basis-[2.5em] truncate">
+    <span dir="auto" className={cn("bidi-text max-w-max grow basis-[2.5em] truncate", className)}>
       {children}
     </span>
   );

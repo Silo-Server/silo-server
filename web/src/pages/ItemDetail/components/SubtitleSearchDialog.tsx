@@ -243,9 +243,11 @@ export default function SubtitleSearchDialog({
           <DialogDescription className="flex flex-wrap justify-center overflow-hidden sm:justify-start">
             <TitleLineParts>
               {versionLabel ? (
+                // The title comes first; the version moves to the next line
+                // rather than cut it, and is cut in its own direction.
                 t("web.detail.subtitleSearch.descriptionWithVersion", {
-                  title: <LineTitle>{title}</LineTitle>,
-                  version: versionLabel,
+                  title: <LineTitle className="basis-auto">{title}</LineTitle>,
+                  version: <LineTitle>{versionLabel}</LineTitle>,
                 })
               ) : (
                 <LineTitle>{title}</LineTitle>

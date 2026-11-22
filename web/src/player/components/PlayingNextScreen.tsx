@@ -530,6 +530,15 @@ function OnDeckCarousel({
               : titledEpisode
                 ? t("web.player.episode.codeWithTitle", { ...episodeCode, title: titledEpisode })
                 : t("web.player.episode.code", episodeCode);
+            // The same line with the title in its own box; `episodeMeta` stays
+            // the plain text for the tooltip.
+            const episodeLine =
+              hasEpisodeNumber && titledEpisode
+                ? t("web.player.episode.codeWithTitle", {
+                    ...episodeCode,
+                    title: <LineTitle>{titledEpisode}</LineTitle>,
+                  })
+                : episodeMeta;
             const thumbnailUrl = detail.backdrop_url ?? detail.poster_url;
             const progressPercent =
               item.progress.duration_seconds > 0
@@ -588,16 +597,7 @@ function OnDeckCarousel({
                         className="flex flex-wrap overflow-hidden text-xs text-[var(--hud-ash)]"
                         title={episodeMeta}
                       >
-                        {titledEpisode ? (
-                          <TitleLineParts>
-                            {t("web.player.episode.codeWithTitle", {
-                              ...episodeCode,
-                              title: <LineTitle>{titledEpisode}</LineTitle>,
-                            })}
-                          </TitleLineParts>
-                        ) : (
-                          episodeMeta
-                        )}
+                        <TitleLineParts>{episodeLine}</TitleLineParts>
                       </div>
                     )}
                     {timeLeft > 0 && (
