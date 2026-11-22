@@ -216,27 +216,16 @@ func (s *Service) GetConnectionStatus(ctx context.Context, userID int, profileID
 	}
 	missingAccessToken := connected && strings.TrimSpace(conn.AccessToken) == ""
 	status := ConnectionStatus{
-		Provider:                     providerKey,
-		DisplayName:                  provider.DisplayName(),
-		Capabilities:                 provider.Capabilities(),
-		AuthMethod:                   authMethod,
-		Connected:                    connected && !missingAccessToken,
-		CredentialsConfigured:        credentialsConfigured,
-		ImportWatchedEnabled:         true,
-		ImportProgressEnabled:        true,
-		ExportWatchedEnabled:         true,
-		ExportUnwatchedEnabled:       false,
-		ImportFavoritesEnabled:       true,
-		ExportFavoritesEnabled:       true,
-		SyncFavoriteRemovalsEnabled:  false,
-		ImportWatchlistEnabled:       true,
-		ExportWatchlistEnabled:       true,
-		SyncWatchlistRemovalsEnabled: false,
-		SyncWatchlistOrderEnabled:    true,
-		ScrobbleEnabled:              true,
-		ImportRatingsEnabled:         true,
-		ExportRatingsEnabled:         true,
-		SyncDroppedEnabled:           true,
+		Provider:              providerKey,
+		DisplayName:           provider.DisplayName(),
+		Capabilities:          provider.Capabilities(),
+		AuthMethod:            authMethod,
+		Connected:             connected && !missingAccessToken,
+		CredentialsConfigured: credentialsConfigured,
+		// A provider not yet connected shows the switches a new connection
+		// starts with: see persistConnection.
+		SyncWatchlistOrderEnabled: true,
+		ScrobbleEnabled:           true,
 	}
 	if configurable, ok := provider.(connectionConfigProvider); ok {
 		status.ConnectionConfigSchema = configurable.ConnectionConfigSchema()
@@ -694,22 +683,14 @@ func (s *Service) persistConnection(
 		return Connection{}, err
 	}
 	if !ok {
-		// Enable every bidirectional sync by default; per-list removal stays
-		// opt-in. Toggles a provider can't serve are skipped at sync time via
-		// the capability check, so enabling them here is harmless.
+		// A new connection starts with every import and export off, so the
+		// first sync changes nothing the profile hasn't turned on; scrobbling
+		// starts on. Watchlist order mirroring stays on because it has no
+		// effect until watchlist import is turned on. A reconnect keeps the
+		// stored switches.
 		conn = Connection{
-			ImportWatchedEnabled:      true,
-			ImportProgressEnabled:     true,
-			ExportWatchedEnabled:      true,
-			ImportFavoritesEnabled:    true,
-			ExportFavoritesEnabled:    true,
-			ImportWatchlistEnabled:    true,
-			ExportWatchlistEnabled:    true,
 			SyncWatchlistOrderEnabled: true,
 			ScrobbleEnabled:           true,
-			ImportRatingsEnabled:      true,
-			ExportRatingsEnabled:      true,
-			SyncDroppedEnabled:        true,
 		}
 	}
 	rebound := ok && conn.ProviderAccountID != "" && account.ID != "" && account.ID != conn.ProviderAccountID

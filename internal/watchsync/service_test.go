@@ -1622,9 +1622,12 @@ func TestServiceStartsAndPollsDeviceAuth(t *testing.T) {
 	if conn.ProviderUsername != "alex" || conn.AccessToken != testAccessToken {
 		t.Fatalf("connection = %+v", conn)
 	}
-	if !conn.ImportWatchedEnabled || !conn.ImportProgressEnabled ||
-		!conn.ExportWatchedEnabled || !conn.ScrobbleEnabled {
-		t.Fatalf("default toggles were not enabled: %+v", conn)
+	if conn.ImportWatchedEnabled || conn.ImportProgressEnabled || conn.ExportWatchedEnabled ||
+		conn.ImportFavoritesEnabled || conn.ExportFavoritesEnabled ||
+		conn.ImportWatchlistEnabled || conn.ExportWatchlistEnabled ||
+		conn.ImportRatingsEnabled || conn.ExportRatingsEnabled || conn.SyncDroppedEnabled ||
+		!conn.ScrobbleEnabled {
+		t.Fatalf("a new connection must start with sync off and scrobbling on: %+v", conn)
 	}
 	storedSession := repo.sessions[session.ID]
 	if storedSession.CompletedAt == nil {
