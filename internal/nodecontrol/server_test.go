@@ -212,10 +212,10 @@ func (m remoteTranscodes) RemoteTranscode(transportID string) (string, int, bool
 	return t.nodeURL, t.fileID, ok
 }
 
-type streamEndNoterFunc func(ctx context.Context, fileID int, seconds float64)
+type streamEndNoterFunc func(ctx context.Context, fileID int, planned, seconds float64)
 
-func (f streamEndNoterFunc) Note(ctx context.Context, fileID int, seconds float64) {
-	f(ctx, fileID, seconds)
+func (f streamEndNoterFunc) Note(ctx context.Context, fileID int, planned, seconds float64) {
+	f(ctx, fileID, planned, seconds)
 }
 
 // A node reports where its transcodes found their media ends, and the core
@@ -226,7 +226,10 @@ func (f streamEndNoterFunc) Note(ctx context.Context, fileID int, seconds float6
 func TestReportPassesStreamEndsOn(t *testing.T) {
 	f := newControlFixture(t)
 	var noted []notedStreamEnd
-	f.server.opts.StreamEnds = streamEndNoterFunc(func(_ context.Context, fileID int, seconds float64) {
+	f.server.opts.StreamEnds = streamEndNoterFunc(func(_ context.Context, fileID int, planned, seconds float64) {
+		if planned != 160 {
+			t.Errorf("planned %v s, want the reported 160", planned)
+		}
 		noted = append(noted, notedStreamEnd{fileID, seconds})
 	})
 	f.server.opts.Transcodes = remoteTranscodes{
@@ -237,7 +240,7 @@ func TestReportPassesStreamEndsOn(t *testing.T) {
 	key := f.addNode(7, "gpu-7")
 	report := testReport("1800000000000000000", 1, "ended", "other-node", "other-file", "unknown", "playing")
 	for i, fileID := range []int{42, 42, 99, 42, 43} {
-		report.Sessions[i].MediaFileID, report.Sessions[i].StreamEndSeconds = fileID, 149.5
+		report.Sessions[i].MediaFileID, report.Sessions[i].StreamEndSeconds, report.Sessions[i].StreamPlannedSeconds = fileID, 149.5, 160
 	}
 	report.Sessions[4].StreamEndSeconds = 0
 	if code := f.serve(7, key, http.MethodPost, PathReport, report, nil).Code; code != http.StatusNoContent {

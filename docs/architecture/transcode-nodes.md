@@ -451,7 +451,7 @@ their records. `HandleReport`:
    come from the registered row (the registry's copy, so a Postgres outage does
    not stop reports), never from the report. A session whose transcode has read
    its source to the end also carries `stream_end_seconds`, where the media
-   ends. The API server takes it only when a playback session it holds runs
+   ends, and `stream_planned_seconds`, the stored duration it was planned with. The API server takes it only when a playback session it holds runs
    that transport on the reporting node for the file the session names
    (`playback.SessionManager.RemoteTranscode`), so a node cannot shorten a file
    it is not transcoding, and passes it to

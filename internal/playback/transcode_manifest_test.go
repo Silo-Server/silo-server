@@ -1010,8 +1010,8 @@ func TestSegmentRecoveryAfterFFmpegExits(t *testing.T) {
 				!bytes.Equal(rec.Body.Bytes(), genericTSProgramTables())) {
 				t.Fatalf("end of stream = %d %q (% x), want 200 video/mp2t with a PAT and PMT", rec.Code, rec.Header().Get("Content-Type"), rec.Body.Bytes())
 			}
-			if seconds, ok := s.LearnedStreamEnd(); tt.wantEnd && (!ok || seconds != 149.5) {
-				t.Fatalf("LearnedStreamEnd() = %v, %v; want 149.5 (segment 74 starts at 148 and lasts 1.5 s)", seconds, ok)
+			if seconds, planned, ok := s.LearnedStreamEnd(); tt.wantEnd && (!ok || seconds != 149.5 || planned != 160) {
+				t.Fatalf("LearnedStreamEnd() = %v, %v, %v; want 149.5 (the run from 144 s wrote 5.5 s), planned 160", seconds, planned, ok)
 			}
 		})
 	}
@@ -1041,7 +1041,7 @@ func TestEmptyRunsBoundTheStreamEnd(t *testing.T) {
 		if !s.ServePastEndOfStream(rec, name, err) || rec.Code != http.StatusOK {
 			t.Fatalf("err = %v, answer %d; want the end of the stream", err, rec.Code)
 		}
-		if _, ok := s.LearnedStreamEnd(); ok {
+		if _, _, ok := s.LearnedStreamEnd(); ok {
 			t.Fatal("LearnedStreamEnd() ok from a run that wrote nothing, want no seconds")
 		}
 		if _, _, err := s.RestartSegmentSince(context.Background(), 77, time.Time{}); !errors.Is(err, ErrPastEndOfStream) {
@@ -1059,6 +1059,18 @@ func TestEmptyRunsBoundTheStreamEnd(t *testing.T) {
 		runFakeFFmpeg(t, s, 76)
 		if !s.pastEndOfStream(76) || s.pastEndOfStream(75) {
 			t.Fatal("the end after a run that listed only an empty segment at 76 is not 75")
+		}
+	})
+	t.Run("a run from a seek inside a segment ends where it started plus what it wrote", func(t *testing.T) {
+		// An audio-track switch restarts at the player's position, which
+		// need not fall on a segment boundary.
+		s := fakeFFmpegSession(t, "h264", true, "", 0)
+		if err := s.Restart(context.Background(), 145.3, 72); err != nil {
+			t.Fatal(err)
+		}
+		<-s.Done()
+		if seconds, _, ok := s.LearnedStreamEnd(); !ok || math.Abs(seconds-150.8) > 1e-9 {
+			t.Fatalf("LearnedStreamEnd() = %v, %v; want 150.8 (145.3 s plus 5.5 s written)", seconds, ok)
 		}
 	})
 	t.Run("a run from segment 0 that wrote nothing learns nothing", func(t *testing.T) {

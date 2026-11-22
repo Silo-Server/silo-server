@@ -253745,6 +253745,10 @@
             "format": "double",
             "type": "number"
           },
+          "stream_planned_seconds": {
+            "format": "double",
+            "type": "number"
+          },
           "tone_map_mode": {
             "type": "string"
           },

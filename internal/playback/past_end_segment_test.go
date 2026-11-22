@@ -68,17 +68,21 @@ func TestPastEndFMP4Fragment(t *testing.T) {
 	}
 }
 
-type streamEndStoreFunc func(ctx context.Context, fileID, seconds int) (bool, error)
+type streamEndStoreFunc func(ctx context.Context, fileID, from, seconds int) (bool, error)
 
-func (f streamEndStoreFunc) ShortenDuration(ctx context.Context, fileID, seconds int) (bool, error) {
-	return f(ctx, fileID, seconds)
+func (f streamEndStoreFunc) ShortenDuration(ctx context.Context, fileID, from, seconds int) (bool, error) {
+	return f(ctx, fileID, from, seconds)
 }
 
 // The recorder stores a file's end once, rounded up so the partial last
-// second keeps its segment.
+// second keeps its segment, and only from the duration the transcode was
+// planned with; an end at or past that duration writes nothing.
 func TestStreamEndRecorder(t *testing.T) {
 	calls := make(chan int, 4)
-	r := NewStreamEndRecorder(streamEndStoreFunc(func(_ context.Context, _ int, seconds int) (bool, error) {
+	r := NewStreamEndRecorder(streamEndStoreFunc(func(_ context.Context, _, from, seconds int) (bool, error) {
+		if from != 160 {
+			t.Errorf("write from %d s, want the planned 160", from)
+		}
 		calls <- seconds
 		return true, nil
 	}))
@@ -91,12 +95,13 @@ func TestStreamEndRecorder(t *testing.T) {
 			return 0
 		}
 	}
-	r.Note(context.Background(), 7, 149.5)
+	r.Note(context.Background(), 7, 160, 149.5)
 	if got := next(); got != 150 {
 		t.Fatalf("stored %d s, want 150", got)
 	}
-	r.Note(context.Background(), 7, 149.5)
-	r.Note(context.Background(), 7, 140.2)
+	r.Note(context.Background(), 7, 160, 149.5)
+	r.Note(context.Background(), 7, 149, 149.5)
+	r.Note(context.Background(), 7, 160, 140.2)
 	if got := next(); got != 141 {
 		t.Fatalf("stored %d s, want the repeated end skipped and 141 next", got)
 	}

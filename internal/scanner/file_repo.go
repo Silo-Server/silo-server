@@ -959,14 +959,15 @@ func (r *FileRepository) MarkProbeFailed(ctx context.Context, fileID int, probed
 	return nil
 }
 
-// ShortenDuration lowers a file's stored duration to seconds, where a
-// transcode found its media ends, and reports whether it did. It never
-// lengthens one and leaves probe_updated_at alone: the probe itself did not
+// ShortenDuration lowers a file's stored duration from from, the duration the
+// transcode was planned with, to seconds, where it found the media ends, and
+// reports whether it did. A row whose duration is no longer from (the file was
+// replaced or probed again since) keeps it. It never lengthens one and leaves probe_updated_at alone: the probe itself did not
 // change, and live recipes key their source revision on it. A later probe of
 // a changed file stores its own duration again. A file with more than one
 // audio track keeps its duration: the transcode read one of them, and another
 // can run longer.
-func (r *FileRepository) ShortenDuration(ctx context.Context, fileID, seconds int) (bool, error) {
+func (r *FileRepository) ShortenDuration(ctx context.Context, fileID, from, seconds int) (bool, error) {
 	if seconds <= 0 {
 		return false, nil
 	}
@@ -975,10 +976,12 @@ func (r *FileRepository) ShortenDuration(ctx context.Context, fileID, seconds in
 		SET duration = $2,
 		    updated_at = NOW()
 		WHERE id = $1
+		  AND duration = $3
 		  AND duration > $2
 		  AND COALESCE(jsonb_array_length(audio_tracks), 0) <= 1`,
 		fileID,
 		seconds,
+		from,
 	)
 	if err != nil {
 		return false, fmt.Errorf("shortening media file duration: %w", err)

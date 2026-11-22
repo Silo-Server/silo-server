@@ -1118,13 +1118,16 @@ The session learns the media's last segment from FFmpeg runs that read their
 input to the end: a run that exits 0, was not stopped or replaced, and did not
 log `Error during demuxing` (FFmpeg exits 0 after a read fails mid-file, such
 as a relayed source that closes early, but logs that error first). A run whose
-own playlist lists a segment with media sets the end to the last such segment.
+own playlist lists a segment with media sets the end to the last such segment;
+the media then ends at the run's seek position plus the length of the segments it
+wrote, since a seek (an audio-track switch, for one) need not fall on a segment
+boundary.
 A run that wrote no media started past the end: FFmpeg then writes no playlist,
 or one listing a single empty segment (`EXTINF:0`, no bytes). The end lies
 before that run's first segment; such a run only ever lowers a known end, and
 one that started at segment 0 shows nothing. Only an encoded transcode with a synthetic playlist learns the end:
 copy-video serves FFmpeg's own playlist, which a seek re-cuts at other
-keyframes. The end holds for the audio track it was learned with, since another
+keyframes. The end holds for the audio track of the run that learned it, since another
 track can run longer.
 
 A video segment request past the learned end answers `200` with a segment that
@@ -1150,11 +1153,14 @@ is why the answer is a valid segment. To keep later plays off this path, the
 server that answers past the end also lowers the file's stored
 `media_files.duration` to where the run found the media ends, rounded up to a
 whole second (`playback.StreamEndRecorder`). It never lengthens a
-duration, leaves a file with more than one audio track alone (another track can
-run longer than the one the transcode read), and leaves `probe_updated_at`
-alone; a later probe of a changed file stores its own duration. A transcode
-node carries each transcode's learned end in its session report
-(`stream_end_seconds`), and the core stores it the same way, whichever server or
+duration, applies only while the stored duration is still the one the transcode
+was planned with (so an end measured on a file since replaced or probed again
+changes nothing), leaves a file with more than one audio track alone (another
+track can run longer than the one the transcode read), and leaves
+`probe_updated_at` alone. Each API process writes a given end once per ten
+minutes. A transcode
+node carries each transcode's learned end and planned duration in its session
+report (`stream_end_seconds`, `stream_planned_seconds`), and the core stores it the same way, whichever server or
 proxy relayed the segments.
 
 ---
