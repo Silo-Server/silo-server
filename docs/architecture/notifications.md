@@ -575,6 +575,34 @@ keeps it always while the attempt is claimed or scheduled (`retrying` with
 the plugin attempt age cap (36 hours, `pluginAttemptMaxAge`), so a stranded
 attempt (webhooks turned off server-wide, for example) releases its row.
 
+### Revisions and guarded deletion
+
+`notification_webhooks.revision` is a server-owned bigint allocated from a
+non-cycling PostgreSQL sequence (migration
+`20260906145619_webhook_conditional_revision`). The insert/update trigger
+assigns it for every write, including configuration updates, signing-secret
+rotation, delivery success/failure bookkeeping, and disabling a destination. It
+does not depend on transaction timestamps. Gaps are expected, and a recreated
+row receives a new revision even if its ID or supplied revision repeats.
+Sequence exhaustion fails writes rather than reusing a validator. Every writer
+goes through the trigger; trigger bypass, a manual sequence reset and
+independently restored divergent databases are outside this guarantee.
+
+The repository's guarded deletion seam locks the profile-owned row, invokes the
+caller's precondition check on its current revision, and deletes within the
+same transaction. A mismatch returns without deleting the row or cascading its
+attempts. Missing and foreign-profile rows report not found. Concurrent writers
+serialize through the same row lock; an editor that wins first makes the
+original deletion revision stale. A writer that loses to a committed deletion
+cannot update that deleted row.
+
+The revision covers operational metadata as well as configuration, so a
+provider outcome may invalidate an editor's validator. This is conservative
+lost-update protection, not a configuration-only version. A database deletion
+cannot recall an external request already sent. The `/api/v2` transport owns
+validator rendering and conditional-header evaluation; the storage package does
+not interpret HTTP headers.
+
 ## Plugin destinations
 
 A plugin's `notification_channel.v1` capability provides a channel that

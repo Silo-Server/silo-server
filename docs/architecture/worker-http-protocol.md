@@ -27,10 +27,7 @@ bearer failures remain `text/plain`; they are not native API Problem Details.
 Hardware capability responses use the existing `playback.HWAccelInfo` shape.
 
 Describing a worker operation does not change its routing, middleware, execution,
-or delivery authorization. It does not ratify a migration row or authorize a
-fleet cutover. The migration ledger separately records outstanding descriptions,
-review state, exclusions, and required accountable-owner decisions. Root probe
-readiness and wire-generation acceptance remain separate from hardware capability
+or delivery authorization. Root probe readiness and wire-generation acceptance remain separate from hardware capability
 hashes and capacity checks.
 
 The six retained admin commands are declared by `ProtocolControls` on each
@@ -640,6 +637,5 @@ acknowledgment. No new durable availability, runtime execution, reconstruction
 authority, generic retry contract or native v2 alias is introduced.
 
 The forty described worker registrations exclude health, readiness, metrics and
-the legacy health alias on each worker listener. Those eight probe registrations
-remain separate operational/exclusion evidence gates. Description coverage alone
-is not review acceptance, release ratification or consumer compatibility evidence.
+the legacy health alias on each worker listener; those eight probe registrations
+are not described.

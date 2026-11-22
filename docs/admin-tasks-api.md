@@ -1,9 +1,6 @@
 # Administrator tasks and jobs
 
-The v2 administrator task surface uses generated web bindings. Apple and Android
-have no task or administrator-job HTTP calls in their checked source trees; the
-migration inventory also records only web consumers. Jellyfin compatibility has
-no equivalent management surface.
+Scheduled tasks, their schedules and history, and retained administrator jobs.
 
 ## Execution and schedules
 
@@ -77,8 +74,11 @@ ignored at startup. The web page lists them in a separate "On demand" group.
 and a strong caller-bound ETag. `PUT` on that resource requires `If-Match` and a
 `triggers` array, including an empty array to disable scheduling. The database
 compares the original revision under the schedule parent lock, and every
-schedule writer advances the revision. A mismatch returns 412 with the
-observed validator, without rereading or retrying the write. An empty schedule
+schedule writer advances the revision. A mismatch returns 412 with the current
+validator in `ETag` and does not retry the write. When the conflicting schedule
+is unsaved (revision zero), its validator also covers the default triggers, so
+the server reads the schedule again to build it; if that read fails, the 412
+carries no `ETag` and the client reads the schedule itself. An empty schedule
 remains configured across restarts rather than restoring task defaults. A plugin
 task without a persisted schedule reports the default it runs (binding trigger,
 else manifest default, else startup) at revision zero, under a validator that
@@ -194,6 +194,4 @@ images already deleted stay deleted and any not yet deleted remain in storage.
 The canceled job reports the totals it reached in `library_result`:
 `deleted_prefixes` counts fully deleted prefixes and `deleted_s3_objects` counts
 every deleted object, including any from the prefix the cancel interrupted. A
-cleanup canceled before it deleted anything reports zeros. The administrator
-task section does not add a generic durable scheduler or change
-the retention and dispatch guarantees of existing job owners.
+cleanup canceled before it deleted anything reports zeros.
