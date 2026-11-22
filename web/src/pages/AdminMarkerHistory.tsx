@@ -25,7 +25,6 @@ import {
 import { useAllMarkerEditHistory } from "@/hooks/queries/admin/markers";
 import { MARKER_LABEL_KEYS, formatClock } from "@/lib/markers";
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
-import { startsRightToLeft } from "@/lib/direction";
 import { numberText, type Translate, useT } from "@/i18n";
 
 const LIMIT_OPTIONS = ["25", "50", "100"] as const;
@@ -118,6 +117,16 @@ function MarkerHistoryRow({ row }: { row: MarkerEditAuditEntry }) {
   const itemLabel = row.item_type
     ? t("web.admin.markers.history.itemWithType", { title, type: row.item_type })
     : title;
+  // The title on its own element takes its own direction without turning the
+  // translated words around it.
+  const titleNode = (
+    <span dir="auto" className="truncate">
+      {title}
+    </span>
+  );
+  const label = row.item_type
+    ? t("web.admin.markers.history.itemWithType", { title: titleNode, type: row.item_type })
+    : titleNode;
 
   return (
     <TableRow>
@@ -125,26 +134,22 @@ function MarkerHistoryRow({ row }: { row: MarkerEditAuditEntry }) {
         {formatHistoryDate(row.created_at)}
       </TableCell>
       <TableCell>
-        {/* The label takes the title's direction, so a cut one keeps its start.
-            Judged from the title alone: dir="auto" would also read the
-            translated template around it, which may start with a mark. The
-            link cuts its own text, so the box around it doesn't clip its
-            focus outline. */}
-        <div
-          dir={startsRightToLeft(title) ? "rtl" : "ltr"}
-          className="w-fit max-w-[18rem] font-medium"
-        >
+        {/* The words around the title are flex items that keep the page's
+            direction and don't shrink, so a cut label cuts the title, which
+            keeps its start. The link cuts its own text, so the box around it
+            doesn't clip its focus outline. */}
+        <div className="w-fit max-w-[18rem] font-medium">
           {row.item_id ? (
             <Link
               to={`/item/${encodeURIComponent(row.item_id)}`}
-              className="hover:text-primary block truncate hover:underline"
+              className="hover:text-primary flex overflow-hidden whitespace-pre hover:underline"
               title={itemLabel}
             >
-              {itemLabel}
+              {label}
             </Link>
           ) : (
-            <span className="block truncate" title={itemLabel}>
-              {itemLabel}
+            <span className="flex overflow-hidden whitespace-pre" title={itemLabel}>
+              {label}
             </span>
           )}
         </div>

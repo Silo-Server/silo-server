@@ -196,12 +196,14 @@ export default function AdminSubtitlesTable({
                     {providerLabel(subtitle.provider)}
                   </span>
                 </TableCell>
-                <TableCell
-                  className="max-w-[200px] font-mono text-xs"
-                  title={subtitle.release_name}
-                >
-                  {/* A release name takes its direction from its own text. */}
-                  <span dir="auto" className="block w-fit max-w-full truncate">
+                <TableCell className="max-w-[200px] font-mono text-xs">
+                  {/* A release name takes its direction from its own text, and
+                      its tooltip reads the same way. */}
+                  <span
+                    dir="auto"
+                    title={subtitle.release_name || undefined}
+                    className="block w-fit max-w-full truncate"
+                  >
                     {subtitle.release_name || NONE}
                   </span>
                 </TableCell>

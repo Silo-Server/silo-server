@@ -18,10 +18,12 @@ const mocks = vi.hoisted(() => ({
   publicURL: "https://media.example.test" as string | undefined,
 }));
 // The claim link box renders its URL folder by folder, so match its whole text.
+function claimLinkText(url: string) {
+  return (_: string, element: Element | null) =>
+    element?.tagName === "CODE" && element.textContent === url;
+}
 function claimLink(url: string) {
-  return screen.getByText(
-    (_, element) => element?.tagName === "CODE" && element.textContent === url,
-  );
+  return screen.getByText(claimLinkText(url));
 }
 const linkRow = {
   id: "8",
@@ -143,7 +145,9 @@ it("keeps a one-time link after clipboard failure, resets mutation state, and di
   expect(mocks.reset).toHaveBeenCalled();
   setProfileId("other");
   view.rerender(<InvitationsTab />);
-  expect(screen.queryByText("https://example.invalid/invite/one-time")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(claimLinkText("https://example.invalid/invite/one-time")),
+  ).not.toBeInTheDocument();
 });
 it("blocks synchronous double submit and dismissal until delivery resolves", async () => {
   let resolve!: (value: unknown) => void;
