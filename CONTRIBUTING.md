@@ -262,6 +262,7 @@ cd ..
 make test-web
 
 # Generated contracts, fixtures, and docs hygiene
+make verify-fork-pins
 make verify-settings-bindings-all
 make verify-playback-fixtures
 make verify-route-inventory
