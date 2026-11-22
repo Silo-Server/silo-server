@@ -3,6 +3,7 @@ import { ChevronDown, Download, Ear, Loader2, Search } from "lucide-react";
 
 import type { FileVersion, SubtitleResult } from "@/api/types";
 import { readableErrorText } from "@/api/v2/request";
+import { LineTitle, TitleLineParts } from "@/components/TitleLine";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -240,13 +241,19 @@ export default function SubtitleSearchDialog({
       <DialogContent className="flex max-w-3xl flex-col overflow-hidden sm:max-w-3xl">
         <DialogHeader className="min-w-0">
           <DialogTitle>{t("web.detail.subtitleSearch.title")}</DialogTitle>
-          <DialogDescription className="truncate">
-            {versionLabel
-              ? t("web.detail.subtitleSearch.descriptionWithVersion", {
-                  title,
-                  version: versionLabel,
+          <DialogDescription className="flex flex-wrap justify-center overflow-hidden sm:justify-start">
+            <TitleLineParts>
+              {versionLabel ? (
+                // The title keeps its whole width first; the version takes
+                // what it leaves, or the next line, cut in its own direction.
+                t("web.detail.subtitleSearch.descriptionWithVersion", {
+                  title: <LineTitle className="basis-auto">{title}</LineTitle>,
+                  version: <LineTitle>{versionLabel}</LineTitle>,
                 })
-              : title}
+              ) : (
+                <LineTitle>{title}</LineTitle>
+              )}
+            </TitleLineParts>
           </DialogDescription>
         </DialogHeader>
 
