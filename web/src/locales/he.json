@@ -51086,6 +51086,104 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "סריקות ורענוני מטא-נתונים מופיעים כאן בזמן שהם פועלים."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "אין סריקות או רענונים פעילים"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "הכול ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "הסתרת התור"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ ספרייה נוספת אחת"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ספריות נוספות"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ספריות נוספות"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "רענוני מטא-נתונים"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "מתבצע רענון מטא-נתונים…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "הצגת התור"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.confidence.high": [
     {
       "type": 0,
@@ -51602,6 +51700,30 @@
       "value": "אישור ניקוי של תיקיות שורש ריקות"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "בדיקה"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "אין פריטים שממתינים בתור ההתאמה של המטא-נתונים."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "לא נרשמו תיקיות שורש שדולגו."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "לא נרשמו מזהים חיצוניים לא תקפים."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -51638,6 +51760,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "עריכה"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "עדיין לא הוגדרו ספריות."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -51698,6 +51832,12 @@
       "value": "הסתרת נתיבים"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "לא פעילה"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -51732,6 +51872,12 @@
       "value": "סריקה חלקית"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "השלמת מטא-נתונים חסרים או החלפת כל המטא-נתונים"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -51744,6 +51890,12 @@
       "value": "תיקיית שורש לא נגישה"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "סריקה"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -51754,6 +51906,12 @@
     {
       "type": 0,
       "value": "הצגת נתיבים"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "עצירה"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -51772,6 +51930,22 @@
     {
       "type": 0,
       "value": "אימות נקודות עיגון"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "בדיקה שכל תיקיות הספרייה נגישות"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "הצגת הסריקות הפעילות בספרייה "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -51875,7 +52049,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "ניהול תיקיות השורש והסריקות של הספריות. ייבוא וייצוא של הקטלוג נמצאים עכשיו בדף ”תחזוקה”."
+      "value": "ניהול תיקיות מדיה, מעקב אחר סריקות ופתרון בעיות התאמה."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -52422,6 +52596,67 @@
       "value": "מזהים חיצוניים לא תקפים"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " פעילה"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " פעילות"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " פעילות"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "פעילות סריקה"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "תקינות הקטלוג"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "ספריות"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -52888,6 +53123,24 @@
     {
       "type": 0,
       "value": "חיפוש בפריטים המוחרגים לפי שם, ספרייה או סוג…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "לא חד-משמעי"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "ממתין"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "לא הותאם"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -139436,6 +139689,12 @@
     {
       "type": 0,
       "value": "קריאת ההתראות של הפרופיל כשהן מגיעות וסימון שלהן כנקראו."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "הצגת מה שמופעל כרגע בפרופיל, או בכל הפרופילים בחשבון כשהמפתח לא מציין פרופיל: שם הפריט, המיקום בהפעלה, מצב ההשהיה, המכשיר ושיטת ההפעלה. ללא שליטה בהפעלה וללא פרטי רשת."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

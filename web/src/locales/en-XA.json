@@ -50592,6 +50592,96 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "⟦Šçåñš åñđ ɱéţåđåţå ŕéƒŕéšĥéš åþþéåŕ ĥéŕé ŵĥîļé ţĥéý ŕûñ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "⟦Ñö åçţîṽé šçåñš öŕ ŕéƒŕéšĥéš~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "⟦Åļļ ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîđé ǫûéûé~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " öţĥéŕ ļîƀŕåŕý~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " öţĥéŕ ļîƀŕåŕîéš~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "⟦Ṁéţåđåţå Ŕéƒŕéšĥéš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéƒŕéšĥîñĝ ɱéţåđåţå~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "⟦Ṽîéŵ ǫûéûé~~~~⟧"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.confidence.high": [
     {
       "type": 0,
@@ -51080,6 +51170,30 @@
       "value": "⟦Çöñƒîŕɱ éɱþţý ŕööţ çļéåñûþ~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "⟦Îñšþéçţ~~~⟧"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö îţéɱš åŕé ŵåîţîñĝ îñ ţĥé ɱéţåđåţå ɱåţçĥéŕ ǫûéûé.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö šķîþþéđ ŕööţš ŕéçöŕđéđ.~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö šţåļé éẋţéŕñåļ ÎĐš ŕéçöŕđéđ.~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -51124,6 +51238,18 @@
     {
       "type": 0,
       "value": "~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "⟦Éđîţ~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ļîƀŕåŕîéš çöñƒîĝûŕéđ ýéţ.~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -51184,6 +51310,12 @@
       "value": "⟦Ĥîđé þåţĥš~~~~⟧"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "⟦Îđļé~~⟧"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -51222,6 +51354,12 @@
       "value": "⟦Þåŕţîåļ šçåñ~~~~~⟧"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļļ ɱîššîñĝ öŕ ŕéþļåçé åļļ ɱéţåđåţå~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -51234,6 +51372,12 @@
       "value": "⟦Ŕööţ ûñŕéåçĥåƀļé~~~~~~~⟧"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "⟦Šçåñ~~⟧"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -51244,6 +51388,12 @@
     {
       "type": 0,
       "value": "⟦Šĥöŵ þåţĥš~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "⟦Šţöþ~~⟧"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -51262,6 +51412,26 @@
     {
       "type": 0,
       "value": "⟦Ṽéŕîƒý Ṁöûñţš~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "⟦Çĥéçķ ţĥåţ åļļ ļîƀŕåŕý ƒöļđéŕš åŕé ŕéåçĥåƀļé~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "⟦Ṽîéŵ åçţîṽé šçåñš ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~⟧"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -51381,7 +51551,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "⟦Ṁåñåĝé ļîƀŕåŕý ŕööţš åñđ šçåñš. Çåţåļöĝ îɱþöŕţ/éẋþöŕţ ñöŵ ļîṽéš ûñđéŕ Ṁåîñţéñåñçé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ṁåñåĝé ɱéđîå ƒöļđéŕš, ɱöñîţöŕ šçåñš, åñđ ŕéšöļṽé ɱåţçĥîñĝ îššûéš.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.libraries.page.title": [
@@ -51904,6 +52074,64 @@
       "value": "⟦Šţåļé Éẋţéŕñåļ ÎĐš~~~~~~~~⟧"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åçţîṽé~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åçţîṽé~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "⟦Šçåñ Åçţîṽîţý~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "⟦Çåţåļöĝ Ĥéåļţĥ~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "⟦Ļîƀŕåŕîéš~~~~⟧"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -52382,6 +52610,24 @@
     {
       "type": 0,
       "value": "⟦Šéåŕçĥ îĝñöŕéđ îţéɱš ƀý ţîţļé, ļîƀŕåŕý, öŕ ţýþé...~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "⟦Åɱƀîĝûöûš~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "⟦Þéñđîñĝ~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "⟦Ûñɱåţçĥéđ~~~~⟧"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -140797,6 +141043,12 @@
     {
       "type": 0,
       "value": "⟦Ŕéåđ ţĥé þŕöƒîļé'š ñöţîƒîçåţîöñš åš ţĥéý åŕŕîṽé åñđ ɱåŕķ ţĥéɱ ŕéåđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "⟦Šéé ŵĥåţ îš þļåýîñĝ ŕîĝĥţ ñöŵ öñ ţĥé þŕöƒîļé, öŕ öñ éṽéŕý þŕöƒîļé öƒ ţĥé åççöûñţ ŵĥéñ ţĥé ķéý ñåɱéš ñöñé: ţîţļé, þöšîţîöñ, þåûšéđ šţåţé, đéṽîçé åñđ þļåý ɱéţĥöđ. Ñö þļåýƀåçķ çöñţŕöļ öŕ ñéţŵöŕķ đéţåîļš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.apiKeys.scope.requests": [

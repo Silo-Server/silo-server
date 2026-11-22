@@ -52570,6 +52570,111 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Šeit tiek rādīta skenēšana un metadatu atsvaidzināšana, kamēr tā notiek."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Nav aktīvu skenēšanu vai atsvaidzināšanu"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Visas ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Slēpt rindu"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ vēl "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " bibliotēkas"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ vēl "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " bibliotēka"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ vēl "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " bibliotēkas"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Metadatu atsvaidzināšana"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Notiek metadatu atsvaidzināšana…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Skatīt rindu"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.confidence.high": [
     {
       "type": 0,
@@ -53098,6 +53203,30 @@
       "value": "Apstiprināt tukšo sakņu tīrīšanu"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Pārbaudīt"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Metadatu saskaņošanas rindā nav gaidošu vienumu."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Nav reģistrētu izlaisto sakņu."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Nav reģistrētu novecojušu ārējo ID."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -53142,6 +53271,18 @@
     {
       "type": 0,
       "value": "”"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Rediģēt"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Vēl nav konfigurēta neviena bibliotēka."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -53205,6 +53346,12 @@
       "value": "Slēpt ceļus"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Dīkstāvē"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -53239,6 +53386,12 @@
       "value": "Daļēja skenēšana"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Aizpildīt trūkstošos vai aizstāt visus metadatus"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -53251,6 +53404,12 @@
       "value": "Sakne nav sasniedzama"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Skenēt"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -53261,6 +53420,12 @@
     {
       "type": 0,
       "value": "Rādīt ceļus"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Apturēt"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -53279,6 +53444,26 @@
     {
       "type": 0,
       "value": "Pārbaudīt montējumus"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Pārbaudīt, vai visas bibliotēku mapes ir sasniedzamas"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Skatīt bibliotēkas „"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "” aktīvās skenēšanas"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -53382,7 +53567,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Pārvaldiet bibliotēku saknes un skenēšanu. Kataloga importēšana/eksportēšana tagad atrodas sadaļā „Uzturēšana”."
+      "value": "Pārvaldiet multivides mapes, uzraugiet skenēšanu un novērsiet saskaņošanas problēmas."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -53941,6 +54126,67 @@
       "value": "Novecojuši ārējie ID"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktīvi"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktīvs"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktīvi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Skenēšanas aktivitāte"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Kataloga stāvoklis"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Bibliotēkas"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -54423,6 +54669,24 @@
     {
       "type": 0,
       "value": "Meklēt ignorētos vienumus pēc nosaukuma, bibliotēkas vai veida…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Neviennozīmīgs"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Gaida"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Nesaskaņots"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -142793,6 +143057,12 @@
     {
       "type": 0,
       "value": "Lasīt profila paziņojumus, kad tie pienāk, un atzīmēt tos kā izlasītus."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Redzēt, kas pašlaik tiek atskaņots profilā vai, ja atslēgā nav norādīts neviens profils, visos konta profilos: nosaukums, pozīcija, pauzes stāvoklis, ierīce un atskaņošanas metode. Bez atskaņošanas vadības un tīkla informācijas."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

@@ -57113,6 +57113,126 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Тут відображаються сканування й оновлення метаданих, поки вони тривають."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Немає активних сканувань чи оновлень"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Усі ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Сховати чергу"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ ще "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " бібліотека"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ ще "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " бібліотеки"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ ще "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " бібліотек"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ ще "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " бібліотеки"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Оновлення метаданих"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Оновлення метаданих"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Переглянути чергу"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.confidence.high": [
     {
       "type": 0,
@@ -57713,6 +57833,30 @@
       "value": "Підтвердити очищення порожніх коренів"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Перевірити"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "У черзі зіставлення метаданих немає елементів."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Пропущених коренів не виявлено."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Застарілих зовнішніх ID не виявлено."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -57749,6 +57893,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Редагувати"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Ще немає налаштованих бібліотек."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -57823,6 +57979,12 @@
       "value": "Сховати шляхи"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Неактивна"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -57857,6 +58019,12 @@
       "value": "Часткове сканування"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Доповнити відсутні або замінити всі метадані"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -57869,6 +58037,12 @@
       "value": "Корінь недоступний"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Сканувати"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -57879,6 +58053,12 @@
     {
       "type": 0,
       "value": "Показати шляхи"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Зупинити"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -57897,6 +58077,22 @@
     {
       "type": 0,
       "value": "Перевірити точки монтування"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Перевірити, чи доступні всі папки бібліотеки"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Переглянути активні сканування для "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -58000,7 +58196,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Керуйте коренями бібліотек і скануваннями. Імпорт/експорт каталогу тепер у розділі «Обслуговування»."
+      "value": "Керуйте папками медіа, відстежуйте сканування й розв’язуйте проблеми зіставлення."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -58639,6 +58835,78 @@
       "value": "Застарілі зовнішні ID"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " активне"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " активні"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " активних"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " активного"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Активність сканування"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Стан каталогу"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Бібліотеки"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -59129,6 +59397,24 @@
     {
       "type": 0,
       "value": "Шукати ігноровані елементи за назвою, бібліотекою або типом…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Неоднозначно"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "В очікуванні"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Не зіставлено"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -152179,6 +152465,12 @@
     {
       "type": 0,
       "value": "Читати сповіщення профілю, щойно вони надходять, і позначати їх як прочитані."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Бачити, що зараз відтворюється в профілі або в усіх профілях облікового запису, якщо ключ не вказує профіль: назву, позицію, чи стоїть на паузі, пристрій і спосіб відтворення. Без керування відтворенням і мережевих даних."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

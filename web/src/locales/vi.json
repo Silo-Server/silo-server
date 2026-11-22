@@ -46280,6 +46280,96 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Các lượt quét và làm mới siêu dữ liệu sẽ hiển thị ở đây khi đang chạy."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Không có lượt quét hoặc làm mới nào đang chạy"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Tất cả ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Ẩn hàng đợi"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " thư viện khác"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " thư viện khác"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Làm mới siêu dữ liệu"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Đang làm mới siêu dữ liệu…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Xem hàng đợi"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.confidence.high": [
     {
       "type": 0,
@@ -46736,6 +46826,30 @@
       "value": "Xác nhận dọn dẹp thư mục gốc trống"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Kiểm tra"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Không có mục nào đang chờ trong hàng đợi của bộ khớp siêu dữ liệu."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Chưa ghi nhận thư mục gốc nào bị bỏ qua."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Chưa ghi nhận ID bên ngoài lỗi thời nào."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -46772,6 +46886,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Sửa"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Chưa cấu hình thư viện nào."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -46824,6 +46950,12 @@
       "value": "Ẩn đường dẫn"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Không hoạt động"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -46858,6 +46990,12 @@
       "value": "Quét một phần"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Bổ sung siêu dữ liệu còn thiếu hoặc thay thế toàn bộ"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -46870,6 +47008,12 @@
       "value": "Không truy cập được thư mục gốc"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Quét"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -46880,6 +47024,12 @@
     {
       "type": 0,
       "value": "Hiển thị đường dẫn"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Dừng"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -46898,6 +47048,22 @@
     {
       "type": 0,
       "value": "Kiểm tra điểm gắn kết"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Kiểm tra xem mọi thư mục của thư viện có truy cập được không"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Xem các lượt quét đang chạy của "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -47001,7 +47167,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Quản lý thư mục gốc và các lượt quét thư viện. Nhập/xuất danh mục hiện nằm trong Bảo trì."
+      "value": "Quản lý thư mục phương tiện, theo dõi lượt quét và xử lý sự cố khớp."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -47488,6 +47654,56 @@
       "value": "ID bên ngoài lỗi thời"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " đang chạy"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " đang chạy"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Hoạt động quét"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Tình trạng danh mục"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Thư viện"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -47930,6 +48146,24 @@
     {
       "type": 0,
       "value": "Tìm mục đã bỏ qua theo tiêu đề, thư viện hoặc loại…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Không rõ ràng"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Đang chờ"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Chưa khớp"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -129839,6 +130073,12 @@
     {
       "type": 0,
       "value": "Đọc thông báo của hồ sơ ngay khi đến và đánh dấu đã đọc."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Xem nội dung đang phát ngay lúc này trên hồ sơ, hoặc trên mọi hồ sơ của tài khoản khi khóa không chỉ định hồ sơ nào: tiêu đề, vị trí phát, trạng thái tạm dừng, thiết bị và phương thức phát. Không có quyền điều khiển phát hay thông tin chi tiết về mạng."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

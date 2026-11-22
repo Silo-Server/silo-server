@@ -57865,6 +57865,126 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Vykdomi nuskaitymai ir metaduomenų atnaujinimai rodomi čia."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Nėra aktyvių nuskaitymų ar atnaujinimų"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Visos ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Slėpti eilę"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ dar "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " biblioteka"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ dar "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " bibliotekos"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ dar "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " bibliotekos"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ dar "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " bibliotekų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Metaduomenų atnaujinimai"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Atnaujinami metaduomenys…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Rodyti eilę"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.confidence.high": [
     {
       "type": 0,
@@ -58465,6 +58585,30 @@
       "value": "Patvirtinti tuščių šakninių aplankų valymą"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Peržiūrėti"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Metaduomenų sutapatinimo eilėje nėra laukiančių elementų."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Praleistų šakninių aplankų neužregistruota."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Pasenusių išorinių ID neužregistruota."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -58509,6 +58653,18 @@
     {
       "type": 0,
       "value": "“"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Redaguoti"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Dar nesukonfigūruota jokių bibliotekų."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -58583,6 +58739,12 @@
       "value": "Slėpti kelius"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Neaktyvi"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -58617,6 +58779,12 @@
       "value": "Dalinis nuskaitymas"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Užpildyti trūkstamus arba pakeisti visus metaduomenis"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -58629,6 +58797,12 @@
       "value": "Šakninis aplankas nepasiekiamas"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Nuskaityti"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -58639,6 +58813,12 @@
     {
       "type": 0,
       "value": "Rodyti kelius"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Sustabdyti"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -58657,6 +58837,26 @@
     {
       "type": 0,
       "value": "Patikrinti prijungimus"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Patikrinti, ar visi bibliotekos aplankai pasiekiami"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Peržiūrėti aktyvius bibliotekos „"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "“ nuskaitymus"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -58760,7 +58960,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Tvarkykite bibliotekų šakninius aplankus ir nuskaitymus. Katalogo importavimas ir eksportavimas dabar yra skiltyje „Priežiūra“."
+      "value": "Tvarkykite medijos aplankus, stebėkite nuskaitymus ir spręskite sutapatinimo problemas."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -59399,6 +59599,78 @@
       "value": "Pasenę išoriniai ID"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktyvus"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktyvūs"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktyvaus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktyvių"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Nuskaitymo veikla"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Katalogo būklė"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Bibliotekos"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -59905,6 +60177,24 @@
     {
       "type": 0,
       "value": "Ieškoti ignoruojamų elementų pagal pavadinimą, biblioteką arba tipą…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Neaiškus"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Laukiama"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Nesusietas"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -154063,6 +154353,12 @@
     {
       "type": 0,
       "value": "Skaityti profilio pranešimus, kai jie gaunami, ir pažymėti juos kaip perskaitytus."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Matyti, kas šiuo metu leidžiama profilyje arba, jei raktas nenurodo jokio profilio, visuose paskyros profiliuose: kūrinį, atkūrimo vietą, ar pristabdyta, įrenginį ir atkūrimo būdą. Be atkūrimo valdymo ir tinklo informacijos."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

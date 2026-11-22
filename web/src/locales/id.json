@@ -40736,6 +40736,81 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Pemindaian dan penyegaran metadata muncul di sini saat sedang berjalan."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Tidak ada pemindaian atau penyegaran aktif"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Semua ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Sembunyikan antrean"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " perpustakaan lainnya"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Penyegaran metadata"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Menyegarkan metadata"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Lihat antrean"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.confidence.high": [
     {
       "type": 0,
@@ -41120,6 +41195,30 @@
       "value": "Konfirmasi pembersihan root kosong"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Periksa"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Tidak ada item yang menunggu di antrean pencocok metadata."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Tidak ada root yang dilewati tercatat."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Tidak ada ID eksternal kedaluwarsa yang tercatat."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -41156,6 +41255,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Edit"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Belum ada perpustakaan yang dikonfigurasi."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -41197,6 +41308,12 @@
       "value": "Sembunyikan jalur"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Siaga"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -41231,6 +41348,12 @@
       "value": "Pemindaian sebagian"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Lengkapi metadata yang hilang atau ganti semua metadata"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -41243,6 +41366,12 @@
       "value": "Root tidak terjangkau"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Pindai"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -41253,6 +41382,12 @@
     {
       "type": 0,
       "value": "Tampilkan jalur"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Hentikan"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -41271,6 +41406,22 @@
     {
       "type": 0,
       "value": "Verifikasi mount"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Periksa apakah semua folder perpustakaan dapat dijangkau"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Lihat pemindaian aktif untuk "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -41374,7 +41525,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Kelola root dan pemindaian perpustakaan. Impor/ekspor katalog kini ada di Pemeliharaan."
+      "value": "Kelola folder media, pantau pemindaian, dan selesaikan masalah pencocokan."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -41775,6 +41926,45 @@
     {
       "type": 0,
       "value": "ID eksternal kedaluwarsa"
+    }
+  ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktif"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Aktivitas pemindaian"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Kesehatan katalog"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Perpustakaan"
     }
   ],
   "web.admin.libraries.toast.cancelJobFailed": [
@@ -42195,6 +42385,24 @@
     {
       "type": 0,
       "value": "Cari item diabaikan menurut judul, perpustakaan, atau jenis…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Ambigu"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Menunggu"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Tidak cocok"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -118194,6 +118402,12 @@
     {
       "type": 0,
       "value": "Baca notifikasi profil saat tiba dan tandai sebagai sudah dibaca."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Lihat apa yang sedang diputar saat ini di profil, atau di setiap profil di akun jika kunci tidak menyebutkan profil: judul, posisi pemutaran, status jeda, perangkat, dan metode pemutaran. Tanpa kontrol pemutaran atau detail jaringan."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

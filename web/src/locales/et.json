@@ -46596,6 +46596,96 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Skannimised ja metaandmete värskendused kuvatakse siin nende käigus."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Aktiivseid skannimisi ega värskendusi pole"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Kõik ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Peida järjekord"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " muu meediakogu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " muud meediakogu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Metaandmete värskendused"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Metaandmete värskendamine…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Vaata järjekorda"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.confidence.high": [
     {
       "type": 0,
@@ -47052,6 +47142,30 @@
       "value": "Kinnitage tühjade juurkaustade puhastamine"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Kontrolli"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Metaandmete sobitaja järjekorras pole ootel üksusi."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Vahele jäetud juurkaustu pole registreeritud."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Aegunud väliseid ID-sid pole registreeritud."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -47088,6 +47202,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Muuda"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Meediakogusid pole veel seadistatud."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -47140,6 +47266,12 @@
       "value": "Peida teed"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Jõude"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -47174,6 +47306,12 @@
       "value": "Osaline skannimine"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Täidab puuduvad metaandmed või asendab kõik"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -47186,6 +47324,12 @@
       "value": "Juurkaust pole kättesaadav"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Skanni"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -47196,6 +47340,12 @@
     {
       "type": 0,
       "value": "Näita teid"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Lõpeta"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -47214,6 +47364,26 @@
     {
       "type": 0,
       "value": "Kontrolli haakepunkte"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Kontrollib, kas kõik meediakogu kaustad on kättesaadavad"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Vaata meediakogu "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " aktiivseid skannimisi"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -47317,7 +47487,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Hallake meediakogude juurkaustu ja skannimisi. Kataloogi import ja eksport asuvad nüüd jaotises „Hooldus“."
+      "value": "Hallake meediakaustu, jälgige skannimisi ja lahendage vastendamisprobleeme."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -47796,6 +47966,56 @@
       "value": "Aegunud välised ID-d"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktiivne"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktiivset"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Skannimistegevus"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Kataloogi seisund"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Meediakogud"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -48246,6 +48466,24 @@
     {
       "type": 0,
       "value": "Otsi ignoreeritud üksusi pealkirja, meediakogu või tüübi järgi…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Ebaselge"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Ootel"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Vastendamata"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -130293,6 +130531,12 @@
     {
       "type": 0,
       "value": "Profiili teavituste lugemine nende saabumisel ja loetuks märkimine."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Praegu esitatava sisu nägemine profiilis või, kui võti ühtegi profiili ei määra, konto kõigis profiilides: pealkiri, esituskoht, peatatud olek, seade ja esitusviis. Ilma esituse juhtimise ja võrgu üksikasjadeta."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

@@ -41544,6 +41544,81 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "การสแกนและการรีเฟรชข้อมูลเมตาจะแสดงที่นี่ขณะกำลังทำงาน"
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "ไม่มีการสแกนหรือการรีเฟรชที่กำลังทำงาน"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "ทั้งหมด ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "ซ่อนคิว"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ อีก "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " คลัง"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "การรีเฟรชข้อมูลเมตา"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "กำลังรีเฟรชข้อมูลเมตา…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "ดูคิว"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.confidence.high": [
     {
       "type": 0,
@@ -41944,6 +42019,30 @@
       "value": "ยืนยันการล้างรูทที่ว่าง"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบ"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "ไม่มีรายการที่รออยู่ในคิวของตัวจับคู่ข้อมูลเมตา"
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "ไม่มีบันทึกรูทที่ข้าม"
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "ไม่มีบันทึก ID ภายนอกที่ล้าสมัย"
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -41980,6 +42079,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "แก้ไข"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "ยังไม่ได้ตั้งค่าคลัง"
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -42021,6 +42132,12 @@
       "value": "ซ่อนพาธ"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "ว่าง"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -42055,6 +42172,12 @@
       "value": "สแกนบางส่วน"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "เติมข้อมูลเมตาที่ขาดหายหรือแทนที่ข้อมูลเมตาทั้งหมด"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -42067,6 +42190,12 @@
       "value": "เข้าถึงรูทไม่ได้"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "สแกน"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -42077,6 +42206,12 @@
     {
       "type": 0,
       "value": "แสดงพาธ"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "หยุด"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -42095,6 +42230,22 @@
     {
       "type": 0,
       "value": "ตรวจสอบการเมานต์"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบว่าเข้าถึงโฟลเดอร์ทั้งหมดของคลังได้"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "ดูการสแกนที่กำลังทำงานของคลัง "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -42198,7 +42349,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "จัดการรูทของคลังและการสแกน การนำเข้า/ส่งออกแค็ตตาล็อกย้ายไปอยู่ในการบำรุงรักษาแล้ว"
+      "value": "จัดการโฟลเดอร์สื่อ ติดตามการสแกน และแก้ไขปัญหาการจับคู่"
     }
   ],
   "web.admin.libraries.page.title": [
@@ -42607,6 +42758,49 @@
     {
       "type": 0,
       "value": "ID ภายนอกที่ล้าสมัย"
+    }
+  ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "กำลังทำงาน "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "กิจกรรมการสแกน"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "สถานะของแค็ตตาล็อก"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "คลัง"
     }
   ],
   "web.admin.libraries.toast.cancelJobFailed": [
@@ -43035,6 +43229,24 @@
     {
       "type": 0,
       "value": "ค้นหารายการที่ละเว้นตามชื่อเรื่อง คลัง หรือประเภท…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "กำกวม"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "รอดำเนินการ"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "ไม่พบที่ตรงกัน"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -119594,6 +119806,12 @@
     {
       "type": 0,
       "value": "อ่านการแจ้งเตือนของโปรไฟล์เมื่อได้รับและทำเครื่องหมายว่าอ่านแล้ว"
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "ดูสิ่งที่กำลังเล่นอยู่ขณะนี้ในโปรไฟล์ หรือในทุกโปรไฟล์ของบัญชีเมื่อคีย์ไม่ได้ระบุโปรไฟล์ใด: เรื่อง ตำแหน่งการเล่น สถานะหยุดชั่วคราว อุปกรณ์ และวิธีการเล่น ไม่รวมการควบคุมการเล่นหรือรายละเอียดเครือข่าย"
     }
   ],
   "web.settings.apiKeys.scope.requests": [
