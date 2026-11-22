@@ -12,6 +12,7 @@ import (
 
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // PlaybackEndReason is why a playback attempt ended. The empty reason marks a
@@ -80,6 +81,27 @@ type AdminPlaybackHistoryEntry struct {
 	// decides it, whatever position it ended at: a play can seek back,
 	// switch subtitles and stop before where an earlier end left it.
 	Subtitle *playback.SessionSubtitle
+	// Delivered route facts captured from the session when it finalized.
+	// RouteFactsRecorded distinguishes post-upgrade direct-play rows (whose
+	// transcode columns are legitimately NULL) from pre-upgrade rows.
+	TargetVideoCodec       string
+	TargetResolution       string
+	TargetAudioCodec       string
+	TargetAudioChannels    int
+	OutputContainer        string
+	OutputProtocol         string
+	TargetBitrateKbps      int
+	TranscodeHWAccel       string
+	ToneMapMode            string
+	AdaptationReasons      []string
+	ReportingNode          string
+	StreamLocation         string
+	CompatOrigin           bool
+	RoutingExecution       string
+	RoutingExecutionNodeID int
+	RoutingEgress          string
+	RoutingEgressNodeID    int
+	RouteFactsRecorded     bool
 }
 
 // PlaybackAdminStore persists finalized playback history and manages the
@@ -146,9 +168,15 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 			 play_method, started_at, ended_at, watched_seconds, duration_seconds, completed, client_ip,
 			 start_position_seconds, played_seconds, paused_seconds, measured, measured_since, measured_until,
 			 device_id, device_platform, client_name, client_version, video_decision, audio_decision,
-			 end_reason, end_reason_at, subtitle)
+			 end_reason, end_reason_at, subtitle,
+			 target_video_codec, target_resolution, target_audio_codec, target_audio_channels,
+			 output_container, output_protocol, target_bitrate_kbps, transcode_hw_accel, tone_map_mode,
+			 adaptation_reasons, reporting_node, stream_location, compat_origin,
+			 routing_execution, routing_execution_node_id, routing_egress, routing_egress_node_id,
+			 route_facts_recorded)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::inet, $14, $15, $16, $17, $18, $19,
-			$20, $21, $22, $23, $24, $25, $26::text, CASE WHEN $26::text IS NOT NULL THEN $9::timestamptz END, $27)
+			$20, $21, $22, $23, $24, $25, $26::text, CASE WHEN $26::text IS NOT NULL THEN $9::timestamptz END, $27,
+			$28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)
 		ON CONFLICT (session_id) DO UPDATE SET
 			watched_seconds = GREATEST(admin_playback_history.watched_seconds, EXCLUDED.watched_seconds),
 			subtitle = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at
@@ -170,7 +198,38 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 				ELSE GREATEST(admin_playback_history.paused_seconds, EXCLUDED.paused_seconds) END,
 			measured = admin_playback_history.measured OR EXCLUDED.measured,
 			measured_since = LEAST(admin_playback_history.measured_since, EXCLUDED.measured_since),
-			measured_until = GREATEST(admin_playback_history.measured_until, EXCLUDED.measured_until)
+			measured_until = GREATEST(admin_playback_history.measured_until, EXCLUDED.measured_until),
+			target_video_codec = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.target_video_codec, admin_playback_history.target_video_codec) ELSE admin_playback_history.target_video_codec END,
+			target_resolution = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.target_resolution, admin_playback_history.target_resolution) ELSE admin_playback_history.target_resolution END,
+			target_audio_codec = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.target_audio_codec, admin_playback_history.target_audio_codec) ELSE admin_playback_history.target_audio_codec END,
+			target_audio_channels = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.target_audio_channels, admin_playback_history.target_audio_channels) ELSE admin_playback_history.target_audio_channels END,
+			output_container = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.output_container, admin_playback_history.output_container) ELSE admin_playback_history.output_container END,
+			output_protocol = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.output_protocol, admin_playback_history.output_protocol) ELSE admin_playback_history.output_protocol END,
+			target_bitrate_kbps = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.target_bitrate_kbps, admin_playback_history.target_bitrate_kbps) ELSE admin_playback_history.target_bitrate_kbps END,
+			transcode_hw_accel = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.transcode_hw_accel, admin_playback_history.transcode_hw_accel) ELSE admin_playback_history.transcode_hw_accel END,
+			tone_map_mode = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.tone_map_mode, admin_playback_history.tone_map_mode) ELSE admin_playback_history.tone_map_mode END,
+			adaptation_reasons = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.adaptation_reasons, admin_playback_history.adaptation_reasons) ELSE admin_playback_history.adaptation_reasons END,
+			reporting_node = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.reporting_node, admin_playback_history.reporting_node) ELSE admin_playback_history.reporting_node END,
+			routing_execution = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.routing_execution, admin_playback_history.routing_execution) ELSE admin_playback_history.routing_execution END,
+			routing_execution_node_id = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.routing_execution_node_id, admin_playback_history.routing_execution_node_id) ELSE admin_playback_history.routing_execution_node_id END,
+			routing_egress = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.routing_egress, admin_playback_history.routing_egress) ELSE admin_playback_history.routing_egress END,
+			routing_egress_node_id = CASE WHEN EXCLUDED.ended_at >= admin_playback_history.ended_at AND EXCLUDED.route_facts_recorded
+				THEN COALESCE(EXCLUDED.routing_egress_node_id, admin_playback_history.routing_egress_node_id) ELSE admin_playback_history.routing_egress_node_id END,
+			route_facts_recorded = admin_playback_history.route_facts_recorded OR EXCLUDED.route_facts_recorded
 		WHERE EXCLUDED.watched_seconds > admin_playback_history.watched_seconds
 			OR EXCLUDED.played_seconds > admin_playback_history.played_seconds
 			OR EXCLUDED.paused_seconds > admin_playback_history.paused_seconds
@@ -178,7 +237,7 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 			OR (EXCLUDED.completed AND NOT admin_playback_history.completed)
 			OR `+laterStretch+`
 			OR (EXCLUDED.ended_at > admin_playback_history.ended_at
-				AND EXCLUDED.subtitle IS DISTINCT FROM admin_playback_history.subtitle)
+				AND (EXCLUDED.subtitle IS DISTINCT FROM admin_playback_history.subtitle OR EXCLUDED.route_facts_recorded))
 	`,
 		entry.SessionID,
 		entry.UserID,
@@ -207,6 +266,24 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 		nullableString(entry.AudioDecision),
 		nullableString(string(entry.EndReason)),
 		entry.Subtitle,
+		nullableString(entry.TargetVideoCodec),
+		nullableString(entry.TargetResolution),
+		nullableString(entry.TargetAudioCodec),
+		nullablePositiveInt(entry.TargetAudioChannels),
+		nullableString(entry.OutputContainer),
+		nullableString(entry.OutputProtocol),
+		nullablePositiveInt(entry.TargetBitrateKbps),
+		nullableString(entry.TranscodeHWAccel),
+		nullableString(entry.ToneMapMode),
+		nullableStringSlice(entry.AdaptationReasons),
+		nullableString(entry.ReportingNode),
+		nullableString(entry.StreamLocation),
+		nullableTrueBool(entry.CompatOrigin),
+		nullableString(entry.RoutingExecution),
+		nullablePositiveInt(entry.RoutingExecutionNodeID),
+		nullableString(entry.RoutingEgress),
+		nullablePositiveInt(entry.RoutingEgressNodeID),
+		entry.RouteFactsRecorded,
 	)
 	queueHistoryFacts(batch, entry)
 	return batch
@@ -222,6 +299,7 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 	}
 	var live playback.Session
 	var playMethod string
+	var toneMapMode string
 	var startedAt *time.Time
 	err := s.pool.QueryRow(ctx, `
 		SELECT user_id, COALESCE(profile_id, ''), COALESCE(media_file_id, 0), COALESCE(requested_media_file_id, media_file_id, 0),
@@ -230,6 +308,12 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 			COALESCE(client_channel, ''), COALESCE(client_user_agent, ''),
 			COALESCE(device_id, ''), COALESCE(device_platform, ''),
 			COALESCE(transcode_audio, FALSE), COALESCE(target_video_codec, ''),
+			COALESCE(target_resolution, ''), COALESCE(target_audio_codec, ''),
+			COALESCE(target_audio_channels, 0), COALESCE(output_container, ''), COALESCE(output_protocol, ''),
+			COALESCE(target_bitrate_kbps, 0), COALESCE(transcode_hw_accel, ''), COALESCE(tone_map_mode, ''),
+			COALESCE(reporting_node, ''), COALESCE(stream_location, ''),
+			COALESCE(routing_execution, ''), COALESCE(routing_execution_node_id, 0),
+			COALESCE(routing_egress, ''), COALESCE(routing_egress_node_id, 0),
 			COALESCE(position_seconds, 0), COALESCE(compat_origin, FALSE),
 			COALESCE(timeline_duration_seconds, 0), adaptation_reasons, subtitle
 		FROM (
@@ -248,6 +332,12 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 		&live.ClientChannel, &live.ClientUserAgent,
 		&live.DeviceID, &live.DevicePlatform,
 		&live.TranscodeAudio, &live.TargetVideoCodec,
+		&live.TargetResolution, &live.TargetAudioCodec,
+		&live.TargetAudioChannels, &live.OutputContainer, &live.OutputProtocol,
+		&live.TargetBitrateKbps, &live.TranscodeHWAccel, &toneMapMode,
+		&live.ReportingNode, &live.StreamLocation,
+		&live.RoutingExecution, &live.RoutingExecutionNodeID,
+		&live.RoutingEgress, &live.RoutingEgressNodeID,
 		&live.Position, &live.IsJellyfinCompat,
 		&live.TimelineDuration, &live.AdaptationReasons, &live.Subtitle,
 	)
@@ -259,6 +349,7 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 	}
 	live.ID = sessionID
 	live.PlayMethod = playback.PlayMethod(playMethod)
+	live.ToneMapMode = tonemap.Mode(toneMapMode)
 	if startedAt != nil {
 		live.StartedAt = *startedAt
 	}
@@ -374,6 +465,27 @@ func nullableString(value string) any {
 	return value
 }
 
+func nullablePositiveInt(value int) any {
+	if value <= 0 {
+		return nil
+	}
+	return value
+}
+
+func nullableStringSlice(values []string) any {
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
+func nullableTrueBool(value bool) any {
+	if !value {
+		return nil
+	}
+	return true
+}
+
 // queueHistoryFacts queues the statement that records the facts a
 // finalization knows and the row lacks, and its end reason.
 func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
@@ -391,7 +503,25 @@ func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
 			video_decision = COALESCE(video_decision, $6),
 			audio_decision = COALESCE(audio_decision, $7),
 			end_reason = CASE WHEN `+laterReason+` THEN $8 ELSE end_reason END,
-			end_reason_at = CASE WHEN `+laterReason+` THEN $9::timestamptz ELSE end_reason_at END
+			end_reason_at = CASE WHEN `+laterReason+` THEN $9::timestamptz ELSE end_reason_at END,
+			target_video_codec = COALESCE(target_video_codec, $10),
+			target_resolution = COALESCE(target_resolution, $11),
+			target_audio_codec = COALESCE(target_audio_codec, $12),
+			target_audio_channels = COALESCE(target_audio_channels, $13),
+			output_container = COALESCE(output_container, $14),
+			output_protocol = COALESCE(output_protocol, $15),
+			target_bitrate_kbps = COALESCE(target_bitrate_kbps, $16),
+			transcode_hw_accel = COALESCE(transcode_hw_accel, $17),
+			tone_map_mode = COALESCE(tone_map_mode, $18),
+			adaptation_reasons = COALESCE(adaptation_reasons, $19),
+			reporting_node = COALESCE(reporting_node, $20),
+			stream_location = COALESCE(stream_location, $21),
+			compat_origin = COALESCE(compat_origin, $22),
+			routing_execution = COALESCE(routing_execution, $23),
+			routing_execution_node_id = COALESCE(routing_execution_node_id, $24),
+			routing_egress = COALESCE(routing_egress, $25),
+			routing_egress_node_id = COALESCE(routing_egress_node_id, $26),
+			route_facts_recorded = route_facts_recorded OR $27
 		WHERE session_id = $1 AND (
 			(device_id IS NULL AND $2::text IS NOT NULL)
 			OR (device_platform IS NULL AND $3::text IS NOT NULL)
@@ -399,7 +529,25 @@ func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
 			OR (client_version IS NULL AND $5::text IS NOT NULL)
 			OR (video_decision IS NULL AND $6::text IS NOT NULL)
 			OR (audio_decision IS NULL AND $7::text IS NOT NULL)
-			OR (`+laterReason+` AND (end_reason IS DISTINCT FROM $8 OR end_reason_at IS DISTINCT FROM $9::timestamptz)))
+			OR (`+laterReason+` AND (end_reason IS DISTINCT FROM $8 OR end_reason_at IS DISTINCT FROM $9::timestamptz))
+			OR (target_video_codec IS NULL AND $10::text IS NOT NULL)
+			OR (target_resolution IS NULL AND $11::text IS NOT NULL)
+			OR (target_audio_codec IS NULL AND $12::text IS NOT NULL)
+			OR (target_audio_channels IS NULL AND $13::integer IS NOT NULL)
+			OR (output_container IS NULL AND $14::text IS NOT NULL)
+			OR (output_protocol IS NULL AND $15::text IS NOT NULL)
+			OR (target_bitrate_kbps IS NULL AND $16::integer IS NOT NULL)
+			OR (transcode_hw_accel IS NULL AND $17::text IS NOT NULL)
+			OR (tone_map_mode IS NULL AND $18::text IS NOT NULL)
+			OR (adaptation_reasons IS NULL AND $19::text[] IS NOT NULL)
+			OR (reporting_node IS NULL AND $20::text IS NOT NULL)
+			OR (stream_location IS NULL AND $21::text IS NOT NULL)
+			OR (compat_origin IS NULL AND $22::boolean IS NOT NULL)
+			OR (routing_execution IS NULL AND $23::text IS NOT NULL)
+			OR (routing_execution_node_id IS NULL AND $24::integer IS NOT NULL)
+			OR (routing_egress IS NULL AND $25::text IS NOT NULL)
+			OR (routing_egress_node_id IS NULL AND $26::integer IS NOT NULL)
+			OR (NOT route_facts_recorded AND $27))
 	`,
 		entry.SessionID,
 		nullableString(entry.DeviceID),
@@ -410,5 +558,23 @@ func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
 		nullableString(entry.AudioDecision),
 		nullableString(string(entry.EndReason)),
 		entry.EndedAt,
+		nullableString(entry.TargetVideoCodec),
+		nullableString(entry.TargetResolution),
+		nullableString(entry.TargetAudioCodec),
+		nullablePositiveInt(entry.TargetAudioChannels),
+		nullableString(entry.OutputContainer),
+		nullableString(entry.OutputProtocol),
+		nullablePositiveInt(entry.TargetBitrateKbps),
+		nullableString(entry.TranscodeHWAccel),
+		nullableString(entry.ToneMapMode),
+		nullableStringSlice(entry.AdaptationReasons),
+		nullableString(entry.ReportingNode),
+		nullableString(entry.StreamLocation),
+		nullableTrueBool(entry.CompatOrigin),
+		nullableString(entry.RoutingExecution),
+		nullablePositiveInt(entry.RoutingExecutionNodeID),
+		nullableString(entry.RoutingEgress),
+		nullablePositiveInt(entry.RoutingEgressNodeID),
+		entry.RouteFactsRecorded,
 	)
 }

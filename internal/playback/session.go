@@ -76,6 +76,9 @@ type Session struct {
 	RoutingEgress           string
 	RoutingEgressNodeID     int
 	RoutingEgressNodeURL    string
+	// ReportingNode is the API node identity recovered from playback_sessions_sync
+	// when another replica finalizes a session it does not hold in memory.
+	ReportingNode string
 
 	StreamBitrateKbps      int          // currently delivered bitrate, when known
 	TargetResolution       string       // requested output resolution for transcodes

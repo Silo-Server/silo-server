@@ -1,5 +1,5 @@
 {
-  "revision": "1966162d2977d6d9b3adbd4bf5e7af19e29a0e73c17f58f9d4cf71d7f9d62c56",
+  "revision": "95d50dd458410a75a8cabddbe2b44c64df94b588760315f6bdde946c3faed517",
   "state": "available",
   "allowed": true,
   "available": true,
@@ -17,5 +17,8 @@
     "aborted",
     "replaced"
   ],
-  "lifecycle_seq": true
+  "lifecycle_seq": true,
+  "route_facts": true,
+  "rich_filters": true,
+  "session_detail": true
 }

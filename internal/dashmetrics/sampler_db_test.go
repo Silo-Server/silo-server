@@ -36,7 +36,14 @@ func samplerTestPool(t *testing.T) *pgxpool.Pool {
 			t.Error(err)
 		}
 	})
-	for _, table := range []string{"dashboard_metric_samples", "dashboard_node_egress_samples", "stream_nodes", "playback_sessions_sync"} {
+	for _, table := range []string{
+		"dashboard_metric_samples",
+		"dashboard_node_egress_samples",
+		"dashboard_metric_daily",
+		"dashboard_node_egress_daily",
+		"stream_nodes",
+		"playback_sessions_sync",
+	} {
 		if _, err := admin.Exec(t.Context(), fmt.Sprintf("CREATE TABLE %s.%s (LIKE public.%s INCLUDING ALL)", schema, table, table)); err != nil {
 			t.Fatal(err)
 		}
@@ -130,5 +137,134 @@ func TestSampleSharedRecordsEgressPerNodeDB(t *testing.T) {
 	NewSampler(pool, nil, "replica-b").sampleShared(ctx)
 	if got := samples(); fmt.Sprint(got) != fmt.Sprint([]string{"shared=1", "shared=1"}) {
 		t.Fatalf("after a losing replica: samples = %v, want only the winner's shared rows", got)
+	}
+}
+
+func seedDownsampleTestSamples(t *testing.T, pool *pgxpool.Pool, m1, m2, mRecent, mToday time.Time) {
+	t.Helper()
+	ctx := t.Context()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO dashboard_metric_samples (bucket, source, streams_total, streams_direct, streams_remux, streams_transcode, egress_kbps, download_egress_kbps)
+		VALUES ($1, 'shared', 5, 3, 1, 1, 12000, 0),
+		       ($1, 'proc:api-1', 0, 0, 0, 0, 3000, 1000),
+		       ($2, 'shared', 8, 5, 2, 1, 8000, 0),
+		       ($2, 'proc:api-1', 0, 0, 0, 0, 2000, 500),
+		       ($3, 'shared', 2, 2, 0, 0, 4000, 0),
+		       ($4, 'shared', 9, 9, 0, 0, 20000, 0)`,
+		m1, m2, mRecent, mToday); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO dashboard_node_egress_samples (bucket, node_id, egress_kbps)
+		VALUES ($1, 10, 7000), ($1, 20, 5000),
+		       ($2, 10, 5000), ($2, 20, 3000),
+		       ($3, 10, 4000),
+		       ($4, 10, 20000)`,
+		m1, m2, mRecent, mToday); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertOldDayRollup(t *testing.T, pool *pgxpool.Pool, oldDay, m1, m2 time.Time) {
+	t.Helper()
+	ctx := t.Context()
+	var peakStreams, peakDirect, peakRemux, peakTranscode int
+	var peakEgress, peakDL, apiPeak int
+	var egressBytes, dlBytes, apiBytes int64
+	var peakStreamsAt, peakEgressAt time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT peak_streams, peak_streams_direct, peak_streams_remux, peak_streams_transcode,
+		       peak_egress_kbps, peak_download_kbps, api_peak_egress_kbps,
+		       egress_bytes, download_egress_bytes, api_egress_bytes,
+		       peak_streams_at, peak_egress_at
+		FROM dashboard_metric_daily WHERE day = $1`, oldDay.Format("2006-01-02")).Scan(
+		&peakStreams, &peakDirect, &peakRemux, &peakTranscode,
+		&peakEgress, &peakDL, &apiPeak,
+		&egressBytes, &dlBytes, &apiBytes,
+		&peakStreamsAt, &peakEgressAt,
+	); err != nil {
+		t.Fatalf("query oldDay daily row: %v", err)
+	}
+	if peakStreams != 8 || peakDirect != 5 || peakRemux != 2 || peakTranscode != 1 {
+		t.Fatalf("oldDay stream peaks = %d(%d/%d/%d), want 8(5/2/1)", peakStreams, peakDirect, peakRemux, peakTranscode)
+	}
+	if peakEgress != 15000 || peakDL != 1000 || apiPeak != 3000 ||
+		egressBytes != 187500000 || dlBytes != 11250000 || apiBytes != 37500000 {
+		t.Fatalf("oldDay egress = peak %d dl %d api %d bytes %d/%d/%d", peakEgress, peakDL, apiPeak, egressBytes, dlBytes, apiBytes)
+	}
+	if !peakStreamsAt.Equal(m2) || !peakEgressAt.Equal(m1) {
+		t.Fatalf("oldDay peak timestamps = streams %v egress %v, want %v and %v", peakStreamsAt, peakEgressAt, m2, m1)
+	}
+}
+
+// TestDownsampleCompletedDaysAndPruneDB verifies that completed UTC days roll
+// up into dashboard_metric_daily and dashboard_node_egress_daily before
+// retention pruning, that today's partial UTC day is left unarchived, that
+// monotonic upserts preserve totals if an older replica pruned raw rows early,
+// and that pruning aligns to whole UTC days.
+func TestDownsampleCompletedDaysAndPruneDB(t *testing.T) {
+	pool := samplerTestPool(t)
+	ctx := t.Context()
+
+	todayUTC := time.Now().UTC().Truncate(24 * time.Hour)
+	oldDay := todayUTC.AddDate(0, 0, -40)
+	recentDay := todayUTC.AddDate(0, 0, -2)
+	m1 := oldDay.Add(10 * time.Hour)
+	m2 := oldDay.Add(10*time.Hour + time.Minute)
+
+	seedDownsampleTestSamples(t, pool, m1, m2, recentDay.Add(14*time.Hour), todayUTC.Add(time.Minute))
+
+	s := NewSampler(pool, nil, "replica-a")
+	if err := s.downsampleCompletedDays(ctx); err != nil {
+		t.Fatalf("downsampleCompletedDays: %v", err)
+	}
+	assertOldDayRollup(t, pool, oldDay, m1, m2)
+
+	var todayCount int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM dashboard_metric_daily WHERE day = $1`, todayUTC.Format("2006-01-02")).Scan(&todayCount); err != nil || todayCount != 0 {
+		t.Fatalf("today daily rows = %d (err %v), want 0", todayCount, err)
+	}
+
+	var node10Bytes int64
+	var node10Peak int
+	if err := pool.QueryRow(ctx, `SELECT egress_bytes, peak_egress_kbps FROM dashboard_node_egress_daily WHERE day = $1 AND node_id = 10`, oldDay.Format("2006-01-02")).Scan(&node10Bytes, &node10Peak); err != nil {
+		t.Fatal(err)
+	}
+	if node10Bytes != (7000+5000)*7500 || node10Peak != 7000 {
+		t.Fatalf("node 10 oldDay rollup = bytes %d peak %d, want %d and 7000", node10Bytes, node10Peak, (7000+5000)*7500)
+	}
+
+	// Simulate partial raw deletion before re-rollup: monotonic GREATEST preserves full totals.
+	if _, err := pool.Exec(ctx, `DELETE FROM dashboard_metric_samples WHERE bucket = $1`, m1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM dashboard_node_egress_samples WHERE bucket = $1`, m1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.downsampleCompletedDays(ctx); err != nil {
+		t.Fatalf("second downsampleCompletedDays: %v", err)
+	}
+	var egressBytes int64
+	var peakEgress int
+	if err := pool.QueryRow(ctx, `SELECT egress_bytes, peak_egress_kbps FROM dashboard_metric_daily WHERE day = $1`, oldDay.Format("2006-01-02")).Scan(&egressBytes, &peakEgress); err != nil {
+		t.Fatal(err)
+	}
+	if egressBytes != 187500000 || peakEgress != 15000 {
+		t.Fatalf("after partial raw delete + rerollup: bytes=%d peak=%d, want 187500000 and 15000", egressBytes, peakEgress)
+	}
+
+	s.pruneExpired(ctx)
+	var oldRawCount, remainingRawCount, dailyCount int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM dashboard_metric_samples WHERE bucket < $1`, recentDay).Scan(&oldRawCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM dashboard_metric_samples`).Scan(&remainingRawCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM dashboard_metric_daily`).Scan(&dailyCount); err != nil {
+		t.Fatal(err)
+	}
+	if oldRawCount != 0 || remainingRawCount != 2 || dailyCount != 2 {
+		t.Fatalf("after prune: oldRaw=%d remainingRaw=%d daily=%d, want 0, 2, 2", oldRawCount, remainingRawCount, dailyCount)
 	}
 }

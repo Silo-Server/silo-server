@@ -220,6 +220,10 @@ type PlaybackHandler struct {
 	// InstallationID is diagnostics.ServerInstanceID; v2 playback mutations
 	// carry it and are refused when it differs. Empty leaves v2 unconfigured.
 	InstallationID string
+	// ReportingNode identifies this API node on finalized admin playback
+	// history rows when the session itself does not carry one recovered from
+	// playback_sessions_sync.
+	ReportingNode string
 	// WatchTogetherAvailable is set when the room service and authenticated
 	// socket are wired, so capability discovery reflects their dependencies.
 	WatchTogetherAvailable bool
@@ -1282,26 +1286,54 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 		}
 	}
 
+	playMethod := semanticPlayMethod(session)
+	var adaptationReasons []string
+	if playMethod != playback.PlayDirect {
+		adaptationReasons = playback.NormalizeAdaptationReasons(session.AdaptationReasons)
+	}
+	reportingNode := session.ReportingNode
+	if reportingNode == "" {
+		reportingNode = h.ReportingNode
+	}
+
 	entry := &AdminPlaybackHistoryEntry{
-		SessionID:          session.ID,
-		UserID:             session.UserID,
-		ProfileID:          session.ProfileID,
-		ProfileName:        profileName,
-		MediaItemID:        targetID,
-		MediaFileID:        requestedMediaFileID(session),
-		PlayMethod:         string(semanticPlayMethod(session)),
-		StartedAt:          session.StartedAt.UTC().Format(time.RFC3339Nano),
-		EndedAt:            time.Now().UTC().Format(time.RFC3339Nano),
-		EndPositionSeconds: session.Position,
-		DurationSeconds:    durationPtr,
-		Completed:          completed,
-		ClientIP:           session.ClientIP,
-		Watch:              session.Watch,
-		DeviceID:           session.DeviceID,
-		DevicePlatform:     session.DevicePlatform,
-		ClientName:         session.ClientName,
-		ClientVersion:      session.ClientVersion,
-		Subtitle:           session.Subtitle,
+		SessionID:              session.ID,
+		UserID:                 session.UserID,
+		ProfileID:              session.ProfileID,
+		ProfileName:            profileName,
+		MediaItemID:            targetID,
+		MediaFileID:            requestedMediaFileID(session),
+		PlayMethod:             string(playMethod),
+		StartedAt:              session.StartedAt.UTC().Format(time.RFC3339Nano),
+		EndedAt:                time.Now().UTC().Format(time.RFC3339Nano),
+		EndPositionSeconds:     session.Position,
+		DurationSeconds:        durationPtr,
+		Completed:              completed,
+		ClientIP:               session.ClientIP,
+		Watch:                  session.Watch,
+		DeviceID:               session.DeviceID,
+		DevicePlatform:         session.DevicePlatform,
+		ClientName:             session.ClientName,
+		ClientVersion:          session.ClientVersion,
+		Subtitle:               session.Subtitle,
+		TargetVideoCodec:       session.TargetVideoCodec,
+		TargetResolution:       session.TargetResolution,
+		TargetAudioCodec:       session.TargetAudioCodec,
+		TargetAudioChannels:    session.TargetAudioChannels,
+		OutputContainer:        session.OutputContainer,
+		OutputProtocol:         session.OutputProtocol,
+		TargetBitrateKbps:      session.TargetBitrateKbps,
+		TranscodeHWAccel:       session.TranscodeHWAccel,
+		ToneMapMode:            string(session.ToneMapMode),
+		AdaptationReasons:      adaptationReasons,
+		ReportingNode:          reportingNode,
+		StreamLocation:         session.StreamLocation,
+		CompatOrigin:           session.IsJellyfinCompat,
+		RoutingExecution:       session.RoutingExecution,
+		RoutingExecutionNodeID: session.RoutingExecutionNodeID,
+		RoutingEgress:          session.RoutingEgress,
+		RoutingEgressNodeID:    session.RoutingEgressNodeID,
+		RouteFactsRecorded:     true,
 	}
 	// The decisions the live admin row showed for the transport the play
 	// ended on.
@@ -1817,6 +1849,34 @@ func fillEmptySessionFacts(session, live *playback.Session) {
 		session.TranscodeAudio = live.TranscodeAudio
 		session.TargetVideoCodec = live.TargetVideoCodec
 		session.Subtitle = live.Subtitle
+	}
+	fill(&session.TargetVideoCodec, live.TargetVideoCodec)
+	fill(&session.TargetResolution, live.TargetResolution)
+	fill(&session.TargetAudioCodec, live.TargetAudioCodec)
+	if session.TargetAudioChannels == 0 {
+		session.TargetAudioChannels = live.TargetAudioChannels
+	}
+	fill(&session.OutputContainer, live.OutputContainer)
+	fill(&session.OutputProtocol, live.OutputProtocol)
+	if session.TargetBitrateKbps == 0 {
+		session.TargetBitrateKbps = live.TargetBitrateKbps
+	}
+	fill(&session.TranscodeHWAccel, live.TranscodeHWAccel)
+	if session.ToneMapMode == "" {
+		session.ToneMapMode = live.ToneMapMode
+	}
+	if len(session.AdaptationReasons) == 0 && len(live.AdaptationReasons) > 0 && session.PlayMethod != playback.PlayDirect {
+		session.AdaptationReasons = append([]string(nil), live.AdaptationReasons...)
+	}
+	fill(&session.ReportingNode, live.ReportingNode)
+	fill(&session.StreamLocation, live.StreamLocation)
+	fill(&session.RoutingExecution, live.RoutingExecution)
+	if session.RoutingExecutionNodeID == 0 {
+		session.RoutingExecutionNodeID = live.RoutingExecutionNodeID
+	}
+	fill(&session.RoutingEgress, live.RoutingEgress)
+	if session.RoutingEgressNodeID == 0 {
+		session.RoutingEgressNodeID = live.RoutingEgressNodeID
 	}
 	fill(&session.ClientIP, live.ClientIP)
 	fill(&session.ClientName, live.ClientName)

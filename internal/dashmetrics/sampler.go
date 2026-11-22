@@ -39,6 +39,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
@@ -63,6 +64,14 @@ const (
 	// minutes down before returning them (internal/api/handlers), so a wide
 	// window costs the same on the wire as a narrow one.
 	retentionDays = 31
+
+	// bytesPerKbpsMinute converts one sampled minute at 1 kbps into bytes:
+	// 1000 bits/s * 60 s / 8 bits per byte.
+	bytesPerKbpsMinute = 7500
+
+	// downsampleLockKey serializes the hourly completed-day rollup and prune
+	// across API replicas so only one replica runs the work per tick.
+	downsampleLockKey int64 = 0x53494c4f4441494c // "SILODAIL"
 )
 
 // Sampler writes one dashboard_metric_samples row per minute for as long as it
@@ -77,7 +86,8 @@ type Sampler struct {
 	// lastBucket is the minute the last tick wrote, so a ticker that fires
 	// twice inside one minute does not spend an INSERT that ON CONFLICT would
 	// only discard — which would silently drop the egress bytes it carried.
-	lastBucket time.Time
+	lastBucket       time.Time
+	startupRollupRan bool
 
 	// prevBytes holds the cumulative viewer bytes per telemetry session and
 	// transfer at the previous tick; lastEgressAt is when it was taken.
@@ -161,10 +171,19 @@ func (s *Sampler) sampleOnce(ctx context.Context, at time.Time) {
 	s.sampleShared(ctx)
 	s.sampleProcessEgress(ctx, at)
 
-	// Retention runs in-band rather than as its own timer: the table is tiny
-	// and one DELETE an hour costs less than another goroutine.
-	if at.Minute() == 0 {
-		s.pruneExpired(ctx)
+	// Downsample completed UTC days into dashboard_metric_daily and
+	// dashboard_node_egress_daily on startup and at the top of each hour,
+	// strictly before pruning expired minute samples. If the rollup fails, skip
+	// pruning on this tick so unsaved days are never lost.
+	if !s.startupRollupRan || at.Minute() == 0 {
+		s.startupRollupRan = true
+		if err := s.downsampleCompletedDays(ctx); err != nil {
+			slog.WarnContext(ctx, "failed to downsample daily dashboard metrics; skipping prune", "component", component, "error", err)
+			return
+		}
+		if at.Minute() == 0 {
+			s.pruneExpired(ctx)
+		}
 	}
 }
 
@@ -250,12 +269,159 @@ func (s *Sampler) sampleProcessEgress(ctx context.Context, at time.Time) {
 	}
 }
 
-// pruneExpired drops samples older than the retention window.
+// downsampleCompletedDays rolls up every completed UTC calendar day currently
+// present in dashboard_metric_samples and dashboard_node_egress_samples into
+// dashboard_metric_daily and dashboard_node_egress_daily.
+//
+// Only complete UTC days strictly before today UTC are rolled up, and
+// pruneExpired removes whole UTC days at a time, so every day present in the
+// raw sample tables has all of its recorded minutes intact. A non-blocking
+// transaction-scoped advisory lock avoids redundant work across replicas.
+const downsampleMetricDailySQL = `
+	WITH cutoff AS (
+		SELECT (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') AS today_utc
+	), minutes AS (
+		SELECT
+			(bucket AT TIME ZONE 'UTC')::date AS day,
+			bucket,
+			MAX(streams_total)     FILTER (WHERE source = 'shared') AS streams_total,
+			MAX(streams_direct)    FILTER (WHERE source = 'shared') AS streams_direct,
+			MAX(streams_remux)     FILTER (WHERE source = 'shared') AS streams_remux,
+			MAX(streams_transcode) FILTER (WHERE source = 'shared') AS streams_transcode,
+			COALESCE(SUM(egress_kbps), 0)::bigint AS egress_kbps,
+			COALESCE(SUM(download_egress_kbps), 0)::bigint AS download_egress_kbps,
+			COALESCE(SUM(egress_kbps) FILTER (WHERE source LIKE 'proc:%'), 0)::bigint AS api_egress_kbps
+		FROM dashboard_metric_samples, cutoff
+		WHERE bucket < cutoff.today_utc
+		GROUP BY 1, 2
+	), stream_peaks AS (
+		SELECT DISTINCT ON (day)
+			day,
+			COALESCE(streams_direct, 0)::integer    AS peak_streams_direct,
+			COALESCE(streams_remux, 0)::integer     AS peak_streams_remux,
+			COALESCE(streams_transcode, 0)::integer AS peak_streams_transcode,
+			bucket AS peak_streams_at
+		FROM minutes
+		WHERE streams_total IS NOT NULL
+		ORDER BY day, streams_total DESC, bucket ASC
+	), egress_peaks AS (
+		SELECT DISTINCT ON (day)
+			day,
+			bucket AS peak_egress_at
+		FROM minutes
+		ORDER BY day, egress_kbps DESC, bucket ASC
+	), agg AS (
+		SELECT
+			day,
+			COALESCE(MAX(streams_total), 0)::integer     AS peak_streams,
+			COALESCE(MAX(streams_direct), 0)::integer    AS peak_direct,
+			COALESCE(MAX(streams_remux), 0)::integer     AS peak_remux,
+			COALESCE(MAX(streams_transcode), 0)::integer AS peak_transcode,
+			COALESCE(MAX(egress_kbps), 0)::bigint        AS peak_egress_kbps,
+			COALESCE(MAX(download_egress_kbps), 0)::bigint AS peak_download_kbps,
+			(COALESCE(SUM(egress_kbps), 0) * $1)::bigint          AS egress_bytes,
+			(COALESCE(SUM(download_egress_kbps), 0) * $1)::bigint AS download_egress_bytes,
+			(COALESCE(SUM(api_egress_kbps), 0) * $1)::bigint      AS api_egress_bytes,
+			COALESCE(MAX(api_egress_kbps), 0)::bigint             AS api_peak_egress_kbps
+		FROM minutes
+		GROUP BY day
+	)
+	INSERT INTO dashboard_metric_daily (
+		day, peak_streams, peak_direct, peak_remux, peak_transcode,
+		peak_streams_direct, peak_streams_remux, peak_streams_transcode,
+		peak_egress_kbps, peak_download_kbps,
+		egress_bytes, download_egress_bytes,
+		api_egress_bytes, api_peak_egress_kbps,
+		peak_streams_at, peak_egress_at, updated_at
+	)
+	SELECT
+		agg.day, agg.peak_streams, agg.peak_direct, agg.peak_remux, agg.peak_transcode,
+		COALESCE(sp.peak_streams_direct, 0),
+		COALESCE(sp.peak_streams_remux, 0),
+		COALESCE(sp.peak_streams_transcode, 0),
+		agg.peak_egress_kbps, agg.peak_download_kbps,
+		agg.egress_bytes, agg.download_egress_bytes,
+		agg.api_egress_bytes, agg.api_peak_egress_kbps,
+		sp.peak_streams_at, ep.peak_egress_at, now()
+	FROM agg
+	LEFT JOIN stream_peaks sp ON sp.day = agg.day
+	LEFT JOIN egress_peaks ep ON ep.day = agg.day
+	ON CONFLICT (day) DO UPDATE SET
+		peak_streams           = GREATEST(dashboard_metric_daily.peak_streams, EXCLUDED.peak_streams),
+		peak_direct            = GREATEST(dashboard_metric_daily.peak_direct, EXCLUDED.peak_direct),
+		peak_remux             = GREATEST(dashboard_metric_daily.peak_remux, EXCLUDED.peak_remux),
+		peak_transcode         = GREATEST(dashboard_metric_daily.peak_transcode, EXCLUDED.peak_transcode),
+		peak_streams_direct    = CASE WHEN EXCLUDED.peak_streams >= dashboard_metric_daily.peak_streams THEN EXCLUDED.peak_streams_direct ELSE dashboard_metric_daily.peak_streams_direct END,
+		peak_streams_remux     = CASE WHEN EXCLUDED.peak_streams >= dashboard_metric_daily.peak_streams THEN EXCLUDED.peak_streams_remux ELSE dashboard_metric_daily.peak_streams_remux END,
+		peak_streams_transcode = CASE WHEN EXCLUDED.peak_streams >= dashboard_metric_daily.peak_streams THEN EXCLUDED.peak_streams_transcode ELSE dashboard_metric_daily.peak_streams_transcode END,
+		peak_egress_kbps       = GREATEST(dashboard_metric_daily.peak_egress_kbps, EXCLUDED.peak_egress_kbps),
+		peak_download_kbps     = GREATEST(dashboard_metric_daily.peak_download_kbps, EXCLUDED.peak_download_kbps),
+		egress_bytes           = GREATEST(dashboard_metric_daily.egress_bytes, EXCLUDED.egress_bytes),
+		download_egress_bytes  = GREATEST(dashboard_metric_daily.download_egress_bytes, EXCLUDED.download_egress_bytes),
+		api_egress_bytes       = GREATEST(dashboard_metric_daily.api_egress_bytes, EXCLUDED.api_egress_bytes),
+		api_peak_egress_kbps   = GREATEST(dashboard_metric_daily.api_peak_egress_kbps, EXCLUDED.api_peak_egress_kbps),
+		peak_streams_at        = CASE WHEN EXCLUDED.peak_streams >= dashboard_metric_daily.peak_streams THEN COALESCE(EXCLUDED.peak_streams_at, dashboard_metric_daily.peak_streams_at) ELSE dashboard_metric_daily.peak_streams_at END,
+		peak_egress_at         = CASE WHEN EXCLUDED.peak_egress_kbps >= dashboard_metric_daily.peak_egress_kbps THEN COALESCE(EXCLUDED.peak_egress_at, dashboard_metric_daily.peak_egress_at) ELSE dashboard_metric_daily.peak_egress_at END,
+		updated_at             = now()
+`
+
+const downsampleNodeEgressDailySQL = `
+	WITH cutoff AS (
+		SELECT (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') AS today_utc
+	)
+	INSERT INTO dashboard_node_egress_daily (day, node_id, egress_bytes, peak_egress_kbps, updated_at)
+	SELECT
+		(bucket AT TIME ZONE 'UTC')::date AS day,
+		node_id,
+		(COALESCE(SUM(egress_kbps), 0) * $1)::bigint AS egress_bytes,
+		COALESCE(MAX(egress_kbps), 0)::bigint        AS peak_egress_kbps,
+		now()
+	FROM dashboard_node_egress_samples, cutoff
+	WHERE bucket < cutoff.today_utc
+	GROUP BY 1, 2
+	ON CONFLICT (day, node_id) DO UPDATE SET
+		egress_bytes     = GREATEST(dashboard_node_egress_daily.egress_bytes, EXCLUDED.egress_bytes),
+		peak_egress_kbps = GREATEST(dashboard_node_egress_daily.peak_egress_kbps, EXCLUDED.peak_egress_kbps),
+		updated_at       = now()
+`
+
+func (s *Sampler) downsampleCompletedDays(ctx context.Context) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	var locked bool
+	if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock($1)`, downsampleLockKey).Scan(&locked); err != nil {
+		return err
+	}
+	if !locked {
+		return nil
+	}
+	if err := execDownsampleStatements(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func execDownsampleStatements(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, downsampleMetricDailySQL, int64(bytesPerKbpsMinute)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, downsampleNodeEgressDailySQL, int64(bytesPerKbpsMinute)); err != nil {
+		return err
+	}
+	return nil
+}
+
+// pruneExpired drops whole UTC days older than the retention window so raw
+// samples never lose half a day before downsampleCompletedDays rolls it up.
 func (s *Sampler) pruneExpired(ctx context.Context) {
 	for _, table := range []string{"dashboard_metric_samples", "dashboard_node_egress_samples"} {
 		_, err := s.pool.Exec(ctx, `
 			DELETE FROM `+table+`
-			WHERE bucket < now() - make_interval(days => $1)
+			WHERE bucket < ((date_trunc('day', now() AT TIME ZONE 'UTC') - make_interval(days => $1)) AT TIME ZONE 'UTC')
 		`, retentionDays)
 		if err != nil {
 			slog.WarnContext(ctx, "failed to prune dashboard metric samples", "component", component, "table", table, "error", err)

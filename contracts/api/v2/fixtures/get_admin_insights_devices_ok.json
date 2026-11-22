@@ -1,0 +1,93 @@
+{
+  "from": "2025-12-04T03:04:05.678Z",
+  "to": "2026-01-02T03:04:05.678Z",
+  "tz": "UTC",
+  "coverage": {
+    "oldest_history_at": "2025-12-04T03:04:05.678Z",
+    "oldest_measured_at": "2025-12-04T03:04:05.678Z",
+    "oldest_route_facts_at": "2025-12-04T03:04:05.678Z",
+    "oldest_metric_at": "2025-12-04T03:04:05.678Z",
+    "total_plays": 42,
+    "measured_plays": 40,
+    "route_facts_plays": 38
+  },
+  "summary": {
+    "total_plays": 42,
+    "direct_plays": 30,
+    "remux_plays": 7,
+    "transcode_plays": 5,
+    "direct_rate": 0.7143,
+    "route_facts_plays": 38,
+    "hw_transcode_plays": 4,
+    "sw_transcode_plays": 1,
+    "subtitle_burn_in_plays": 2,
+    "hdr_tonemap_plays": 2,
+    "hdr_tonemap_hw_plays": 2,
+    "hdr_tonemap_sw_plays": 0
+  },
+  "codecs": [
+    "hevc",
+    "h264"
+  ],
+  "matrix": [
+    {
+      "client_name": "Silo Apple",
+      "device_platform": "tvOS",
+      "is_jellyfin_client": false,
+      "total_plays": 20,
+      "direct_plays": 18,
+      "remux_plays": 1,
+      "transcode_plays": 1,
+      "direct_rate": 0.9,
+      "cells": [
+        {
+          "source_video_codec": "hevc",
+          "plays": 12,
+          "direct_plays": 11,
+          "remux_plays": 1,
+          "transcode_plays": 0,
+          "direct_rate": 0.9167
+        }
+      ]
+    }
+  ],
+  "adaptation_reasons": [
+    {
+      "reason": "subtitle_burn_in",
+      "plays": 2,
+      "share_of_adapted": 0.1667
+    }
+  ],
+  "hw_accel_breakdown": [
+    {
+      "key": "vaapi",
+      "plays": 4
+    },
+    {
+      "key": "software",
+      "plays": 1
+    }
+  ],
+  "tone_map_breakdown": [
+    {
+      "key": "hardware",
+      "plays": 2
+    }
+  ],
+  "subtitle_burn_in_codecs": [
+    {
+      "key": "hdmv_pgs_subtitle",
+      "plays": 2
+    }
+  ],
+  "top_transcoding_accounts": [
+    {
+      "user_id": "7",
+      "username": "alex",
+      "transcode_plays": 3,
+      "total_plays": 24,
+      "transcode_rate": 0.125,
+      "top_reason": "subtitle_burn_in"
+    }
+  ]
+}

@@ -670,8 +670,15 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	synced, bare := "synced-"+suffix, "bare-"+suffix
 	if _, err = pool.Exec(ctx, `INSERT INTO playback_sessions_sync
 		(session_id, user_id, profile_id, media_file_id, requested_media_file_id, play_method, started_at, client_ip,
-		 client_name, client_version, device_id, device_platform, transcode_audio, target_video_codec, position_seconds, compat_origin, subtitle)
-		VALUES ($1, $2, 'p-1', 7, 8, 'transcode', $3, '203.0.113.9', 'Jellyfin Web', '10.9', 'browser-1', 'web', TRUE, 'h264', 1800, TRUE,
+		 client_name, client_version, device_id, device_platform, transcode_audio, target_video_codec,
+		 target_resolution, target_audio_codec, target_audio_channels, output_container, output_protocol,
+		 target_bitrate_kbps, transcode_hw_accel, tone_map_mode, reporting_node, stream_location,
+		 routing_execution, routing_execution_node_id, routing_egress, routing_egress_node_id,
+		 position_seconds, compat_origin, adaptation_reasons, subtitle)
+		VALUES ($1, $2, 'p-1', 7, 8, 'transcode', $3, '203.0.113.9', 'Jellyfin Web', '10.9', 'browser-1', 'web', TRUE, 'h264',
+			'1080p', 'aac', 2, 'fmp4', 'hls', 8000, 'vaapi', 'hardware', 'api-1', 'remote',
+			'remote_transcode', 11, 'proxy', 12,
+			1800, TRUE, ARRAY['video_codec_unsupported','subtitle_burn_in'],
 			'{"track_id":"file:7:subtitle:1","codec":"hdmv_pgs_subtitle","source":"embedded","delivery":"burn_in","forced":true,"hearing_impaired":false}')`,
 		synced, account, started); err != nil {
 		t.Fatal(err)
@@ -687,8 +694,13 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	want := playback.Session{ID: synced, UserID: account, ProfileID: "p-1", MediaFileID: 7, RequestedMediaFileID: 8,
 		PlayMethod: playback.PlayTranscode, StartedAt: started, ClientIP: "203.0.113.9", ClientName: "Jellyfin Web",
 		ClientVersion: "10.9", DeviceID: "browser-1", DevicePlatform: "web", TranscodeAudio: true,
-		TargetVideoCodec: "h264", Position: 1800, IsJellyfinCompat: true,
-		Subtitle: &playback.SessionSubtitle{TrackID: "file:7:subtitle:1", Codec: "hdmv_pgs_subtitle", Source: "embedded", Delivery: "burn_in", Forced: true}}
+		TargetVideoCodec: "h264", TargetResolution: "1080p", TargetAudioCodec: "aac", TargetAudioChannels: 2,
+		OutputContainer: "fmp4", OutputProtocol: "hls", TargetBitrateKbps: 8000, TranscodeHWAccel: "vaapi",
+		ToneMapMode: "hardware", ReportingNode: "api-1", StreamLocation: "remote",
+		RoutingExecution: "remote_transcode", RoutingExecutionNodeID: 11, RoutingEgress: "proxy", RoutingEgressNodeID: 12,
+		Position: 1800, IsJellyfinCompat: true,
+		AdaptationReasons: []string{"video_codec_unsupported", "subtitle_burn_in"},
+		Subtitle:          &playback.SessionSubtitle{TrackID: "file:7:subtitle:1", Codec: "hdmv_pgs_subtitle", Source: "embedded", Delivery: "burn_in", Forced: true}}
 	if live.StartedAt.Equal(started) {
 		live.StartedAt = started
 	}
@@ -899,5 +911,110 @@ func TestLifecycleSweepRecordsTheAttemptsSubtitle(t *testing.T) {
 	h.endLifecycleWith(t.Context(), nil, "s-1", PlaybackEndExpired, time.Now(), nil)
 	if len(admin.history) != 1 || admin.history[0].Subtitle != nil {
 		t.Fatalf("admin history = %+v, want one end with the subtitle turned off", admin.history)
+	}
+}
+
+// TestAdminPlaybackHistoryRouteFactsDB verifies that delivered route facts
+// persist on finalization, advance with later replans, fill missing columns on
+// out-of-order finalizations without clobbering newer route facts, and keep
+// pre-upgrade rows marked route_facts_recorded = false.
+func TestAdminPlaybackHistoryRouteFactsDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	suffix := uuid.NewString()
+	var account int
+	if err = pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, "route-facts-"+suffix).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account) }()
+
+	started := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	store := NewPGPlaybackAdminStore(pool, nil)
+	sessionID := "route-" + suffix
+
+	// First finalization lands without route facts (e.g. a detached replica before
+	// sync), then an earlier-ending replica fills the missing route facts, then
+	// a later replan updates the route facts to the final transcode target, and
+	// a delayed older replica does not revert them.
+	if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+		SessionID: sessionID, UserID: account, ProfileID: "p-1", PlayMethod: "transcode",
+		StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(10 * time.Minute).Format(time.RFC3339Nano),
+		EndPositionSeconds: 600,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+		SessionID: sessionID, UserID: account, ProfileID: "p-1", PlayMethod: "transcode",
+		StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(8 * time.Minute).Format(time.RFC3339Nano),
+		EndPositionSeconds: 480,
+		TargetVideoCodec:   "h264", TargetResolution: "1080p", TargetAudioCodec: "aac", TargetAudioChannels: 2,
+		OutputContainer: "fmp4", OutputProtocol: "hls", TargetBitrateKbps: 8000,
+		TranscodeHWAccel: "vaapi", ToneMapMode: "hardware",
+		AdaptationReasons: []string{"video_codec_unsupported"},
+		ReportingNode:     "api-1", StreamLocation: "remote", CompatOrigin: true,
+		RoutingExecution: "remote_transcode", RoutingExecutionNodeID: 3,
+		RoutingEgress: "proxy", RoutingEgressNodeID: 4,
+		RouteFactsRecorded: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+		SessionID: sessionID, UserID: account, ProfileID: "p-1", PlayMethod: "transcode",
+		StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(12 * time.Minute).Format(time.RFC3339Nano),
+		EndPositionSeconds: 720,
+		TargetVideoCodec:   "hevc", TargetResolution: "720p", TargetAudioCodec: "aac", TargetAudioChannels: 2,
+		OutputContainer: "fmp4", OutputProtocol: "hls", TargetBitrateKbps: 4000,
+		TranscodeHWAccel: "qsv", ToneMapMode: "software",
+		AdaptationReasons: []string{"bitrate_cap", "subtitle_burn_in"},
+		ReportingNode:     "api-2", StreamLocation: "remote", CompatOrigin: true,
+		RoutingExecution: "local", RoutingEgress: "api",
+		RouteFactsRecorded: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Delayed stale finalization must not overwrite the 12m replan's route facts.
+	if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+		SessionID: sessionID, UserID: account, ProfileID: "p-1", PlayMethod: "transcode",
+		StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(9 * time.Minute).Format(time.RFC3339Nano),
+		EndPositionSeconds: 500,
+		TargetVideoCodec:   "vp9", TargetResolution: "480p", TargetBitrateKbps: 1000,
+		TranscodeHWAccel: "software", RouteFactsRecorded: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var videoCodec, resolution, audioCodec, container, protocol, hwAccel, toneMap, reportingNode, streamLoc, routingExec, routingEgress string
+	var audioCh, bitrate int
+	var reasons []string
+	var compat, recorded bool
+	if err := pool.QueryRow(ctx, `
+		SELECT COALESCE(target_video_codec,''), COALESCE(target_resolution,''), COALESCE(target_audio_codec,''),
+			COALESCE(target_audio_channels,0), COALESCE(output_container,''), COALESCE(output_protocol,''),
+			COALESCE(target_bitrate_kbps,0), COALESCE(transcode_hw_accel,''), COALESCE(tone_map_mode,''),
+			adaptation_reasons, COALESCE(reporting_node,''), COALESCE(stream_location,''),
+			COALESCE(compat_origin, FALSE), COALESCE(routing_execution,''), COALESCE(routing_egress,''),
+			route_facts_recorded
+		FROM admin_playback_history WHERE session_id = $1`, sessionID).Scan(
+		&videoCodec, &resolution, &audioCodec, &audioCh, &container, &protocol,
+		&bitrate, &hwAccel, &toneMap, &reasons, &reportingNode, &streamLoc,
+		&compat, &routingExec, &routingEgress, &recorded,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if videoCodec != "hevc" || resolution != "720p" || audioCodec != "aac" || audioCh != 2 ||
+		container != "fmp4" || protocol != "hls" || bitrate != 4000 || hwAccel != "qsv" ||
+		toneMap != "software" || !reflect.DeepEqual(reasons, []string{"bitrate_cap", "subtitle_burn_in"}) ||
+		reportingNode != "api-2" || streamLoc != "remote" || !compat ||
+		routingExec != "local" || routingEgress != "api" || !recorded {
+		t.Fatalf("unexpected route facts: codec=%q res=%q audio=%q/%d container=%q proto=%q kbps=%d hw=%q tm=%q reasons=%v node=%q loc=%q compat=%v exec=%q egress=%q recorded=%v",
+			videoCodec, resolution, audioCodec, audioCh, container, protocol, bitrate, hwAccel, toneMap, reasons, reportingNode, streamLoc, compat, routingExec, routingEgress, recorded)
 	}
 }

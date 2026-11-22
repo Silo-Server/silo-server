@@ -1874,13 +1874,67 @@ withdrawn plan).
 
 `GET /api/v2/admin/playback-history/capabilities` reports `available`, `ended_before`,
 `watch_measurement`, `client_ip`, `device_identity`, `client_identity`,
-`stream_decisions`, `end_reason`, `end_reason_values` and `lifecycle_seq`, for feature
-detection.
+`stream_decisions`, `end_reason`, `end_reason_values`, `lifecycle_seq`, `route_facts`,
+`rich_filters` and `session_detail`, for feature detection.
+
+Additional optional query parameters filter `GET /api/v2/admin/playback-history` (and are
+bound into the cursor alongside the original filters): `search`, `play_method`
+(`all`, `direct`, `remux`, `transcode`), `device_platform`, `client_name`,
+`source_video_codec`, `subtitle_burn_in` (`all`, `true`, `false`), `stream_location`
+(`all`, `local`, `remote`), `adaptation_reason`, `library_id`, `started_after` and
+`started_before`. Each entry also carries delivered route facts captured on finalization
+(`route_facts_recorded`, `target_video_codec`, `target_resolution`, `target_audio_codec`,
+`target_audio_channels`, `output_container`, `output_protocol`, `target_bitrate_kbps`,
+`transcode_hw_accel`, `tone_map_mode`, `adaptation_reasons`, `reporting_node`,
+`stream_location`, `compat_origin`, `is_jellyfin_client`, `routing_execution`,
+`routing_execution_node_id`, `routing_execution_node_name`, `routing_egress`,
+`routing_egress_node_id`, `routing_egress_node_name`) plus joined source file metadata
+(`source_video_codec`, `source_resolution`, `source_audio_codec`, `source_audio_channels`,
+`source_container`, `source_bitrate_kbps`, `source_hdr`, `source_video_range_type`,
+`library_id`, `library_name`). Pre-upgrade rows report `route_facts_recorded: false` and
+null for unrecorded route columns.
+
+`GET /api/v2/admin/playback-history/{session_id}` (`getAdminPlaybackHistoryEntry`) reads
+one finalized entry in the same shape, returning `404 not_found` when no row exists.
 
 The administrator history page and the user detail watch-history tab read this route
 under the authority captured when the query was created, keyed by an opaque authority
 generation, and refuse a page whose account, server, profile or PIN authority changed while
-it was in flight. Both views keep their single-page reading at the v2 page ceiling.
+it was in flight.
+
+## Insights
+
+The Monitor -> Insights endpoints sit under `admin:monitor:read` for acting administrators.
+Each tab shares the time-window parameters `range` (`7d`, `30d`, `90d`, `1y`, `all`,
+`custom`; default `30d`), optional local-date bounds `from_date` and `to_date`
+(`YYYY-MM-DD`, required when `range=custom`), IANA `tz` (default `UTC`), and `refresh`
+(ignored for scoped API keys). Out-of-range dates or unknown timezones answer
+`422 validation_failed`.
+
+- `GET /api/v2/admin/insights/capabilities` (`getAdminInsightsCapabilities`) advertises
+  which tabs and archival datasets are configured (`available`, `activity`, `people`,
+  `devices`, `bandwidth`, `node_egress_daily`, and reserved flags `library` and `map`).
+- `GET /api/v2/admin/insights/activity` (`getAdminInsightsActivity`) accepts optional
+  `library_id` and `user_id` filters and returns window totals, auto-bucketed local-timezone
+  series (`day`, `week`, or `month`), a 7×24 local-timezone viewing heatmap
+  (`day_of_week` `0=Monday..6=Sunday`, `hour` `0..23`), server-wide peak concurrent streams
+  unioned from `dashboard_metric_daily` and unarchived `dashboard_metric_samples`, and
+  data-coverage boundaries (`oldest_history_at`, `oldest_measured_at`,
+  `oldest_route_facts_at`, `oldest_metric_at`).
+- `GET /api/v2/admin/insights/people` (`getAdminInsightsPeople`) accepts optional
+  `library_id`, `search`, `sort` (`watch_time`, `plays`, `direct_pct`, `completion_pct`,
+  `last_seen`), `dir` (`asc`, `desc`), `limit` (1..100), and `offset`, returning account
+  rollups with nested household profiles and live session indicators.
+- `GET /api/v2/admin/insights/devices` (`getAdminInsightsDevices`) accepts optional
+  `library_id`, `user_id`, and `min_plays` (default 5), returning the normalized
+  `(client_name, device_platform)` × source video codec direct-play matrix, canonical
+  `adaptation_reasons` counts, hardware acceleration and HDR tone-mapping breakdowns,
+  burn-in subtitle codecs, and top transcoding accounts.
+- `GET /api/v2/admin/insights/bandwidth` (`getAdminInsightsBandwidth`) unions
+  `dashboard_metric_daily` and `dashboard_node_egress_daily` with unarchived live minute
+  samples (without double-counting archived UTC days) to report multi-year egress volume,
+  playback vs. download totals, peak throughput, per-node daily breakdown, and remote vs.
+  local play share.
 
 ## History imports
 
