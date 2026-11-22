@@ -88,8 +88,15 @@ type platformBuildFetcher func(ctx context.Context, installation *Installation) 
 
 // platformFetchRetryAfter is how long a server waits before it tries
 // again to get a build it couldn't. Every start of the plugin fails
-// meanwhile, without a catalog request or download each time.
-const platformFetchRetryAfter = 10 * time.Minute
+// meanwhile, without a catalog request or download each time. It is shorter
+// than the resident supervisor's restart budget (ten attempts over about four
+// minutes), so a resident plugin gets fresh fetches before it is parked.
+const platformFetchRetryAfter = time.Minute
+
+// platformFetchTimeout bounds one fetch of a platform build. The fetch runs in
+// the archive cache's shared load, which outlives the callers that started
+// it, so it can't rely on their deadlines.
+const platformFetchTimeout = 5 * time.Minute
 
 // platformArchives supplies an installation's build for this host's
 // platform: the one stored for it, or one it fetches and stores.
@@ -315,6 +322,8 @@ func (s *Service) fetchPlatformBuild(ctx context.Context, installation *Installa
 	if installation.RepositoryID == nil {
 		return nil, errors.New("the plugin was not installed from a catalog")
 	}
+	ctx, cancel := context.WithTimeout(ctx, platformFetchTimeout)
+	defer cancel()
 	target, err := s.resolvePlatformBuild(ctx, installation)
 	if err != nil {
 		return nil, fmt.Errorf("%w (update the plugin to a version its catalog lists to install a build for every platform from there)", err)
@@ -344,9 +353,11 @@ func (s *Service) resolvePlatformBuild(ctx context.Context, installation *Instal
 		return target, nil
 	}
 	if official, officialErr := s.catalog.OfficialRepository(ctx); officialErr == nil && official.ID == *installation.RepositoryID {
-		if target, exactErr := s.catalog.ResolveOfficialInstall(ctx, installation.PluginID, installation.Version); exactErr == nil {
+		target, exactErr := s.catalog.ResolveOfficialInstall(ctx, installation.PluginID, installation.Version)
+		if exactErr == nil {
 			return target, nil
 		}
+		return nil, fmt.Errorf("%w; its release descriptor: %w", err, exactErr)
 	}
 	return nil, err
 }

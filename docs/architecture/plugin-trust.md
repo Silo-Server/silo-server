@@ -147,7 +147,7 @@ official plugin whose version the catalog's list no longer names resolves from
 that version's release descriptor, as provisioning an exact version does. A
 plugin that was uploaded, or whose version a third-party catalog no longer
 lists, fails to start on that server with an error naming both platforms, and
-the server tries again after ten minutes without reading the stored archive
+the server tries again after a minute without reading the stored archive
 meanwhile. Startup preload doesn't fetch: the plugin's first launch does.
 
 The server enforces these refusals: `cmd/silo` builds the one
