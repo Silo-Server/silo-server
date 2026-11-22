@@ -1,5 +1,7 @@
 # Watch Together rooms: lobby, staging, and readiness
 
+For how the room anchor, presence and playback commands stay consistent across replicas, see [Watch Party synchronization](watch-party-synchronization.md).
+
 How a room moves from an empty lobby to synchronized playback, which counters
 mean what, and what "ready" means in each phase. The code is the source of
 truth; this records the invariants the code keeps.

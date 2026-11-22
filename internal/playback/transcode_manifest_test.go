@@ -1168,3 +1168,62 @@ func TestTranscodeThrottlerIgnoresOutputFromAnEarlierGeneration(t *testing.T) {
 		t.Fatalf("writes = %q, want up", writer.writes)
 	}
 }
+
+// A client that has fetched all but at most one produced segment is waiting
+// on the encoder: its stall says nothing about the link. A running encoder
+// that is ahead of the client, or one that has finished, is not. A segment
+// counts as fetched once its download completed, so a restart's first
+// segment still in flight on a slow link is not.
+func TestTranscodeOutputBoundsClient(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		running   bool
+		start     int
+		produced  int
+		completed int
+		// stale writes the manifest before the running FFmpeg started: it is
+		// an earlier generation's, and this one has produced nothing yet.
+		stale bool
+		// restarting is a restart between FFmpeg processes: nothing runs, and
+		// the client waits on the server.
+		restarting bool
+		// failed is an FFmpeg that exited with an error: the client waits on
+		// a server fault, not the link.
+		failed bool
+		want   bool
+	}{
+		{name: "client at produced head", running: true, produced: 4, completed: 4, want: true},
+		{name: "head segment not yet fetched", running: true, produced: 5, completed: 4, want: true},
+		{name: "encoder ahead of the client", running: true, produced: 40, completed: 4, want: false},
+		{name: "encoder finished", running: false, produced: 4, completed: 4, want: false},
+		{name: "encoder failed with the client at its output", running: false, failed: true, produced: 4, completed: 4, want: true},
+		{name: "encoder failed far ahead of the client", running: false, failed: true, produced: 40, completed: 4, want: false},
+		{name: "restart with both new segments still undelivered", running: true, start: 100, produced: 101, completed: 99, want: false},
+		{name: "restart whose first segment is still being encoded", running: true, start: 100, produced: -1, completed: 99, want: true},
+		{name: "restart in flight", restarting: true, produced: 40, completed: 9, want: true},
+		{name: "restart still stopping the old encoder", running: true, restarting: true, produced: 40, completed: 9, want: true},
+		{name: "earlier generation's output far ahead of a restart", running: true, start: 10, produced: 40, completed: 9, stale: true, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			opts := TranscodeOpts{TargetCodecVideo: "h264", SegmentDuration: 2, StartSegmentNumber: tc.start}
+			if tc.produced >= 0 {
+				writeManifestRange(t, dir, 0, tc.produced, ".ts")
+				writeSegmentFile(t, dir, segmentFilename(tc.produced, opts), []byte("x"), time.Now())
+			}
+			session := &TranscodeSession{outputDir: dir, running: tc.running, lastRequestedSegment: max(tc.completed, tc.start), lastCompletedSegment: tc.completed, opts: opts}
+			if tc.stale {
+				session.generationStartedAt = time.Now().Add(time.Minute)
+			}
+			if tc.restarting {
+				session.restarting = &restartFlight{}
+			}
+			if tc.failed {
+				session.waitErr = errors.New("exit status 1")
+			}
+			if got := session.OutputBoundsClient(); got != tc.want {
+				t.Fatalf("OutputBoundsClient() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

@@ -2197,7 +2197,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	// limit's label, to check that the limit lowered it. A stall's estimate
 	// goes with the limit; the connection's reading then stands in for it.
 	unlimitedReq, unlimitedFile, unlimitedAudioIndex := withoutObservedEstimateV3(req), effectiveFile, audioIndex
-	learnedLimit, limitErr := h.applyLearnedLimit(r, &req, true)
+	learnedLimit, limitErr := h.applyLearnedLimit(r, &req, true, nil)
 	if limitErr != nil {
 		return playback.DecisionResponseV3{}, playbackStoreOperationError()
 	}
@@ -6088,7 +6088,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	}
 	if !seekReanchor {
 		var limitErr error
-		learnedLimit, limitErr = h.applyLearnedLimit(r, &start, !seekScopedRecovery)
+		// The playing transcode is still mounted here: whether the client
+		// was waiting on it tells an encoder-paced stall from a slow link.
+		outputBound := func() bool { return h.transcodeOutputBoundV3(r.Context(), record.SessionID, unreachableNodes) }
+		learnedLimit, limitErr = h.applyLearnedLimit(r, &start, !seekScopedRecovery, outputBound)
 		if limitErr != nil {
 			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "internal_error", message: "Connection observations are temporarily unavailable.", retryable: true, cause: limitErr}
 		}

@@ -1,6 +1,6 @@
 # Progress bootstrap API
 
-The v2 bootstrap protocol returns a durable, immutable **full replacement** of
+The bootstrap protocol returns a durable, immutable **full replacement** of
 one profile's server progress. It does not provide incremental deltas. Ordinary
 `GET /api/v2/progress` remains browse pagination, and
 `POST /api/v2/sync/progress` remains a separate upload operation.

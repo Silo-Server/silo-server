@@ -8,7 +8,7 @@ server's `/api/v2` base URL.
 
 The public auth operations that decode a JSON body before any credential is checked
 (`login`, `setupServer`, `signup`, `refreshSession`, `startDeviceLogin`, `pollDeviceLogin`,
-`completeOAuthLogin` and `acceptInvitation`) follow the shared v2 body rules: a body over the
+`completeOAuthLogin` and `acceptInvitation`) follow the shared body rules: a body over the
 1 MiB structured-body cap answers `413 payload_too_large`, and a non-blank body that is not
 `application/json` (optionally with `charset=utf-8`), including one with no `Content-Type`,
 answers `415 unsupported_media_type` before the operation runs.
@@ -94,93 +94,85 @@ Local passwords are bcrypt hashes. Setup, invited signup, and password changes s
 password policy. New passwords must contain at least 8 Unicode characters and be
 no more than 72 UTF-8 bytes, the bcrypt input limit. The caller must prove knowledge of the current
 password. By default, changing the password does not revoke existing login sessions; users can
-review and revoke those separately through the account sessions API. The v2 operation can also
+review and revoke those separately through the account sessions API. The change can also
 sign the account out everywhere else in the same step; see
-[V2 password management](#v2-password-management).
+[`POST /account/password`](#post-accountpassword-changepassword).
 
 Accounts whose local password login is disabled keep their credential at the external provider and
 cannot use this flow. An administrator can also make a password temporary or issue a reset link;
 see [temporary passwords](#temporary-passwords) and [password reset links](#password-reset-links).
 
-The next two routes are the frozen `/api/v1` bridge. The v2 operations are under
-[V2 password management](#v2-password-management).
+### `GET /account/password/capability` (`getAccountPasswordCapability`)
 
-### `GET /api/v1/auth/account/capability` (frozen bridge)
-
-Requires an authenticated access-token session. When the request names an active profile, normal
-profile and PIN verification applies. Clients should read this endpoint, or
-`GET /api/v2/account/password/capability` on v2, rather than infer support from a server
-version.
+Requires an authenticated login session. `X-Profile-Id` is optional; a profile it
+names gets its normal viewer and PIN verification, even when the account is an
+administrator. Clients read this document rather than infer support from a server
+version. It supports ETag revalidation and uses `Cache-Control: private, no-cache`.
 
 ```json
 {
-  "schema_version": 1,
-  "change_password": true,
+  "revision": "opaque-capability-revision",
+  "state": "available",
+  "allowed": true,
   "requires_current_password": true,
   "minimum_password_length": 8,
-  "maximum_password_bytes": 72
+  "maximum_password_bytes": 72,
+  "sign_out_other_sessions": true
 }
 ```
 
-`change_password` is true only when the caller is a permitted account owner and the account has
-local password login enabled. The remaining fields describe the server contract even when it is
-false.
+`allowed` is true only when the caller may change the password: an access-token
+session, not an API key or "View as user", acting as the account's primary profile,
+or as an administrator with no profile selected. A session holding a temporary
+password is always allowed. The policy fields describe the server contract even when
+`allowed` is false. A server without a password service reports `state`
+`not_configured`, with `allowed` and `sign_out_other_sessions` false.
+`sign_out_other_sessions` says whether the change accepts that member; a server that
+omits it rejects the member as unknown with `422`, so clients send it only when the
+capability says so.
 
-### `POST /api/v1/auth/account/password` (frozen bridge)
-
-Requires the same authenticated profile authority as the capability endpoint. The request is
-rate-limited separately from login attempts.
+### `POST /account/password` (`changePassword`)
 
 ```json
 {
   "current_password": "existing password",
-  "new_password": "replacement password"
+  "new_password": "replacement password",
+  "sign_out_other_sessions": false
 }
 ```
 
-Success returns `204 No Content`.
+Success returns `204 No Content`. A capability read does not authorize the write: the
+server checks the current account and profile again. This credential operation does
+not require `If-Match`. Repeating a request whose response was lost is safe; the
+current password it names is then the new one, so the retry returns `422` at
+`body.current_password` and changes nothing.
 
-| Status | Error | Meaning |
+The optional `sign_out_other_sessions` boolean (default `false`) also signs the
+account out everywhere except the calling session, in the transaction that replaces
+the password: its other login sessions, "View as user" sessions it opened or that
+view it, its Audiobookshelf-compatible sessions, its stored Jellyfin-compatible
+sessions, and the device sign-ins it approved that the device has not collected yet.
+This is what a password reset revokes, minus the caller's session. API keys survive.
+After commit, every node drops the Jellyfin-compatible sessions it holds in memory,
+as for account-wide admin revocation. `null` is not a value for it.
+
+The operation spends the dedicated `password_change` rate-limit budget
+(`ratelimit.auth.password_change.*`, 10 requests a minute with a burst of 5 per
+client IP by default) rather than the generic authenticated limiter, so a caller
+holding a session but not the password cannot brute-force it.
+
+| Status | Problem type | Meaning |
 | --- | --- | --- |
-| `400` | `bad_request` | The body is invalid or a required field is empty. |
-| `400` | `invalid_current_password` | The current password did not match. |
-| `400` | `weak_password` | The new password contains fewer than 8 characters. |
-| `400` | `password_too_long` | The new password exceeds 72 UTF-8 bytes. |
-| `403` | `password_change_forbidden` | The active profile is not the primary profile, or the caller is an API key or impersonation session. |
-| `409` | `password_login_disabled` | The account does not use local password login. |
+| `401` | `authentication_required` | No valid login session. |
+| `403` | `permission_denied` | The active profile is not the primary profile, an administrator selected a secondary profile, or the caller is an API key or "View as user" session. |
+| `409` | `conflict` | The account does not use local password login. |
+| `422` | `validation_failed` | A member is missing, empty, `null` or unknown; the current password did not match (`body.current_password`); or the new password is shorter than 8 characters, longer than 72 UTF-8 bytes, or the same as a temporary password (`body.new_password`). |
+| `429` | `rate_limited` | The `password_change` budget is spent; `Retry-After` says when to try again. |
+| `503` | `dependency_unavailable` | The server has no password service, or password hashing is saturated; `Retry-After` says when to try again. |
 
 The Jellyfin-compatibility listener does not expose password mutation. Jellyfin-compatible clients
 continue to authenticate with the account's current local password, while password management stays
 on Silo's native API.
-
-### V2 password management
-
-`GET /api/v2/account/password/capability` exposes the same decision through the
-common capability fields `revision`, `state`, and `allowed`, alongside the three
-password-policy fields above. It supports ETag revalidation and uses
-`Cache-Control: private, no-cache`. Selecting a profile requires its normal viewer
-and PIN verification, even when the account is an administrator.
-
-`POST /api/v2/account/password` accepts the same password body and returns 204.
-An optional `sign_out_other_sessions` boolean (default `false`) also signs the
-account out everywhere except the calling session, in the transaction that
-replaces the password: its other login sessions, "View as user" sessions it
-opened or that view it, its Audiobookshelf-compatible sessions, its stored
-Jellyfin-compatible sessions, and the device sign-ins it approved that the
-device has not collected yet. This is what a password reset revokes, minus the
-caller's session. API keys survive. After commit, every node drops the
-Jellyfin-compatible sessions it holds in memory, as for account-wide admin
-revocation. `null` is not a value for it (`422 validation_failed`). The
-capability document's `sign_out_other_sessions` is true on servers that accept
-the member; older servers reject it as an unknown member with `422`, so clients
-send it only when the capability says so.
-It spends the dedicated `password_change` rate-limit budget; exhausted
-requests return `429 rate_limited` with `Retry-After`. Invalid password values
-return `422 validation_failed` naming the member. Disallowed account/profile
-authority returns `403 permission_denied`, and disabled local password login
-returns `409 conflict`. A capability read does not authorize the write: the
-server checks the current account and profile again. This credential operation
-does not require If-Match.
 
 ### Temporary passwords
 
@@ -226,8 +218,7 @@ uses two public operations, which carry it in the request body:
 The earlier path forms, `GET /password-resets/{token}` (`lookupPasswordReset`) and
 `POST /password-resets/{token}/complete` (`completePasswordReset`), still answer the
 same way but are deprecated, because a token in the path reaches proxy access logs.
-They send the `Deprecation` and `Link` headers and will be removed before `/api/v2`
-locks. A link issued in the old `/reset-password/{token}` form still opens.
+They send the `Deprecation` and `Link` headers; no `Sunset` is declared. A link issued in the old `/reset-password/{token}` form still opens.
 
 Every unusable link returns the same `404 not_found`, whether it is unknown, expired,
 used, replaced, or outdated by a password or recovery email change, or its account
@@ -274,20 +265,20 @@ administrator issued; while one exists, requests send nothing.
 
 ## Email addresses
 
-Every v2 write that stores an account address (`setupServer`, `signup`,
+Every write that stores an account address (`setupServer`, `signup`,
 administrator account create and update, and emailed invitations) runs the
 same check (`internal/auth.ValidateEmail`): one bare mailbox, no display name
 or comments, and a domain containing a dot with text on both sides. A bare
 hostname such as `admin@siloserver` is refused with a `422 validation_failed`
 problem at `body.email`. The web client applies the same check before sending.
 
-## Login sessions on v2
+## Listing login sessions
 
 `GET /api/v2/auth/sessions` lists the authenticated account's live login sessions, including
 sessions on its other devices. Authentication is required; no active profile is needed.
 Expired and revoked sessions are excluded before pagination.
 
-The response uses the v2 collection envelope, `items` and `page`, plus `current_session`. Each
+The response uses the collection envelope, `items` and `page`, plus `current_session`. Each
 item contains `id`, `device_name`, `ip_address`, `created_at`, `expires_at`, `last_seen_at`,
 and `current`, plus `device_id` and `device_platform` when the client reported them.
 Timestamps use UTC with millisecond
@@ -297,13 +288,14 @@ A session records the device that opened it. Every sign-in that opens a login se
 login, initial setup, signup, invitation acceptance, password-reset completion, OAuth completion,
 network sign-in, and device-code collection) reads the request's
 `X-Silo-Device-Id`, `X-Silo-Device-Name`, and `X-Silo-Device-Platform` headers, clamped like the
-settings device headers: name to 120 characters, platform to 40. An id longer than 128 characters
-or not made of letters, digits, `.`, `_`, `:` and `-` is dropped, and the sign-in still succeeds.
-A repeated header or an id with other characters is refused with `422 validation_failed`
-before the sign-in runs, as on every v2 operation, and each of these operations declares the three
-headers, so an id longer than 128 characters is refused with `422 validation_failed` too (an
-`out_of_range` error at `header.X-Silo-Device-Id`, as on the settings operations). Name and
-platform are declared without a limit and clamped, so a long name never refuses a sign-in. `device_name` is the
+settings device headers: name to 120 characters, platform to 40. Surrounding whitespace
+is trimmed from the id. A repeated `X-Silo-Device-Id` header, or an id made of anything
+but letters, digits, `.`, `_`, `:` and `-`, is refused with `422 validation_failed`
+before the sign-in runs, as on every operation. Each of these operations declares the
+three headers, so an id longer than 128 characters is refused with `422
+validation_failed` too (an `out_of_range` error at `header.X-Silo-Device-Id`, as on
+the settings operations). Name and platform are declared without a limit and clamped,
+so a long name never refuses a sign-in. `device_name` is the
 reported name, else the `User-Agent`; a device-code sign-in falls back to the name the device
 started the request with, then its `User-Agent`, then `This device`. A name or platform that is
 not valid UTF-8 is dropped. These values are client-reported: they serve display and audit, and
@@ -362,7 +354,7 @@ Routes that check credentials outside the shared auth gate, refresh, the proxy m
 and the Jellyfin session, stream and socket checks may still treat a failed lookup as no session and
 answer 401 or refuse the request. Examples are plugin content routes, theme-song grants,
 Jellyfin admin API keys, Jellyfin image routes (which fall back to anonymous access), and
-the v2 socket-ticket check used by the events, playback-control,
+the socket-ticket check used by the events, playback-control,
 watch-together and admin-logs sockets (a watch-together re-check that fails closes the
 room). None of them is a token refresh, so a client that signs out only on a refresh 401
 stays signed in and retries.
@@ -408,7 +400,7 @@ changes and resets, setup, signup, invitation acceptance, account creation and e
 an administrator, credential linking, and setting a profile PIN all answer this way;
 clients retry after the delay. A signup or invitation acceptance whose account was
 already created when its sign-in was refused answers as before (`500`, or
-`sign_in_required` from v2 invitation acceptance), since repeating it cannot succeed. A
+`sign_in_required` from invitation acceptance), since repeating it cannot succeed. A
 first OAuth sign-in that has to create the account fails with `login_failed`, and the
 person starts it again.
 
@@ -520,10 +512,10 @@ labels these **Per sign-in session**.
   token, and logs the same line.
 
 The quota counts native API requests made with a login session's access token. It
-does not count anything under `/api/v1/stream`, `/api/v2/stream`, `/api/v1/playback`
-or `/api/v2/playback`, so a player keeps reporting progress, replanning and stopping
-after its session runs out; the other media transfer routes (downloads, direct
-downloads, theme audio and ebook reads); `GET /api/v2/auth/provider-logout` and `POST /api/v2/auth/logout`, so a
+does not count anything under `/api/v2/stream` or `/api/v2/playback`, so a player
+keeps reporting progress, replanning and stopping after its session runs out; the
+other media transfer routes (download files and their subtitles, direct downloads and
+theme audio); `GET /api/v2/auth/provider-logout` and `POST /api/v2/auth/logout`, so a
 session that spent its quota can still sign out; API-key requests, which have their own tiers;
 admins; or requests made while impersonating. `ratelimit.QuotaExemptPathPattern`
 defines the exempt routes and must match every route in `internal/api`'s native media
@@ -536,10 +528,9 @@ request, and is dropped once even the slowest refill the settings allow would ha
 filled it: a week after a drained bucket's last request, seconds after one a client
 barely used.
 
-The defaults come from production traffic. The busiest first-party sessions stayed
-under 20000 requests in any hour and rarely went above 10000, while a polling
-integration ran at about 30000 an hour around the clock. The burst lets a client
-sync a whole library in one sitting; the refill rate caps what it can sustain.
+The burst is sized so a first-party client can sync a whole library in one sitting
+without running dry. The refill rate sits well below what an integration polling
+around the clock sends, so sustained polling is what the quota catches.
 
 `GET /api/v2/admin/stats/api-clients` lists the sessions with the most requests in a
 window, leaving out what the quota leaves out, with each session's 429 count. The
@@ -870,9 +861,9 @@ While local sign-in is off, sending or resending an invitation and accepting
 one are refused with 403 `local_login_disabled`: an invitation creates a
 local-password account, which could not sign in.
 
-## Ordinary v2 authentication
+## Ordinary authentication
 
-The ordinary v2 auth surface provides login, refresh, logout, provider discovery,
+The ordinary auth surface provides login, refresh, logout, provider discovery,
 initial setup, invited signup, device pairing, OAuth completion, and account
 password management. Login and device-start submissions create fresh durable
 state and must not be automatically replayed after an uncertain response.
@@ -885,7 +876,7 @@ signup is refused without creating an account or spending the invite.
 SQLite profile storage remains a separate-store boundary; this does not certify
 an atomic cross-store operation or activate backend conversion.
 
-The bundled web client uses the ordinary v2 routes. Its OAuth sign-in buttons
+The bundled web client uses these routes. Its OAuth sign-in buttons
 are links to `GET /api/v2/auth/oauth/{install_id}/start` (`startOAuthLogin`);
 `POST /api/v2/auth/oauth/{install_id}/init` (`initOAuthLogin`) remains for
 form posts. The provider returns to
@@ -907,7 +898,7 @@ exactly as discovery advertises them, including composite plugin identifiers.
 `POST /api/v2/auth/plugin-launch` (`createPluginLaunch`) issues the plugin access
 cookie for the current login session and optional validated profile: the same
 five-minute `HttpOnly` `SameSite=Lax` credential, `Secure` on HTTPS,
-scoped to the v2 plugin-content parent path `/api/v2/plugin-content` and never
+scoped to the plugin-content parent path `/api/v2/plugin-content` and never
 broadened to `/`. The body is `{"expires_in": 300}`. A credential without a login
 session, such as an API key, is refused with 403 `permission_denied`; an unknown
 declared profile is 404 and a PIN-locked one without its token is 403
@@ -919,15 +910,12 @@ The bundled web client launches pages under
 cookie against a served auth-provider plugin is not yet proven
 and is a follow-up.
 
-Apple and Android adoption must be verified against each client's selected API
-contract. Native clients must distinguish failed credential exchanges from an
-expired bearer on an authenticated read, retain refresh concurrency protection,
-and preserve the selected account and profile during device handoff. The native
-migration inventory and client tests track adoption; server/web validation alone
-does not establish native cutover.
+Native clients must distinguish failed credential exchanges from an expired
+bearer on an authenticated read, retain refresh concurrency protection, and
+preserve the selected account and profile during device handoff.
 
 
-## V2 policy discovery
+## Policy discovery
 
 `GET /api/v2/policy/capability` reports `enabled`, `editor_available`,
 `decision_types`, `generation`, `degraded`, optional `degraded_reason` and
@@ -937,7 +925,7 @@ does not require policy-editor authorization.
 
 The route requires authentication and preserves the demo restriction. A profile
 is optional; when supplied it must pass viewer verification. The bundled web
-policy query uses this endpoint. There are no Apple or Android callers to migrate.
+policy query uses this endpoint.
 
 ### Public provider icons
 

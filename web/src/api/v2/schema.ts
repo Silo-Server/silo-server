@@ -10154,7 +10154,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Process a tokenized notification email link and render its standalone result. */
+    /** Render an unsubscribe confirmation page without changing email preferences. */
     get: operations["unsubscribeNotificationEmail"];
     put?: never;
     /** Process a tokenized notification email link and render its standalone result. */
@@ -128162,7 +128162,7 @@ export interface operations {
   unsubscribeNotificationEmail: {
     parameters: {
       query?: {
-        /** @description Email capability token. Missing, expired or consumed proof returns an HTML error page. */
+        /** @description Email capability token. Missing proof returns an HTML error page; validity is checked only when the confirmation is submitted with POST. */
         token?: string;
       };
       header?: never;
@@ -128218,7 +128218,7 @@ export interface operations {
   unsubscribeNotificationEmailOneClick: {
     parameters: {
       query?: {
-        /** @description Email capability token. Missing, expired or consumed proof returns an HTML error page. */
+        /** @description Email capability token. Missing or unknown proof returns an HTML error page. The token stays valid after use. */
         token?: string;
       };
       header?: never;

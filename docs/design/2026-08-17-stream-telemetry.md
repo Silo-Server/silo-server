@@ -4,9 +4,9 @@
 > is blocked, throttled, cut or banned.
 > Enforcement (P1), harvest (P2) and heuristics (P3) are **deferred** — see §3 and §5.
 >
-> **Validated in production.** An 18-hour soak on a live deployment (185 samples,
-> `native` + `jellycompat` enabled) held at 183/183 complete views, zero build failures,
-> zero stale views, and a merge cost of 3 ms median / 10 ms p95 / 52 ms max. See §6.
+> **Validated in production.** A soak against live traffic, with `native` and
+> `jellycompat` enabled, kept every view complete with no build failures, stale views or
+> clock skew, and a merge cost of 3 ms median / 10 ms p95. See §6.
 >
 > **Section numbers are load-bearing.** Go comments cite `§2.2`, `§2.5`, `§4.2`,
 > `§4.2b`, `§4.4`, `§6` and `§7.1` directly. Renumbering breaks those references.
@@ -35,7 +35,7 @@ each answer a different part of the question from a different store.
 served, to whom, and how fast, into one merged picture — asynchronously, off the hot
 path, and without trusting anything the client says. Five router families across three
 kinds of process publish into Redis; a pure function merges them; an admin endpoint
-serves the result and diffs it against the two projections admins read today.
+serves the result and diffs it against the two legacy projections admins read.
 
 **What P0 deliberately does not do.** It makes no decisions. No request is denied,
 delayed or cut, and no existing admin read has been repointed onto it. Judgement —
@@ -68,7 +68,7 @@ flowchart LR
   RT -- "publish snapshot" --> R
   R -- "reads roster + all snapshots" --> M["BuildGlobalView — pure<br/>complete | degraded"]
   M --> V["ViewCache<br/>read-driven TTL, single-flight"]
-  V --> E["GET /api/v1/admin/stream-telemetry/parity<br/>CompareLiveSessions"]
+  V --> E["GET /api/v2/admin/stream-telemetry/parity<br/>CompareLiveSessions"]
   L["legacy projections, still authoritative<br/>playback_sessions in Postgres<br/>silo:sessions:* in Redis"] -. "compared field-by-field, never replaced" .-> E
 ```
 
@@ -81,7 +81,7 @@ endpoint reads those two stores only to diff against them (§6).
 ```mermaid
 flowchart TB
   subgraph REQ["1 · request in"]
-    C["viewer<br/>GET /api/v1/stream/SESSION"] --> MW["base middleware<br/>clientip · logger · metrics · compress"]
+    C["viewer<br/>GET /api/v2/stream/SESSION"] --> MW["base middleware<br/>clientip · logger · metrics · compress"]
     MW --> OB["Registry.Observe route<br/>provisional Observation"]
     OB --> H["handler<br/>resolve + authorize"]
   end
@@ -362,14 +362,14 @@ one process can safely decide rather than splitting the brain.
 
 ## 3. Enforcement — deferred to P1
 
-Nothing in this branch enforces anything. No request is denied, delayed, cut or
+Nothing in P0 enforces anything. No request is denied, delayed, cut or
 throttled, and no user is sanctioned.
 
 The enforcement design (sticky cuts, the policy table, cooperative-flag plus interrupt,
 the sanction ledger) was written and reviewed, then deliberately pulled out of this
 document: every threshold in it was a guess made before any traffic had been observed.
 It is retained verbatim in appendix section E and will be reworked against the
-measurements this branch produces, rather than shipped on assumption.
+measurements P0 produces, rather than shipped on assumption.
 
 
 ## 4. Enrolment — as built
@@ -601,16 +601,17 @@ merge (§2.5, §8). Still read-only, so no election and no sanctions are needed 
 
 ### P0d — admin parity ✅ comparison built, repoint deliberately not
 
-`GET /api/v1/admin/stream-telemetry/parity`, a new additive admin endpoint behind the
-same authorization as `/admin/sessions`. Read-only: no `/api/v1` response changed, no
-migration, no Postgres or Redis write.
+`GET /api/v2/admin/stream-telemetry/parity` (`internal/apiv2/admin_telemetry_parity.go`),
+an acting-admin endpoint with the same authorization as `/api/v2/admin/sessions`.
+Read-only: it changes no other response and does no migration and no Postgres or Redis
+write.
 
 The phase was specified as "serve a debug projection, **compare it against both legacy
 projections**, *then* repoint admin sessions, stats and events". **The comparison
 shipped; the repoint did not**, for two reasons that will not change by trying harder:
 
-1. **Parity evidence now exists, and it argues against a blind repoint.** The 18-hour
-   soak below produced it: the two projections do not describe the same population, and
+1. **Parity evidence now exists, and it argues against a blind repoint.** The soak
+   below produced it: the two projections do not describe the same population, and
    where they differ the legacy side is the one that is wrong (#666). A repoint is a
    correction to make deliberately, with the discrepancy understood, not a swap.
 2. **The admin session payload is a join, not a swap.** `playbackSessionRow` carries
@@ -624,8 +625,8 @@ its input.
 
 | Projection | Written by | Read by |
 |---|---|---|
-| `playback_sessions_sync` (Postgres) | `internal/worker/reconciler.go` from `playback.SessionManager` | `GET /api/v1/admin/sessions`, `active_streams` in `admin_stats.go` |
-| `silo:sessions:{nodeHash}:{sessionID}` (Redis, 60s TTL, 30s refresh) | `internal/nodesessions` on each proxy and transcode node | `GET /api/v1/admin/node-sessions` |
+| `playback_sessions_sync` (Postgres) | `internal/worker/reconciler.go` from `playback.SessionManager` | `GET /api/v2/admin/sessions`, `active_streams` in `admin_stats.go` |
+| `silo:sessions:{nodeHash}:{sessionID}` (Redis, 60s TTL, 30s refresh) | `internal/nodesessions` on each proxy and transcode node | `GET /api/v2/admin/node-sessions` |
 
 **The cached view.** `BuildGlobalView` measured **347 ms at 50,000 sessions**, so it can
 neither run at sweep frequency nor be rebuilt per request. `streamtelemetry.ViewCache`
@@ -672,37 +673,35 @@ JSON through opaquely so an older node's extra fields survive, and a decode-and-
 reader would drop them. `nodesessions.ListAll` is a second, decoding reader for the
 parity path only.
 
-### P0 soak — validated in production, 2026-08-17/18
+### P0 soak — validated in production
 
 Run on a live deployment carrying real traffic, rolled family-by-family: phase 0 (off) →
 phase 1 (`native`) → phase 2 (`+jellycompat`), each held until quiet before widening.
 
-**Result over 18 hours / 185 samples:**
+**Result:**
 
 | Measure | Result |
 |---|---|
-| `view.complete` | 183/183 |
-| Build failures / stale views / clock skew | 0 / 0 / 0 |
-| `build_took_ms` | median 3, p95 10, max 52 |
-| Redis `silo:stelem:*` | 2 keys |
-| Contradictions between publishers | 1, transient, after a container recreate |
-| Container restarts caused | 0 |
+| `view.complete` | every sample |
+| Build failures / stale views / clock skew | none |
+| `build_took_ms` | median 3, p95 10 |
+| Contradictions between publishers | one, transient, after a container recreate |
+| Container restarts caused | none |
 
-Live sessions resumed mid-stream across three container recreates — QSV transcode,
+Live sessions resumed mid-stream across container recreates — transcode,
 `-c:v copy` direct play and HLS all confirmed.
 
 **What the soak did *not* exercise**, stated plainly so the evidence is not read wider
-than it is: `abs` (no audiobook traffic exists on the host), `proxy` and `transcode_node`
-(single-node `MODE=integrated`), and the multi-publisher merge — every sample had exactly
-one publisher. Those rest on the per-family manifest tests and the two-publisher
-real-Redis integration test, not on production evidence.
+than it is: the `abs`, `proxy` and `transcode_node` families, and the multi-publisher
+merge. Those rest on the per-family manifest
+tests and the two-publisher real-Redis integration test, not on production evidence.
 
 **What it found.** The parity projection surfaced a defect in the legacy view it is
 compared against: `playback_sessions_sync` treats a progress POST as liveness, so
 sessions that stopped fetching bytes persist indefinitely and their transcodes are never
 reaped. Telemetry is byte-path driven and correctly excluded them; they appeared
-one-sided in 179 of 185 consecutive samples. Filed as #666 — the finding belongs to the
-legacy store, not to this branch.
+one-sided in nearly every sample. Filed as #666 — the finding belongs to the legacy
+store, not to the telemetry path.
 
 
 ### Legacy retirement — its own project, gated on parity evidence
@@ -710,14 +709,14 @@ legacy store, not to this branch.
 Nine consumers: the nodesessions admin endpoint, proxy health and status capacity, the
 admin session query, admin active-stream counts, stop/delete and session events,
 reconciliation, cleanup and shutdown. That touches health payloads, admin statistics,
-realtime invalidation, stop cleanup, and two `/api/v1` endpoints under the
-additive-only rule. Dual-publish, prove parity, migrate each named consumer, retire
+realtime invalidation, stop cleanup, and two admin endpoints. Dual-publish, prove parity, migrate each named consumer, retire
 writes last.
 
-> **Superseded on this point:** `/api/v1` is a frozen alpha contract retired after the
-> bridge release, not an additive-only surface — see
-> [the native API contract](../architecture/api-contract.md) for the current `/api/v1`
-> lifecycle.
+> **Superseded on this point:** this plan was written when the two endpoints were
+> `/api/v1` routes under an additive-only rule. `/api/v1` has since been retired
+> (#3200); the endpoints are now `/api/v2/admin/sessions` and
+> `/api/v2/admin/node-sessions`, governed by
+> [the native API contract](../architecture/api-contract.md).
 
 **What is authoritative for what.** Telemetry is canonical *only* for server-observed
 live activity, viewer bytes, viewer addresses and enforcement. The control stores stay
@@ -758,8 +757,8 @@ and connection reuse, allocation and sharded-map contention on every HLS request
 ABS socket.io if `Hijacker` is not preserved. Treat it as a production streaming
 change: the §4.4 conformance suite, benchmarks, and the family flag as a canary.
 
-That risk has now been exercised rather than only reasoned about — 18 hours of live
-traffic across three container recreates with no restart, no stall and no regression
+That risk has now been exercised rather than only reasoned about — a soak of live
+traffic across container recreates with no restart, no stall and no regression
 attributable to the telemetry path (see the soak subsection above). The families that
 carried that traffic were `native` and `jellycompat`; the rest still rest on tests.
 
@@ -856,7 +855,7 @@ fence token, not a timestamp comparison, is what makes mutations safe.
 |---|---|---|
 | Fence token primitive | P1 | Nothing in `internal/cache` provides one (§2.5). |
 | Sanction cache coherence | P1 | Generation counter + periodic Postgres reconcile. Pub/sub was tried and rejected: it is lossy, and a replica missing a lift denies indefinitely (appendix E, former §3.4). |
-| Harvest interval production | P2 | Nothing carries representation offsets today; multipart ranges yield no usable `Content-Range`. Window semantics and the canonical title/part key are undefined (appendix E, former §5.3). |
+| Harvest interval production | P2 | Nothing carries representation offsets; multipart ranges yield no usable `Content-Range`. Window semantics and the canonical title/part key are undefined (appendix E, former §5.3). |
 | `DeliveryRate` threshold | P1 | Needs real traffic. Read the distribution before picking a multiplier. |
 
 **Standing risks:**
@@ -937,7 +936,7 @@ self-heals when Redis returns.
 ## Operating it
 
 **It is on.** Every remaining threshold is a guess until the merged view has been
-compared against what admins see today, and that comparison only happens at scale if
+compared against what admins see, and that comparison only happens at scale if
 observation is the default rather than something each deployment has to opt into. A
 fresh install observes every declared family, and merges through Redis whenever Redis
 is configured; nothing has to be set to get a parity read.
