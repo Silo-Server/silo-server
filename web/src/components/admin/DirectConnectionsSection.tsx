@@ -14,6 +14,7 @@ import {
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
+import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/datetime";
 import { formatFileSize } from "@/lib/mediaFormat";
 import { FieldGroup } from "@/pages/admin-settings/FieldGroup";
@@ -182,16 +183,28 @@ function DiagnosticRow({
   label,
   value,
   children,
+  detailsUnderValue = false,
 }: {
   label: ReactNode;
   value: ReactNode;
   children: ReactNode;
+  /** Keeps the detail lines directly under the value when the label runs two lines. */
+  detailsUnderValue?: boolean;
 }) {
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-6 gap-y-1 py-2">
-      <dt className="max-w-full min-w-0 break-words">{label}</dt>
+      <dt className={cn("max-w-full min-w-0 break-words", detailsUnderValue && "row-span-2")}>
+        {label}
+      </dt>
       <dd className="text-end whitespace-nowrap">{value}</dd>
-      <dd className="col-span-2 min-w-0 space-y-1 text-end break-words empty:hidden">{children}</dd>
+      <dd
+        className={cn(
+          "min-w-0 space-y-1 text-end break-words empty:hidden",
+          detailsUnderValue ? "col-start-2" : "col-span-2",
+        )}
+      >
+        {children}
+      </dd>
     </div>
   );
 }
@@ -342,6 +355,7 @@ function HostRow({ host }: { host: DirectConnectionsHostStatus }) {
               return (
                 <DiagnosticRow
                   key={knob.env}
+                  detailsUnderValue
                   label={
                     label ? (
                       <>
