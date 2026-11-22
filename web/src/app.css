@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* The lint rules' test strings are class names, not UI; scanning them ships their CSS. */
+@source not "../eslint-rules";
 /* animate-in/animate-out and their fade-/zoom-/slide- modifiers, used by the
    radix overlay primitives in components/ui. Radix keeps a closing overlay
    mounted until its exit animation ends. The enter/exit keyframes are

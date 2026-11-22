@@ -25,8 +25,7 @@ tester.run("text-size-in-rem", rule, {
     // Only a whole class token counts, not one glued to other text.
     `const hint = "Use text-[13px]. Or text-[13px]px";`,
     // Tailwind reads an upper-case hint as a colour, not a size, so neither is a font size.
-    // Joined at runtime: Tailwind scans this file, and the whole token would emit invalid CSS.
-    ['const label = "TEXT-[13px] text-[', 'LENGTH:13px]";'].join(""),
+    `const label = "TEXT-[13px] text-[LENGTH:13px]";`,
   ],
   invalid: [
     fixed(
