@@ -348,3 +348,41 @@ func TestLocalExitMonitorRestartsFilterReinitFailureOnCPUDecode(t *testing.T) {
 		})
 	}
 }
+
+// The replacement FFmpeg can write stderr as soon as it starts, before restart
+// publishes the new options. Logging that line must not race the restart.
+// Only `go test -race` tells fixed from unfixed code here.
+func TestRestartLogsReplacementStderrWithoutRacingOptions(t *testing.T) {
+	s := newFakeFFmpegSession(t)
+	bin := filepath.Join(s.outputDir, "chatty-ffmpeg.sh")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'replacement started' >&2\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg: %v", err)
+	}
+	sink := &lineSignalingFFmpegLogSink{lines: make(chan string, 1)}
+	s.opts.FFmpegPath = bin
+	s.opts.FFmpegLogSink = sink
+	t.Cleanup(func() { _ = s.Close() })
+
+	if err := s.Restart(context.Background(), 0, 0); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	select {
+	case line := <-sink.lines:
+		if line != "replacement started" {
+			t.Fatalf("logged line = %q, want the replacement's stderr line", line)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the replacement's stderr line never reached the log sink")
+	}
+}
+
+type lineSignalingFFmpegLogSink struct{ lines chan string }
+
+func (s *lineSignalingFFmpegLogSink) WriteLine(_ context.Context, _ string, _ FFmpegLogAttrs, line string) {
+	select {
+	case s.lines <- line:
+	default:
+	}
+}
+
+func (s *lineSignalingFFmpegLogSink) WriteEvent(context.Context, string, FFmpegLogAttrs, string) {}
