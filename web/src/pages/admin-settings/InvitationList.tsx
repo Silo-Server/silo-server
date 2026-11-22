@@ -138,7 +138,8 @@ function useInvitationRow(
     details: details.join(" · "),
     /**
      * The details for the table row, cut short on one line. The note and the
-     * inviter's name each read in their own direction, so a cut one keeps its start.
+     * inviter's name each read in their own direction, so a cut one keeps its
+     * start, and each keeps a letter and "…".
      */
     detailsLine: (
       <MetaLine
@@ -147,11 +148,7 @@ function useInvitationRow(
           joinedByLink,
           note
             ? t("web.admin.settings.invitations.row.note", {
-                note: (
-                  <span dir="auto" className="truncate">
-                    {note}
-                  </span>
-                ),
+                note: <LineName name={note} />,
               })
             : "",
           inviter

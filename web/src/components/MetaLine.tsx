@@ -15,36 +15,35 @@ function floor(text: string) {
   return [...text].length <= SHORT_NAME ? "min-w-max" : "min-w-[2em]";
 }
 
-/** Whether the name's phrase ends the line, so the name is the first part cut. */
-const NameEndsLine = createContext(true);
+/**
+ * A part that ends a line of several takes only the room the others leave, so it
+ * is cut first; the others share what is left once it is down to its floor.
+ */
+const ENDS_LINE = "max-w-max grow basis-0";
+
+/** Whether the phrase ends the line, so its `LineName` is the first part cut. */
+const EndsLine = createContext(true);
 
 /**
- * A person's name inside a `MetaLine` phrase, passed to `t()` as the value. It
- * reads in its own direction and keeps at least a letter and "…" before the
- * parts around it give up their room. At the end of the line it takes the room
- * the other parts leave, so it is cut first; before other parts it keeps its
- * width, and they are cut first. A short name is kept whole instead: a floor
- * wider than the name would leave a gap after it. `align-with-page` keeps a
- * name narrower than its box against the phrase's words.
+ * User text inside a `MetaLine` phrase (a person's name, a note), passed to
+ * `t()` as the value. It reads in its own direction, so a cut one keeps its
+ * start, and keeps a letter and "…" when the line is cut. `align-with-page`
+ * keeps text narrower than its box against the phrase's words.
  */
 export function LineName({ name }: { name: string }) {
-  const endsLine = useContext(NameEndsLine);
+  const endsLine = useContext(EndsLine);
   return (
-    <span
-      dir="auto"
-      className={cn("align-with-page truncate", floor(name), endsLine && "max-w-max grow basis-0")}
-    >
+    <span dir="auto" className={cn("align-with-page truncate", floor(name), endsLine && ENDS_LINE)}>
       {name}
     </span>
   );
 }
 
 /**
- * One line of details joined with " · " and cut short at its end, where a part
- * can be a phrase from `t()` that names someone with `LineName`. The phrase's
- * words keep the page's direction and stay whole. The line is cut from its end,
- * each part with its own "…", except that a name keeps a letter and "…" before
- * the parts ahead of it are cut.
+ * One line of details joined with " · " and cut short, where a part can be a
+ * phrase from `t()` that holds user text in a `LineName`. The phrase's words keep
+ * the page's direction and stay whole. The part at the end of the line is cut
+ * first; then the others, each with its own "…" and keeping a letter and "…".
  */
 export function MetaLine({ parts, className }: { parts: ReactNode[]; className?: string }) {
   const groups: ReactNode[] = [];
@@ -58,7 +57,7 @@ export function MetaLine({ parts, className }: { parts: ReactNode[]; className?:
     }
   }
   if (groups.length === 0) return null;
-  let afterName = false;
+  const lastIndex = groups.length - 1;
   // Screen readers put a space around each flex item, so they read an inline copy
   // instead: words joined to a name ("김님 작성") stay joined.
   return (
@@ -72,32 +71,18 @@ export function MetaLine({ parts, className }: { parts: ReactNode[]; className?:
         ))}
       </span>
       <span aria-hidden className={cn("flex overflow-hidden whitespace-pre", className)}>
-        {groups.map((group, index) => {
-          const isText = typeof group === "string";
-          // Text after a name takes only the room the name leaves, so it is cut
-          // first, down to a letter and "…" like the name.
-          const yieldsFirst = isText && afterName;
-          afterName ||= !isText;
-          return (
-            <Fragment key={index}>
-              {index > 0 ? <span className="shrink-0">{SEPARATOR}</span> : null}
-              {isText ? (
-                <span
-                  className={cn(
-                    "truncate",
-                    yieldsFirst && ["max-w-max grow basis-0", floor(group)],
-                  )}
-                >
-                  {group}
-                </span>
-              ) : (
-                <NameEndsLine.Provider value={index === groups.length - 1}>
-                  {group}
-                </NameEndsLine.Provider>
-              )}
-            </Fragment>
-          );
-        })}
+        {groups.map((group, index) => (
+          <Fragment key={index}>
+            {index > 0 ? <span className="shrink-0">{SEPARATOR}</span> : null}
+            {typeof group === "string" ? (
+              <span className={cn("truncate", floor(group), index === lastIndex && ENDS_LINE)}>
+                {group}
+              </span>
+            ) : (
+              <EndsLine.Provider value={index === lastIndex}>{group}</EndsLine.Provider>
+            )}
+          </Fragment>
+        ))}
       </span>
     </>
   );
