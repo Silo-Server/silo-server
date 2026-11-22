@@ -609,6 +609,182 @@ describe("usePlaybackSession quality changes", () => {
 
     unmount();
   });
+
+  it("reconciles rapid Data Saver toggles against an in-flight replan", async () => {
+    let resolveFirstReplan!: (response: Response) => void;
+    let replanCount = 0;
+    const fetchMock = sessionFetch(() => {
+      replanCount += 1;
+      if (replanCount === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveFirstReplan = resolve;
+        });
+      }
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: `plan:reconcile-${replanCount}`,
+            plan_attempt_key: `v3:reconcile-${replanCount}`,
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+    const bodiesTo = (suffix: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith(suffix))
+        .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 2_000 as number | null,
+          tier: "low_data" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Disable Data Saver -> 10 Mbps replan starts in flight.
+    rerender({ cap: 10_000, tier: "metered" });
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
+    expect(bodiesTo("/playback/session-1/replan")[0]?.bandwidth_cap_kbps).toBe(10_000);
+
+    // Re-enable Data Saver before the 10 Mbps replan settles.
+    rerender({ cap: 2_000, tier: "low_data" });
+
+    // Once the 10 Mbps replan adopts, the session reconciles back to 2 Mbps.
+    act(() =>
+      resolveFirstReplan(
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:reconcile-1",
+              plan_attempt_key: "v3:reconcile-1",
+            }),
+          ),
+        ),
+      ),
+    );
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(2));
+    expect(bodiesTo("/playback/session-1/replan")[1]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "auto",
+      bandwidth_cap_kbps: 2_000,
+    });
+
+    unmount();
+  });
+
+  it("preserves a queued track pick when the network tier changes during an in-flight replan", async () => {
+    let resolveFirstReplan!: (response: Response) => void;
+    let replanCount = 0;
+    const fetchMock = sessionFetch(() => {
+      replanCount += 1;
+      if (replanCount === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveFirstReplan = resolve;
+        });
+      }
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: `plan:track-tier-${replanCount}`,
+            plan_attempt_key: `v3:track-tier-${replanCount}`,
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+    const bodiesTo = (suffix: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith(suffix))
+        .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Start an audio switch, then queue a subtitle switch behind it.
+    act(() => result.current.switchAudioTrack(1, 30));
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
+    act(() => result.current.changeSubtitleTrack(2, 30));
+
+    // Toggle Data Saver while the first replan is still in flight.
+    rerender({ cap: 2_000, tier: "low_data" });
+
+    // Resolving the first replan must dispatch the queued subtitle pick with the new 2 Mbps cap.
+    act(() =>
+      resolveFirstReplan(
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:track-tier-1",
+              plan_attempt_key: "v3:track-tier-1",
+            }),
+          ),
+        ),
+      ),
+    );
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(2));
+    expect(bodiesTo("/playback/session-1/replan")[1]).toMatchObject({
+      operation: "track_change",
+      bandwidth_cap_kbps: 2_000,
+      selected_tracks: { subtitle: { id: "", index: 2 } },
+    });
+
+    unmount();
+  });
 });
 
 describe("usePlaybackSession initial bitmap subtitles", () => {

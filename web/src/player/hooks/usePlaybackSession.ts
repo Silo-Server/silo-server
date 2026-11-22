@@ -602,12 +602,17 @@ export function usePlaybackSession(
   );
   // The adoptions already summarized, so a second report of one is dropped.
   const summarizedAdoptionsRef = useRef(new Set<string>());
-  // The estimate and bandwidth cap on the start or replan in flight; requests
-  // are serialized, so the next adoption answers them.
+  // The estimate, bandwidth cap, and network tier on the start or replan in
+  // flight; requests are serialized, so the next adoption answers them.
   const requestedEstimateRef = useRef<number | null | undefined>(undefined);
   const requestedCapRef = useRef<number | null>(maxBitrateKbps ?? null);
+  const requestedTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
   const activeBandwidthCapRef = useRef<number | null>(maxBitrateKbps ?? null);
+  const activePlanTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
   const activeNetworkTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
+  const latestNetworkTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
+  latestNetworkTierRef.current = networkTier;
+  const tierChangeSeqRef = useRef(0);
   const userPickedQualityRef = useRef(false);
   const latestQualitySettingsRef = useRef({
     qualityPreference: normalizeQualityPreferenceV3(qualityPreference),
@@ -926,6 +931,7 @@ export function usePlaybackSession(
       }
       hasAdoptedPlanRef.current = true;
       activeBandwidthCapRef.current = requestedCapRef.current;
+      activePlanTierRef.current = requestedTierRef.current;
       if (
         Number.isFinite(plan.timeline.source_start_seconds) &&
         plan.timeline.source_start_seconds >= 0
@@ -977,6 +983,7 @@ export function usePlaybackSession(
       const bandwidthEstimateKbps = detectBandwidthEstimateKbpsV3();
       requestedEstimateRef.current = bandwidthEstimateKbps;
       requestedCapRef.current = maxBitrateKbps ?? null;
+      requestedTierRef.current = latestNetworkTierRef.current;
       // An owed Restore's `clear` goes out once, on this start.
       const clearOwed = clearOwedRef.current;
       clearOwedRef.current = false;
@@ -1339,7 +1346,9 @@ export function usePlaybackSession(
     activeRequestKeyRef.current = requestKey;
     activeCapabilityRequestKeyRef.current = capabilityRequestKey;
     activeNetworkTierRef.current = networkTier;
+    activePlanTierRef.current = networkTier;
     activeBandwidthCapRef.current = maxBitrateKbps ?? null;
+    tierChangeSeqRef.current += 1;
     userPickedQualityRef.current = false;
     versionPinnedRef.current = versionPicked;
     qualityRef.current = normalizeQualityPreferenceV3(qualityPreference);
@@ -1531,6 +1540,7 @@ export function usePlaybackSession(
         options.bandwidthEstimateKbps !== undefined ? options.bandwidthEstimateSource : undefined;
       requestedEstimateRef.current = bandwidthEstimateKbps;
       requestedCapRef.current = maxBitrateKbps ?? null;
+      requestedTierRef.current = latestNetworkTierRef.current;
       // A Restore that could not go at once rides its `clear` on the request
       // that replaced it.
       const learnedLimit =
@@ -1809,13 +1819,22 @@ export function usePlaybackSession(
     if (sessionEndedRef.current) return;
 
     const loadSequence = loadSequenceRef.current;
+    const tierChangeSeq = ++tierChangeSeqRef.current;
     const applyTierChange = () => {
-      if (loadSequence !== loadSequenceRef.current || sessionEndedRef.current) return;
-      if (!replanInFlightRef.current && (!planRef.current || !sessionIdRef.current)) {
-        const settling = awaitAdoptionSettled();
-        if (settling) {
-          void settling.then(applyTierChange);
-        }
+      if (
+        loadSequence !== loadSequenceRef.current ||
+        tierChangeSeq !== tierChangeSeqRef.current ||
+        sessionEndedRef.current
+      ) {
+        return;
+      }
+      // Wait for any in-flight start, replan, or queued replan chain to settle
+      // before comparing against the adopted cap or issuing a quality_change,
+      // so rapid toggles reconcile against the adopted cap and queued track
+      // picks are never discarded.
+      const settling = awaitAdoptionSettled();
+      if (settling) {
+        void settling.then(applyTierChange);
         return;
       }
       if (!planRef.current || !sessionIdRef.current) return;
@@ -1833,7 +1852,9 @@ export function usePlaybackSession(
         setState((current) => ({ ...current, qualityPreference: nextQuality }));
       }
       const leavingMetered =
-        previousTier !== "unmetered" && activeNetworkTierRef.current === "unmetered";
+        activePlanTierRef.current !== undefined &&
+        activePlanTierRef.current !== "unmetered" &&
+        activeNetworkTierRef.current === "unmetered";
       if (leavingMetered) {
         keptEstimateRef.current = undefined;
       }
