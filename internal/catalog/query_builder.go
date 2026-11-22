@@ -1721,56 +1721,48 @@ func (qb *QueryBuilder) dateViewedSortPlan() (string, []string, []any) {
 	if qb.mediaScope == "ebook" {
 		return qb.ebookDateViewedSortPlan()
 	}
-	historyJoin := fmt.Sprintf(
-		`LEFT JOIN (
-			SELECT viewed.content_id, MAX(uwh.watched_at) AS viewed_at
-			FROM user_watch_history uwh
-			LEFT JOIN episodes ep ON ep.content_id = uwh.media_item_id
-			CROSS JOIN LATERAL (VALUES (uwh.media_item_id), (ep.series_id)) AS viewed(content_id)
-			LEFT JOIN user_history_hidden_items hhi
-				ON hhi.user_id = $%d
-			   AND hhi.profile_id = $%d
-			   AND hhi.media_item_id = uwh.media_item_id
-			WHERE uwh.user_id = $%d
-			  AND uwh.profile_id = $%d
-			  AND uwh.completed = TRUE
-			  AND (hhi.media_item_id IS NULL OR uwh.watched_at > hhi.hidden_before)
-			  AND viewed.content_id IS NOT NULL
-			GROUP BY viewed.content_id
-		) sort_history_viewed ON sort_history_viewed.content_id = %s.content_id`,
-		qb.argIdx,
-		qb.argIdx+1,
-		qb.argIdx,
-		qb.argIdx+1,
-		qb.alias,
-	)
-	progressJoin := fmt.Sprintf(
-		`LEFT JOIN (
-			SELECT viewed.content_id, MAX(uwp.updated_at) AS viewed_at
-			FROM user_watch_progress uwp
-			LEFT JOIN episodes ep ON ep.content_id = uwp.media_item_id
-			CROSS JOIN LATERAL (VALUES (uwp.media_item_id), (ep.series_id)) AS viewed(content_id)
-			LEFT JOIN user_history_hidden_items hhi
-				ON hhi.user_id = $%d
-			   AND hhi.profile_id = $%d
-			   AND hhi.media_item_id = uwp.media_item_id
-			WHERE uwp.user_id = $%d
-			  AND uwp.profile_id = $%d
-			  AND uwp.completed = TRUE
-			  AND (hhi.media_item_id IS NULL OR uwp.updated_at > hhi.hidden_before)
-			  AND viewed.content_id IS NOT NULL
-			GROUP BY viewed.content_id
-		) sort_progress_viewed ON sort_progress_viewed.content_id = %s.content_id`,
-		qb.argIdx,
-		qb.argIdx+1,
-		qb.argIdx,
-		qb.argIdx+1,
-		qb.alias,
-	)
+	// Crediting series joins every play to episodes, so a scope that can't
+	// hold a series (a movie library) leaves it out.
+	creditSeries := MediaScopeMatchesItemType(qb.mediaScope, "series")
+	joins := []string{
+		qb.dateViewedSourceJoin("user_watch_history", "uwh", "watched_at", "sort_history_viewed", creditSeries),
+		qb.dateViewedSourceJoin("user_watch_progress", "uwp", "updated_at", "sort_progress_viewed", creditSeries),
+	}
 	// GREATEST skips NULLs, so a never-watched title stays NULL and the
 	// sort's NULLS LAST puts it after the watched ones in both directions.
 	expr := `GREATEST(sort_history_viewed.viewed_at, sort_progress_viewed.viewed_at)`
-	return expr, []string{historyJoin, progressJoin}, []any{qb.userID, qb.profileID}
+	return expr, joins, []any{qb.userID, qb.profileID}
+}
+
+// dateViewedSourceJoin is one of dateViewedSortPlan's joins: the derived
+// table name holds each title's latest visible finished play in table. With
+// creditSeries an episode's plays also count for its series.
+func (qb *QueryBuilder) dateViewedSourceJoin(table, alias, viewedColumn, name string, creditSeries bool) string {
+	contentID := alias + ".media_item_id"
+	from := table + " " + alias
+	if creditSeries {
+		from += `
+			LEFT JOIN episodes ep ON ep.content_id = ` + contentID + `
+			CROSS JOIN LATERAL (VALUES (` + contentID + `), (ep.series_id)) AS viewed(content_id)`
+		contentID = "viewed.content_id"
+	}
+	return fmt.Sprintf(
+		`LEFT JOIN (
+			SELECT %[1]s AS content_id, MAX(%[2]s.%[3]s) AS viewed_at
+			FROM %[4]s
+			LEFT JOIN user_history_hidden_items hhi
+				ON hhi.user_id = $%[5]d
+			   AND hhi.profile_id = $%[6]d
+			   AND hhi.media_item_id = %[2]s.media_item_id
+			WHERE %[2]s.user_id = $%[5]d
+			  AND %[2]s.profile_id = $%[6]d
+			  AND %[2]s.completed = TRUE
+			  AND (hhi.media_item_id IS NULL OR %[2]s.%[3]s > hhi.hidden_before)
+			  AND %[1]s IS NOT NULL
+			GROUP BY %[1]s
+		) %[7]s ON %[7]s.content_id = %[8]s.content_id`,
+		contentID, alias, viewedColumn, from, qb.argIdx, qb.argIdx+1, name, qb.alias,
+	)
 }
 
 func (qb *QueryBuilder) ebookDateViewedSortPlan() (string, []string, []any) {

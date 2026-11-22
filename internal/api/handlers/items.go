@@ -1442,9 +1442,11 @@ func (h *ItemsHandler) listViewedAtSortMetrics(
 		// Without the store's rollup, series go undated but other titles
 		// still are.
 		if rollup, ok := store.(userstore.SeriesEpisodeRollupStore); ok {
-			if viewed, err := rollup.SeriesLatestViewedAt(ctx, profileID, seriesIDs); err == nil {
-				seriesViewedAt = viewed
+			viewed, err := rollup.SeriesLatestViewedAt(ctx, profileID, seriesIDs)
+			if err != nil {
+				slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "listing series viewed times", "component", "api", "error", err)
 			}
+			seriesViewedAt = viewed
 		}
 	}
 	// One grouped read gives each item's latest visible play.
