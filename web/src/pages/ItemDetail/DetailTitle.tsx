@@ -39,7 +39,9 @@ export default function DetailTitle({
       const style = getComputedStyle(heading);
       const baseSize = parseFloat(style.fontSize);
       const baseSpacing = parseFloat(style.letterSpacing) || 0;
-      const width = heading.clientWidth;
+      // The used width, not clientWidth: that rounds to a whole pixel, and a
+      // title that wraps within half a pixel of the edge would measure as fitting.
+      const width = parseFloat(style.width);
       if (!width || !Number.isFinite(baseSize)) return;
       Object.assign(measure.style, {
         width: `${width}px`,
@@ -58,6 +60,7 @@ export default function DetailTitle({
               [5 / 6, 2],
               [2 / 3, 3],
             ];
+      let fits = false;
       for (const [scale, lines] of steps) {
         const size = baseSize * scale;
         measure.style.fontSize = `${size}px`;
@@ -66,8 +69,14 @@ export default function DetailTitle({
         heading.style.fontSize = `${size}px`;
         heading.style.letterSpacing = `${baseSpacing * scale}px`;
         heading.style.setProperty("--detail-title-lines", String(lines));
-        if (measure.getBoundingClientRect().height <= size * 1.15 * lines + 1) break;
+        if (measure.getBoundingClientRect().height <= size * 1.15 * lines + 1) {
+          fits = true;
+          break;
+        }
       }
+      // When not even the smallest step fits, the clamp cuts the title
+      // (`.bidi-text[data-clamp-cut]` in app.css).
+      heading.toggleAttribute("data-clamp-cut", !fits);
     };
     const scheduleFit = () => {
       cancelAnimationFrame(frame);
@@ -101,6 +110,7 @@ export default function DetailTitle({
       window.removeEventListener("resize", scheduleFit);
       document.fonts?.removeEventListener("loadingdone", scheduleFit);
       measure.remove();
+      heading.removeAttribute("data-clamp-cut");
     };
   }, [bounded, title, className]);
 

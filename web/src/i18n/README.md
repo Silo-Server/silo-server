@@ -191,6 +191,10 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   loses its "…" in Firefox and its start in WebKit, and a clamped paragraph gets its "…"
   at the start of its last line. `.bidi-text` keeps a short one on the page's start
   side, so it needs no `w-fit`. The mixed-direction limit above applies here too.
+  Clamped text also sets `data-clamp-cut` on the clamped `.bidi-text` element while the
+  clamp cuts it, or Chrome drops its "…" (`app.css`). Take it from `useClampCut`
+  (`src/hooks/useClampCut.ts`), or from a measurement the component already
+  makes, as `DetailOverview` and `DetailTitle` do.
 - A path shown as text, cut or not, takes `dir="ltr"` and renders through
   `PathText` (`src/components/PathText.tsx`), which keeps each folder name in its
   own direction; without it, folders named in Arabic swap places. An email cut with
