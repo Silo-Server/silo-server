@@ -408,6 +408,41 @@ func (r *PushDeviceRepository) DeleteEndedLoginRegistrations(ctx context.Context
 	return tag.RowsAffected(), nil
 }
 
+// pushDeviceUnboundWithoutLogin selects the registrations, as d, that
+// DeleteRegistrationsWithNoLogin removes, with $1 the Apple platform.
+const pushDeviceUnboundWithoutLogin = `d.login_session_id IS NULL
+	  -- An API key registers with no session, and it has no revoked state.
+	  AND NOT EXISTS (SELECT 1 FROM api_keys k WHERE k.user_id = d.user_id)
+	  -- Only Apple logins name the push device, on whichever account.
+	  AND NOT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.device_id = d.device_id AND ` + authSessionLive + `)
+	  AND (
+	    -- The account has no live login. That includes a row carried through a
+	    -- full restore, which leaves auth_sessions empty: the phone has to sign
+	    -- in again anyway, as for a recorded session the restore dropped.
+	    NOT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_id = d.user_id AND ` + authSessionLive + `)
+	    OR
+	    -- This Apple device's login was live at that write and has ended, since
+	    -- the check above leaves none live. A live login naming no device could
+	    -- be this phone's.
+	    (d.platform = $1
+	     AND EXISTS (SELECT 1 FROM auth_sessions s
+	                 WHERE s.user_id = d.user_id AND s.device_id = d.device_id
+	                   AND s.created_at <= d.last_seen_at
+	                   AND COALESCE(s.revoked_at, s.expires_at) >= d.last_seen_at)
+	     AND NOT EXISTS (SELECT 1 FROM auth_sessions s
+	                     WHERE s.user_id = d.user_id AND s.device_id IS NULL AND ` + authSessionLive + `))
+	  )`
+
+// A registration DeleteRegistrationsWithNoLogin skips because a delivery
+// holds it is tried again this often, this long apart, before the sweep
+// returns. The Apple evidence is an ended login's row, which session cleanup
+// deletes right after notification retention once its expiry has passed, so
+// a login that expired since the last run gets only this run to match.
+const (
+	pushNoLoginSweepTries = 5
+	pushNoLoginSweepRetry = time.Second
+)
+
 // DeleteRegistrationsWithNoLogin removes registrations with no recorded login
 // whose device has no live login. Such a registration predates login_session_id,
 // and a phone already signed out can never supply one, so it would otherwise
@@ -415,39 +450,42 @@ func (r *PushDeviceRepository) DeleteEndedLoginRegistrations(ctx context.Context
 //
 // Removing a working phone's registration is worse than the alert: its client
 // believes it is registered and sends nothing until a new sign-in. So only the
-// evidence below removes a row, and a signed-out phone it misses keeps delivering.
-// docs/notifications-push-api.md lists what it misses.
+// evidence in pushDeviceUnboundWithoutLogin removes a row, and a signed-out
+// phone it misses keeps delivering. docs/notifications-push-api.md lists what
+// it misses.
+//
+// Like the other retention sweeps it skips a registration a delivery holds
+// rather than wait on it, but it comes back for it shortly (see
+// pushNoLoginSweepTries) instead of on the next run, when the evidence may be
+// gone.
 func (r *PushDeviceRepository) DeleteRegistrationsWithNoLogin(ctx context.Context) (int64, error) {
-	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM push_devices WHERE id IN (
-		SELECT d.id FROM push_devices d
-		WHERE d.login_session_id IS NULL
-		  -- An API key registers with no session, and it has no revoked state.
-		  AND NOT EXISTS (SELECT 1 FROM api_keys k WHERE k.user_id = d.user_id)
-		  -- Only Apple logins name the push device, on whichever account.
-		  AND NOT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.device_id = d.device_id AND `+authSessionLive+`)
-		  AND (
-		    -- The account has no live login. That includes a row carried through a
-		    -- full restore, which leaves auth_sessions empty: the phone has to sign
-		    -- in again anyway, as for a recorded session the restore dropped.
-		    NOT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_id = d.user_id AND `+authSessionLive+`)
-		    OR
-		    -- This Apple device's login was live at that write and has ended, since
-		    -- the check above leaves none live. A live login naming no device could
-		    -- be this phone's.
-		    (d.platform = $1
-		     AND EXISTS (SELECT 1 FROM auth_sessions s
-		                 WHERE s.user_id = d.user_id AND s.device_id = d.device_id
-		                   AND s.created_at <= d.last_seen_at
-		                   AND COALESCE(s.revoked_at, s.expires_at) >= d.last_seen_at)
-		     AND NOT EXISTS (SELECT 1 FROM auth_sessions s
-		                     WHERE s.user_id = d.user_id AND s.device_id IS NULL AND `+authSessionLive+`))
-		  )
-		FOR UPDATE OF d SKIP LOCKED)`, PushPlatformApple)
-	if err != nil {
-		return 0, fmt.Errorf("delete registrations with no login: %w", err)
+	var removed int64
+	for try := 1; ; try++ {
+		tag, err := r.pool.Exec(ctx, `
+			DELETE FROM push_devices WHERE id IN (
+				SELECT d.id FROM push_devices d WHERE `+pushDeviceUnboundWithoutLogin+`
+				FOR UPDATE OF d SKIP LOCKED)`, PushPlatformApple)
+		if err != nil {
+			return removed, fmt.Errorf("delete registrations with no login: %w", err)
+		}
+		removed += tag.RowsAffected()
+		if try == pushNoLoginSweepTries {
+			return removed, nil
+		}
+		var skipped bool
+		if err := r.pool.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM push_devices d WHERE `+pushDeviceUnboundWithoutLogin+`)`, PushPlatformApple).Scan(&skipped); err != nil {
+			return removed, fmt.Errorf("check registrations with no login: %w", err)
+		}
+		if !skipped {
+			return removed, nil
+		}
+		select {
+		case <-ctx.Done():
+			return removed, ctx.Err()
+		case <-time.After(pushNoLoginSweepRetry):
+		}
 	}
-	return tag.RowsAffected(), nil
 }
 
 func (r *PushDeviceRepository) RecordPushSuccess(ctx context.Context, deviceID string) error {

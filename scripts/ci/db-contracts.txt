@@ -426,9 +426,11 @@
 
 # A browser or device removed after a delivery listed it gets no attempt and
 # leaves the delivery transaction intact. A retention sweep skips a target a
-# delivery holds instead of waiting on it.
+# delivery holds instead of waiting on it, and the unbound push sweep comes back
+# for it within the run, before session cleanup removes its evidence.
 ./internal/notifications TestPushEnqueueSkipsTargetsRemovedAfterListingDB
 ./internal/notifications TestPushRetentionSkipsTargetsADeliveryHoldsDB
+./internal/notifications TestPushRetentionKeepsTheLastChanceForAnExpiredAppleLoginDB
 
 # Push stops when the login session that registered the device ends, however it
 # ended, including for a push already queued, and retention removes the token.

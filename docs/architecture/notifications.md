@@ -665,8 +665,9 @@ to the plugin service, so neither package imports the other.
   one included. The insert key-share locks only the account row, the row an
   account deletion locks before its cascade reaches the profile and its
   destinations, so the two wait on each other instead of deadlocking. A
-  profile purge locks the profile's destinations, and its webhooks, in id
-  order before deleting them, the order an enqueue locks them.
+  profile purge locks the profile's destinations, and its webhooks, web push
+  subscriptions and push registrations, in id order before deleting them, the
+  order an enqueue locks them.
 - **Enqueue.** Like webhooks, attempts are enqueued in the fanout
   transaction, filtered by the destination's switch for the delivery
   (`notify_next_up` for an episode, `notify_requests` for a watchlist
@@ -679,8 +680,14 @@ to the plugin service, so neither package imports the other.
   exist and key-share locks them, in id order, until the delivery commits, so a
   destination deleted after it was listed drops its attempt instead of
   aborting the delivery, inbox row and other channels included, on the
-  foreign key; webhooks enqueue the same way. All of a transaction's attempts
-  go in one `INSERT ... SELECT FROM unnest(...)` with four parameters, so a
+  foreign key; webhooks, web push and mobile push enqueue the same way. The
+  retention sweeps of web push subscriptions and push registrations skip a
+  row a delivery holds instead of waiting on it, which could deadlock with an
+  enqueue, and take it on a later run. The sweep of push registrations with no
+  recorded login comes back for a skipped row within the same run, since its
+  Apple evidence, an ended login, can be gone by the next one. All of a
+  transaction's attempts go in one `INSERT ... SELECT FROM unnest(...)` with
+  four parameters, so a
   fanout of any size stays under the protocol's parameter limit. A delivery
   the insert's `RETURNING` names is marked (`InsertedDelivery.pluginAttempts`),
   and only those reach the plugin destination dispatcher, so other deliveries
