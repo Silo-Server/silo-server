@@ -115,6 +115,19 @@ export const RECONNECT_MAX_DELAY_MS = 15_000;
 export const RECONNECT_MAX_ATTEMPTS = 12;
 const RECONNECT_STABLE_MS = 30_000;
 
+// A reconnect reopens a progressive remux on the keyframe FFmpeg's input seek
+// lands on, which with a long GOP is often the one it played from before, and
+// the remux writes the same bytes for the same origin. A reopened remux that
+// drops again within RECONNECT_STABLE_MS, less than this far past where it
+// dropped before, is failing at a fixed point in those bytes: the player
+// recovers from a failed route instead of reconnecting.
+const PROGRESSIVE_REPEAT_DROP_SECONDS = 1;
+export const FAILURE_PROGRESSIVE_DROP_REPEATED = "progressive_drop_repeated";
+const PROGRESSIVE_DROP_REPEATED_FAILURE: FailureV3 = {
+  classification: FAILURE_PROGRESSIVE_DROP_REPEATED,
+  message: "The progressive remux dropped again at the same point after it was reopened",
+};
+
 /** Delay before reconnect attempt `attempt` (0-based). */
 export function reconnectDelayMs(attempt: number): number {
   return Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt));
@@ -518,6 +531,12 @@ interface ReplanFailurePolicy {
    * tightening failure unless `retireOnRefusal` independently applies.
    */
   retireWhileTightened?: () => boolean;
+  /**
+   * The recovery replaces a stream whose connection dropped, so the server or
+   * node that held the session may be gone with it: a 404 goes back to the
+   * reconnect, which starts a new session, instead of showing an error.
+   */
+  reconnectWhenSessionGone?: boolean;
 }
 
 const NO_RETIRE_POLICY: ReplanFailurePolicy = {};
@@ -531,8 +550,10 @@ function mergeReplanFailurePolicy(
     existing.retireWhileTightened && incoming.retireWhileTightened
       ? () => existing.retireWhileTightened!() || incoming.retireWhileTightened!()
       : (existing.retireWhileTightened ?? incoming.retireWhileTightened);
-  return retireOnRefusal || retireWhileTightened
-    ? { retireOnRefusal, retireWhileTightened }
+  const reconnectWhenSessionGone =
+    existing.reconnectWhenSessionGone || incoming.reconnectWhenSessionGone || undefined;
+  return retireOnRefusal || retireWhileTightened || reconnectWhenSessionGone
+    ? { retireOnRefusal, retireWhileTightened, reconnectWhenSessionGone }
     : NO_RETIRE_POLICY;
 }
 
@@ -780,6 +801,9 @@ export function usePlaybackSession(
     resume: true,
     timer: null as ReturnType<typeof setTimeout> | null,
     recoveredAt: Number.NEGATIVE_INFINITY,
+    // The progressive remux a reconnect reopened (its plan revision) and the
+    // position it dropped at before.
+    reopened: null as { planRevision: number; positionSeconds: number } | null,
   });
   const runReconnectAttemptRef = useRef<(generation: number) => Promise<void>>(async () => {});
   const beginReconnectRef = useRef<
@@ -1819,11 +1843,15 @@ export function usePlaybackSession(
         if (
           isFailureRecovery &&
           playbackStartedRef.current &&
-          isRetryableReconnectError(err, "replan")
+          (isRetryableReconnectError(err, "replan") ||
+            (failurePolicy.reconnectWhenSessionGone &&
+              err instanceof PlayerFetchError &&
+              err.status === 404))
         ) {
           // The stream broke and the server could not be reached to replace
-          // it: the connection failed, not necessarily the route. Reconnect
-          // rather than strand the viewer on an error.
+          // it, or no longer has its session: the connection failed, not
+          // necessarily the route. Reconnect rather than strand the viewer on
+          // an error.
           beginReconnectRef.current(options.positionSeconds, playIntent, false);
           return false;
         }
@@ -2245,7 +2273,11 @@ export function usePlaybackSession(
   );
 
   const recoverFromFailure = useCallback(
-    (failure: FailureV3, currentPosition: number) => {
+    (
+      failure: FailureV3,
+      currentPosition: number,
+      failurePolicy: ReplanFailurePolicy = NO_RETIRE_POLICY,
+    ) => {
       // While the server is unreachable a transport failure says nothing about
       // the route; the reconnect replaces the transport anyway.
       if (reconnectRef.current.active) return;
@@ -2253,7 +2285,10 @@ export function usePlaybackSession(
         failureClassification: failure.classification,
         ...(failure.message ? { diagnostics: { message: failure.message } } : {}),
       });
-      void replan({ operation: "failure_recovery", positionSeconds: currentPosition, failure });
+      void replan(
+        { operation: "failure_recovery", positionSeconds: currentPosition, failure },
+        failurePolicy,
+      );
     },
     [replan, reportEvent],
   );
@@ -2268,7 +2303,9 @@ export function usePlaybackSession(
   // fresh plan at the saved position). A progressive remux reanchors instead:
   // the no-op track_change replans from the top and can hand back a route that
   // already failed in this attempt, while a reanchor reopens the remux at the
-  // saved position, as the remux range refusal promises. If the session did not
+  // saved position, as the remux range refusal promises. A reopened remux that
+  // drops again at the same point did fail its route, so recoverConnection
+  // recovers from that failure instead of starting a cycle. If the session did not
   // survive — a server restart answers 404 — it starts a new session at the
   // same position with the same tracks. Unreachable or overloaded answers back
   // off; any adopted plan ends the cycle; the viewer leaving or another start
@@ -2349,14 +2386,16 @@ export function usePlaybackSession(
 
     if (planRef.current && sessionIdRef.current) {
       try {
-        const operation =
-          planRef.current.delivery === "server_remux_progressive"
-            ? "seek_reanchor"
-            : "track_change";
+        const reopen = planRef.current.delivery === "server_remux_progressive";
         const adopted = await issueReplanRef.current(
-          { operation, positionSeconds },
+          { operation: reopen ? "seek_reanchor" : "track_change", positionSeconds },
           NO_RETIRE_POLICY,
           true,
+          reopen
+            ? (planRevision) => {
+                reconnect.reopened = { planRevision, positionSeconds };
+              }
+            : undefined,
         );
         // An adopted plan has already ended the cycle.
         if (adopted || !isCurrent()) return;
@@ -2418,9 +2457,30 @@ export function usePlaybackSession(
       // Only a stream that exists can lose its connection, and a session an
       // administrator ended stays ended.
       if (!planRef.current || !sessionIdRef.current || sessionEndedRef.current) return;
+      const reconnect = reconnectRef.current;
+      const reopened = reconnect.reopened;
+      if (
+        !reconnect.active &&
+        reopened !== null &&
+        reopened.planRevision === planRevisionRef.current &&
+        positionSeconds < reopened.positionSeconds + PROGRESSIVE_REPEAT_DROP_SECONDS &&
+        Date.now() - reconnect.recoveredAt < RECONNECT_STABLE_MS
+      ) {
+        // The pause the failed transport forces is not the viewer's. Until the
+        // replacement shows a frame, the player keeps the intent at the drop,
+        // also for the reconnect a failed recovery request starts.
+        playbackPlayingRef.current = resume;
+        planAutoPlayRef.current = resume;
+        planTransportShownRef.current = false;
+        // A server restart or a dead node can also drop the stream there.
+        recoverFromFailure(PROGRESSIVE_DROP_REPEATED_FAILURE, positionSeconds, {
+          reconnectWhenSessionGone: true,
+        });
+        return;
+      }
       beginReconnect(positionSeconds, resume, false);
     },
-    [beginReconnect],
+    [beginReconnect, recoverFromFailure],
   );
 
   const retryConnection = useCallback(() => {

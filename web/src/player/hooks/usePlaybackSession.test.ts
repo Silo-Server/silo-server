@@ -20,6 +20,7 @@ import {
 import { resetSessionMutations } from "../session-mutations";
 import { resetCodecDetectionForTests } from "./useCodecDetection";
 import {
+  FAILURE_PROGRESSIVE_DROP_REPEATED,
   RECONNECT_BASE_DELAY_MS,
   RECONNECT_MAX_ATTEMPTS,
   RECONNECT_MAX_DELAY_MS,
@@ -3749,6 +3750,174 @@ describe("usePlaybackSession mid-stream reconnect", () => {
     ]);
 
     unmount();
+  });
+
+  describe("a progressive remux that drops again after its reopen", () => {
+    // Playback started at 0. The reconnect reopens the remux on the keyframe
+    // at 2.002 before the drop at 2.8.
+    const remuxPlan = fixturePlanV3({
+      plan_id: "plan:3333333333333333",
+      delivery: "server_remux_progressive",
+      plan_attempt_key: "v3:remux1111111111",
+      timeline: { ...fixturePlanV3().timeline, stream_origin_seconds: 0, player_start_seconds: 0 },
+    });
+    const reopenedPlan = fixturePlanV3({
+      plan_id: "plan:5555555555555555",
+      delivery: "server_remux_progressive",
+      plan_attempt_key: "v3:remux1111111111",
+      stream: { ...fixturePlanV3().stream, url: "/stream/session-1/remux?seek=2.8" },
+      timeline: {
+        ...fixturePlanV3().timeline,
+        stream_origin_seconds: 2.002,
+        player_start_seconds: 0.798,
+      },
+    });
+    const hlsPlan = fixturePlanV3({
+      plan_id: "plan:4444444444444444",
+      delivery: "server_remux_hls",
+      plan_attempt_key: "v3:hls00000000000",
+    });
+
+    const noOtherRoute = {
+      protocol_version: 3,
+      server_features: ["playback_plan_v3"],
+      outcome: "terminal",
+      terminal: {
+        reason: "no_playable_route",
+        message: "No other route can play this title.",
+        retryable: false,
+      },
+    };
+
+    async function dropAndReopen(
+      secondDropAt: number,
+      {
+        recovery = () => jsonResponse(playable("session-1", hlsPlan)),
+        afterRecovery = () => jsonResponse(playable("session-1", reopenedPlan)),
+        restart,
+        playing = true,
+      }: {
+        recovery?: () => Response;
+        afterRecovery?: () => Response;
+        restart?: () => Response;
+        playing?: boolean;
+      } = {},
+    ) {
+      const harness = reconnectHarness({
+        initialPlan: remuxPlan,
+        // A reanchor reopens the remux until a recovery excludes it. That
+        // recovery gets `recovery`, and replans after it `afterRecovery`.
+        replan: () => {
+          const bodies = harness.replanBodies;
+          const recoveryAt = bodies.findIndex((body) => body.operation === "failure_recovery");
+          if (recoveryAt < 0) return jsonResponse(playable("session-1", reopenedPlan));
+          return recoveryAt === bodies.length - 1 ? recovery() : afterRecovery();
+        },
+        restart,
+      });
+      const rendered = await startPlaying();
+      act(() => rendered.result.current.recoverConnection(2.8, true));
+      await advance(RECONNECT_BASE_DELAY_MS);
+      expect(harness.replanBodies[0]?.operation).toBe("seek_reanchor");
+      expect(rendered.result.current.connectionStatus).toBe("connected");
+
+      // The reopened stream plays, and the element is reported paused before
+      // the drop: by Chromium, or by the viewer when `playing` is false.
+      act(() => {
+        rendered.result.current.reportFirstFrame();
+        rendered.result.current.updatePlaybackState(2.8, true);
+        rendered.result.current.updatePlaybackState(secondDropAt, false);
+      });
+      act(() => rendered.result.current.recoverConnection(secondDropAt, playing));
+      act(() => rendered.result.current.updatePlaybackState(secondDropAt, false));
+      await advance(reconnectDelayMs(1));
+      return { harness, ...rendered };
+    }
+
+    it("reports the route failed when it drops at the same point", async () => {
+      const { harness, result, unmount } = await dropAndReopen(2.8);
+
+      const body = harness.replanBodies[1];
+      expect(body?.operation).toBe("failure_recovery");
+      expect(body?.position_seconds).toBe(2.8);
+      expect(body?.failure).toMatchObject({ classification: FAILURE_PROGRESSIVE_DROP_REPEATED });
+      expect(body?.attempted_plan_keys).toEqual(["v3:remux1111111111"]);
+      expect(result.current.connectionStatus).toBe("connected");
+      expect(result.current.plan?.delivery).toBe("server_remux_hls");
+      expect(result.current.shouldAutoPlay).toBe(true);
+
+      unmount();
+    });
+
+    it("shows the server's refusal instead of starting over when no other route plays", async () => {
+      const { harness, result, unmount } = await dropAndReopen(2.8, {
+        recovery: () => jsonResponse(noOtherRoute),
+      });
+
+      expect(harness.replanBodies[1]?.operation).toBe("failure_recovery");
+      // A fresh start would forget the excluded remux and could pick it again.
+      expect(harness.startBodies).toHaveLength(1);
+      expect(result.current.errorReason).toBe("no_playable_route");
+
+      unmount();
+    });
+
+    it("keeps a viewer's pause when the recovery request cannot reach the server", async () => {
+      const { harness, result, unmount } = await dropAndReopen(2.8, {
+        recovery: unreachable,
+        playing: false,
+      });
+      // The failed request starts a reconnect, which reopens the remux.
+      await advance(RECONNECT_MAX_DELAY_MS);
+
+      expect(harness.replanBodies.map((body) => body.operation)).toEqual([
+        "seek_reanchor",
+        "failure_recovery",
+        "seek_reanchor",
+      ]);
+      expect(result.current.connectionStatus).toBe("connected");
+      expect(result.current.shouldAutoPlay).toBe(false);
+
+      unmount();
+    });
+
+    it("starts a new session when the server no longer has this one", async () => {
+      // A restarted server or a dead node can also drop the reopened stream at
+      // the same point.
+      const sessionGone = () =>
+        jsonResponse(
+          { error: "playback_session_not_found", message: "Playback session not found" },
+          { status: 404 },
+        );
+      const { harness, result, unmount } = await dropAndReopen(2.8, {
+        recovery: sessionGone,
+        afterRecovery: sessionGone,
+        restart: () =>
+          jsonResponse(playable("session-2", { ...hlsPlan, session_id: "session-2" }), {
+            status: 201,
+          }),
+      });
+      await advance(RECONNECT_MAX_DELAY_MS);
+
+      expect(harness.replanBodies[1]?.operation).toBe("failure_recovery");
+      expect(harness.startBodies).toHaveLength(2);
+      expect(harness.startBodies[1]?.start_position).toBe(2.8);
+      expect(result.current.sessionId).toBe("session-2");
+      expect(result.current.connectionStatus).toBe("connected");
+      expect(result.current.error).toBeNull();
+
+      unmount();
+    });
+
+    it("reopens it again when it played on past the previous drop", async () => {
+      const { harness, result, unmount } = await dropAndReopen(9);
+
+      expect(harness.replanBodies[1]?.operation).toBe("seek_reanchor");
+      expect(harness.replanBodies[1]?.failure).toBeUndefined();
+      expect(result.current.plan?.delivery).toBe("server_remux_progressive");
+
+      unmount();
+    });
   });
 
   it("starts a new session at the saved position when the old one did not survive a restart", async () => {
