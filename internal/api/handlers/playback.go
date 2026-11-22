@@ -1930,6 +1930,7 @@ func fillEmptySessionFacts(session, live *playback.Session) {
 		session.AdaptationReasons = append([]string(nil), live.AdaptationReasons...)
 	}
 	fill(&session.ReportingNode, live.ReportingNode)
+	fill(&session.PlanID, live.PlanID)
 	fill(&session.StreamLocation, live.StreamLocation)
 	fill(&session.RoutingExecution, live.RoutingExecution)
 	if session.RoutingExecutionNodeID == 0 {

@@ -18851,23 +18851,11 @@ export interface components {
       unknown_location_plays: number;
     };
     AdminInsightsCapabilities: {
-      /** @description Activity tab (play volume, watch time, heatmap, peak concurrent streams) */
-      activity: boolean;
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       available: boolean;
-      /** @description Bandwidth tab (daily archive + live egress volume and peak throughput) */
-      bandwidth: boolean;
-      /** @description Devices & Quality tab (client x codec direct-play matrix, adaptation reasons, HW accel, subtitle burn-in, HDR tone-mapping) */
-      devices: boolean;
-      /** @description Reserved capability flag for Library Insights tab */
-      library: boolean;
-      /** @description Reserved capability flag for GeoIP Map tab */
-      map: boolean;
       /** @description Long-term per-node daily egress archive survives past the 31-day minute-sample window */
       node_egress_daily: boolean;
-      /** @description People tab (account and household profile leaderboard) */
-      people: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -18952,7 +18940,6 @@ export interface components {
        */
       to: string;
       tone_map_breakdown: components["schemas"]["AdminInsightsLabeledCount"][];
-      top_transcoding_accounts: components["schemas"]["AdminInsightsTopTranscodingAccount"][];
       tz: string;
     };
     AdminInsightsDevicesSummary: {
@@ -19067,6 +19054,8 @@ export interface components {
       to: string;
       /** Format: int64 */
       total_accounts: number;
+      /** Format: int64 */
+      total_watch_seconds: number;
       tz: string;
     };
     AdminInsightsPersonAccount: {
@@ -19139,21 +19128,6 @@ export interface components {
       transcode_plays: number;
       /** Format: int64 */
       watch_seconds: number;
-    };
-    AdminInsightsTopTranscodingAccount: {
-      top_reason: string | null;
-      /** Format: int64 */
-      total_plays: number;
-      /** Format: int64 */
-      transcode_plays: number;
-      /** Format: double */
-      transcode_rate: number;
-      /**
-       * @description Opaque identifier
-       * @example 1
-       */
-      user_id: string;
-      username: string;
     };
     AdminInvitation: {
       /**

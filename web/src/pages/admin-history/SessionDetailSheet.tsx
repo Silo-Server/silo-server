@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 
 import type { AdminPlaybackHistoryItem, AdminSession } from "@/api/types";
+import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
+import { PlaybackRouteBadges } from "@/components/PlaybackRouteBadges";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -307,15 +309,7 @@ export function SessionDetailSheet({
               >
                 {formatDecisionLabel(session.play_method)}
               </span>
-              {session.is_jellyfin_client ? (
-                <Badge
-                  variant="secondary"
-                  title={t("web.admin.history.detail.jellyfinBadgeTitle")}
-                  className="px-1.5 py-0 text-[10px] font-bold"
-                >
-                  {t("web.admin.history.detail.jellyfinBadge")}
-                </Badge>
-              ) : null}
+              <JellyfinSessionPill session={session} />
               <Badge variant={session.completed ? "default" : "outline"} className="text-[11px]">
                 {session.completed
                   ? t("web.admin.history.row.completed")
@@ -618,10 +612,18 @@ export function SessionDetailSheet({
                     <dt className="text-muted-foreground">
                       {t("web.admin.history.detail.field.route")}
                     </dt>
-                    <dd className="mt-0.5 font-medium">
-                      {routeNodes.length > 0
-                        ? routeNodes.map((n) => `${n.label}: ${n.name}`).join(" → ")
-                        : EM_DASH}
+                    <dd className="mt-1 font-medium">
+                      {routeNodes.length > 0 ? (
+                        <div className="flex flex-wrap items-center gap-1">
+                          <PlaybackRouteBadges
+                            session={adminSession}
+                            showLocation={false}
+                            showNetwork={false}
+                          />
+                        </div>
+                      ) : (
+                        EM_DASH
+                      )}
                     </dd>
                   </div>
                   <div className="col-span-2">

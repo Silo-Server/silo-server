@@ -18,18 +18,12 @@ type AdminInsightsService interface {
 	ReadAdminInsightsBandwidth(context.Context, handlers.AdminInsightsBandwidthQuery, bool) (*handlers.AdminInsightsBandwidth, error)
 }
 
-// AdminInsightsCapabilities reports which Monitor -> Insights tabs and backing
-// datasets are available on this server build.
+// AdminInsightsCapabilities reports whether Monitor -> Insights and its
+// long-term per-node egress archive are available on this server build.
 type AdminInsightsCapabilities struct {
 	Capability
 	Available       bool `json:"available"`
-	Activity        bool `json:"activity" doc:"Activity tab (play volume, watch time, heatmap, peak concurrent streams)"`
-	People          bool `json:"people" doc:"People tab (account and household profile leaderboard)"`
-	Devices         bool `json:"devices" doc:"Devices & Quality tab (client x codec direct-play matrix, adaptation reasons, HW accel, subtitle burn-in, HDR tone-mapping)"`
-	Bandwidth       bool `json:"bandwidth" doc:"Bandwidth tab (daily archive + live egress volume and peak throughput)"`
 	NodeEgressDaily bool `json:"node_egress_daily" doc:"Long-term per-node daily egress archive survives past the 31-day minute-sample window"`
-	Library         bool `json:"library" doc:"Reserved capability flag for Library Insights tab"`
-	Map             bool `json:"map" doc:"Reserved capability flag for GeoIP Map tab"`
 }
 
 type AdminInsightsCapabilitiesOutput struct {
@@ -197,15 +191,16 @@ type AdminInsightsPersonAccount struct {
 }
 
 type AdminInsightsPeople struct {
-	From           Instant                      `json:"from"`
-	To             Instant                      `json:"to"`
-	TZ             string                       `json:"tz"`
-	TotalAccounts  int64                        `json:"total_accounts"`
-	ActiveAccounts int64                        `json:"active_accounts"`
-	ActiveProfiles int64                        `json:"active_profiles"`
-	LiveAccounts   int64                        `json:"live_accounts"`
-	Coverage       AdminInsightsCoverage        `json:"coverage"`
-	Accounts       []AdminInsightsPersonAccount `json:"accounts"`
+	From              Instant                      `json:"from"`
+	To                Instant                      `json:"to"`
+	TZ                string                       `json:"tz"`
+	TotalAccounts     int64                        `json:"total_accounts"`
+	ActiveAccounts    int64                        `json:"active_accounts"`
+	ActiveProfiles    int64                        `json:"active_profiles"`
+	LiveAccounts      int64                        `json:"live_accounts"`
+	TotalWatchSeconds int64                        `json:"total_watch_seconds"`
+	Coverage          AdminInsightsCoverage        `json:"coverage"`
+	Accounts          []AdminInsightsPersonAccount `json:"accounts"`
 }
 
 type AdminInsightsPeopleOutput struct {
@@ -259,28 +254,18 @@ type AdminInsightsLabeledCount struct {
 	Plays int64  `json:"plays"`
 }
 
-type AdminInsightsTopTranscodingAccount struct {
-	UserID         ID      `json:"user_id"`
-	Username       string  `json:"username"`
-	TranscodePlays int64   `json:"transcode_plays"`
-	TotalPlays     int64   `json:"total_plays"`
-	TranscodeRate  float64 `json:"transcode_rate"`
-	TopReason      *string `json:"top_reason" nullable:"true"`
-}
-
 type AdminInsightsDevices struct {
-	From                  Instant                              `json:"from"`
-	To                    Instant                              `json:"to"`
-	TZ                    string                               `json:"tz"`
-	Coverage              AdminInsightsCoverage                `json:"coverage"`
-	Summary               AdminInsightsDevicesSummary          `json:"summary"`
-	Codecs                []string                             `json:"codecs"`
-	Matrix                []AdminInsightsClientMatrixRow       `json:"matrix"`
-	AdaptationReasons     []AdminInsightsAdaptationReason      `json:"adaptation_reasons"`
-	HWAccelBreakdown      []AdminInsightsLabeledCount          `json:"hw_accel_breakdown"`
-	ToneMapBreakdown      []AdminInsightsLabeledCount          `json:"tone_map_breakdown"`
-	SubtitleBurnInCodecs  []AdminInsightsLabeledCount          `json:"subtitle_burn_in_codecs"`
-	TopTranscodingAccount []AdminInsightsTopTranscodingAccount `json:"top_transcoding_accounts"`
+	From                 Instant                         `json:"from"`
+	To                   Instant                         `json:"to"`
+	TZ                   string                          `json:"tz"`
+	Coverage             AdminInsightsCoverage           `json:"coverage"`
+	Summary              AdminInsightsDevicesSummary     `json:"summary"`
+	Codecs               []string                        `json:"codecs"`
+	Matrix               []AdminInsightsClientMatrixRow  `json:"matrix"`
+	AdaptationReasons    []AdminInsightsAdaptationReason `json:"adaptation_reasons"`
+	HWAccelBreakdown     []AdminInsightsLabeledCount     `json:"hw_accel_breakdown"`
+	ToneMapBreakdown     []AdminInsightsLabeledCount     `json:"tone_map_breakdown"`
+	SubtitleBurnInCodecs []AdminInsightsLabeledCount     `json:"subtitle_burn_in_codecs"`
 }
 
 type AdminInsightsDevicesOutput struct {
@@ -389,13 +374,7 @@ func registerAdminInsightsCapabilities(reg *Registry) {
 		available := reg.deps.AdminInsights != nil
 		out.Body.State = configuredCapabilityState(available)
 		out.Body.Available = available
-		out.Body.Activity = available
-		out.Body.People = available
-		out.Body.Devices = available
-		out.Body.Bandwidth = available
 		out.Body.NodeEgressDaily = available
-		out.Body.Library = false
-		out.Body.Map = false
 		return out, nil
 	})
 }
@@ -486,8 +465,9 @@ func adminInsightsPeopleOf(res *handlers.AdminInsightsPeople) AdminInsightsPeopl
 		From: NewInstant(res.From), To: NewInstant(res.To), TZ: res.TZ,
 		TotalAccounts: res.TotalAccounts, ActiveAccounts: res.ActiveAccounts,
 		ActiveProfiles: res.ActiveProfiles, LiveAccounts: res.LiveAccounts,
-		Coverage: adminInsightsCoverageOf(res.Coverage),
-		Accounts: make([]AdminInsightsPersonAccount, 0, len(res.Accounts)),
+		TotalWatchSeconds: res.TotalWatchSeconds,
+		Coverage:          adminInsightsCoverageOf(res.Coverage),
+		Accounts:          make([]AdminInsightsPersonAccount, 0, len(res.Accounts)),
 	}
 	for _, acc := range res.Accounts {
 		profiles := make([]AdminInsightsPersonProfile, 0, len(acc.Profiles))
@@ -540,15 +520,14 @@ func registerAdminInsightsDevices(reg *Registry) {
 func adminInsightsDevicesOf(res *handlers.AdminInsightsDevices) AdminInsightsDevices {
 	body := AdminInsightsDevices{
 		From: NewInstant(res.From), To: NewInstant(res.To), TZ: res.TZ,
-		Coverage:              adminInsightsCoverageOf(res.Coverage),
-		Summary:               AdminInsightsDevicesSummary(res.Summary),
-		Codecs:                append([]string{}, res.Codecs...),
-		Matrix:                make([]AdminInsightsClientMatrixRow, 0, len(res.Matrix)),
-		AdaptationReasons:     make([]AdminInsightsAdaptationReason, 0, len(res.AdaptationReasons)),
-		HWAccelBreakdown:      make([]AdminInsightsLabeledCount, 0, len(res.HWAccelBreakdown)),
-		ToneMapBreakdown:      make([]AdminInsightsLabeledCount, 0, len(res.ToneMapBreakdown)),
-		SubtitleBurnInCodecs:  make([]AdminInsightsLabeledCount, 0, len(res.SubtitleBurnInCodecs)),
-		TopTranscodingAccount: make([]AdminInsightsTopTranscodingAccount, 0, len(res.TopTranscodingAccount)),
+		Coverage:             adminInsightsCoverageOf(res.Coverage),
+		Summary:              AdminInsightsDevicesSummary(res.Summary),
+		Codecs:               append([]string{}, res.Codecs...),
+		Matrix:               make([]AdminInsightsClientMatrixRow, 0, len(res.Matrix)),
+		AdaptationReasons:    make([]AdminInsightsAdaptationReason, 0, len(res.AdaptationReasons)),
+		HWAccelBreakdown:     make([]AdminInsightsLabeledCount, 0, len(res.HWAccelBreakdown)),
+		ToneMapBreakdown:     make([]AdminInsightsLabeledCount, 0, len(res.ToneMapBreakdown)),
+		SubtitleBurnInCodecs: make([]AdminInsightsLabeledCount, 0, len(res.SubtitleBurnInCodecs)),
 	}
 	for _, row := range res.Matrix {
 		cells := make([]AdminInsightsClientCodecCell, 0, len(row.Cells))
@@ -572,13 +551,6 @@ func adminInsightsDevicesOf(res *handlers.AdminInsightsDevices) AdminInsightsDev
 	}
 	for _, item := range res.SubtitleBurnInCodecs {
 		body.SubtitleBurnInCodecs = append(body.SubtitleBurnInCodecs, AdminInsightsLabeledCount(item))
-	}
-	for _, item := range res.TopTranscodingAccount {
-		body.TopTranscodingAccount = append(body.TopTranscodingAccount, AdminInsightsTopTranscodingAccount{
-			UserID: IDFromInt(int64(item.UserID)), Username: item.Username,
-			TranscodePlays: item.TranscodePlays, TotalPlays: item.TotalPlays,
-			TranscodeRate: item.TranscodeRate, TopReason: item.TopReason,
-		})
 	}
 	return body
 }
@@ -619,7 +591,7 @@ func adminInsightsBandwidthOf(res *handlers.AdminInsightsBandwidth) AdminInsight
 			Key: src.Key, Kind: src.Kind, Name: src.Name, NodeType: src.NodeType,
 			EgressBytes: src.EgressBytes, PeakEgressKbps: src.PeakEgressKbps, ShareOfTotal: src.ShareOfTotal,
 		}
-		if src.Kind == handlers.EgressSourceKindNode {
+		if src.Kind == handlers.EgressSourceKindNode && src.NodeID > 0 {
 			wire.NodeID = new(IDFromInt(int64(src.NodeID)))
 		}
 		body.Sources = append(body.Sources, wire)

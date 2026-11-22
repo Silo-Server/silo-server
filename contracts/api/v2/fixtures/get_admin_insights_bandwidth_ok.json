@@ -39,6 +39,15 @@
       "egress_bytes": 600000000000,
       "peak_egress_kbps": 90000,
       "share_of_total": 0.6667
+    },
+    {
+      "key": "node:-1",
+      "kind": "node",
+      "name": "archived-edge",
+      "node_type": "proxy",
+      "egress_bytes": 0,
+      "peak_egress_kbps": 0,
+      "share_of_total": 0
     }
   ],
   "points": [

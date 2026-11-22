@@ -73,6 +73,24 @@ func assertRestoredNodeReconciliation(t *testing.T, restored *pgxpool.Pool) {
 		t.Fatalf("remapped daily row = id=%d name=%q type=%q bytes=%d", remappedID, remappedName, remappedType, remappedBytes)
 	}
 
+	// Unarchived same-day samples for unmatched src-edge are folded into the
+	// daily archive under the same synthetic negative node_id rather than lost.
+	var foldedID int
+	var foldedName, foldedType string
+	var foldedBytes, foldedPeak int64
+	if err := restored.QueryRow(ctx, `
+		SELECT node_id, node_name, COALESCE(node_type, ''), egress_bytes, peak_egress_kbps
+		FROM dashboard_node_egress_daily
+		WHERE day = '2026-10-02' AND node_id < 0
+	`).Scan(&foldedID, &foldedName, &foldedType, &foldedBytes, &foldedPeak); err != nil {
+		t.Fatalf("expected folded same-day daily row for src-edge: %v", err)
+	}
+	if foldedID != remappedID || foldedName != "src-edge" || foldedType != "proxy" ||
+		foldedBytes != 4000*7500 || foldedPeak != 4000 {
+		t.Fatalf("folded same-day row = id=%d (want %d) name=%q type=%q bytes=%d peak=%d",
+			foldedID, remappedID, foldedName, foldedType, foldedBytes, foldedPeak)
+	}
+
 	var dstNode1Rows int
 	if err := restored.QueryRow(ctx, `SELECT COUNT(*) FROM dashboard_node_egress_daily WHERE node_id = 1`).Scan(&dstNode1Rows); err != nil || dstNode1Rows != 0 {
 		t.Fatalf("daily rows still bound to destination node 1 = %d (err %v), want 0", dstNode1Rows, err)

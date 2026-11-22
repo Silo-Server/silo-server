@@ -670,13 +670,13 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	started := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	synced, bare := "synced-"+suffix, "bare-"+suffix
 	if _, err = pool.Exec(ctx, `INSERT INTO playback_sessions_sync
-		(session_id, user_id, profile_id, media_file_id, requested_media_file_id, play_method, started_at, client_ip,
+		(session_id, user_id, profile_id, media_file_id, requested_media_file_id, play_method, plan_id, started_at, client_ip,
 		 client_name, client_version, device_id, device_platform, transcode_audio, target_video_codec,
 		 target_resolution, target_audio_codec, target_audio_channels, output_container, output_protocol,
 		 target_bitrate_kbps, transcode_hw_accel, tone_map_mode, reporting_node, stream_location,
 		 routing_execution, routing_execution_node_id, routing_egress, routing_egress_node_id,
 		 position_seconds, compat_origin, adaptation_reasons, subtitle)
-		VALUES ($1, $2, 'p-1', 7, 8, 'transcode', $3, '203.0.113.9', 'Jellyfin Web', '10.9', 'browser-1', 'web', TRUE, 'h264',
+		VALUES ($1, $2, 'p-1', 7, 8, 'transcode', 'plan-sync-1', $3, '203.0.113.9', 'Jellyfin Web', '10.9', 'browser-1', 'web', TRUE, 'h264',
 			'1080p', 'aac', 2, 'fmp4', 'hls', 8000, 'vaapi', 'hardware', 'api-1', 'remote',
 			'remote_transcode', 11, 'proxy', 12,
 			1800, TRUE, ARRAY['video_codec_unsupported','subtitle_burn_in'],
@@ -693,7 +693,7 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := playback.Session{ID: synced, UserID: account, ProfileID: "p-1", MediaFileID: 7, RequestedMediaFileID: 8,
-		PlayMethod: playback.PlayTranscode, StartedAt: started, ClientIP: "203.0.113.9", ClientName: "Jellyfin Web",
+		PlayMethod: playback.PlayTranscode, PlanID: "plan-sync-1", StartedAt: started, ClientIP: "203.0.113.9", ClientName: "Jellyfin Web",
 		ClientVersion: "10.9", DeviceID: "browser-1", DevicePlatform: "web", TranscodeAudio: true,
 		TargetVideoCodec: "h264", TargetResolution: "1080p", TargetAudioCodec: "aac", TargetAudioChannels: 2,
 		OutputContainer: "fmp4", OutputProtocol: "hls", TargetBitrateKbps: 8000, TranscodeHWAccel: "vaapi",
@@ -1189,5 +1189,118 @@ func TestRecordHistoryReplanReplacesVideoAndAudioDecisionsDB(t *testing.T) {
 		targetVideo != "" || routingEgress != "api" {
 		t.Fatalf("replanned decisions mismatch: method=%q video=%q audio=%q targetVideo=%q egress=%q",
 			playMethod, videoDec, audioDec, targetVideo, routingEgress)
+	}
+}
+
+func TestApplyAttemptPlanFactsStaleLivePlanClearsExecutor(t *testing.T) {
+	record := &playback.AttemptRecordV3{
+		CurrentPlanID:          "plan-2",
+		CurrentReplanRequestID: "replan-2",
+		CurrentPlan: playback.PlanV3{
+			PlanID:   "plan-2",
+			Delivery: playback.DeliveryTranscodeHLSV3,
+			EffectiveRecipe: playback.EffectiveRecipeV3{
+				SegmentContainer: playback.OutputContainerFMP4,
+			},
+		},
+		FrozenRecipe: playback.ExecutableRecipeV3{
+			PlanID:           "plan-2",
+			PlayMethod:       playback.PlayTranscode,
+			TargetVideoCodec: "h264",
+			TargetResolution: "720p",
+		},
+	}
+
+	// Same method/protocol/container as plan-2, but live row still belongs to plan-1:
+	// stale executor and routing fields must be cleared rather than attributed to plan-2.
+	staleLive := &playback.Session{
+		PlanID:                 "plan-1",
+		PlayMethod:             playback.PlayTranscode,
+		OutputProtocol:         playback.OutputProtocolHLS,
+		OutputContainer:        playback.OutputContainerFMP4,
+		TranscodeHWAccel:       "vaapi",
+		RoutingExecution:       "transcode",
+		RoutingExecutionNodeID: 5,
+		RoutingEgress:          "proxy",
+		RoutingEgressNodeID:    6,
+	}
+	applyAttemptPlanFacts(staleLive, record, true)
+	if staleLive.TranscodeHWAccel != "" || staleLive.RoutingExecution != "" ||
+		staleLive.RoutingExecutionNodeID != 0 || staleLive.RoutingEgress != "" ||
+		staleLive.RoutingEgressNodeID != 0 || staleLive.PlanID != "plan-2" {
+		t.Fatalf("stale live plan kept old executor fields: %+v", staleLive)
+	}
+
+	// When the live row's PlanID already matches CurrentPlanID, executor facts are kept.
+	freshLive := &playback.Session{
+		PlanID:                 "plan-2",
+		PlayMethod:             playback.PlayTranscode,
+		OutputProtocol:         playback.OutputProtocolHLS,
+		OutputContainer:        playback.OutputContainerFMP4,
+		TranscodeHWAccel:       "qsv",
+		RoutingExecution:       "transcode",
+		RoutingExecutionNodeID: 8,
+		RoutingEgress:          "proxy",
+		RoutingEgressNodeID:    9,
+	}
+	applyAttemptPlanFacts(freshLive, record, true)
+	if freshLive.TranscodeHWAccel != "qsv" || freshLive.RoutingExecutionNodeID != 8 || freshLive.RoutingEgressNodeID != 9 {
+		t.Fatalf("matching live plan lost executor fields: %+v", freshLive)
+	}
+}
+
+func TestFinishStopReadsLatestAttemptAfterReplan(t *testing.T) {
+	admin := &recordingPlaybackAdminStore{}
+	h := newFinishHistoryReplica(newPlaybackTestStore(t), admin, finishHistoryFile()).handler
+	store := playback.NewMemoryPlanStoreV3()
+	h.PlanStoreV3 = store
+
+	staleRecord := &playback.AttemptRecordV3{
+		PlaybackAttemptID:    "a-1",
+		SessionID:            "sess-race-1",
+		UserID:               7,
+		ProfileID:            "p-1",
+		RequestedMediaFileID: 42,
+		EffectiveMediaFileID: 42,
+		CurrentPlanID:        "plan-1",
+		CurrentPlan:          playback.PlanV3{PlanID: "plan-1", Delivery: playback.DeliveryOriginalHTTPV3},
+		FrozenRecipe:         playback.ExecutableRecipeV3{PlanID: "plan-1", PlayMethod: playback.PlayDirect},
+		CreatedAt:            time.Now().Add(-10 * time.Minute),
+		ExpiresAt:            time.Now().Add(time.Hour),
+	}
+	// Another replica committed plan-2 before StopAttempt sealed the attempt.
+	latestRecord := *staleRecord
+	latestRecord.CurrentPlanID = "plan-2"
+	latestRecord.CurrentReplanRequestID = "replan-2"
+	latestRecord.CurrentPlan = playback.PlanV3{
+		PlanID:          "plan-2",
+		Delivery:        playback.DeliveryTranscodeHLSV3,
+		EffectiveRecipe: playback.EffectiveRecipeV3{SegmentContainer: playback.OutputContainerFMP4},
+	}
+	latestRecord.FrozenRecipe = playback.ExecutableRecipeV3{
+		PlanID:            "plan-2",
+		PlayMethod:        playback.PlayTranscode,
+		TargetVideoCodec:  "h264",
+		TargetResolution:  "1080p",
+		TargetBitrateKbps: 6000,
+		AdaptationReasons: []string{"bitrate_cap"},
+	}
+	if err := store.SaveAttempt(t.Context(), latestRecord); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := h.finishStop(t.Context(), staleRecord, latestRecord.SessionID, playback.StopReceiptV3{
+		StopID:   "stop-1",
+		Accepted: &playback.ProgressSampleV3{Sequence: 1, Position: 120},
+	}); err != nil {
+		t.Fatalf("finishStop: %v", err)
+	}
+	if len(admin.history) != 1 {
+		t.Fatalf("history len = %d, want 1", len(admin.history))
+	}
+	got := admin.history[0]
+	if got.PlayMethod != string(playback.PlayTranscode) || got.TargetVideoCodec != "h264" ||
+		got.TargetResolution != "1080p" || got.TargetBitrateKbps != 6000 {
+		t.Fatalf("finishStop recorded stale pre-replan facts: %+v", got)
 	}
 }

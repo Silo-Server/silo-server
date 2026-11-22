@@ -1,11 +1,18 @@
 import { formatLocale } from "@/lib/appLocale";
 import { formatDateTime, preferredDateLocale } from "@/lib/datetime";
 
-export const INSIGHTS_TABS = ["activity", "people", "devices", "bandwidth"] as const;
+export const INSIGHTS_TABS = ["playback", "people", "devices", "bandwidth"] as const;
 export type InsightsTab = (typeof INSIGHTS_TABS)[number];
 
 export const INSIGHTS_RANGES = ["7d", "30d", "90d", "1y", "all", "custom"] as const;
 export type InsightsRange = (typeof INSIGHTS_RANGES)[number];
+
+/** Maps a Dashboard widget range (`hour`/`day`/`week`/`month`) to the closest Insights range preset. */
+export function widgetRangeToInsightsRange(
+  range: "hour" | "day" | "week" | "month",
+): InsightsRange {
+  return range === "month" ? "30d" : "7d";
+}
 
 export interface InsightsFilterState {
   tab: InsightsTab;
@@ -53,9 +60,10 @@ export function parseInsightsUrlState(
   defaultTz: string,
 ): InsightsFilterState {
   const rawTab = searchParams.get("tab");
-  const tab: InsightsTab = INSIGHTS_TABS.includes(rawTab as InsightsTab)
-    ? (rawTab as InsightsTab)
-    : "activity";
+  const normalizedTab = rawTab === "activity" ? "playback" : rawTab;
+  const tab: InsightsTab = INSIGHTS_TABS.includes(normalizedTab as InsightsTab)
+    ? (normalizedTab as InsightsTab)
+    : "playback";
 
   const rawRange = searchParams.get("range");
   const range: InsightsRange = INSIGHTS_RANGES.includes(rawRange as InsightsRange)

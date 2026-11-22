@@ -195,15 +195,16 @@ type AdminInsightsPersonAccount struct {
 
 // AdminInsightsPeople is the payload for GET /api/v2/admin/insights/people.
 type AdminInsightsPeople struct {
-	From           time.Time
-	To             time.Time
-	TZ             string
-	TotalAccounts  int64
-	ActiveAccounts int64
-	ActiveProfiles int64
-	LiveAccounts   int64
-	Coverage       AdminInsightsCoverage
-	Accounts       []AdminInsightsPersonAccount
+	From              time.Time
+	To                time.Time
+	TZ                string
+	TotalAccounts     int64
+	ActiveAccounts    int64
+	ActiveProfiles    int64
+	LiveAccounts      int64
+	TotalWatchSeconds int64
+	Coverage          AdminInsightsCoverage
+	Accounts          []AdminInsightsPersonAccount
 }
 
 // AdminInsightsDevicesSummary aggregates KPIs for Devices & Quality.
@@ -259,30 +260,19 @@ type AdminInsightsLabeledCount struct {
 	Plays int64
 }
 
-// AdminInsightsTopTranscodingAccount ranks accounts with the most transcodes.
-type AdminInsightsTopTranscodingAccount struct {
-	UserID         int
-	Username       string
-	TranscodePlays int64
-	TotalPlays     int64
-	TranscodeRate  float64
-	TopReason      *string
-}
-
 // AdminInsightsDevices is the payload for GET /api/v2/admin/insights/devices.
 type AdminInsightsDevices struct {
-	From                  time.Time
-	To                    time.Time
-	TZ                    string
-	Coverage              AdminInsightsCoverage
-	Summary               AdminInsightsDevicesSummary
-	Codecs                []string
-	Matrix                []AdminInsightsClientMatrixRow
-	AdaptationReasons     []AdminInsightsAdaptationReason
-	HWAccelBreakdown      []AdminInsightsLabeledCount
-	ToneMapBreakdown      []AdminInsightsLabeledCount
-	SubtitleBurnInCodecs  []AdminInsightsLabeledCount
-	TopTranscodingAccount []AdminInsightsTopTranscodingAccount
+	From                 time.Time
+	To                   time.Time
+	TZ                   string
+	Coverage             AdminInsightsCoverage
+	Summary              AdminInsightsDevicesSummary
+	Codecs               []string
+	Matrix               []AdminInsightsClientMatrixRow
+	AdaptationReasons    []AdminInsightsAdaptationReason
+	HWAccelBreakdown     []AdminInsightsLabeledCount
+	ToneMapBreakdown     []AdminInsightsLabeledCount
+	SubtitleBurnInCodecs []AdminInsightsLabeledCount
 }
 
 // AdminInsightsBandwidthSummary aggregates KPIs for the Bandwidth tab.
@@ -436,6 +426,22 @@ func insightsWindowCacheable(rangeVal string) bool {
 	return normalizeInsightsRange(rangeVal) != InsightsRangeCustom
 }
 
+func cachedInsightsRead[T comparable](p *AdminInsightsProvider, c *cache.TTLCache[T], key string, load func() (T, error)) (T, error) {
+	if v, ok := c.Get(key); ok {
+		return v, nil
+	}
+	gen := p.gen.Load()
+	v, err := load()
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	if p.gen.Load() == gen {
+		c.Set(key, v, p.ttl)
+	}
+	return v, nil
+}
+
 func (p *AdminInsightsProvider) Activity(ctx context.Context, q AdminInsightsWindowQuery) (*AdminInsightsActivity, error) {
 	if p == nil || p.pool == nil {
 		return nil, ErrAdminDashboardUnavailable
@@ -444,40 +450,29 @@ func (p *AdminInsightsProvider) Activity(ctx context.Context, q AdminInsightsWin
 		return queryAdminInsightsActivity(ctx, p.pool, q)
 	}
 	key := fmt.Sprintf("%sactivity:r=%s:tz=%s:lib=%d:u=%d", adminInsightsCacheKeyPrefix, normalizeInsightsRange(q.Range), normalizeInsightsTZ(q.TZ), q.LibraryID, q.UserID)
-	if v, ok := p.activity.Get(key); ok {
-		return v, nil
-	}
-	gen := p.gen.Load()
-	v, err := queryAdminInsightsActivity(ctx, p.pool, q)
-	if err != nil {
-		return nil, err
-	}
-	if p.gen.Load() == gen {
-		p.activity.Set(key, v, p.ttl)
-	}
-	return v, nil
+	return cachedInsightsRead(p, p.activity, key, func() (*AdminInsightsActivity, error) {
+		return queryAdminInsightsActivity(ctx, p.pool, q)
+	})
 }
 
 func (p *AdminInsightsProvider) People(ctx context.Context, q AdminInsightsPeopleQuery) (*AdminInsightsPeople, error) {
 	if p == nil || p.pool == nil {
 		return nil, ErrAdminDashboardUnavailable
 	}
-	if !insightsWindowCacheable(q.Range) || strings.TrimSpace(q.Search) != "" || q.Offset != 0 {
+	if !insightsWindowCacheable(q.Range) || strings.TrimSpace(q.Search) != "" {
 		return queryAdminInsightsPeople(ctx, p.pool, q)
 	}
-	key := fmt.Sprintf("%speople:r=%s:tz=%s:lib=%d:s=%s:d=%s:l=%d", adminInsightsCacheKeyPrefix, normalizeInsightsRange(q.Range), normalizeInsightsTZ(q.TZ), q.LibraryID, strings.TrimSpace(q.Sort), strings.TrimSpace(q.Dir), clampInsightsPeopleLimit(q.Limit))
-	if v, ok := p.people.Get(key); ok {
-		return v, nil
-	}
-	gen := p.gen.Load()
-	v, err := queryAdminInsightsPeople(ctx, p.pool, q)
+	// Cache the full sorted snapshot (independent of limit/offset) so paging
+	// past the first page reads from the same snapshot without skipping or
+	// duplicating accounts across concurrent plays.
+	key := fmt.Sprintf("%speople:r=%s:tz=%s:lib=%d:s=%s:d=%s", adminInsightsCacheKeyPrefix, normalizeInsightsRange(q.Range), normalizeInsightsTZ(q.TZ), q.LibraryID, strings.TrimSpace(q.Sort), strings.TrimSpace(q.Dir))
+	full, err := cachedInsightsRead(p, p.people, key, func() (*AdminInsightsPeople, error) {
+		return queryAdminInsightsPeopleSnapshot(ctx, p.pool, q)
+	})
 	if err != nil {
 		return nil, err
 	}
-	if p.gen.Load() == gen {
-		p.people.Set(key, v, p.ttl)
-	}
-	return v, nil
+	return sliceAdminInsightsPeople(full, q.Limit, q.Offset), nil
 }
 
 func (p *AdminInsightsProvider) Devices(ctx context.Context, q AdminInsightsDevicesQuery) (*AdminInsightsDevices, error) {
@@ -488,18 +483,9 @@ func (p *AdminInsightsProvider) Devices(ctx context.Context, q AdminInsightsDevi
 		return queryAdminInsightsDevices(ctx, p.pool, q)
 	}
 	key := fmt.Sprintf("%sdevices:r=%s:tz=%s:lib=%d:u=%d:m=%d", adminInsightsCacheKeyPrefix, normalizeInsightsRange(q.Range), normalizeInsightsTZ(q.TZ), q.LibraryID, q.UserID, clampInsightsMinPlays(q.MinPlays))
-	if v, ok := p.devices.Get(key); ok {
-		return v, nil
-	}
-	gen := p.gen.Load()
-	v, err := queryAdminInsightsDevices(ctx, p.pool, q)
-	if err != nil {
-		return nil, err
-	}
-	if p.gen.Load() == gen {
-		p.devices.Set(key, v, p.ttl)
-	}
-	return v, nil
+	return cachedInsightsRead(p, p.devices, key, func() (*AdminInsightsDevices, error) {
+		return queryAdminInsightsDevices(ctx, p.pool, q)
+	})
 }
 
 func (p *AdminInsightsProvider) Bandwidth(ctx context.Context, q AdminInsightsBandwidthQuery) (*AdminInsightsBandwidth, error) {
@@ -510,18 +496,9 @@ func (p *AdminInsightsProvider) Bandwidth(ctx context.Context, q AdminInsightsBa
 		return queryAdminInsightsBandwidth(ctx, p.pool, q)
 	}
 	key := fmt.Sprintf("%sbandwidth:r=%s:tz=%s", adminInsightsCacheKeyPrefix, normalizeInsightsRange(q.Range), normalizeInsightsTZ(q.TZ))
-	if v, ok := p.bandwidth.Get(key); ok {
-		return v, nil
-	}
-	gen := p.gen.Load()
-	v, err := queryAdminInsightsBandwidth(ctx, p.pool, q)
-	if err != nil {
-		return nil, err
-	}
-	if p.gen.Load() == gen {
-		p.bandwidth.Set(key, v, p.ttl)
-	}
-	return v, nil
+	return cachedInsightsRead(p, p.bandwidth, key, func() (*AdminInsightsBandwidth, error) {
+		return queryAdminInsightsBandwidth(ctx, p.pool, q)
+	})
 }
 
 // Service entrypoints on AdminHandler used by internal/apiv2.

@@ -60,6 +60,7 @@ type Session struct {
 
 	TranscodeNodeURL     string // URL of assigned transcode node (empty = local/integrated)
 	TranscodeTransportID string // remote node process identity; empty means session ID
+	PlanID               string // committed v3 plan ID that produced this live route snapshot
 	AudioTrackIndex      int
 
 	// RoutingNetworkProvider is the validated access path selected when preparing
@@ -179,6 +180,7 @@ type SessionStreamState struct {
 	Subtitle                      *SessionSubtitle
 	TranscodeNodeURL              string
 	TranscodeTransportID          string
+	PlanID                        string
 	TranscodeRouteSet             bool
 	RoutingNetworkProvider        *string
 	RoutingWorkload               string
@@ -1285,6 +1287,7 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 	if state.TranscodeRouteSet {
 		s.TranscodeNodeURL = state.TranscodeNodeURL
 		s.TranscodeTransportID = state.TranscodeTransportID
+		s.PlanID = state.PlanID
 		s.RoutingNetworkProvider = state.RoutingNetworkProvider
 		s.RoutingWorkload = state.RoutingWorkload
 		s.RoutingExecution = state.RoutingExecution
@@ -1337,6 +1340,7 @@ func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 		Subtitle:                      s.Subtitle,
 		TranscodeNodeURL:              s.TranscodeNodeURL,
 		TranscodeTransportID:          s.TranscodeTransportID,
+		PlanID:                        s.PlanID,
 		TranscodeRouteSet:             true,
 		RoutingNetworkProvider:        s.RoutingNetworkProvider,
 		RoutingWorkload:               s.RoutingWorkload,
@@ -1382,6 +1386,7 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.Subtitle = state.Subtitle
 	s.TranscodeNodeURL = state.TranscodeNodeURL
 	s.TranscodeTransportID = state.TranscodeTransportID
+	s.PlanID = state.PlanID
 	s.RoutingNetworkProvider = state.RoutingNetworkProvider
 	s.RoutingWorkload = state.RoutingWorkload
 	s.RoutingExecution = state.RoutingExecution

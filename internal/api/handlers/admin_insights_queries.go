@@ -171,34 +171,38 @@ var insightsCombinedDailyMetricsCTE = `
 		SELECT * FROM _dm_daily
 	)`
 
+// metricDaySpanForWindow maps an Insights window to the UTC calendar-day span
+// read from dashboard_metric_daily / dashboard_node_egress_daily and unarchived
+// raw samples. Preset windows (7d/30d/90d/1y) anchor strictly on dbNow's UTC
+// day so a 7d request always spans exactly 7 UTC days regardless of the
+// viewer's timezone.
 func metricDaySpanForWindow(win resolvedInsightsWindow, dbNow time.Time) (fromDay, toDay string, upperUTC time.Time) {
-	fromDay = win.FromLocalDate
-	toDay = win.ToLocalDate
-	if fromDay == "" || toDay == "" {
-		fromLocal := win.From.In(win.Loc)
-		inclusiveTo := win.To.Add(-time.Nanosecond).In(win.Loc)
-		if inclusiveTo.Before(fromLocal) {
-			inclusiveTo = fromLocal
-		}
-		fromDay = fromLocal.Format("2006-01-02")
-		toDay = inclusiveTo.Format("2006-01-02")
-	}
-	if win.AllTime {
-		if fromUTC := win.From.UTC().Format("2006-01-02"); fromUTC < fromDay {
-			fromDay = fromUTC
-		}
-	}
-	if win.Range == InsightsRangeCustom {
+	nowUTC := dbNow.UTC()
+	todayUTC := nowUTC.Truncate(24 * time.Hour)
+	switch win.Range {
+	case InsightsRange7d:
+		return todayUTC.AddDate(0, 0, -6).Format("2006-01-02"), todayUTC.Format("2006-01-02"), nowUTC
+	case InsightsRange30d:
+		return todayUTC.AddDate(0, 0, -29).Format("2006-01-02"), todayUTC.Format("2006-01-02"), nowUTC
+	case InsightsRange90d:
+		return todayUTC.AddDate(0, 0, -89).Format("2006-01-02"), todayUTC.Format("2006-01-02"), nowUTC
+	case InsightsRange1y:
+		return todayUTC.AddDate(0, 0, -364).Format("2006-01-02"), todayUTC.Format("2006-01-02"), nowUTC
+	case InsightsRangeCustom:
+		fromDay = win.FromLocalDate
+		toDay = win.ToLocalDate
 		if toCal, err := time.Parse("2006-01-02", toDay); err == nil {
 			return fromDay, toDay, toCal.AddDate(0, 0, 1).UTC()
 		}
 		return fromDay, toDay, win.To.UTC()
+	default:
+		// All-time (or any fallback): span from earliest UTC day through today UTC.
+		fromDay = win.From.UTC().Format("2006-01-02")
+		if win.FromLocalDate != "" && win.FromLocalDate < fromDay {
+			fromDay = win.FromLocalDate
+		}
+		return fromDay, todayUTC.Format("2006-01-02"), nowUTC
 	}
-	todayUTC := dbNow.UTC().Format("2006-01-02")
-	if todayUTC > toDay {
-		toDay = todayUTC
-	}
-	return fromDay, toDay, dbNow.UTC()
 }
 
 // ---- Activity --------------------------------------------------------------
@@ -409,7 +413,7 @@ func queryInsightsActivityPeakStreams(ctx context.Context, tx pgx.Tx, win resolv
 
 // ---- People ----------------------------------------------------------------
 
-func queryAdminInsightsPeople(ctx context.Context, pool *pgxpool.Pool, q AdminInsightsPeopleQuery) (*AdminInsightsPeople, error) {
+func queryAdminInsightsPeopleSnapshot(ctx context.Context, pool *pgxpool.Pool, q AdminInsightsPeopleQuery) (*AdminInsightsPeople, error) {
 	if pool == nil {
 		return nil, ErrAdminDashboardUnavailable
 	}
@@ -454,14 +458,34 @@ func queryAdminInsightsPeople(ctx context.Context, pool *pgxpool.Pool, q AdminIn
 
 	allAccounts := finalizeInsightsPeopleAccounts(byUser, q.Search, out)
 	sortInsightsAccounts(allAccounts, q.Sort, q.Dir)
-	limit, offset := clampInsightsPeopleLimit(q.Limit), max(q.Offset, 0)
-	if offset < len(allAccounts) {
-		out.Accounts = allAccounts[offset:min(offset+limit, len(allAccounts))]
-	}
+	out.Accounts = allAccounts
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("committing insights people read: %w", err)
 	}
 	return out, nil
+}
+
+func queryAdminInsightsPeople(ctx context.Context, pool *pgxpool.Pool, q AdminInsightsPeopleQuery) (*AdminInsightsPeople, error) {
+	full, err := queryAdminInsightsPeopleSnapshot(ctx, pool, q)
+	if err != nil {
+		return nil, err
+	}
+	return sliceAdminInsightsPeople(full, q.Limit, q.Offset), nil
+}
+
+func sliceAdminInsightsPeople(full *AdminInsightsPeople, rawLimit, rawOffset int) *AdminInsightsPeople {
+	if full == nil {
+		return nil
+	}
+	cp := *full
+	limit, offset := clampInsightsPeopleLimit(rawLimit), max(rawOffset, 0)
+	if offset >= len(full.Accounts) {
+		cp.Accounts = make([]AdminInsightsPersonAccount, 0)
+	} else {
+		end := min(offset+limit, len(full.Accounts))
+		cp.Accounts = append([]AdminInsightsPersonAccount(nil), full.Accounts[offset:end]...)
+	}
+	return &cp
 }
 
 func queryInsightsLiveUsers(ctx context.Context, tx pgx.Tx, libraryID int) (map[int]bool, map[string]bool, error) {
@@ -579,6 +603,7 @@ func queryInsightsPeopleProfiles(
 		out.Coverage.MeasuredPlays += measuredPlays
 		out.Coverage.RouteFactsPlays += routePlays
 		out.ActiveProfiles++
+		out.TotalWatchSeconds += watchSec
 
 		acc, ok := byUser[uid]
 		if !ok {
@@ -772,7 +797,7 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 		Codecs: make([]string, 0), Matrix: make([]AdminInsightsClientMatrixRow, 0),
 		AdaptationReasons: make([]AdminInsightsAdaptationReason, 0),
 		HWAccelBreakdown:  make([]AdminInsightsLabeledCount, 0), ToneMapBreakdown: make([]AdminInsightsLabeledCount, 0),
-		SubtitleBurnInCodecs: make([]AdminInsightsLabeledCount, 0), TopTranscodingAccount: make([]AdminInsightsTopTranscodingAccount, 0),
+		SubtitleBurnInCodecs: make([]AdminInsightsLabeledCount, 0),
 	}
 
 	if err := queryInsightsDevicesSummary(ctx, tx, whereSQL, whereArgs, out); err != nil {
@@ -785,9 +810,6 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 		return nil, err
 	}
 	if err := queryInsightsDevicesBreakdowns(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
-		return nil, err
-	}
-	if err := queryInsightsTopTranscodingAccounts(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -1053,61 +1075,6 @@ func queryInsightsDevicesBreakdowns(ctx context.Context, tx pgx.Tx, libraryID in
 	return nil
 }
 
-func queryInsightsTopTranscodingAccounts(ctx context.Context, tx pgx.Tx, libraryID int, whereSQL string, whereArgs []any, out *AdminInsightsDevices) error {
-	joinSQL := insightsLibraryJoinSQL(libraryID)
-	rows, err := tx.Query(ctx, `
-		WITH per_user AS (
-			SELECT
-				h.user_id,
-				COUNT(*)::bigint AS total_plays,
-				COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+`)::bigint AS transcode_plays
-			FROM admin_playback_history h `+joinSQL+`
-			WHERE `+whereSQL+`
-			GROUP BY h.user_id
-			HAVING COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+`) > 0
-			ORDER BY transcode_plays DESC, total_plays DESC, h.user_id ASC
-			LIMIT 10
-		),
-		top_reasons AS (
-			SELECT DISTINCT ON (h.user_id) h.user_id, reason
-			FROM admin_playback_history h `+joinSQL+`
-			CROSS JOIN LATERAL unnest(h.adaptation_reasons) AS reason
-			WHERE `+whereSQL+` AND `+insightsPlayTranscodeSQL+`
-			  AND h.user_id IN (SELECT user_id FROM per_user)
-			GROUP BY h.user_id, reason
-			ORDER BY h.user_id, COUNT(*) DESC, reason ASC
-		)
-		SELECT p.user_id, COALESCE(u.username, ''), p.transcode_plays, p.total_plays, tr.reason
-		FROM per_user p
-		LEFT JOIN users u ON u.id = p.user_id
-		LEFT JOIN top_reasons tr ON tr.user_id = p.user_id
-		ORDER BY p.transcode_plays DESC, p.total_plays DESC, p.user_id ASC
-	`, whereArgs...)
-	if err != nil {
-		return fmt.Errorf("querying insights top transcoding accounts: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var item AdminInsightsTopTranscodingAccount
-		var reason *string
-		if err := rows.Scan(&item.UserID, &item.Username, &item.TranscodePlays, &item.TotalPlays, &reason); err != nil {
-			return err
-		}
-		if item.Username == "" {
-			item.Username = fmt.Sprintf("User %d", item.UserID)
-		}
-		item.TranscodeRate = roundInsightsRate(item.TranscodePlays, item.TotalPlays)
-		if reason != nil {
-			if norm := playback.NormalizeAdaptationReasons([]string{*reason}); len(norm) > 0 {
-				r := norm[0]
-				item.TopReason = &r
-			}
-		}
-		out.TopTranscodingAccount = append(out.TopTranscodingAccount, item)
-	}
-	return rows.Err()
-}
-
 func sortedLabeledCounts(m map[string]int64) []AdminInsightsLabeledCount {
 	res := make([]AdminInsightsLabeledCount, 0, len(m))
 	for k, v := range m {
@@ -1236,15 +1203,14 @@ func queryInsightsBandwidthDaily(ctx context.Context, tx pgx.Tx, fromDay, toDay 
 
 func queryInsightsBandwidthNodes(ctx context.Context, tx pgx.Tx, fromDay, toDay string, upperUTC time.Time, pointIdx map[string]int, out *AdminInsightsBandwidth) (map[int]*AdminInsightsEgressSource, error) {
 	rows, err := tx.Query(ctx, `
-		WITH archived_days AS (
-			SELECT DISTINCT d.day
+		WITH archived_node_days AS (
+			SELECT d.day, d.node_id, d.node_name, d.node_type, d.egress_bytes, d.peak_egress_kbps
 			FROM dashboard_node_egress_daily d
 			WHERE d.day >= $1::date AND d.day <= $2::date
 		),
 		node_daily AS (
-			SELECT d.day, d.node_id, d.node_name, d.node_type, d.egress_bytes, d.peak_egress_kbps
-			FROM dashboard_node_egress_daily d
-			INNER JOIN archived_days a ON a.day = d.day
+			SELECT day, node_id, node_name, node_type, egress_bytes, peak_egress_kbps
+			FROM archived_node_days
 			UNION ALL
 			SELECT
 				(s.bucket AT TIME ZONE 'UTC')::date AS day,
@@ -1256,7 +1222,10 @@ func queryInsightsBandwidthNodes(ctx context.Context, tx pgx.Tx, fromDay, toDay 
 			FROM dashboard_node_egress_samples s
 			WHERE s.bucket >= ($1::date::timestamp AT TIME ZONE 'UTC')
 			  AND s.bucket < LEAST((($2::date + 1)::timestamp AT TIME ZONE 'UTC'), $3::timestamptz)
-			  AND NOT EXISTS (SELECT 1 FROM archived_days a WHERE a.day = (s.bucket AT TIME ZONE 'UTC')::date)
+			  AND NOT EXISTS (
+				SELECT 1 FROM archived_node_days a
+				WHERE a.day = (s.bucket AT TIME ZONE 'UTC')::date AND a.node_id = s.node_id
+			  )
 			GROUP BY 1, 2
 		)
 		SELECT

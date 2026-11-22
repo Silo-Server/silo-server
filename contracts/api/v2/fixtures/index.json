@@ -6658,7 +6658,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"5867ac260c821bf833113efde8d4b622968a50cc947a1f8d0387ed222f2c0015\""
+        "ETag": "\"bbb10b6f542af6d68e49980464875cf8e16cb7ef02b2f4345bd516f39abc17e7\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminInsightsCapabilities",

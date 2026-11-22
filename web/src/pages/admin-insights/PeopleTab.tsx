@@ -109,9 +109,6 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
 
   return (
     <div className="space-y-5">
-      {filters.userId !== undefined ? (
-        <InsightNoticeBanner message={t("web.admin.insights.people.scopeNotice")} />
-      ) : null}
       {showMeasuredBanner && coverage ? (
         <InsightNoticeBanner
           message={t("web.admin.insights.coverage.watchTimePartial", {
@@ -132,9 +129,8 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
             value={data.active_profiles.toLocaleString(formatLocale())}
           />
           <InsightKpiCard
-            label={t("web.admin.insights.people.kpi.liveNow")}
-            value={data.live_accounts.toLocaleString(formatLocale())}
-            accent={data.live_accounts > 0 ? "success" : "default"}
+            label={t("web.admin.insights.people.kpi.totalWatchTime")}
+            value={formatWatchTime(data.total_watch_seconds)}
           />
         </div>
       ) : query.isLoading ? (

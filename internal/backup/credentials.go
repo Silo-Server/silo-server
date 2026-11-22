@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/dashmetrics"
 )
 
 // secretHandling is what a backup and a restore do with a table holding a
@@ -961,10 +963,10 @@ func reconcileRestoredStreamNodeReferences(ctx context.Context, tx pgx.Tx, liveS
 	if err := reconcileRestoredHistoryNodes(ctx, tx); err != nil {
 		return err
 	}
-	if err := reconcileRestoredDailyNodeEgress(ctx, tx); err != nil {
+	if err := foldUnmatchedNodeEgressSamples(ctx, tx); err != nil {
 		return err
 	}
-	return reconcileRestoredNodeEgressSamples(ctx, tx)
+	return reconcileRestoredDailyNodeEgress(ctx, tx)
 }
 
 func reconcileRestoredHistoryNodes(ctx context.Context, tx pgx.Tx) error {
@@ -1067,14 +1069,58 @@ func reconcileRestoredDailyNodeEgress(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
-func reconcileRestoredNodeEgressSamples(ctx context.Context, tx pgx.Tx) error {
-	ok, err := tableExists(ctx, tx, "dashboard_node_egress_samples")
-	if err != nil || !ok {
+// foldUnmatchedNodeEgressSamples folds raw per-node samples from unmatched
+// backup nodes into dashboard_node_egress_daily before deleting them from the
+// raw sample table. That preserves unarchived same-day node egress while
+// letting reconcileRestoredDailyNodeEgress remap the old node's prior days and
+// restore-day rows together under one synthetic negative node_id.
+func foldUnmatchedNodeEgressSamples(ctx context.Context, tx pgx.Tx) error {
+	okSamples, err := tableExists(ctx, tx, "dashboard_node_egress_samples")
+	if err != nil || !okSamples {
+		return err
+	}
+	if err := insertFoldedUnmatchedNodeEgress(ctx, tx); err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, `
 		DELETE FROM dashboard_node_egress_samples s
 		WHERE NOT EXISTS (SELECT 1 FROM matched_stream_nodes m WHERE m.id = s.node_id)
 	`)
+	return err
+}
+
+func insertFoldedUnmatchedNodeEgress(ctx context.Context, tx pgx.Tx) error {
+	okDaily, err := tableExists(ctx, tx, "dashboard_node_egress_daily")
+	if err != nil || !okDaily {
+		return err
+	}
+	cols, err := tableColumns(ctx, tx, "dashboard_node_egress_daily")
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(cols, "node_name") || !slices.Contains(cols, "node_type") {
+		return nil
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO dashboard_node_egress_daily (day, node_id, node_name, node_type, egress_bytes, peak_egress_kbps, updated_at)
+		SELECT
+			(s.bucket AT TIME ZONE 'UTC')::date AS day,
+			s.node_id,
+			COALESCE(NULLIF(BTRIM(b.name), ''), '') AS node_name,
+			b.type AS node_type,
+			(COALESCE(SUM(s.egress_kbps), 0) * $1)::bigint AS egress_bytes,
+			COALESCE(MAX(s.egress_kbps), 0)::bigint        AS peak_egress_kbps,
+			now()
+		FROM dashboard_node_egress_samples s
+		LEFT JOIN stream_nodes b ON b.id = s.node_id
+		WHERE NOT EXISTS (SELECT 1 FROM matched_stream_nodes m WHERE m.id = s.node_id)
+		GROUP BY 1, 2, 3, 4
+		ON CONFLICT (day, node_id) DO UPDATE SET
+			node_name        = COALESCE(NULLIF(BTRIM(dashboard_node_egress_daily.node_name), ''), EXCLUDED.node_name),
+			node_type        = COALESCE(dashboard_node_egress_daily.node_type, EXCLUDED.node_type),
+			egress_bytes     = GREATEST(dashboard_node_egress_daily.egress_bytes, EXCLUDED.egress_bytes),
+			peak_egress_kbps = GREATEST(dashboard_node_egress_daily.peak_egress_kbps, EXCLUDED.peak_egress_kbps),
+			updated_at       = now()
+	`, int64(dashmetrics.BytesPerKbpsMinute))
 	return err
 }

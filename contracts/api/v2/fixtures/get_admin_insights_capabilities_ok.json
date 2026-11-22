@@ -1,13 +1,7 @@
 {
-  "revision": "d2b9f57daf5dc0c35a7ce1d19d5bf8b48370bb97c0e9b0253e6547537d4afbf4",
+  "revision": "a021c59af897bb94747c930461628656962b3aa59e054e7410044f02e94e6261",
   "state": "available",
   "allowed": true,
   "available": true,
-  "activity": true,
-  "people": true,
-  "devices": true,
-  "bandwidth": true,
-  "node_egress_daily": true,
-  "library": false,
-  "map": false
+  "node_egress_daily": true
 }

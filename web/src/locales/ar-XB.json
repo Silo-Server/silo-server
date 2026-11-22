@@ -46412,18 +46412,6 @@
       "value": "\u200F\u202EWatch time\u202C"
     }
   ],
-  "web.admin.history.detail.jellyfinBadge": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EJF\u202C"
-    }
-  ],
-  "web.admin.history.detail.jellyfinBadgeTitle": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EJellyfin compatibility client\u202C"
-    }
-  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -49510,6 +49498,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.liveActivity": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELive activity\u202C"
+    }
+  ],
   "web.admin.insights.activity.heatmap.cellTooltip": [
     {
       "type": 0,
@@ -49709,7 +49703,7 @@
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EDaily highest simultaneous streams (server-wide)\u202C"
+      "value": "\u200F\u202EDaily highest simultaneous streams (server-wide, UTC days)\u202C"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -49808,6 +49802,12 @@
       "value": "\u200F\u202EDaily peak egress rate\u202C"
     }
   ],
+  "web.admin.insights.bandwidth.chart.subtitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDaily egress totals and peak rates (server-wide, UTC days)\u202C"
+    }
+  ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
@@ -49900,6 +49900,28 @@
       "value": "\u202E downloads\u202C"
     }
   ],
+  "web.admin.insights.bandwidth.kpi.nodeSplit": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "api"
+    },
+    {
+      "type": 0,
+      "value": "\u202E API server · \u202C"
+    },
+    {
+      "type": 1,
+      "value": "nodes"
+    },
+    {
+      "type": 0,
+      "value": "\u202E stream nodes\u202C"
+    }
+  ],
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
@@ -49990,12 +50012,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EEgress by node\u202C"
-    }
-  ],
-  "web.admin.insights.bandwidth.scopeNotice": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EBandwidth metrics are server-wide and do not change with account or library filters.\u202C"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
@@ -50125,7 +50141,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E remux · \u202C"
+      "value": "\u202E direct stream · \u202C"
     },
     {
       "type": 1,
@@ -50339,7 +50355,7 @@
   "web.admin.insights.devices.topTranscoders.title": [
     {
       "type": 0,
-      "value": "\u200F\u202ETop transcoding accounts\u202C"
+      "value": "\u200F\u202EClients transcoding most\u202C"
     }
   ],
   "web.admin.insights.devices.topTranscoders.transcodeShare": [
@@ -50536,10 +50552,10 @@
       "value": "\u200F\u202EActive profiles\u202C"
     }
   ],
-  "web.admin.insights.people.kpi.liveNow": [
+  "web.admin.insights.people.kpi.totalWatchTime": [
     {
       "type": 0,
-      "value": "\u200F\u202ELive now\u202C"
+      "value": "\u200F\u202ETotal watch time\u202C"
     }
   ],
   "web.admin.insights.people.liveBadge": [
@@ -50592,12 +50608,6 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.insights.people.scopeNotice": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EThe leaderboard lists every account; the account filter applies on Activity and Devices & Quality.\u202C"
     }
   ],
   "web.admin.insights.people.searchPlaceholder": [
@@ -50723,7 +50733,7 @@
   "web.admin.insights.tabs.activity": [
     {
       "type": 0,
-      "value": "\u200F\u202EActivity\u202C"
+      "value": "\u200F\u202EPlayback\u202C"
     }
   ],
   "web.admin.insights.tabs.bandwidth": [

@@ -1912,8 +1912,8 @@ Each tab shares the time-window parameters `range` (`7d`, `30d`, `90d`, `1y`, `a
 `422 validation_failed`.
 
 - `GET /api/v2/admin/insights/capabilities` (`getAdminInsightsCapabilities`) advertises
-  which tabs and archival datasets are configured (`available`, `activity`, `people`,
-  `devices`, `bandwidth`, `node_egress_daily`, and reserved flags `library` and `map`).
+  whether Insights and its long-term per-node egress archive are configured (`available`,
+  `node_egress_daily`).
 - `GET /api/v2/admin/insights/activity` (`getAdminInsightsActivity`) accepts optional
   `library_id` and `user_id` filters and returns window totals, auto-bucketed local-timezone
   series (`day`, `week`, or `month`), a 7×24 local-timezone viewing heatmap
@@ -1924,19 +1924,19 @@ Each tab shares the time-window parameters `range` (`7d`, `30d`, `90d`, `1y`, `a
 - `GET /api/v2/admin/insights/people` (`getAdminInsightsPeople`) accepts optional
   `library_id`, `search`, `sort` (`watch_time`, `plays`, `direct_pct`, `completion_pct`,
   `last_seen`), `dir` (`asc`, `desc`), `limit` (1..100), and `offset`, returning account
-  rollups with nested household profiles and live session indicators.
+  rollups with `total_watch_seconds`, nested household profiles, and live session indicators.
 - `GET /api/v2/admin/insights/devices` (`getAdminInsightsDevices`) accepts optional
   `library_id`, `user_id`, and `min_plays` (default 5), returning the normalized
   `(client_name, device_platform)` × source video codec direct-play matrix, canonical
-  `adaptation_reasons` counts, hardware acceleration and HDR tone-mapping breakdowns,
-  burn-in subtitle codecs, and top transcoding accounts.
+  `adaptation_reasons` counts, hardware acceleration and HDR tone-mapping breakdowns, and
+  burn-in subtitle codecs.
 - `GET /api/v2/admin/insights/bandwidth` (`getAdminInsightsBandwidth`) unions
   `dashboard_metric_daily` and `dashboard_node_egress_daily` with unarchived live minute
-  samples across the requested calendar date span in UTC (without double-counting archived
-  UTC days, so minute-sample pruning does not change historical totals or peaks) to report
-  multi-year egress volume, playback vs. download totals, peak throughput, per-node daily
-  breakdown, and remote vs. local play share. Activity's `peak_streams` series uses the
-  same UTC-day daily rollup union.
+  samples across the requested UTC calendar date span (exact 7/30/90/365 UTC days for presets;
+  without double-counting archived UTC days, so minute-sample pruning does not change
+  historical totals or peaks) to report multi-year egress volume, API vs. node totals, peak
+  throughput, per-node daily breakdown, and remote vs. local play share. Activity's
+  `peak_streams` series uses the same UTC-day daily rollup union.
 
 ## History imports
 

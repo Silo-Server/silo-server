@@ -49,13 +49,17 @@ function NetworkBadge({ name, title }: { name: string; title: string }) {
  * The selected access network and serving nodes, shared by all activity views.
  * showLocation={false} leaves out the Local/Remote badge for a view that shows
  * the location next to the client address instead.
+ * showNetwork={false} leaves out the access-network provider badge when the
+ * record does not carry a network provider (such as playback history).
  */
 export function PlaybackRouteBadges({
   session,
   showLocation = true,
+  showNetwork = true,
 }: {
   session: AdminSession;
   showLocation?: boolean;
+  showNetwork?: boolean;
 }) {
   const t = useT();
   const provider = session.routing_network_provider;
@@ -74,22 +78,24 @@ export function PlaybackRouteBadges({
             : t("web.player.routeBadge.remote")}
         </span>
       )}
-      {provider ? (
-        <OverlayNetworkBadge provider={provider} />
-      ) : (
-        <NetworkBadge
-          name={
-            provider === ""
-              ? t("web.player.routeBadge.defaultNetwork")
-              : t("web.player.routeBadge.unknownNetwork")
-          }
-          title={
-            provider === ""
-              ? t("web.player.routeBadge.defaultNetworkTitle")
-              : t("web.player.routeBadge.unknownNetworkTitle")
-          }
-        />
-      )}
+      {showNetwork ? (
+        provider ? (
+          <OverlayNetworkBadge provider={provider} />
+        ) : (
+          <NetworkBadge
+            name={
+              provider === ""
+                ? t("web.player.routeBadge.defaultNetwork")
+                : t("web.player.routeBadge.unknownNetwork")
+            }
+            title={
+              provider === ""
+                ? t("web.player.routeBadge.defaultNetworkTitle")
+                : t("web.player.routeBadge.unknownNetworkTitle")
+            }
+          />
+        )
+      ) : null}
       {getSessionRouteNodes(session).map((node) => {
         const serves = session.routing_egress === "api" ? "yes" : "no";
         const title =

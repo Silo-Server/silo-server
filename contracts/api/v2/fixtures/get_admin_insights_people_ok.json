@@ -6,6 +6,7 @@
   "active_accounts": 1,
   "active_profiles": 2,
   "live_accounts": 1,
+  "total_watch_seconds": 50400,
   "coverage": {
     "oldest_history_at": "2025-12-04T03:04:05.678Z",
     "oldest_measured_at": "2025-12-04T03:04:05.678Z",

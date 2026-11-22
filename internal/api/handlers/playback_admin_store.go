@@ -365,7 +365,8 @@ func (s *PGPlaybackAdminStore) LiveSessionWithOrigin(ctx context.Context, sessio
 			COALESCE(routing_execution, ''), COALESCE(routing_execution_node_id, 0),
 			COALESCE(routing_egress, ''), COALESCE(routing_egress_node_id, 0),
 			COALESCE(position_seconds, 0), COALESCE(compat_origin, FALSE),
-			COALESCE(timeline_duration_seconds, 0), adaptation_reasons, subtitle
+			COALESCE(timeline_duration_seconds, 0), adaptation_reasons, subtitle,
+			COALESCE(plan_id, '')
 		FROM (
 			SELECT 0 AS source, live.* FROM playback_sessions_sync live WHERE live.session_id = $1
 			UNION ALL
@@ -391,6 +392,7 @@ func (s *PGPlaybackAdminStore) LiveSessionWithOrigin(ctx context.Context, sessio
 		&live.RoutingEgress, &live.RoutingEgressNodeID,
 		&live.Position, &live.IsJellyfinCompat,
 		&live.TimelineDuration, &live.AdaptationReasons, &live.Subtitle,
+		&live.PlanID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, playback.ErrSessionNotFound

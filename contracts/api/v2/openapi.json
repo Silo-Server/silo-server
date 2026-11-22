@@ -12599,10 +12599,6 @@
       "AdminInsightsCapabilities": {
         "additionalProperties": false,
         "properties": {
-          "activity": {
-            "description": "Activity tab (play volume, watch time, heatmap, peak concurrent streams)",
-            "type": "boolean"
-          },
           "allowed": {
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
@@ -12610,28 +12606,8 @@
           "available": {
             "type": "boolean"
           },
-          "bandwidth": {
-            "description": "Bandwidth tab (daily archive + live egress volume and peak throughput)",
-            "type": "boolean"
-          },
-          "devices": {
-            "description": "Devices \u0026 Quality tab (client x codec direct-play matrix, adaptation reasons, HW accel, subtitle burn-in, HDR tone-mapping)",
-            "type": "boolean"
-          },
-          "library": {
-            "description": "Reserved capability flag for Library Insights tab",
-            "type": "boolean"
-          },
-          "map": {
-            "description": "Reserved capability flag for GeoIP Map tab",
-            "type": "boolean"
-          },
           "node_egress_daily": {
             "description": "Long-term per-node daily egress archive survives past the 31-day minute-sample window",
-            "type": "boolean"
-          },
-          "people": {
-            "description": "People tab (account and household profile leaderboard)",
             "type": "boolean"
           },
           "revision": {
@@ -12651,13 +12627,7 @@
         },
         "required": [
           "available",
-          "activity",
-          "people",
-          "devices",
-          "bandwidth",
           "node_egress_daily",
-          "library",
-          "map",
           "revision",
           "state",
           "allowed"
@@ -12879,12 +12849,6 @@
             },
             "type": "array"
           },
-          "top_transcoding_accounts": {
-            "items": {
-              "$ref": "#/components/schemas/AdminInsightsTopTranscodingAccount"
-            },
-            "type": "array"
-          },
           "tz": {
             "type": "string"
           }
@@ -12900,8 +12864,7 @@
           "adaptation_reasons",
           "hw_accel_breakdown",
           "tone_map_breakdown",
-          "subtitle_burn_in_codecs",
-          "top_transcoding_accounts"
+          "subtitle_burn_in_codecs"
         ],
         "type": "object"
       },
@@ -13180,6 +13143,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "total_watch_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
           "tz": {
             "type": "string"
           }
@@ -13192,6 +13159,7 @@
           "active_accounts",
           "active_profiles",
           "live_accounts",
+          "total_watch_seconds",
           "coverage",
           "accounts"
         ],
@@ -13384,49 +13352,6 @@
           "completed_plays",
           "completion_rate",
           "last_seen_at"
-        ],
-        "type": "object"
-      },
-      "AdminInsightsTopTranscodingAccount": {
-        "additionalProperties": false,
-        "properties": {
-          "top_reason": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "total_plays": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "transcode_plays": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "transcode_rate": {
-            "format": "double",
-            "type": "number"
-          },
-          "user_id": {
-            "description": "Opaque identifier",
-            "examples": [
-              "1"
-            ],
-            "minLength": 1,
-            "type": "string"
-          },
-          "username": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_id",
-          "username",
-          "transcode_plays",
-          "total_plays",
-          "transcode_rate",
-          "top_reason"
         ],
         "type": "object"
       },

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, RotateCcw } from "lucide-react";
+import { Activity, History, RefreshCw, RotateCcw } from "lucide-react";
 
 import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -76,7 +76,7 @@ export default function AdminInsights() {
   const handleTabChange = useCallback(
     (value: string) => {
       updateParams((next) => {
-        if (value === "activity") {
+        if (value === "playback") {
           next.delete("tab");
         } else {
           next.set("tab", value);
@@ -109,7 +109,7 @@ export default function AdminInsights() {
 
   const handleReset = useCallback(() => {
     const next = new URLSearchParams();
-    if (filters.tab !== "activity") {
+    if (filters.tab !== "playback") {
       next.set("tab", filters.tab);
     }
     setSearchParams(next, { replace: true });
@@ -149,6 +149,9 @@ export default function AdminInsights() {
     filters.userId !== undefined;
 
   const activeTab: InsightsTab = filters.tab;
+  const showLibraryFilter = activeTab !== "bandwidth";
+  const showAccountFilter = activeTab === "playback" || activeTab === "devices";
+  const showTimezoneFilter = activeTab !== "bandwidth";
 
   return (
     <div className="space-y-6 pb-4 sm:pb-6">
@@ -157,6 +160,18 @@ export default function AdminInsights() {
         subtitle={t("web.admin.insights.subtitle")}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <Button variant="ghost" size="sm" asChild>
+              <Link to="/admin/activity">
+                <Activity className="h-3.5 w-3.5" />
+                {t("web.admin.insights.action.liveActivity")}
+              </Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <Link to="/admin/history">
+                <History className="h-3.5 w-3.5" />
+                {t("web.admin.insights.openHistory")}
+              </Link>
+            </Button>
             {hasNonDefaultFilters ? (
               <Button variant="ghost" size="sm" onClick={handleReset}>
                 <RotateCcw className="h-3.5 w-3.5" />
@@ -185,7 +200,7 @@ export default function AdminInsights() {
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-5">
         <div className="border-border/70 border-b">
           <TabsList variant="line" className="h-auto gap-2 pb-1">
-            <TabsTrigger value="activity">{t("web.admin.insights.tabs.activity")}</TabsTrigger>
+            <TabsTrigger value="playback">{t("web.admin.insights.tabs.activity")}</TabsTrigger>
             <TabsTrigger value="people">{t("web.admin.insights.tabs.people")}</TabsTrigger>
             <TabsTrigger value="devices">{t("web.admin.insights.tabs.devices")}</TabsTrigger>
             <TabsTrigger value="bandwidth">{t("web.admin.insights.tabs.bandwidth")}</TabsTrigger>
@@ -257,96 +272,104 @@ export default function AdminInsights() {
             </div>
           ) : null}
 
-          <div className="ms-auto flex flex-wrap items-center gap-2">
-            <Select
-              value={filters.libraryId ? String(filters.libraryId) : ALL_VALUE}
-              onValueChange={(value) => {
-                updateParams((next) => {
-                  if (value === ALL_VALUE) {
-                    next.delete("library_id");
-                  } else {
-                    next.set("library_id", value);
-                  }
-                });
-              }}
-            >
-              <SelectTrigger className="h-8 w-[165px] text-xs">
-                <SelectValue placeholder={t("web.admin.insights.filter.allLibraries")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_VALUE}>
-                  {t("web.admin.insights.filter.allLibraries")}
-                </SelectItem>
-                {libraries.map((lib) => (
-                  <SelectItem key={lib.id} value={String(lib.id)}>
-                    {lib.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {showLibraryFilter || showAccountFilter || showTimezoneFilter ? (
+            <div className="ms-auto flex flex-wrap items-center gap-2">
+              {showLibraryFilter ? (
+                <Select
+                  value={filters.libraryId ? String(filters.libraryId) : ALL_VALUE}
+                  onValueChange={(value) => {
+                    updateParams((next) => {
+                      if (value === ALL_VALUE) {
+                        next.delete("library_id");
+                      } else {
+                        next.set("library_id", value);
+                      }
+                    });
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-[165px] text-xs">
+                    <SelectValue placeholder={t("web.admin.insights.filter.allLibraries")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_VALUE}>
+                      {t("web.admin.insights.filter.allLibraries")}
+                    </SelectItem>
+                    {libraries.map((lib) => (
+                      <SelectItem key={lib.id} value={String(lib.id)}>
+                        {lib.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
 
-            <Select
-              value={filters.userId ? String(filters.userId) : ALL_VALUE}
-              onValueChange={(value) => {
-                updateParams((next) => {
-                  if (value === ALL_VALUE) {
-                    next.delete("user_id");
-                  } else {
-                    next.set("user_id", value);
-                  }
-                });
-              }}
-            >
-              <SelectTrigger className="h-8 w-[165px] text-xs">
-                <SelectValue placeholder={t("web.admin.insights.filter.allAccounts")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_VALUE}>
-                  {t("web.admin.insights.filter.allAccounts")}
-                </SelectItem>
-                {users.map((u) => (
-                  <SelectItem key={u.id} value={String(u.id)}>
-                    {u.username}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              {showAccountFilter ? (
+                <Select
+                  value={filters.userId ? String(filters.userId) : ALL_VALUE}
+                  onValueChange={(value) => {
+                    updateParams((next) => {
+                      if (value === ALL_VALUE) {
+                        next.delete("user_id");
+                      } else {
+                        next.set("user_id", value);
+                      }
+                    });
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-[165px] text-xs">
+                    <SelectValue placeholder={t("web.admin.insights.filter.allAccounts")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_VALUE}>
+                      {t("web.admin.insights.filter.allAccounts")}
+                    </SelectItem>
+                    {users.map((u) => (
+                      <SelectItem key={u.id} value={String(u.id)}>
+                        {u.username}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
 
-            <Select
-              value={filters.tz}
-              onValueChange={(value) => {
-                updateParams((next) => {
-                  if (value === browserTz) {
-                    next.delete("tz");
-                  } else {
-                    next.set("tz", value);
-                  }
-                });
-              }}
-            >
-              <SelectTrigger
-                aria-label={t("web.admin.insights.filter.timezone")}
-                className="h-8 w-[185px] text-xs"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {timezoneOptions.map((tzOpt) => (
-                  <SelectItem key={tzOpt} value={tzOpt}>
-                    {tzOpt === "UTC"
-                      ? t("web.admin.insights.filter.timezoneUtc")
-                      : tzOpt === browserTz
-                        ? t("web.admin.insights.filter.timezoneBrowser", { tz: tzOpt })
-                        : tzOpt}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+              {showTimezoneFilter ? (
+                <Select
+                  value={filters.tz}
+                  onValueChange={(value) => {
+                    updateParams((next) => {
+                      if (value === browserTz) {
+                        next.delete("tz");
+                      } else {
+                        next.set("tz", value);
+                      }
+                    });
+                  }}
+                >
+                  <SelectTrigger
+                    aria-label={t("web.admin.insights.filter.timezone")}
+                    className="h-8 w-[185px] text-xs"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {timezoneOptions.map((tzOpt) => (
+                      <SelectItem key={tzOpt} value={tzOpt}>
+                        {tzOpt === "UTC"
+                          ? t("web.admin.insights.filter.timezoneUtc")
+                          : tzOpt === browserTz
+                            ? t("web.admin.insights.filter.timezoneBrowser", { tz: tzOpt })
+                            : tzOpt}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
-        <TabsContent value="activity" className="mt-0 space-y-5">
-          {activeTab === "activity" ? <ActivityTab filters={filters} /> : null}
+        <TabsContent value="playback" className="mt-0 space-y-5">
+          {activeTab === "playback" ? <ActivityTab filters={filters} /> : null}
         </TabsContent>
         <TabsContent value="people" className="mt-0 space-y-5">
           {activeTab === "people" ? <PeopleTab filters={filters} /> : null}

@@ -206,6 +206,9 @@ describe("SessionDetailSheet", () => {
     );
 
     expect(screen.getByText(/limit\s+.*8\.0\s+Mbps/)).toBeTruthy();
+    // Recorded routes render Silo's native PlaybackRouteBadges without a spurious Unknown network badge.
+    expect(screen.getByText("edge-eu-1")).toBeTruthy();
+    expect(screen.queryByText(/Unknown/)).toBeNull();
 
     rerender(
       <MemoryRouter>

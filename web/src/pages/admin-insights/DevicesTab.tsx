@@ -3,7 +3,7 @@ import { Link } from "react-router";
 
 import { BarList, type BarListItem } from "@/components/admin/dashboard/charts";
 import { WidgetViewToggle } from "@/components/admin/dashboard/WidgetViewToggle";
-import { Badge } from "@/components/ui/badge";
+import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -91,27 +91,39 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
 
   const topTranscoderItems = useMemo<BarListItem[]>(() => {
     if (!data) return [];
-    return data.top_transcoding_accounts.map((acc) => {
-      const topReason = acc.top_reason ? getAdaptationReasonByCode(acc.top_reason)?.label : null;
-      const share = t("web.admin.insights.devices.topTranscoders.transcodeShare", {
-        transcodes: acc.transcode_plays.toLocaleString(formatLocale()),
-        total: acc.total_plays.toLocaleString(formatLocale()),
+    const unknownClient = t("web.admin.insights.devices.unknownClient");
+    return [...data.matrix]
+      .filter((row) => row.transcode_plays > 0)
+      .sort(
+        (a, b) =>
+          b.transcode_plays - a.transcode_plays ||
+          b.total_plays - a.total_plays ||
+          a.client_name.localeCompare(b.client_name),
+      )
+      .slice(0, 10)
+      .map((row) => {
+        const clientLabel = row.client_name || unknownClient;
+        const label = row.device_platform ? `${clientLabel} · ${row.device_platform}` : clientLabel;
+        return {
+          id: `${row.client_name}:${row.device_platform}`,
+          label,
+          value: row.transcode_plays,
+          secondary: t("web.admin.insights.devices.topTranscoders.transcodeShare", {
+            transcodes: row.transcode_plays.toLocaleString(formatLocale()),
+            total: row.total_plays.toLocaleString(formatLocale()),
+          }),
+          to: buildHistoryDrilldownHref({
+            clientName: row.client_name || "unknown",
+            devicePlatform: row.device_platform || "unknown",
+            playMethod: "transcode",
+            libraryId: filters.libraryId,
+            userId: filters.userId,
+            startedAfter: data.from,
+            startedBefore: data.to,
+          }),
+        };
       });
-      return {
-        id: acc.user_id,
-        label: acc.username,
-        value: acc.transcode_plays,
-        secondary: topReason ? `${share} · ${topReason}` : share,
-        to: buildHistoryDrilldownHref({
-          userId: acc.user_id,
-          playMethod: "transcode",
-          libraryId: filters.libraryId,
-          startedAfter: data.from,
-          startedBefore: data.to,
-        }),
-      };
-    });
-  }, [data, filters.libraryId, t]);
+  }, [data, filters.libraryId, filters.userId, t]);
 
   const hwAccelItems = useMemo<BarListItem[]>(() => {
     if (!data) return [];
@@ -297,15 +309,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
                           <div className="space-y-0.5">
                             <div className="flex items-center gap-1.5 font-medium">
                               <span>{clientLabel}</span>
-                              {row.is_jellyfin_client ? (
-                                <Badge
-                                  variant="secondary"
-                                  title={t("web.admin.history.detail.jellyfinBadgeTitle")}
-                                  className="px-1 py-0 text-[10px] font-bold"
-                                >
-                                  {t("web.admin.history.detail.jellyfinBadge")}
-                                </Badge>
-                              ) : null}
+                              <JellyfinSessionPill session={row} />
                             </div>
                             <div className="text-muted-foreground text-[11px]">
                               {row.device_platform}

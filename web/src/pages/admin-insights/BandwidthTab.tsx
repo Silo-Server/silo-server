@@ -45,6 +45,7 @@ import { InsightKpiCard, InsightNoticeBanner, InsightSectionError } from "./insi
 
 type BandwidthMetric = "volume" | "peak";
 type BandwidthScope = "total" | "nodes";
+const EM_DASH = "—";
 
 export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
   const t = useT();
@@ -189,7 +190,6 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
   }
 
   const { summary } = data;
-  const hasScopeFilter = filters.libraryId !== undefined || filters.userId !== undefined;
   const showMetricsStartBanner =
     Boolean(data.oldest_metric_at) &&
     Date.parse(data.from) < Date.parse(data.oldest_metric_at ?? "");
@@ -197,9 +197,6 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
 
   return (
     <div className="space-y-5">
-      {hasScopeFilter ? (
-        <InsightNoticeBanner message={t("web.admin.insights.bandwidth.scopeNotice")} />
-      ) : null}
       {showMetricsStartBanner ? (
         <InsightNoticeBanner
           message={t("web.admin.insights.coverage.metricsStart", {
@@ -212,10 +209,17 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
         <InsightKpiCard
           label={t("web.admin.insights.bandwidth.kpi.totalEgress")}
           value={formatDataTotal(summary.total_egress_bytes)}
-          subtext={t("web.admin.insights.bandwidth.kpi.egressSplit", {
-            playback: formatDataTotal(summary.playback_egress_bytes),
-            downloads: formatDataTotal(summary.download_egress_bytes),
-          })}
+          subtext={
+            data.has_remote_nodes
+              ? t("web.admin.insights.bandwidth.kpi.nodeSplit", {
+                  api: formatDataTotal(summary.api_egress_bytes),
+                  nodes: formatDataTotal(summary.node_egress_bytes),
+                })
+              : t("web.admin.insights.bandwidth.kpi.egressSplit", {
+                  playback: formatDataTotal(summary.playback_egress_bytes),
+                  downloads: formatDataTotal(summary.download_egress_bytes),
+                })
+          }
         />
         <InsightKpiCard
           label={t("web.admin.insights.bandwidth.kpi.peakEgress")}
@@ -225,7 +229,7 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
               ? t("web.admin.insights.bandwidth.kpi.peakEgressAt", {
                   date: formatShortTimestamp(summary.peak_egress_at),
                 })
-              : "—"
+              : EM_DASH
           }
           accent="info"
         />
@@ -243,7 +247,7 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
               ? t("web.admin.insights.percent", {
                   value: formatRatePercentNumber(summary.remote_plays / knownLocationPlays),
                 })
-              : "—"
+              : EM_DASH
           }
           subtext={
             knownLocationPlays > 0
@@ -258,10 +262,15 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
 
       {/* Egress over time */}
       <Card className="surface-panel rounded-2xl border-0">
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-          <CardTitle className="text-sm font-bold">
-            {t("web.admin.insights.bandwidth.chart.title")}
-          </CardTitle>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 space-y-0">
+          <div className="space-y-0.5">
+            <CardTitle className="text-sm font-bold">
+              {t("web.admin.insights.bandwidth.chart.title")}
+            </CardTitle>
+            <p className="text-muted-foreground text-xs">
+              {t("web.admin.insights.bandwidth.chart.subtitle")}
+            </p>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <WidgetViewToggle
               value={metric}
@@ -373,8 +382,12 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
                             <div className="flex items-center gap-2">
                               <span>{displayName}</span>
                               {src.node_type ? (
-                                <Badge variant="outline" className="text-[10px] uppercase">
-                                  {src.node_type}
+                                <Badge variant="outline" className="text-[10px]">
+                                  {src.node_type === "proxy"
+                                    ? t("web.admin.activity.route.proxy")
+                                    : src.node_type === "transcode"
+                                      ? t("web.admin.activity.route.transcode")
+                                      : src.node_type}
                                 </Badge>
                               ) : null}
                             </div>

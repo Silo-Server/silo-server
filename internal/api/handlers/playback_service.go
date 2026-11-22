@@ -10,7 +10,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -650,6 +649,15 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 	// No copy here to finalize: the copy on another replica, if any, finds
 	// the attempt stopped and is dropped without history, so the admin log
 	// is written from the attempt row and the live row that copy synced.
+	// Re-read the attempt after StopAttempt sealed it: another replica may have
+	// committed a replan between ownedAttemptV2 and StopAttempt, and stop
+	// finalization must record the final committed plan rather than the earlier
+	// snapshot.
+	if h.PlanStoreV3 != nil {
+		if latest, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && latest != nil {
+			record = latest
+		}
+	}
 	if accepted == nil {
 		position = playback.PositionUnknown
 	}
@@ -734,84 +742,92 @@ func applyAttemptPlanFacts(session *playback.Session, record *playback.AttemptRe
 	if recipe.PlanID != record.CurrentPlanID || recipe.PlayMethod == "" {
 		return
 	}
-	wantProtocol, wantContainer := plannedOutputFormatV3(record.CurrentPlan, recipe)
-	methodChanged := session.PlayMethod != "" && session.PlayMethod != recipe.PlayMethod
-	deliveryChanged := (wantProtocol != "" && session.OutputProtocol != "" && session.OutputProtocol != wantProtocol) ||
-		(wantContainer != "" && session.OutputContainer != "" && session.OutputContainer != wantContainer)
-	staleStartSnapshot := !fromLiveRow && record.CurrentReplanRequestID != ""
-	if methodChanged || deliveryChanged || staleStartSnapshot {
-		session.TranscodeHWAccel = ""
-		session.OutputContainer = ""
-		session.OutputProtocol = ""
-		session.RoutingExecution = ""
-		session.RoutingExecutionNodeID = 0
-		session.RoutingEgress = ""
-		session.RoutingEgressNodeID = 0
+	out := playback.ResolvePlannedOutputV3(
+		record.CurrentPlan,
+		recipe.PlayMethod,
+		recipe.SourceVideoCodec,
+		recipe.TargetVideoCodec,
+		"",
+	)
+	if detachedSessionRouteStale(session, record, recipe, out, fromLiveRow) {
+		clearDetachedRouteExecutor(session)
 	}
+	session.PlanID = record.CurrentPlanID
 	session.PlayMethod = recipe.PlayMethod
 	session.TranscodeAudio = recipe.TranscodeAudio
 	if recipe.PlayMethod == playback.PlayDirect {
-		session.TargetVideoCodec = ""
-		session.TargetResolution = ""
-		session.TargetAudioCodec = ""
-		session.TargetAudioChannels = 0
-		session.TargetBitrateKbps = 0
-		session.TranscodeHWAccel = ""
-		session.ToneMapMode = ""
-		session.AdaptationReasons = nil
-		session.OutputProtocol = playback.OutputProtocolHTTP
+		clearDirectPlayTargets(session)
 		return
 	}
-	targetVideoCodec := recipe.TargetVideoCodec
-	if record.CurrentPlan.Delivery == playback.DeliveryRemuxHLSV3 ||
-		record.CurrentPlan.Delivery == playback.DeliveryRemuxProgressiveV3 ||
-		recipe.PlayMethod == playback.PlayRemux {
-		targetVideoCodec = videoCodecCopy
-	}
-	session.TargetVideoCodec = targetVideoCodec
+	session.TargetVideoCodec = out.TargetVideoCodec
 	session.TargetResolution = recipe.TargetResolution
 	session.TargetAudioCodec = recipe.TargetAudioCodec
 	session.TargetAudioChannels = recipe.TargetAudioChannels
 	session.TargetBitrateKbps = recipe.TargetBitrateKbps
-	if strings.EqualFold(targetVideoCodec, videoCodecCopy) {
+	if out.ClearsVideoTarget {
 		session.TargetResolution = ""
 		session.TargetBitrateKbps = 0
 	}
 	session.ToneMapMode = recipe.ToneMapMode
 	session.AdaptationReasons = playback.NormalizeAdaptationReasons(recipe.AdaptationReasons)
-	if wantProtocol != "" {
-		session.OutputProtocol = wantProtocol
+	if out.OutputProtocol != "" {
+		session.OutputProtocol = out.OutputProtocol
 	}
-	if wantContainer != "" {
-		session.OutputContainer = wantContainer
+	if out.OutputContainer != "" {
+		session.OutputContainer = out.OutputContainer
 	}
 }
 
-const videoCodecCopy = "copy"
-
-func plannedOutputFormatV3(plan playback.PlanV3, recipe playback.ExecutableRecipeV3) (protocol, container string) {
-	switch plan.Delivery {
-	case playback.DeliveryRemuxHLSV3, playback.DeliveryTranscodeHLSV3:
-		if seg := strings.ToLower(strings.TrimSpace(plan.EffectiveRecipe.SegmentContainer)); seg != "" {
-			return playback.OutputProtocolHLS, seg
-		}
-		videoCodec := recipe.TargetVideoCodec
-		if plan.Delivery == playback.DeliveryRemuxHLSV3 {
-			videoCodec = videoCodecCopy
-		}
-		container = playback.HLSOutputContainer(playback.TranscodeOpts{
-			TargetCodecVideo: videoCodec,
-			SourceVideoCodec: recipe.SourceVideoCodec,
-			CopyVideoMPEGTS:  playback.PlanCopiesVideoAsMPEGTSV3(plan),
-		})
-		return playback.OutputProtocolHLS, container
-	case playback.DeliveryRemuxProgressiveV3:
-		return playback.OutputProtocolHTTP, playback.OutputContainerFMP4
-	case playback.DeliveryOriginalHTTPV3:
-		return playback.OutputProtocolHTTP, ""
-	default:
-		return "", ""
+// detachedSessionRouteStale reports whether runtime executor/routing fields on
+// a detached session may belong to a plan older than record.CurrentPlanID.
+func detachedSessionRouteStale(
+	session *playback.Session,
+	record *playback.AttemptRecordV3,
+	recipe playback.ExecutableRecipeV3,
+	out playback.PlannedOutputV3,
+	fromLiveRow bool,
+) bool {
+	if session.PlayMethod != "" && session.PlayMethod != recipe.PlayMethod {
+		return true
 	}
+	if out.OutputProtocol != "" && session.OutputProtocol != "" && session.OutputProtocol != out.OutputProtocol {
+		return true
+	}
+	if out.OutputContainer != "" && session.OutputContainer != "" && session.OutputContainer != out.OutputContainer {
+		return true
+	}
+	if !fromLiveRow {
+		return record.CurrentReplanRequestID != ""
+	}
+	if record.CurrentPlanID == "" {
+		return false
+	}
+	if session.PlanID != "" {
+		return session.PlanID != record.CurrentPlanID
+	}
+	return record.CurrentReplanRequestID != ""
+}
+
+func clearDetachedRouteExecutor(session *playback.Session) {
+	session.TranscodeHWAccel = ""
+	session.OutputContainer = ""
+	session.OutputProtocol = ""
+	session.RoutingExecution = ""
+	session.RoutingExecutionNodeID = 0
+	session.RoutingEgress = ""
+	session.RoutingEgressNodeID = 0
+}
+
+func clearDirectPlayTargets(session *playback.Session) {
+	session.TargetVideoCodec = ""
+	session.TargetResolution = ""
+	session.TargetAudioCodec = ""
+	session.TargetAudioChannels = 0
+	session.TargetBitrateKbps = 0
+	session.TranscodeHWAccel = ""
+	session.ToneMapMode = ""
+	session.AdaptationReasons = nil
+	session.OutputProtocol = playback.OutputProtocolHTTP
 }
 
 // ownedAttemptV2 loads the live attempt row for sessionID and checks it

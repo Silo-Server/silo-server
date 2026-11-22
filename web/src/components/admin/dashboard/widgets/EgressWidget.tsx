@@ -19,6 +19,7 @@ import { buildEgressBands } from "./egressBands";
 import { TimeseriesChartBody } from "./timeseriesChart";
 import { buildTimeseriesPoints } from "./timeseriesSeries";
 import { useAppLanguage, useT } from "@/i18n";
+import { widgetRangeToInsightsRange } from "@/pages/admin-insights/insightsHelpers";
 
 /**
  * Egress the deployment served over the chosen window, in Mbps.
@@ -105,7 +106,7 @@ export function EgressWidget() {
           />
         ) : null}
         <Link
-          to="/admin/insights?tab=bandwidth"
+          to={`/admin/insights?tab=bandwidth&range=${widgetRangeToInsightsRange(range)}`}
           className="text-muted-foreground hover:text-primary hidden text-[11px] whitespace-nowrap transition-colors @lg/card-header:inline"
         >
           {t("web.admin.dashboard.widgets.openInsights")}

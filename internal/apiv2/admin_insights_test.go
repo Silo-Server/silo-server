@@ -70,7 +70,7 @@ func (f *fakeAdminInsights) ReadAdminInsightsPeople(_ context.Context, q handler
 	topClient := "Silo Apple"
 	return &handlers.AdminInsightsPeople{
 		From: fixedTime().AddDate(0, 0, -29), To: fixedTime(), TZ: q.TZ,
-		TotalAccounts: 1, ActiveAccounts: 1, ActiveProfiles: 2, LiveAccounts: 1,
+		TotalAccounts: 1, ActiveAccounts: 1, ActiveProfiles: 2, LiveAccounts: 1, TotalWatchSeconds: 50400,
 		Coverage: f.coverage(),
 		Accounts: []handlers.AdminInsightsPersonAccount{{
 			UserID: 7, Username: "alex", Role: "admin", IsLive: true,
@@ -92,7 +92,6 @@ func (f *fakeAdminInsights) ReadAdminInsightsDevices(_ context.Context, q handle
 	if f.err != nil {
 		return nil, f.err
 	}
-	topReason := "subtitle_burn_in"
 	return &handlers.AdminInsightsDevices{
 		From: fixedTime().AddDate(0, 0, -29), To: fixedTime(), TZ: q.TZ,
 		Coverage: f.coverage(),
@@ -113,9 +112,6 @@ func (f *fakeAdminInsights) ReadAdminInsightsDevices(_ context.Context, q handle
 		HWAccelBreakdown:     []handlers.AdminInsightsLabeledCount{{Key: "vaapi", Plays: 4}, {Key: "software", Plays: 1}},
 		ToneMapBreakdown:     []handlers.AdminInsightsLabeledCount{{Key: "hardware", Plays: 2}},
 		SubtitleBurnInCodecs: []handlers.AdminInsightsLabeledCount{{Key: "hdmv_pgs_subtitle", Plays: 2}},
-		TopTranscodingAccount: []handlers.AdminInsightsTopTranscodingAccount{{
-			UserID: 7, Username: "alex", TranscodePlays: 3, TotalPlays: 24, TranscodeRate: 0.125, TopReason: &topReason,
-		}},
 	}, nil
 }
 
@@ -139,6 +135,7 @@ func (f *fakeAdminInsights) ReadAdminInsightsBandwidth(_ context.Context, q hand
 		Sources: []handlers.AdminInsightsEgressSource{
 			{Key: "api", Kind: "api", Name: "API server", EgressBytes: 300_000_000_000, PeakEgressKbps: 65_000, ShareOfTotal: 0.3333},
 			{Key: "node:1", Kind: "node", NodeID: 1, Name: "edge-eu-1", NodeType: &nodeType, EgressBytes: 600_000_000_000, PeakEgressKbps: 90_000, ShareOfTotal: 0.6667},
+			{Key: "node:-1", Kind: "node", NodeID: -1, Name: "archived-edge", NodeType: &nodeType, EgressBytes: 0, PeakEgressKbps: 0, ShareOfTotal: 0},
 		},
 		Points: []handlers.AdminInsightsBandwidthPoint{{
 			Date: fixedTime().AddDate(0, 0, -1).Format("2006-01-02"), EgressBytes: 30_000_000_000,
@@ -204,13 +201,23 @@ func TestAdminInsightsValidationAndMonitorScope(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/admin/insights/activity?tz=Invalid/Zone", "", bearer("sa_admin")), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/admin/playback-history/missing", "", bearer("sa_admin")), TypeNotFound)
 
-	// Capabilities explicitly leave Library and Map slots false for sibling features.
+	// Capabilities expose availability and the daily node-egress archive flag.
 	rec := do(t, h, http.MethodGet, Prefix+"/admin/insights/capabilities", "", bearer("sa_admin"))
 	var caps AdminInsightsCapabilities
 	if err := json.Unmarshal(rec.Body.Bytes(), &caps); err != nil {
 		t.Fatal(err)
 	}
-	if !caps.Available || !caps.Activity || !caps.People || !caps.Devices || !caps.Bandwidth || !caps.NodeEgressDaily || caps.Library || caps.Map {
+	if !caps.Available || !caps.NodeEgressDaily {
 		t.Fatalf("unexpected capabilities: %+v", caps)
+	}
+
+	// Synthetic negative node IDs from restored backups must omit node_id on the wire.
+	bwRec := do(t, h, http.MethodGet, Prefix+"/admin/insights/bandwidth?range=30d&tz=UTC", "", bearer("sa_admin"))
+	var bw AdminInsightsBandwidth
+	if err := json.Unmarshal(bwRec.Body.Bytes(), &bw); err != nil {
+		t.Fatal(err)
+	}
+	if len(bw.Sources) != 3 || bw.Sources[1].NodeID == nil || *bw.Sources[1].NodeID != "1" || bw.Sources[2].NodeID != nil {
+		t.Fatalf("unexpected bandwidth source node_id wire encoding: %+v", bw.Sources)
 	}
 }

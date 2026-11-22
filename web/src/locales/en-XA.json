@@ -47948,18 +47948,6 @@
       "value": "⟦Ŵåţçĥ ţîɱé~~~~⟧"
     }
   ],
-  "web.admin.history.detail.jellyfinBadge": [
-    {
-      "type": 0,
-      "value": "⟦ĴƑ~⟧"
-    }
-  ],
-  "web.admin.history.detail.jellyfinBadgeTitle": [
-    {
-      "type": 0,
-      "value": "⟦Ĵéļļýƒîñ çöɱþåţîƀîļîţý çļîéñţ~~~~~~~~~~~~⟧"
-    }
-  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -51158,6 +51146,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.liveActivity": [
+    {
+      "type": 0,
+      "value": "⟦Ļîṽé åçţîṽîţý~~~~~~⟧"
+    }
+  ],
   "web.admin.insights.activity.heatmap.cellTooltip": [
     {
       "type": 0,
@@ -51365,7 +51359,7 @@
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "⟦Đåîļý ĥîĝĥéšţ šîɱûļţåñéöûš šţŕéåɱš (šéŕṽéŕ-ŵîđé)~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Đåîļý ĥîĝĥéšţ šîɱûļţåñéöûš šţŕéåɱš (šéŕṽéŕ-ŵîđé, ÛŢÇ đåýš)~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -51464,6 +51458,12 @@
       "value": "⟦Đåîļý þéåķ éĝŕéšš ŕåţé~~~~~~~~~⟧"
     }
   ],
+  "web.admin.insights.bandwidth.chart.subtitle": [
+    {
+      "type": 0,
+      "value": "⟦Đåîļý éĝŕéšš ţöţåļš åñđ þéåķ ŕåţéš (šéŕṽéŕ-ŵîđé, ÛŢÇ đåýš)~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
@@ -51554,6 +51554,28 @@
     {
       "type": 0,
       "value": " đöŵñļöåđš~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.nodeSplit": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "api"
+    },
+    {
+      "type": 0,
+      "value": " ÅÞÎ šéŕṽéŕ · "
+    },
+    {
+      "type": 1,
+      "value": "nodes"
+    },
+    {
+      "type": 0,
+      "value": " šţŕéåɱ ñöđéš~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgress": [
@@ -51650,12 +51672,6 @@
     {
       "type": 0,
       "value": "⟦Éĝŕéšš ƀý ñöđé~~~~~~⟧"
-    }
-  ],
-  "web.admin.insights.bandwidth.scopeNotice": [
-    {
-      "type": 0,
-      "value": "⟦Ɓåñđŵîđţĥ ɱéţŕîçš åŕé šéŕṽéŕ-ŵîđé åñđ đö ñöţ çĥåñĝé ŵîţĥ åççöûñţ öŕ ļîƀŕåŕý ƒîļţéŕš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
@@ -51785,7 +51801,7 @@
     },
     {
       "type": 0,
-      "value": " ŕéɱûẋ · "
+      "value": " đîŕéçţ šţŕéåɱ · "
     },
     {
       "type": 1,
@@ -51793,7 +51809,7 @@
     },
     {
       "type": 0,
-      "value": " ţŕåñšçöđé~~~~~~~~~~~~⟧"
+      "value": " ţŕåñšçöđé~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.devices.kpi.directPlayRate": [
@@ -51999,7 +52015,7 @@
   "web.admin.insights.devices.topTranscoders.title": [
     {
       "type": 0,
-      "value": "⟦Ţöþ ţŕåñšçöđîñĝ åççöûñţš~~~~~~~~~~⟧"
+      "value": "⟦Çļîéñţš ţŕåñšçöđîñĝ ɱöšţ~~~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.devices.topTranscoders.transcodeShare": [
@@ -52204,10 +52220,10 @@
       "value": "⟦Åçţîṽé þŕöƒîļéš~~~~~~⟧"
     }
   ],
-  "web.admin.insights.people.kpi.liveNow": [
+  "web.admin.insights.people.kpi.totalWatchTime": [
     {
       "type": 0,
-      "value": "⟦Ļîṽé ñöŵ~~~~⟧"
+      "value": "⟦Ţöţåļ ŵåţçĥ ţîɱé~~~~~~~⟧"
     }
   ],
   "web.admin.insights.people.liveBadge": [
@@ -52260,12 +52276,6 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.insights.people.scopeNotice": [
-    {
-      "type": 0,
-      "value": "⟦Ţĥé ļéåđéŕƀöåŕđ ļîšţš éṽéŕý åççöûñţ; ţĥé åççöûñţ ƒîļţéŕ åþþļîéš öñ Åçţîṽîţý åñđ Đéṽîçéš & Ǫûåļîţý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.people.searchPlaceholder": [
@@ -52395,7 +52405,7 @@
   "web.admin.insights.tabs.activity": [
     {
       "type": 0,
-      "value": "⟦Åçţîṽîţý~~~~⟧"
+      "value": "⟦Þļåýƀåçķ~~~~⟧"
     }
   ],
   "web.admin.insights.tabs.bandwidth": [

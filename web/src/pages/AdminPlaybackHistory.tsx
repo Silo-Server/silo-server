@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Flame, History, RefreshCw, Search, X } from "lucide-react";
 
+import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -700,15 +701,7 @@ export default function AdminPlaybackHistory() {
                               <div className="space-y-0.5">
                                 <div className="flex items-center gap-1.5 text-xs font-medium">
                                   <span>{row.client_name ?? EM_DASH}</span>
-                                  {row.is_jellyfin_client ? (
-                                    <Badge
-                                      variant="secondary"
-                                      title={t("web.admin.history.detail.jellyfinBadgeTitle")}
-                                      className="px-1 py-0 text-[10px] font-bold"
-                                    >
-                                      {t("web.admin.history.detail.jellyfinBadge")}
-                                    </Badge>
-                                  ) : null}
+                                  <JellyfinSessionPill session={row} />
                                 </div>
                                 {row.device_platform ? (
                                   <div className="text-muted-foreground text-[11px]">

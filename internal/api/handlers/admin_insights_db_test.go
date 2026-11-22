@@ -225,6 +225,7 @@ func assertInsightsPeopleDB(t *testing.T, h *AdminHandler) {
 		t.Fatal(err)
 	}
 	if people.ActiveAccounts != 2 || people.ActiveProfiles != 3 || people.LiveAccounts != 1 ||
+		people.TotalWatchSeconds <= 0 ||
 		len(people.Accounts) != 2 || people.Accounts[0].Username != "alice" || !people.Accounts[0].IsLive || len(people.Accounts[0].Profiles) != 2 {
 		t.Fatalf("unexpected people: %+v", people)
 	}
@@ -240,7 +241,7 @@ func assertInsightsDevicesDB(t *testing.T, h *AdminHandler) {
 	}
 	if devs.Summary.TotalPlays != 3 || devs.Summary.HWTranscodePlays != 1 || devs.Summary.SubtitleBurnInPlays != 1 ||
 		devs.Summary.HDRToneMapHWPlays != 1 || len(devs.Matrix) != 2 || len(devs.AdaptationReasons) != 2 ||
-		len(devs.TopTranscodingAccount) != 1 || devs.TopTranscodingAccount[0].Username != "bob" {
+		len(devs.HWAccelBreakdown) == 0 || len(devs.ToneMapBreakdown) != 1 || len(devs.SubtitleBurnInCodecs) != 1 {
 		t.Fatalf("unexpected devices: %+v", devs)
 	}
 }
@@ -338,6 +339,56 @@ func assertInsightsEdgeCasesDB(t *testing.T, pool *pgxpool.Pool, h *AdminHandler
 
 	// 7. History search matches literal % and _ without treating them as wildcards.
 	assertHistoryLiteralLikeSearchDB(t, pool, h, userID)
+
+	// 8. People pagination serves pages from the same cached sorted snapshot.
+	assertPeopleCacheConsistentAcrossPagesDB(t, pool)
+}
+
+func assertPeopleCacheConsistentAcrossPagesDB(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := t.Context()
+	provider, err := NewAdminInsightsProvider(ctx, pool, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Close()
+
+	baseQ := AdminInsightsPeopleQuery{
+		AdminInsightsWindowQuery: AdminInsightsWindowQuery{Range: "7d", TZ: "UTC"},
+		Sort:                     "watch_time",
+		Dir:                      "desc",
+		Limit:                    1,
+	}
+	page1, err := provider.People(ctx, baseQ)
+	if err != nil || len(page1.Accounts) != 1 {
+		t.Fatalf("page 1 = %+v, %v", page1, err)
+	}
+
+	// Insert a huge new play for a third user between page 1 and page 2 without
+	// invalidating the provider. Page 2 must read from the cached snapshot so
+	// alice/bob never shift or duplicate across pages.
+	var daveID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ('dave', 'user') RETURNING id`).Scan(&daveID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO admin_playback_history
+			(session_id, user_id, profile_id, media_item_id, media_file_id, play_method, started_at, ended_at, watched_seconds, played_seconds, measured)
+		VALUES ($1, $2, 'p-dave', 'movie-1', 0, 'direct', $3, $4, 99999, 99999, TRUE)
+	`, "sess-dave-"+uuid.NewString(), daveID, now, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	page2Q := baseQ
+	page2Q.Offset = 1
+	page2, err := provider.People(ctx, page2Q)
+	if err != nil || len(page2.Accounts) != 1 {
+		t.Fatalf("page 2 = %+v, %v", page2, err)
+	}
+	if page2.Accounts[0].UserID == page1.Accounts[0].UserID || page2.Accounts[0].Username == "dave" || page2.TotalAccounts != page1.TotalAccounts {
+		t.Fatalf("page 2 drifted from cached snapshot: page1=%+v page2=%+v", page1.Accounts, page2.Accounts)
+	}
 }
 
 func assertPruneInvariantNonUTCCustomRangeDB(t *testing.T, pool *pgxpool.Pool, h *AdminHandler) {
@@ -595,5 +646,19 @@ func TestResolveInsightsWindowMidnightDST(t *testing.T) {
 	wantTo := time.Date(2026, 9, 7, 3, 0, 0, 0, time.UTC)
 	if !win.From.Equal(wantFrom) || !win.To.Equal(wantTo) {
 		t.Fatalf("Santiago DST start day = [%v, %v), want [%v, %v)", win.From, win.To, wantFrom, wantTo)
+	}
+}
+
+func TestMetricDaySpanPresetExactUTCDays(t *testing.T) {
+	// 2026-11-22 05:00Z is still 2026-11-21 21:00 in America/Los_Angeles.
+	// A 7d preset must still span exactly 7 UTC calendar days (2026-11-16..2026-11-22).
+	nowUTC := time.Date(2026, 11, 22, 5, 0, 0, 0, time.UTC)
+	win, err := resolveInsightsWindow(nowUTC, InsightsRange7d, "", "", "America/Los_Angeles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromDay, toDay, upperUTC := metricDaySpanForWindow(win, nowUTC)
+	if fromDay != "2026-11-16" || toDay != "2026-11-22" || !upperUTC.Equal(nowUTC) {
+		t.Fatalf("7d LA metricDaySpan = [%s, %s] upper=%v, want [2026-11-16, 2026-11-22]", fromDay, toDay, upperUTC)
 	}
 }

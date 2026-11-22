@@ -7,7 +7,11 @@ import { isJellyfinSession } from "@/pages/adminActivityPresentation";
  * surface (server-identified via is_jellyfin_client). Renders nothing for
  * native sessions, so callers can drop it into any badge row unconditionally.
  */
-export function JellyfinSessionPill({ session }: { session: AdminSession }) {
+export function JellyfinSessionPill({
+  session,
+}: {
+  session: Pick<AdminSession, "is_jellyfin_client">;
+}) {
   const t = useT();
   if (!isJellyfinSession(session)) {
     return null;
