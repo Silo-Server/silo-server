@@ -234,7 +234,10 @@ func (r *WebhookRepository) RecordFailure(ctx context.Context, tx pgx.Tx, webhoo
 		    last_failure_status = $2,
 		    last_failure_message = left($3, 256),
 		    consecutive_failures = consecutive_failures + 1,
-		    consecutive_rejections = consecutive_rejections + CASE WHEN $4 THEN 1 ELSE 0 END,
+		    -- Clamped to the failure streak as it stood, so a reset that
+		    -- cleared only consecutive_failures (a build from before this
+		    -- column, during an upgrade) can't leave old rejections counting.
+		    consecutive_rejections = LEAST(consecutive_rejections, consecutive_failures) + CASE WHEN $4 THEN 1 ELSE 0 END,
 		    updated_at = now()
 		WHERE id = $1
 		RETURNING consecutive_rejections`, webhookID, httpStatus, message, rejected).Scan(&rejections)

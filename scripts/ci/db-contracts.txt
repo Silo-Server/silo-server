@@ -599,6 +599,7 @@
 ./internal/notifications TestSeriesMutesList
 ./internal/notifications TestSeriesMutesUnmuteAndPurge
 ./internal/notifications TestWebhookRejectionsAutoDisableDB
+./internal/notifications TestWebhookRejectionsNeverOutrunFailuresDB
 ./internal/notifications TestWebhookFinishIsAtomicDB
 ./internal/notifications TestWebhookExhaustedScheduleDisablesOnceDB
 ./internal/notifications TestWebhookRetryAfterIsAMinimumDB

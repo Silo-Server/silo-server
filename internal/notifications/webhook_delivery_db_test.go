@@ -97,6 +97,13 @@ func (h *webhookDeliveryHarness) addWebhook(id string) {
 // the post-commit dispatcher does.
 func (h *webhookDeliveryHarness) claimNew(webhookID string) DeliveryAttempt {
 	h.t.Helper()
+	return h.claimNewAt(webhookID, 0)
+}
+
+// claimNewAt is claimNew for an attempt that has already been tried
+// tries times.
+func (h *webhookDeliveryHarness) claimNewAt(webhookID string, tries int) DeliveryAttempt {
+	h.t.Helper()
 	n := h.seq.Add(1)
 	deliveryID := fmt.Sprintf("%s-d%d", webhookID, n)
 	ctx := h.t.Context()
@@ -107,7 +114,7 @@ func (h *webhookDeliveryHarness) claimNew(webhookID string) DeliveryAttempt {
 	}
 	if _, err := h.pool.Exec(ctx, `
 		INSERT INTO webhook_delivery_attempts (id, notification_delivery_id, webhook_id, attempt_number, outcome)
-		VALUES ($1, $1, $2, 0, 'pending')`, deliveryID, webhookID); err != nil {
+		VALUES ($1, $1, $2, $3, 'pending')`, deliveryID, webhookID, tries); err != nil {
 		h.t.Fatal(err)
 	}
 	claimed, err := h.sender.webhooks.ClaimPendingForDelivery(ctx, deliveryID)
@@ -184,6 +191,28 @@ func TestWebhookRejectionsAutoDisableDB(t *testing.T) {
 	}
 }
 
+// A reset that cleared only the failure streak, as a build from before the
+// rejection streak writes it, also ends the rejection streak.
+func TestWebhookRejectionsNeverOutrunFailuresDB(t *testing.T) {
+	h := newWebhookDeliveryHarness(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return webhookResponse(http.StatusNotFound, nil), nil
+	}))
+	ctx := t.Context()
+	h.addWebhook("wh")
+	if _, err := h.pool.Exec(ctx, `UPDATE notification_webhooks SET consecutive_failures = 0, consecutive_rejections = 2 WHERE id = 'wh'`); err != nil {
+		t.Fatal(err)
+	}
+	h.sender.processAttempt(ctx, h.claimNew("wh"))
+	var rejections int
+	if err := h.pool.QueryRow(ctx, `SELECT consecutive_rejections FROM notification_webhooks WHERE id = 'wh'`).Scan(&rejections); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, failures := h.webhook("wh"); !enabled || failures != 1 || rejections != 1 {
+		t.Fatalf("after one rejection: enabled %v, consecutive_failures %d, consecutive_rejections %d; want enabled with a streak of one",
+			enabled, failures, rejections)
+	}
+}
+
 // The disable and its notice commit with the attempt's outcome and the
 // streaks: when the notice can't be written, none of it applies, and the
 // attempt runs again once its lease runs out.
@@ -241,12 +270,15 @@ func TestWebhookExhaustedScheduleDisablesOnceDB(t *testing.T) {
 	h.addWebhook("wh")
 	last := func() string {
 		t.Helper()
-		attempt := h.claimNew("wh")
-		attempt.AttemptNumber = webhookMaxAttempts - 1
+		attempt := h.claimNewAt("wh", webhookMaxAttempts-1)
 		h.sender.processAttempt(ctx, attempt)
 		var outcome string
-		if err := h.pool.QueryRow(ctx, `SELECT outcome FROM webhook_delivery_attempts WHERE id = $1`, attempt.ID).Scan(&outcome); err != nil {
+		var tries int
+		if err := h.pool.QueryRow(ctx, `SELECT outcome, attempt_number FROM webhook_delivery_attempts WHERE id = $1`, attempt.ID).Scan(&outcome, &tries); err != nil {
 			t.Fatal(err)
+		}
+		if tries != webhookMaxAttempts {
+			t.Fatalf("attempt_number = %d after the last scheduled try, want %d", tries, webhookMaxAttempts)
 		}
 		return outcome
 	}
