@@ -1908,6 +1908,7 @@ func main() {
 		fileRepo := scanner.NewFileRepository(deps.DB)
 		deps.FolderRepo = folderRepo
 		deps.FileRepo = fileRepo
+		deps.StreamEnds = playback.NewStreamEndRecorder(fileRepo)
 
 		ffprobePath := scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath)
 		s := scanner.NewScanner(fileRepo, ffprobePath, deps.Blobs.Assets, cfg.Scanner.Workers, cfg.Scanner.EmptyTrashAfterScan, cfg.Scanner.FileRemovalGrace)
@@ -4285,6 +4286,7 @@ func main() {
 		// Wire direct dependencies when DB is available.
 		if deps.DB != nil {
 			compatDeps.RestoreReconstructedWatch = handlers.ReconstructedWatchRestorer(handlers.NewPGPlaybackAdminStore(deps.DB, nil))
+			compatDeps.StreamEnds = deps.StreamEnds
 			browseRepo := catalog.NewBrowseRepository(deps.DB)
 			itemRepo := catalog.NewItemRepository(deps.DB)
 			seasonRepo := catalog.NewSeasonRepository(deps.DB)

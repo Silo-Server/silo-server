@@ -1112,22 +1112,50 @@ The synthetic VOD playlist of an encoded transcode lists two-second segments
 up to the file's stored duration, which the scanner takes from the video and
 audio tracks when a subtitle track alone stretches the container. A container
 can still outlast its streams in ways the scanner cannot see, such as a bad
-duration tag, so the playlist can list segments FFmpeg never writes. An FFmpeg
-that exits 0 without logging `Error during demuxing` has read its input to the
-end, and the session keeps its last segment as the media's last. A video
-segment request past that segment answers `200` with an empty body and the
-segment's media type. That request never waits and never restarts FFmpeg,
-because a restart past the end writes nothing and the player would request the
-segment again. A seek into that tail before any FFmpeg of the session has
-reached the end restarts FFmpeg there once; it reads nothing, exits 0, and the
-request answers the same empty segment. A player steps over the empty segments
-to the end of the playlist. FFmpeg also exits 0 when a read fails mid-file, such as a relayed
-source that closes early, but it logs that demux error first. Such an FFmpeg,
-or one that exits with an error or is killed, has not reached the end, so a
+duration tag, so the playlist can list segments FFmpeg never writes.
+
+The session learns the media's last segment from FFmpeg runs that read their
+input to the end: a run that exits 0, was not stopped or replaced, and did not
+log `Error during demuxing` (FFmpeg exits 0 after a read fails mid-file, such
+as a relayed source that closes early, but logs that error first). A run whose
+own playlist lists a segment with media sets the end to the last such segment.
+A run that wrote no media started past the end: FFmpeg then writes no playlist,
+or one listing a single empty segment (`EXTINF:0`, no bytes). The end lies
+before that run's first segment; such a run only ever lowers a known end, and
+one that started at segment 0 shows nothing. Only an encoded transcode with a synthetic playlist learns the end:
+copy-video serves FFmpeg's own playlist, which a seek re-cuts at other
+keyframes. The end holds for the audio track it was learned with, since another
+track can run longer.
+
+A video segment request past the learned end answers `200` with a segment that
+holds no media: the PAT and PMT of one of the session's MPEG-TS segments (a
+generic H.264 PAT and PMT when none can be read), or an fMP4 `moof` and empty
+`mdat` that gives each track of the init segment an empty run from the
+segment's start. It never waits and never restarts FFmpeg, because a restart
+past the end writes nothing and the player would request the segment again. A
+request that waited on the restart lock checks the end again first. A seek into
+the tail before any run has reached the end restarts FFmpeg there once; it
+writes nothing, and the request answers the same segment. A crash, a kill, a
+non-zero exit, or an exit after a demux error has not reached the end, so a
 request past its output restarts it as before. A keyframe-planned copy remux
 lists only the source's own segments and keeps its own rules. The integrated
 server, transcode nodes, and the Jellyfin-compatible transcode serve this the
 same way.
+
+Players differ in how many such segments they step over. hls.js 1.6.15 treats
+a segment with no media as a gap for two segments in a row and for the
+playlist's last; past that it raises a parsing error. A zero-byte body is worse
+there: it fails hls.js's format probe and is requested again without end, which
+is why the answer is a valid segment. To keep later plays off this path, the
+server that answers past the end also lowers the file's stored
+`media_files.duration` to where the run found the media ends, rounded up to a
+whole second (`playback.StreamEndRecorder`). It never lengthens a
+duration, leaves a file with more than one audio track alone (another track can
+run longer than the one the transcode read), and leaves `probe_updated_at`
+alone; a later probe of a changed file stores its own duration. A transcode
+node carries each transcode's learned end in its session report
+(`stream_end_seconds`), and the core stores it the same way, whichever server or
+proxy relayed the segments.
 
 ---
 

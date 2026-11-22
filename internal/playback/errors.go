@@ -23,7 +23,8 @@ var (
 	// ErrPastEndOfStream reports a video segment after the media's last one,
 	// which the session learns when an FFmpeg reads its input to the end. No
 	// generation writes it. It wraps ErrSegmentNotFound, so a caller that does
-	// not answer it (ServePastEndOfStream) still answers not found.
+	// not answer it (TranscodeSession.ServePastEndOfStream) still answers not
+	// found.
 	ErrPastEndOfStream = fmt.Errorf("past the end of the stream: %w", ErrSegmentNotFound)
 	// ErrManifestQueryTooLong rejects a playlist request whose query is longer
 	// than maxManifestQueryBytes.

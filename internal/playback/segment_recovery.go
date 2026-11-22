@@ -100,7 +100,7 @@ func OpenSegmentWithRecovery(
 	// Past the media's end (FFmpeg finished there, perhaps during the wait)
 	// the segment never comes: end the stream, never restart.
 	if session.pastEndOfStream(segNum) {
-		return nil, ErrPastEndOfStream
+		return nil, pastEndOfStreamError(segNum)
 	}
 
 	// If the segment is still missing (timed out, or outside the active encode
@@ -113,7 +113,7 @@ func OpenSegmentWithRecovery(
 
 	target, ok, restartErr := opts.Restart(ctx, segNum, decision.Progress.GenerationStartedAt)
 	// A restart skipped because the request ended is not a failure.
-	if restartErr != nil && !errors.Is(restartErr, ErrManifestNotReady) && !errors.Is(restartErr, ctx.Err()) {
+	if restartErr != nil && !errors.Is(restartErr, ErrManifestNotReady) && !errors.Is(restartErr, ErrPastEndOfStream) && !errors.Is(restartErr, ctx.Err()) {
 		logSegmentRestartError(ctx, baseLogger, opts.Component, restartErr)
 	}
 	if restartErr != nil {
@@ -138,7 +138,7 @@ func OpenSegmentWithRecovery(
 		// The restart started past the media's end, read nothing and
 		// finished: a seek into the playlist's tail before any FFmpeg of the
 		// session had reached the end.
-		return nil, ErrPastEndOfStream
+		return nil, pastEndOfStreamError(segNum)
 	}
 	if err == nil && opts.CopyLookaheadTimeout > 0 && session.IsCopyVideo() {
 		// Copy-mode seeks can resume as soon as the target segment exists, but

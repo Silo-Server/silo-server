@@ -959,6 +959,33 @@ func (r *FileRepository) MarkProbeFailed(ctx context.Context, fileID int, probed
 	return nil
 }
 
+// ShortenDuration lowers a file's stored duration to seconds, where a
+// transcode found its media ends, and reports whether it did. It never
+// lengthens one and leaves probe_updated_at alone: the probe itself did not
+// change, and live recipes key their source revision on it. A later probe of
+// a changed file stores its own duration again. A file with more than one
+// audio track keeps its duration: the transcode read one of them, and another
+// can run longer.
+func (r *FileRepository) ShortenDuration(ctx context.Context, fileID, seconds int) (bool, error) {
+	if seconds <= 0 {
+		return false, nil
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE media_files
+		SET duration = $2,
+		    updated_at = NOW()
+		WHERE id = $1
+		  AND duration > $2
+		  AND COALESCE(jsonb_array_length(audio_tracks), 0) <= 1`,
+		fileID,
+		seconds,
+	)
+	if err != nil {
+		return false, fmt.Errorf("shortening media file duration: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // UpdateMultiplePPS records the H.264 multi-PPS copy-safety verdict together
 // with the size and mtime it was computed from, so a later read can tell
 // whether the file has been rewritten since. A nil scanMtime records a verdict

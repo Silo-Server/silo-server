@@ -174,6 +174,7 @@ type Dependencies struct {
 	EmailBrand        *mail.BrandLoader             // server branding for outgoing email (nil sends Silo's default)
 	FolderRepo        *catalog.FolderRepository     // media folder repository (may be nil)
 	FileRepo          *scanner.FileRepository       // media file repository (may be nil)
+	StreamEnds        *playback.StreamEndRecorder   // stores where a transcode found a file's media ends (may be nil)
 	Scanner           *scanner.Scanner              // scanner instance (may be nil)
 	LibraryIngester   *libraryingest.Executor       // shared library ingest executor (may be nil)
 	ProbeEnsurer      handlers.PlaybackProbeEnsurer // on-demand probe repair for playback/detail (may be nil)
@@ -1604,6 +1605,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 		}
 		playbackHandler.ProbeEnsurer = deps.ProbeEnsurer
+		playbackHandler.StreamEnds = deps.StreamEnds
 		playbackHandler.ChapterThumbnailQueuer = deps.ChapterThumbnailQueuer
 		if settingsRepo != nil {
 			playbackHandler.SettingsRepo = settingsRepo
@@ -3511,6 +3513,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			Telemetry:  streamtelemetry.NodeSnapshotStore(deps.StreamTelemetry),
 			Events:     deps.EventBus,
 			Deny:       playback.NewStreamDeny(deps.RedisClient),
+			StreamEnds: deps.StreamEnds,
 			// Main cancels the app context before it shuts the listener
 			// down, which cuts source byte streams instead of waiting on them.
 			Lifetime: deps.AppContext,
@@ -3528,6 +3531,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// nothing and revokes nothing.
 		nodeRecipes := noderecipe.NewStore(deps.RedisClient, 0)
 		nodeControlOptions.Recipes, nodeControlOptions.Revocations = nodeRecipes, nodeRecipes
+		if deps.SessionMgr != nil {
+			nodeControlOptions.Transcodes = deps.SessionMgr
+		}
 		deps.wireNodeSources(&nodeControlOptions)
 		if nodeHandler != nil {
 			// A node's declaration goes through the admin node service, so

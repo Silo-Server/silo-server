@@ -44,6 +44,36 @@ type LogSink interface {
 // Options are what the core's node control routes work from. Nodes and
 // Settings are required; each other field disables the route, or the part of
 // one, that needs it when nil.
+// runsFile reports whether session is a remote transcode this server started
+// on node nodeID for the media file it names: the playback session it holds
+// runs that transport on that node and plays that file. A node's stream end
+// lowers a stored duration only then, so a node cannot shorten a file it is
+// not transcoding. A session another API server holds is left to the reports
+// that server receives.
+func (s *Server) runsFile(ctx context.Context, nodeID int, session nodesessions.SessionInfo) bool {
+	if s.opts.Transcodes == nil || session.MediaFileID <= 0 {
+		return false
+	}
+	nodeURL, fileID, ok := s.opts.Transcodes.RemoteTranscode(session.SessionID)
+	if !ok || fileID != session.MediaFileID {
+		return false
+	}
+	node, err := s.identity(ctx, nodeID)
+	return err == nil && node.URL != "" && nodepool.CanonicalNodeURL(node.URL) == nodepool.CanonicalNodeURL(nodeURL)
+}
+
+// TranscodeSource finds the remote transcode a playback session this server
+// holds runs as a transport. *playback.SessionManager implements it.
+type TranscodeSource interface {
+	RemoteTranscode(transportID string) (nodeURL string, mediaFileID int, ok bool)
+}
+
+// StreamEndNoter stores where a transcode found a media file's media ends
+// (playback.StreamEndRecorder).
+type StreamEndNoter interface {
+	Note(ctx context.Context, mediaFileID int, endSeconds float64)
+}
+
 type Options struct {
 	Nodes NodeDirectory
 	// Identities answers the calling node's name and URL for reports and log
@@ -84,6 +114,12 @@ type Options struct {
 	// Registrar applies the declaration a node sends at startup; nil answers
 	// registration with 503.
 	Registrar Registrar
+	// StreamEnds stores the media ends nodes report for their transcodes
+	// (nodesessions.SessionInfo.StreamEndSeconds) when Transcodes confirms
+	// the node runs that file's transcode; nil, or a nil Transcodes, stores
+	// nothing.
+	StreamEnds StreamEndNoter
+	Transcodes TranscodeSource
 	// Lifetime is the API server's lifetime: when it ends, as graceful
 	// shutdown begins, every source byte response in flight is cut, so a
 	// long read does not hold the shutdown. Nil never cuts them.
@@ -355,6 +391,13 @@ func (s *Server) HandleReport(w http.ResponseWriter, r *http.Request) {
 	if err := nodesessions.IngestNodeSessions(ctx, s.opts.Redis, id, node.URL, node.Name, report.Sessions, latest); err != nil {
 		s.reportFailed(w, r, id, err, errors.Is(err, nodesessions.ErrInvalidSession))
 		return
+	}
+	if s.opts.StreamEnds != nil {
+		for _, session := range report.Sessions {
+			if session.StreamEndSeconds > 0 && s.runsFile(ctx, id, session) {
+				s.opts.StreamEnds.Note(ctx, session.MediaFileID, session.StreamEndSeconds)
+			}
+		}
 	}
 	if report.Telemetry != nil && s.opts.Telemetry != nil {
 		err := s.opts.Telemetry.IngestNodeSnapshot(ctx, PublisherID(id), node.Name, int64(boot), report.Seq, *report.Telemetry, now, latest)

@@ -662,6 +662,22 @@ func (s *Server) restartSessionLocked(ctx context.Context, sessionID string, ses
 	return session.Restart(ctx, seekSeconds, startSegment)
 }
 
+// WithStreamEnds returns sessions with each transcode's learned media end
+// filled in (playback.TranscodeSession.LearnedStreamEnd), for the node's
+// report.
+func (s *Server) WithStreamEnds(sessions []nodesessions.SessionInfo) []nodesessions.SessionInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := range sessions {
+		if live, ok := s.sessions[sessions[i].SessionID]; ok {
+			if end, ok := live.LearnedStreamEnd(); ok {
+				sessions[i].StreamEndSeconds = end
+			}
+		}
+	}
+	return sessions
+}
+
 // restartSegmentLocked resolves and applies missing-segment recovery while the
 // node's lifecycle lock keeps the current manifest and live session stable.
 func (s *Server) restartSegmentLocked(
@@ -2926,7 +2942,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	if err != nil {
-		if playback.ServePastEndOfStream(w, name, err) {
+		if session.ServePastEndOfStream(w, name, err) {
 			return
 		}
 		if r.Context().Err() != nil {

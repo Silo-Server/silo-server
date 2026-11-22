@@ -197,6 +197,57 @@ func TestReportFenceRefusesStaleReports(t *testing.T) {
 	}
 }
 
+type notedStreamEnd struct {
+	fileID  int
+	seconds float64
+}
+
+type remoteTranscodes map[string]struct {
+	nodeURL string
+	fileID  int
+}
+
+func (m remoteTranscodes) RemoteTranscode(transportID string) (string, int, bool) {
+	t, ok := m[transportID]
+	return t.nodeURL, t.fileID, ok
+}
+
+type streamEndNoterFunc func(ctx context.Context, fileID int, seconds float64)
+
+func (f streamEndNoterFunc) Note(ctx context.Context, fileID int, seconds float64) {
+	f(ctx, fileID, seconds)
+}
+
+// A node reports where its transcodes found their media ends, and the core
+// passes each to the stream-end store, so a file's stored duration follows
+// whichever server or proxy relayed the segments. It takes one only for a
+// transcode this server's playback session runs on that node for the file
+// named: a node cannot shorten another file.
+func TestReportPassesStreamEndsOn(t *testing.T) {
+	f := newControlFixture(t)
+	var noted []notedStreamEnd
+	f.server.opts.StreamEnds = streamEndNoterFunc(func(_ context.Context, fileID int, seconds float64) {
+		noted = append(noted, notedStreamEnd{fileID, seconds})
+	})
+	f.server.opts.Transcodes = remoteTranscodes{
+		"ended":      {"http://gpu-7:8080", 42},
+		"other-node": {"http://gpu-8:8080", 42},
+		"other-file": {"http://gpu-7:8080", 42},
+	}
+	key := f.addNode(7, "gpu-7")
+	report := testReport("1800000000000000000", 1, "ended", "other-node", "other-file", "unknown", "playing")
+	for i, fileID := range []int{42, 42, 99, 42, 43} {
+		report.Sessions[i].MediaFileID, report.Sessions[i].StreamEndSeconds = fileID, 149.5
+	}
+	report.Sessions[4].StreamEndSeconds = 0
+	if code := f.serve(7, key, http.MethodPost, PathReport, report, nil).Code; code != http.StatusNoContent {
+		t.Fatalf("report: %d", code)
+	}
+	if fmt.Sprint(noted) != fmt.Sprint([]notedStreamEnd{{42, 149.5}}) {
+		t.Fatalf("noted %v, want file 42 at 149.5 s from its own transcode only", noted)
+	}
+}
+
 // The fence compares decimal strings by length, then lexically, since Lua
 // numbers cannot hold a nanosecond boot id: a sequence or boot id gaining or
 // losing a digit must still order numerically.

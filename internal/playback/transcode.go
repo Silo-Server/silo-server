@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"math"
 	"mime"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -397,11 +396,25 @@ type TranscodeSession struct {
 	// closing is set once Close or CloseProcess begins. It is terminal: from
 	// then on no restart publishes a generation and no throttler is armed.
 	closing bool
-	// streamEnded and streamEndSegment record the media's last segment,
-	// learned when an FFmpeg reads its input to the end. They outlive later
-	// generations: the media does not grow. Guarded by mu.
-	streamEnded      bool
-	streamEndSegment int
+	// streamEnd is the media's last segment, learned when an FFmpeg reads
+	// its input to the end (see learnStreamEnd). It outlives later
+	// generations, since the media does not grow, and holds for the audio
+	// track it was learned with. Guarded by mu.
+	streamEnd learnedStreamEnd
+}
+
+// learnedStreamEnd is the last segment of an encoded transcode's media.
+type learnedStreamEnd struct {
+	known bool
+	// segment is the last segment that exists. Segments after it are past
+	// the end.
+	segment int
+	// seconds is where the media ends, set when a run wrote that last
+	// segment; zero when only a run that wrote nothing bounded it.
+	seconds float64
+	// audioTrack is the AudioTrackIndex the end was learned with. Another
+	// track can run longer.
+	audioTrack int
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -714,20 +727,13 @@ func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, don
 	demuxError := s.flushStderr(ctx)
 	// FFmpeg that exits 0 without a demux error read its input to the end:
 	// being stopped or replaced kills it, and a failed read logs
-	// ffmpegDemuxErrorLine before an exit 0 that only looks clean. Its last
-	// segment is then the media's last. A keyframe plan lists only segments
-	// the source has, and keeps its own recovery rules.
-	endedCleanly := waitErr == nil && !demuxError && ctx.Err() == nil && s.copyPlan == nil
-	var lastSegment int
-	if endedCleanly {
-		lastSegment = s.SegmentProgress(time.Now()).ProducedHead
-	}
+	// ffmpegDemuxErrorLine before an exit 0 that only looks clean.
+	endedCleanly := waitErr == nil && !demuxError && ctx.Err() == nil
 	s.mu.Lock()
 	s.running = false
 	s.waitErr = waitErr
 	if endedCleanly {
-		s.streamEnded = true
-		s.streamEndSegment = lastSegment
+		s.learnStreamEndLocked()
 	}
 	s.mu.Unlock()
 	s.logWaitResult(ctx, waitErr)
@@ -3442,33 +3448,91 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 	return decision
 }
 
+// learnStreamEndLocked records the media's last segment after the current
+// FFmpeg run read its input to the end. Only an encoded transcode learns it:
+// its synthetic playlist lists segments to the stored duration, which can
+// outlast every stream, while copy-video serves FFmpeg's own playlist and a
+// seek there re-cuts the segments at other keyframes.
+//
+// A run whose own playlist lists a segment with media sets the end to the last
+// such segment. A run that wrote no media started past the end: FFmpeg then
+// writes no playlist, or one listing a single empty segment (EXTINF 0, no
+// bytes). The end lies before its first segment; such a run only ever lowers a
+// known end, and one that started at segment 0 shows nothing about the media.
+// Output the session cannot read teaches nothing. Must hold s.mu.
+func (s *TranscodeSession) learnStreamEndLocked() {
+	opts := s.opts
+	if strings.EqualFold(opts.TargetCodecVideo, "copy") || s.copyPlan != nil ||
+		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
+		return
+	}
+	segmentDuration := opts.SegmentDuration
+	if segmentDuration <= 0 {
+		segmentDuration = defaultSegmentDuration
+	}
+	manifest, err := readManifestFile(filepath.Join(s.outputDir, "stream.m3u8"), s.inheritedManifest)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			s.learnEndBeforeLocked(opts)
+		}
+		return
+	}
+	timeline, err := parseManifestTimeline(manifest)
+	if err != nil {
+		return
+	}
+	for i := len(timeline.entries) - 1; i >= 0; i-- {
+		entry := timeline.entries[i]
+		if entry.duration <= 0 {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(s.outputDir, segmentFilename(entry.number, opts)))
+		if err != nil {
+			return
+		}
+		if info.Size() <= 0 {
+			continue
+		}
+		s.streamEnd = learnedStreamEnd{
+			known:      true,
+			segment:    entry.number,
+			seconds:    float64(entry.number*segmentDuration) + entry.duration,
+			audioTrack: opts.AudioTrackIndex,
+		}
+		return
+	}
+	s.learnEndBeforeLocked(opts)
+}
+
+// learnEndBeforeLocked records that the media ends before the current run's
+// first segment, which wrote no media. Must hold s.mu.
+func (s *TranscodeSession) learnEndBeforeLocked(opts TranscodeOpts) {
+	if opts.StartSegmentNumber <= 0 {
+		return
+	}
+	bound := opts.StartSegmentNumber - 1
+	if current := s.streamEnd; current.known && current.audioTrack == opts.AudioTrackIndex && current.segment <= bound {
+		return
+	}
+	s.streamEnd = learnedStreamEnd{known: true, segment: bound, audioTrack: opts.AudioTrackIndex}
+}
+
 // pastEndOfStream reports whether segNum lies after the media's last
-// segment, which the session learns when an FFmpeg reads its input to the
-// end.
+// segment for the selected audio track.
 func (s *TranscodeSession) pastEndOfStream(segNum int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.streamEnded && segNum > s.streamEndSegment
+	end := s.streamEnd
+	return end.known && end.audioTrack == s.opts.AudioTrackIndex && segNum > end.segment
 }
 
-// ServePastEndOfStream answers a video segment request that
-// OpenSegmentWithRecovery found past the media's last segment (err is
-// ErrPastEndOfStream) with an empty segment, 200 and no bytes, and reports
-// whether it did. The synthetic playlist lists segments to the stored
-// duration, which can outlast every stream; a player steps over an empty
-// segment to the end of the playlist, while an error status is retried and
-// ends playback as a failure.
-func ServePastEndOfStream(w http.ResponseWriter, name string, err error) bool {
-	if !errors.Is(err, ErrPastEndOfStream) {
-		return false
-	}
-	if contentType := mime.TypeByExtension(filepath.Ext(name)); contentType != "" {
-		w.Header().Set("Content-Type", contentType)
-	}
-	w.Header().Set("Cache-Control", "no-store, max-age=0")
-	w.Header().Set("Content-Length", "0")
-	w.WriteHeader(http.StatusOK)
-	return true
+// LearnedStreamEnd returns where the media ends, in seconds, when a run of
+// this session wrote its last segment.
+func (s *TranscodeSession) LearnedStreamEnd() (float64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	end := s.streamEnd
+	return end.seconds, end.known && end.seconds > 0
 }
 
 // GenerateFullManifest builds a complete VOD-style HLS manifest that lists
@@ -4030,6 +4094,11 @@ func (s *TranscodeSession) RestartSegmentSince(ctx context.Context, segNum int, 
 	// on. Once started, a restart runs to completion (see restart).
 	if err := ctx.Err(); err != nil {
 		return SegmentRecoveryTarget{}, false, err
+	}
+	// The restart this request waited behind may have found the end: a
+	// restart past it writes nothing.
+	if s.pastEndOfStream(segNum) {
+		return SegmentRecoveryTarget{}, false, pastEndOfStreamError(segNum)
 	}
 	target, ok, err := s.ResolveSegmentRecoveryTarget(ctx, segNum)
 	if err != nil || !ok {
