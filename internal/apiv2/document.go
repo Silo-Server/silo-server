@@ -558,6 +558,7 @@ func registerAll(reg *Registry) {
 	registerEmailVerification(reg)
 	registerEventsCapability(reg)
 	registerNetworkAccess(reg)
+	registerDirectConnections(reg)
 	registerEventsSocket(reg)
 	registerAdminLogsSocket(reg)
 	registerPlaybackControlSocket(reg)

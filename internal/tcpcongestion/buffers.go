@@ -29,7 +29,7 @@ type Limits struct {
 	State, Reason    string
 }
 
-// SendBufferResult describes the send-buffer request and readback in bytes.
+// SendBufferResult describes the send-buffer request and usable grant in bytes.
 // Requested is zero when no force is attempted, Granted is zero when unread,
 // and NotSentLowat is the guard set independently of forcing. Errno and Error
 // describe kernel failures; Action names the remedy or "none".
@@ -139,7 +139,8 @@ func decideForce(in sendBufferInput) SendBufferResult {
 		result.Errno, result.Error = errorDetails(in.readErr)
 		return result
 	}
-	result.Granted = in.granted
+	// Linux doubles socket-buffer readbacks; report usable bytes (socket(7)).
+	result.Granted = in.granted / 2
 	if in.granted < 2*in.request {
 		result.Reason = reasonGrantedBelowRequest
 		return result

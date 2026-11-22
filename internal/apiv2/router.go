@@ -171,6 +171,7 @@ type Dependencies struct {
 	PlaybackControlSocket          PlaybackControlSocketService
 	EventsCapability               EventsCapabilityService
 	NetworkAccess                  NetworkAccessService
+	DirectConnections              DirectConnectionsService
 	ServerIdentity                 ServerIdentityService
 	ServerConnections              ServerConnections
 	NotificationDestinationCreate  NotificationDestinationCreateService
@@ -445,7 +446,7 @@ type Dependencies struct {
 	// layouts for an administrator (*handlers.SectionHandler).
 	AdminProfileSections AdminProfileSectionService
 	// Requests serves media requests and the discovery surface
-	// (*requests.Service, the value *handlers.RequestsHandler wraps).
+	// (*requests.Service).
 	AdminSubtitleInspection AdminSubtitleInspectionService
 	AdminRequests           handlers.RequestService
 	Requests                MediaRequestService

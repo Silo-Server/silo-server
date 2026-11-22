@@ -4035,6 +4035,7 @@
             "type": "string"
           },
           "local_username": {
+            "description": "The matched account's username, or its email when it has none",
             "type": "string"
           },
           "match": {
@@ -4386,7 +4387,8 @@
               "kept_stricter",
               "unverified_backup",
               "over_restore_budget",
-              "needs_primary_profile"
+              "needs_primary_profile",
+              "managed_by_environment"
             ],
             "type": "string"
           },
@@ -4906,7 +4908,8 @@
               "kept_stricter",
               "unverified_backup",
               "over_restore_budget",
-              "needs_primary_profile"
+              "needs_primary_profile",
+              "managed_by_environment"
             ],
             "type": "string"
           },
@@ -5236,14 +5239,15 @@
             "type": "boolean"
           },
           "status": {
-            "description": "on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores",
+            "description": "on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores; managed_by_environment: this server's environment sets it, or sets another setting of the outside-service connection it belongs to (mail's SMTP settings, for example), so a restore never writes it and this server keeps its value",
             "enum": [
               "on_this_server",
               "differs",
               "needs_another_key",
               "kept_stricter",
               "cleared",
-              "unverified_backup"
+              "unverified_backup",
+              "managed_by_environment"
             ],
             "type": "string"
           }
@@ -33369,6 +33373,279 @@
         "required": [
           "manifest",
           "bundle"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "refresh": {
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "refresh",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsFeature": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "feature": {
+            "enum": [
+              "direct",
+              "nat_mapping",
+              "nat_hairpin",
+              "ipv4",
+              "ipv6",
+              "port_mapping",
+              "reachability",
+              "socket_receive_buffer",
+              "socket_send_buffer",
+              "gso",
+              "gro",
+              "pmtu_fallback",
+              "cap_net_admin"
+            ],
+            "type": "string"
+          },
+          "granted": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "local",
+              "network"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "disabled",
+              "admin_off",
+              "kernel_unsupported",
+              "limit",
+              "force_failed",
+              "no_cap_net_admin",
+              "net_admin_dropped",
+              "unsupported_platform",
+              "probe_failed",
+              "not_available",
+              "no_gateway",
+              "gateway_unsupported",
+              "mapping_varies",
+              "not_measured"
+            ],
+            "type": "string"
+          },
+          "requested": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "on",
+              "off",
+              "capped",
+              "fallback",
+              "degraded",
+              "unknown"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature",
+          "kind",
+          "state"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsHostStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "checked_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "features": {
+            "items": {
+              "$ref": "#/components/schemas/DirectConnectionsFeature"
+            },
+            "type": "array"
+          },
+          "host": {
+            "$ref": "#/components/schemas/NetworkAccessHostRef"
+          },
+          "knobs": {
+            "items": {
+              "$ref": "#/components/schemas/DirectConnectionsKnob"
+            },
+            "type": "array"
+          },
+          "listeners": {
+            "items": {
+              "$ref": "#/components/schemas/DirectConnectionsListener"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "host",
+          "checked_at",
+          "features",
+          "knobs"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsKnob": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {
+            "type": "string"
+          },
+          "effective": {
+            "type": "string"
+          },
+          "env": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requested": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "env",
+          "default",
+          "effective"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsListener": {
+        "additionalProperties": false,
+        "properties": {
+          "errno": {
+            "type": "string"
+          },
+          "granted": {
+            "type": "string"
+          },
+          "listener": {
+            "enum": [
+              "api",
+              "jellyfin",
+              "abs",
+              "proxy"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requested": {
+            "type": "string"
+          },
+          "send_buffer": {
+            "$ref": "#/components/schemas/DirectConnectionsSendBuffer"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "listener",
+          "requested",
+          "granted",
+          "state",
+          "reason",
+          "send_buffer"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsSendBuffer": {
+        "additionalProperties": false,
+        "properties": {
+          "errno": {
+            "type": "string"
+          },
+          "granted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requested": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "requested",
+          "granted",
+          "state",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "hosts": {
+            "items": {
+              "$ref": "#/components/schemas/DirectConnectionsHostStatus"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "hosts"
         ],
         "type": "object"
       },
@@ -84085,6 +84362,359 @@
         "x-silo-class": "acting_admin",
         "x-silo-raw-protocol": "diagnostic-bundle",
         "x-silo-raw-reason": "The existing administrator consumer downloads a gzip archive; bytes must not pass through JSON encoding or response buffering.",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/direct-connections/capabilities": {
+      "get": {
+        "operationId": "getAdminDirectConnectionsCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectConnectionsCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discover direct-connection readiness operations and service configuration, independently of probe health and the hidden setting.",
+        "tags": [
+          "direct-connections"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/direct-connections/status": {
+      "get": {
+        "operationId": "getAdminDirectConnectionsStatus",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Run a new check, or wait for the in-flight check. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds",
+            "explode": false,
+            "in": "query",
+            "name": "refresh",
+            "schema": {
+              "default": false,
+              "description": "Run a new check, or wait for the in-flight check. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectConnectionsStatus"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the API host's direct-connection readiness. Network probes run only when the hidden setting is enabled. Refresh joins an in-flight check or starts a new one. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds.",
+        "tags": [
+          "direct-connections"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },
@@ -252365,6 +252995,7 @@
               "qsv",
               "vaapi",
               "nvenc",
+              "videotoolbox",
               "none"
             ],
             "type": "string"

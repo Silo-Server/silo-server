@@ -967,6 +967,20 @@ grouped by the admin page that edits each key: a key or prefix with its class.
   it and turns the service off (`email.enabled`) instead of sending this
   server's secret to the backup's address. The preview marks those settings
   `cleared`, and the secrets are expected unchanged under the settings lock.
+- A setting this server's environment sets (`internal/config/env_settings.go`)
+  is never written: the admin settings write path refuses it
+  (`managed_by_environment`, `AdminHandler.EnvironmentSetting`). A stored
+  one gets the environment's value back at the next start anyway; a
+  process one (`scanner.workers`, `matcher.workers`) is never stored, so
+  the row stays as other API servers read it. The preview compares the
+  backup with the environment's value (`RestoreTargets.EnvironmentValue`),
+  marks a difference `managed_by_environment`, and restores the rest of the
+  page. An outside-service connection the environment sets any setting of
+  (`outboundBundles`, the units the full restore carries) keeps every
+  setting of it as it is (`keepEnvironmentBundles`), so a restore never
+  pairs the environment's SMTP transport, address, or password with the
+  backup's. The server that runs the restore job plans it again with its own
+  environment, so the report says what that server did.
 - A backup this server cannot authenticate restores no setting that
   connects to an outside service (class `external_service`) and no plugin
   configuration, whatever the admin confirmed: the preview marks them
@@ -1879,9 +1893,17 @@ from it whole, so an SMTP host and password changed since the backup stay
 changed. A unit the live server lacks, and every unit of another
 deployment's backup or a separate restore, keeps the backup's other values
 with its secrets cleared and its switch off, and the command lists it for
-re-entry. `TestEveryCredentialSettingIsDecided` fails on an encrypted
-setting that is neither in a unit nor this server's own (signing keys,
-storage, Redis, the web push key pair).
+re-entry. When the AI providers' unit is cleared, the job bindings
+(`config.AIProviderBindingKeys`), which name entries of the provider list,
+go with it, and the list is left empty at the current conversion version
+(encrypted when the restore has this server's key), so the next start
+builds no provider from the backup's legacy endpoint settings or the
+Ollama default (`config.PlanAIProviderConversion`). A binding left without
+its list, as a restore with another key leaves it, clears the unit too. A
+full restore then takes the list and bindings from the live server with its
+server-specific settings (below). `TestEveryCredentialSettingIsDecided`
+fails on an encrypted setting that is neither in a unit nor this server's
+own (signing keys, storage, Redis, the web push key pair).
 
 A full restore also keeps every server-specific setting (`SettingKindServerSpecific`:
 the server's identity and public URL, storage, Redis, search, AI

@@ -1713,6 +1713,10 @@ func (qb *QueryBuilder) ebookProgressSortPlan() (string, []string, []any) {
 	return "sort_progress.progress_ratio", []string{joinSQL}, []any{qb.userID, qb.profileID}
 }
 
+// dateViewedSortPlan dates each title by its most recent finished play.
+// Watch history is recorded against episodes, so an episode's plays also date
+// its series, as user_last_watched does for the last_watched rule (#4638). The
+// hidden-item check runs on the episode, the item a history removal names.
 func (qb *QueryBuilder) dateViewedSortPlan() (string, []string, []any) {
 	if qb.mediaScope == "ebook" {
 		return qb.ebookDateViewedSortPlan()
@@ -1760,10 +1764,57 @@ func (qb *QueryBuilder) dateViewedSortPlan() (string, []string, []any) {
 		qb.argIdx+1,
 		qb.alias,
 	)
+	joins := []string{historyJoin, progressJoin}
 	// GREATEST skips NULLs, so a never-watched title stays NULL and the
 	// sort's NULLS LAST puts it after the watched ones in both directions.
 	expr := `GREATEST(sort_history_viewed.viewed_at, sort_progress_viewed.viewed_at)`
-	return expr, []string{historyJoin, progressJoin}, []any{qb.userID, qb.profileID}
+	// Crediting series looks up every watched item in episodes, so a scope
+	// that can't hold a series (a movie library) leaves it out.
+	if MediaScopeMatchesItemType(qb.mediaScope, "series") {
+		joins = append(joins, qb.seriesDateViewedJoin())
+		expr = `GREATEST(sort_history_viewed.viewed_at, sort_progress_viewed.viewed_at, sort_series_viewed.viewed_at)`
+	}
+	return expr, joins, []any{qb.userID, qb.profileID}
+}
+
+// seriesDateViewedJoin dates each series by its episodes' latest visible
+// finished play, from history or a completed progress row, for
+// dateViewedSortPlan. It groups on episodes.series_id, whose statistics give
+// the planner a fair row count; grouping on a key built from item and series
+// IDs together left it expecting a few rows and joining the page by nested
+// loop, seconds for a profile with a long history.
+func (qb *QueryBuilder) seriesDateViewedJoin() string {
+	return fmt.Sprintf(
+		`LEFT JOIN (
+			SELECT ep.series_id AS content_id, MAX(played.viewed_at) AS viewed_at
+			FROM (
+				SELECT uwh.media_item_id, uwh.watched_at AS viewed_at
+				FROM user_watch_history uwh
+				LEFT JOIN user_history_hidden_items hhi
+					ON hhi.user_id = $%[1]d
+				   AND hhi.profile_id = $%[2]d
+				   AND hhi.media_item_id = uwh.media_item_id
+				WHERE uwh.user_id = $%[1]d
+				  AND uwh.profile_id = $%[2]d
+				  AND uwh.completed = TRUE
+				  AND (hhi.media_item_id IS NULL OR uwh.watched_at > hhi.hidden_before)
+				UNION ALL
+				SELECT uwp.media_item_id, uwp.updated_at
+				FROM user_watch_progress uwp
+				LEFT JOIN user_history_hidden_items hhi
+					ON hhi.user_id = $%[1]d
+				   AND hhi.profile_id = $%[2]d
+				   AND hhi.media_item_id = uwp.media_item_id
+				WHERE uwp.user_id = $%[1]d
+				  AND uwp.profile_id = $%[2]d
+				  AND uwp.completed = TRUE
+				  AND (hhi.media_item_id IS NULL OR uwp.updated_at > hhi.hidden_before)
+			) played
+			JOIN episodes ep ON ep.content_id = played.media_item_id
+			GROUP BY ep.series_id
+		) sort_series_viewed ON sort_series_viewed.content_id = %[3]s.content_id`,
+		qb.argIdx, qb.argIdx+1, qb.alias,
+	)
 }
 
 func (qb *QueryBuilder) ebookDateViewedSortPlan() (string, []string, []any) {

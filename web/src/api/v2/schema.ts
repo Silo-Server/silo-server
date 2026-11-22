@@ -1731,6 +1731,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/direct-connections/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover direct-connection readiness operations and service configuration, independently of probe health and the hidden setting. */
+    get: operations["getAdminDirectConnectionsCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/direct-connections/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the API host's direct-connection readiness. Network probes run only when the hidden setting is enabled. Refresh joins an in-flight check or starts a new one. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds. */
+    get: operations["getAdminDirectConnectionsStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/downloads/devices": {
     parameters: {
       query?: never;
@@ -15221,6 +15255,7 @@ export interface components {
        * @example 1
        */
       local_id?: string;
+      /** @description The matched account's username, or its email when it has none */
       local_username?: string;
       /**
        * @description account_id: the backup is this server's and the account id exists; restored: an earlier restore of this backup's server created it; username_email: the one account here whose username or email is this account's username or email; new: restoring creates it
@@ -15402,7 +15437,8 @@ export interface components {
         | "kept_stricter"
         | "unverified_backup"
         | "over_restore_budget"
-        | "needs_primary_profile";
+        | "needs_primary_profile"
+        | "managed_by_environment";
       /** @description Items (section:id) that must be chosen with this one: a collection whose library is restored by the same request */
       requires: string[];
       restart_required: boolean;
@@ -15624,7 +15660,8 @@ export interface components {
         | "kept_stricter"
         | "unverified_backup"
         | "over_restore_budget"
-        | "needs_primary_profile";
+        | "needs_primary_profile"
+        | "managed_by_environment";
       restart_keys: string[];
       restart_required: boolean;
       /** @enum {string} */
@@ -15736,7 +15773,7 @@ export interface components {
       /** @description The setting applies after a restart */
       restart_required: boolean;
       /**
-       * @description on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores
+       * @description on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores; managed_by_environment: this server's environment sets it, or sets another setting of the outside-service connection it belongs to (mail's SMTP settings, for example), so a restore never writes it and this server keeps its value
        * @enum {string}
        */
       status:
@@ -15745,7 +15782,8 @@ export interface components {
         | "needs_another_key"
         | "kept_stricter"
         | "cleared"
-        | "unverified_backup";
+        | "unverified_backup"
+        | "managed_by_environment";
     };
     AdminBackupRestoreSource: {
       /** @description The backup restored from; absent for an upload */
@@ -26781,6 +26819,101 @@ export interface components {
        * @description JSON manifest file, first part; at most 65536 bytes.
        */
       manifest: string;
+    };
+    DirectConnectionsCapabilities: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      refresh: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+      status: boolean;
+    };
+    DirectConnectionsFeature: {
+      detail?: string;
+      /** @enum {string} */
+      feature:
+        | "direct"
+        | "nat_mapping"
+        | "nat_hairpin"
+        | "ipv4"
+        | "ipv6"
+        | "port_mapping"
+        | "reachability"
+        | "socket_receive_buffer"
+        | "socket_send_buffer"
+        | "gso"
+        | "gro"
+        | "pmtu_fallback"
+        | "cap_net_admin";
+      granted?: string;
+      /** @enum {string} */
+      kind: "local" | "network";
+      /** @enum {string} */
+      reason?:
+        | "disabled"
+        | "admin_off"
+        | "kernel_unsupported"
+        | "limit"
+        | "force_failed"
+        | "no_cap_net_admin"
+        | "net_admin_dropped"
+        | "unsupported_platform"
+        | "probe_failed"
+        | "not_available"
+        | "no_gateway"
+        | "gateway_unsupported"
+        | "mapping_varies"
+        | "not_measured";
+      requested?: string;
+      /** @enum {string} */
+      state: "on" | "off" | "capped" | "fallback" | "degraded" | "unknown";
+    };
+    DirectConnectionsHostStatus: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      checked_at: string;
+      features: components["schemas"]["DirectConnectionsFeature"][];
+      host: components["schemas"]["NetworkAccessHostRef"];
+      knobs: components["schemas"]["DirectConnectionsKnob"][];
+      listeners?: components["schemas"]["DirectConnectionsListener"][];
+    };
+    DirectConnectionsKnob: {
+      allowed?: string[];
+      default: string;
+      effective: string;
+      env: string;
+      reason?: string;
+      requested?: string;
+    };
+    DirectConnectionsListener: {
+      errno?: string;
+      granted: string;
+      /** @enum {string} */
+      listener: "api" | "jellyfin" | "abs" | "proxy";
+      reason: string;
+      requested: string;
+      send_buffer: components["schemas"]["DirectConnectionsSendBuffer"];
+      state: string;
+    };
+    DirectConnectionsSendBuffer: {
+      errno?: string;
+      /** Format: int64 */
+      granted: number;
+      reason: string;
+      /** Format: int64 */
+      requested: number;
+      state: string;
+    };
+    DirectConnectionsStatus: {
+      enabled: boolean;
+      hosts: components["schemas"]["DirectConnectionsHostStatus"][];
     };
     DirectDownloadLink: {
       /**
@@ -54553,6 +54686,247 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminDirectConnectionsCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DirectConnectionsCapabilities"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminDirectConnectionsStatus: {
+    parameters: {
+      query?: {
+        /** @description Run a new check, or wait for the in-flight check. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds */
+        refresh?: boolean;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DirectConnectionsStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
         headers: {
           [name: string]: unknown;
         };

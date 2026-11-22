@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -34,11 +33,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/Silo-Server/silo-server/internal/tuning"
 )
-
-// envCoreURL is the URL a transcode node reaches the core at. With its own
-// key (envNodeKey) it is all the node needs: everything else comes from the
-// core.
-const envCoreURL = "SILO_CORE_URL"
 
 // transcodeNodeIgnoredEnv are variables a transcode node once read and now
 // takes from the core or no longer needs: the database and Redis it read
@@ -77,7 +71,7 @@ func transcodeNodeMode(envFile string) bool {
 	if envFile != "" {
 		_ = godotenv.Load(envFile)
 	}
-	return strings.TrimSpace(os.Getenv("MODE")) == serverModeTranscode
+	return strings.TrimSpace(os.Getenv("MODE")) == transcodenode.Mode
 }
 
 // transcodeNodeEnv is what a transcode node reads from its environment.
@@ -98,13 +92,13 @@ type transcodeNodeEnv struct {
 // URL or key, or a key that is not a well-formed node key, is an error: the
 // node could not even ask the core for its configuration.
 func loadTranscodeNodeEnv(getenv func(string) string) (transcodeNodeEnv, error) {
-	env := transcodeNodeEnv{coreURL: strings.TrimSpace(getenv(envCoreURL))}
+	env := transcodeNodeEnv{coreURL: strings.TrimSpace(getenv(transcodenode.EnvCoreURL))}
 	if env.coreURL == "" {
-		return transcodeNodeEnv{}, fmt.Errorf("%s is required: the URL this node reaches the main server at", envCoreURL)
+		return transcodeNodeEnv{}, fmt.Errorf("%s is required: the URL this node reaches the main server at", transcodenode.EnvCoreURL)
 	}
-	parsed, err := url.Parse(env.coreURL)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return transcodeNodeEnv{}, fmt.Errorf("%s must be an absolute http or https URL", envCoreURL)
+	parsed, ok := transcodenode.ParseCoreURL(env.coreURL)
+	if !ok {
+		return transcodeNodeEnv{}, fmt.Errorf("%s must be an absolute http or https URL", transcodenode.EnvCoreURL)
 	}
 	env.insecureCoreURL = parsed.Scheme == "http" && !loopbackHost(parsed.Hostname())
 	key, err := transcodeNodeKey(getenv)
@@ -200,7 +194,7 @@ func runTranscodeNode() {
 
 	stopLogging := configureTranscodeNodeLogging(appCtx, cfg, remote, client, nodeName)
 	defer stopLogging()
-	slog.Info("silo starting", "mode", serverModeTranscode, "listen", cfg.Server.Listen, "log_level", cfg.Server.LogLevel,
+	slog.Info("silo starting", "mode", transcodenode.Mode, "listen", cfg.Server.Listen, "log_level", cfg.Server.LogLevel,
 		"node_id", client.NodeID(), "node_name", nodeName)
 
 	// Every job's input opens through the core with the grant the job
@@ -269,7 +263,7 @@ func runTranscodeNode() {
 		Congestion: tuningCfg.TCPCongestion == tuning.TCPCongestionBBR,
 		SendBuffer: tuningCfg.TCPSendBuffer,
 	}
-	startStandaloneServer(serverModeTranscode, cfg.Server.Listen, srv.Handler(), appCancel, shutdown,
+	startStandaloneServer(transcodenode.Mode, cfg.Server.Listen, srv.Handler(), appCancel, shutdown,
 		standaloneServerHooks{drain: newTranscodeNodeDrain(srv, remote.KeyRejected)}, opts)
 }
 

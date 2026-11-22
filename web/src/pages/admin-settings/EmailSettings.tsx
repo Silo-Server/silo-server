@@ -97,6 +97,7 @@ export default function EmailSettings() {
             dirty={form.isDirty("email.smtp_host")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="smtp.example.com"
+            dir="ltr"
             value={form.getValue("email.smtp_host")}
             onChange={(v) => form.setValue("email.smtp_host", v)}
             restartRequired={restartKeys.has("email.smtp_host")}

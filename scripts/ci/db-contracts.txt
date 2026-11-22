@@ -8,6 +8,7 @@
 ./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB
 ./internal/catalog TestCatalogSearchSortsByProfilePlaysDB
 ./internal/catalog TestCatalogQuerySortsDateViewedUnwatchedLastDB
+./internal/catalog TestCatalogQuerySortsSeriesByEpisodeDateViewedDB
 ./internal/catalog TestLibraryCollectionDrawsFromItsRulesLibrariesDB
 ./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
 ./internal/catalog TestLibraryCollectionReplaceItemsRacesMemberDeleteDB
@@ -50,6 +51,7 @@
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
 ./internal/scanner TestScannedGroupForItemDB
+./internal/scanner TestListMarkerEditAuditClientIPHasNoNetmaskDB
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
 ./internal/scanner TestMatroskaTrackBackfillStopsOnIntermittentStalls
@@ -439,6 +441,7 @@
 ./internal/notifications TestWebPushResubscribeRecordsTheNewLoginDB
 ./internal/notifications TestWebPushSweepOfUnboundSubscriptionsDB
 ./internal/notifications TestQueuedWebPushStopsWhenTheRegisteringLoginEndsDB
+./internal/notifications TestWebPushRetryAfterNeverShortensTheScheduleDB
 
 # Session-less Android push retirement is ordered against registration by generation.
 ./internal/notifications TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB
@@ -652,6 +655,7 @@
 ./internal/downloads TestLateCompletionStopsItsPreparationDB
 ./internal/downloads TestStaleAbandonedPreparationsAreRetiredNotClaimedDB
 ./internal/userstore/pgstore TestPostgresClearResumePosition
+./internal/userstore/pgstore TestPostgresSeriesLatestViewedAtDB
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
 ./internal/userstore/pgstore TestPostgresCollectionsHolding
 ./internal/userstore/pgstore TestPostgresFailedSyncKeepsANewerResult
@@ -1327,6 +1331,7 @@
 ./internal/backup TestSelectivePluginRestorePreviewsOwnedConfigDB
 ./internal/backup TestRestoreRechecksAccessSettingsUnderTheLockDB
 ./internal/backup TestRestoreNeverSendsLiveSecretsToARestoredAddressDB
+./internal/backup TestRestoreLeavesOutSettingsTheEnvironmentSetsDB
 ./internal/backup TestTemplateCollectionsAndHomeSectionsDB
 ./internal/backup TestRestoredLibrarySectionsWaitForTheRestoreDB
 ./internal/backup TestManagedSectionPointedElsewhereIsRestoredDB
