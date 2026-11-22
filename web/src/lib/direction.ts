@@ -8,10 +8,12 @@ export function isRightToLeft(element: Element): boolean {
 // blocks of the supplementary planes.
 const RTL_CHAR = /[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]/u;
 // The characters that set a line's direction (bidi classes L, R and AL): letters,
-// the Hebrew maqaf, paseq, sof pasuq, nun hafukha, geresh and gershayim, and the
-// N'Ko, Garay and Adlam digits. Other digits and punctuation don't.
+// the Hebrew maqaf, paseq, sof pasuq, nun hafukha, geresh and gershayim, the Arabic
+// question mark, semicolon, full stop and other Arabic, Syriac, Samaritan and
+// Mandaic punctuation and signs of those classes, and the N'Ko, Garay and Adlam
+// digits. Other digits and punctuation don't.
 const STRONG =
-  /[\p{L}\u05be\u05c0\u05c3\u05c6\u05f3\u05f4\u07c0-\u07c9\u{10d40}-\u{10d49}\u{1e950}-\u{1e959}]/u;
+  /[\p{L}\u05be\u05c0\u05c3\u05c6\u05f3\u05f4\u0608\u060b\u060d\u061b\u061d-\u061f\u066d\u06d4\u06fd\u06fe\u0700-\u070d\u070f\u07c0-\u07c9\u07fe\u07ff\u0830-\u083e\u085e\u0888\ufbb2-\ufbc2\ufdfc\u{10d40}-\u{10d49}\u{1e950}-\u{1e959}]/u;
 // Arabic-Indic, Hanifi Rohingya and Rumi digits (bidi class AN), which join the
 // right-to-left text around them on a left-to-right line.
 const ARABIC_NUMBER = /[\u0660-\u0669\u{10d30}-\u{10d39}\u{10e60}-\u{10e7e}]/u;
@@ -41,16 +43,17 @@ export function emailDir(email: string): "ltr" | undefined {
 const STRONG_OR_MARK = new RegExp(`[${STRONG.source.slice(1, -1)}\\u200e\\u200f\\u061c]`, "u");
 
 /**
- * Whether the lines of text run different ways, each judged by its first
- * character that sets direction, as `unicode-bidi: plaintext` judges each
- * paragraph of text shown with its line breaks. A line with no such character
- * (digits, punctuation) takes no side.
+ * Whether the lines of text run different ways, judged as `unicode-bidi:
+ * plaintext` judges each paragraph of text shown with its line breaks: by its
+ * first character that sets direction, or left to right when it has none
+ * (digits, punctuation). A blank line shows nothing and takes no side.
  */
 export function mixesDirections(text: string): boolean {
   const directions = new Set<boolean>();
   for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
     const first = STRONG_OR_MARK.exec(line)?.[0];
-    if (first !== undefined) directions.add(first === "\u200f" || RTL_CHAR.test(first));
+    directions.add(first !== undefined && (first === "\u200f" || RTL_CHAR.test(first)));
   }
   return directions.size > 1;
 }
