@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { stubRadixDom } from "@/pages/adminPage.test-support";
 
@@ -9,13 +9,17 @@ import AISettings from "./AISettings";
 
 stubRadixDom();
 
-const { settings, capabilitiesFailed } = vi.hoisted(() => ({
+const { settings, capabilitiesFailed, settingsLoad } = vi.hoisted(() => ({
   settings: { current: {} as Record<string, string> },
   capabilitiesFailed: { current: false },
+  settingsLoad: { failed: false, refetch: (() => {}) as () => void },
 }));
 
 vi.mock("@/hooks/queries/admin/settings", () => ({
-  useAdminServerSettings: () => ({ data: settings.current, isLoading: false }),
+  useAdminServerSettings: () =>
+    settingsLoad.failed
+      ? { data: undefined, isLoading: false, isError: true, refetch: settingsLoad.refetch }
+      : { data: settings.current, isLoading: false },
   useAdminSensitiveStatus: () => ({ data: { configured: [], managed_by_env: [] }, isError: false }),
   useUpdateServerSettings: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCheckAdminSettingsConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -140,5 +144,26 @@ describe("AI text model edits stay where the admin can see them", () => {
 
     // Only the switch to the plan is staged.
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+  });
+});
+
+describe("AI settings that fail to load", () => {
+  beforeEach(() => {
+    settingsLoad.failed = true;
+    settingsLoad.refetch = vi.fn();
+  });
+  afterEach(() => {
+    settingsLoad.failed = false;
+  });
+
+  it("shows a load error with Retry and no form", async () => {
+    render(page);
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(settingsLoad.refetch).toHaveBeenCalledOnce();
   });
 });

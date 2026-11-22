@@ -66577,6 +66577,12 @@
       "value": "\u200F\u202EConnect each AI provider once, then assign providers and models for text, speech-to-text, and embeddings below.\u202C"
     }
   ],
+  "web.admin.settings.ai.page.loadError": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAI settings could not be loaded. Retry before editing.\u202C"
+    }
+  ],
   "web.admin.settings.ai.page.loading": [
     {
       "type": 0,
