@@ -75,13 +75,13 @@ export function UnsupportedFilesSection({ libraries }: { libraries: Library[] })
       onOpenChange={setOpen}
     >
       <div className="relative mb-2">
-        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+        <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
         <Input
           placeholder="Filter by folder, file, library, or reason..."
           aria-label="Filter files not cataloged"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-8 pl-8 text-xs"
+          className="h-8 ps-8 text-xs"
         />
       </div>
       {isError ? (
@@ -115,7 +115,7 @@ export function UnsupportedFilesSection({ libraries }: { libraries: Library[] })
                 <TableHead>Folder</TableHead>
                 <TableHead>Library</TableHead>
                 <TableHead>Type</TableHead>
-                <TableHead className="text-right">Files</TableHead>
+                <TableHead className="text-end">Files</TableHead>
                 <TableHead>First found</TableHead>
               </TableRow>
             </TableHeader>
@@ -131,7 +131,7 @@ export function UnsupportedFilesSection({ libraries }: { libraries: Library[] })
                       <TableCell className="max-w-[20rem]">
                         <button
                           type="button"
-                          className="flex max-w-full items-center gap-2 text-left"
+                          className="flex max-w-full items-center gap-2 text-start"
                           aria-expanded={isExpanded}
                           aria-controls={isExpanded ? detailsId : undefined}
                           onClick={() => setExpandedKey(isExpanded ? null : rowKey)}
@@ -139,8 +139,8 @@ export function UnsupportedFilesSection({ libraries }: { libraries: Library[] })
                           <ChevronRight
                             aria-hidden="true"
                             className={cn(
-                              "text-muted-foreground h-3.5 w-3.5 shrink-0 transition-transform",
-                              isExpanded && "rotate-90",
+                              "text-muted-foreground h-3.5 w-3.5 shrink-0 transition-transform rtl:rotate-180",
+                              isExpanded && "rotate-90 rtl:rotate-90",
                             )}
                           />
                           <span className="truncate text-sm font-medium">
@@ -157,7 +157,7 @@ export function UnsupportedFilesSection({ libraries }: { libraries: Library[] })
                           {REASON_LABELS[group.reason] ?? group.reason}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
+                      <TableCell className="text-muted-foreground text-end text-xs tabular-nums">
                         {group.file_count}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-xs tabular-nums">
