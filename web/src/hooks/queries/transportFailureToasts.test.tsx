@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -121,5 +121,43 @@ describe("write failures whose error text is developer English", () => {
     );
     expect(audioText).toBe("Failed to save audio preference");
     expect(subtitleText).toBe("Failed to save subtitle preference");
+  });
+
+  it("show one offline notice for a burst of saves made offline", async () => {
+    const admin = renderHook(() => useUpdateAdminUserSetting(), { wrapper }).result;
+    const audio = renderHook(() => useSetAudioPreference(), { wrapper }).result;
+    mocks.toastError.mockClear();
+    onlineManager.setOnline(false);
+    try {
+      await act(() =>
+        Promise.all([
+          admin.current
+            .mutateAsync({
+              userId: 1,
+              key: SETTING_KEYS.NAV_SHORTCUTS,
+              identity: { scope: "account" },
+              value: "{}",
+            })
+            .catch(() => undefined),
+          audio.current
+            .mutateAsync({
+              prefId: "series-1",
+              trackIndex: 0,
+              track: { index: 0, language: "eng", codec: "aac", channels: 2 } as never,
+            })
+            .catch(() => undefined),
+        ]),
+      );
+    } finally {
+      onlineManager.setOnline(true);
+    }
+    // Sonner shows toasts that share an id as one.
+    const offline = [
+      "You're offline, so this change wasn't saved",
+      { id: "setting-write-offline" },
+    ];
+    expect(mocks.toastError.mock.calls).toEqual([offline, offline]);
+    expect(mocks.setAdminSettingValue).not.toHaveBeenCalled();
+    expect(mocks.v2).not.toHaveBeenCalled();
   });
 });

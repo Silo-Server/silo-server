@@ -20,7 +20,7 @@ import type {
 } from "@/api/types";
 
 import { settingsKeys, subtitleKeys } from "./keys";
-import { settingWriteOptions } from "./settingWriteOffline";
+import { settingWriteOptions, toastSettingWriteError } from "./settingWriteOffline";
 import { invalidateItemDetails, runOrderedPreferenceWrite } from "./trackPreferences";
 import { canonicalLanguageWireValue } from "@/lib/languageNames";
 
@@ -196,7 +196,7 @@ export function useDeleteSubtitlePreference() {
       void queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
     },
     onError: (err) => {
-      toast.error(readableErrorText(err, t("web.common.toast.subtitles.resetPreferenceFailed")));
+      toastSettingWriteError(err, t("web.common.toast.subtitles.resetPreferenceFailed"));
     },
   });
 }
@@ -251,7 +251,7 @@ export function useSetSubtitlePreference() {
       void invalidateItemDetails(queryClient);
     },
     onError: (err) => {
-      toast.error(readableErrorText(err, t("web.common.toast.subtitles.savePreferenceFailed")));
+      toastSettingWriteError(err, t("web.common.toast.subtitles.savePreferenceFailed"));
     },
   });
 }

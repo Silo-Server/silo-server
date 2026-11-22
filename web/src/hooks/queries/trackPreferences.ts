@@ -1,5 +1,4 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 
 import { t } from "@/i18n";
 
@@ -9,7 +8,7 @@ import {
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
 import type { VersionAudioTrack } from "@/api/types";
-import { readableErrorText, v2 } from "@/api/v2/request";
+import { v2 } from "@/api/v2/request";
 import { buildAudioPreferenceBody } from "@/player/utils/audioChoicePersistence";
 import {
   runTrackPreferenceWrite,
@@ -17,7 +16,7 @@ import {
 } from "@/player/utils/trackPreferenceWrites";
 
 import { itemKeys } from "./keys";
-import { settingWriteOptions } from "./settingWriteOffline";
+import { settingWriteOptions, toastSettingWriteError } from "./settingWriteOffline";
 
 // Track preferences feed the effective defaults on item details; a
 // series-keyed preference feeds every episode's detail, so invalidate broadly.
@@ -84,7 +83,7 @@ export function useSetAudioPreference() {
       void invalidateItemDetails(queryClient);
     },
     onError: (err) => {
-      toast.error(readableErrorText(err, t("web.player.tracks.saveAudioFailed")));
+      toastSettingWriteError(err, t("web.player.tracks.saveAudioFailed"));
     },
   });
 }
@@ -111,7 +110,7 @@ export function useDeleteAudioPreference() {
       void invalidateItemDetails(queryClient);
     },
     onError: (err) => {
-      toast.error(readableErrorText(err, t("web.player.tracks.resetAudioFailed")));
+      toastSettingWriteError(err, t("web.player.tracks.resetAudioFailed"));
     },
   });
 }

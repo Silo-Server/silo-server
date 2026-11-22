@@ -33,7 +33,7 @@ import {
 export { adminUserFromV2 } from "@/api/v2/adminUsers";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { adminKeys } from "../keys";
-import { settingWriteOptions } from "../settingWriteOffline";
+import { settingWriteOptions, toastSettingWriteError } from "../settingWriteOffline";
 import { useAdminUserProfiles } from "./history";
 import { toast } from "sonner";
 import { t } from "@/i18n";
@@ -339,7 +339,7 @@ export function useUpdateAdminUserSetting() {
       });
     },
     onError: (err) => {
-      toast.error(readableErrorText(err, t("web.admin.common.users.settingSaveFailed")));
+      toastSettingWriteError(err, t("web.admin.common.users.settingSaveFailed"));
     },
   });
 }
@@ -374,7 +374,7 @@ export function useDeleteAdminUserSetting() {
       });
     },
     onError: (err) => {
-      toast.error(readableErrorText(err, t("web.admin.common.users.settingResetFailed")));
+      toastSettingWriteError(err, t("web.admin.common.users.settingResetFailed"));
     },
   });
 }
@@ -477,7 +477,7 @@ export function useUpdateAdminUserDeviceSetting() {
       });
     },
     onError: (err) => {
-      toast.error(readableErrorText(err, t("web.admin.common.users.deviceOverrideSaveFailed")));
+      toastSettingWriteError(err, t("web.admin.common.users.deviceOverrideSaveFailed"));
     },
   });
 }
@@ -513,7 +513,7 @@ export function useDeleteAdminUserDeviceSetting() {
       });
     },
     onError: (err) => {
-      toast.error(readableErrorText(err, t("web.admin.common.users.deviceOverrideResetFailed")));
+      toastSettingWriteError(err, t("web.admin.common.users.deviceOverrideResetFailed"));
     },
   });
 }
@@ -579,7 +579,7 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
     },
     onError: (err, variables) => {
       invalidateAdminDeviceCaches(queryClient, variables.userId, authority);
-      toast.error(readableErrorText(err, t("web.admin.common.users.resetAllFailed")));
+      toastSettingWriteError(err, t("web.admin.common.users.resetAllFailed"));
     },
   });
 }
