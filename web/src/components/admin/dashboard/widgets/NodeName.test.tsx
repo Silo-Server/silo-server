@@ -1,0 +1,42 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+
+import { NodeName } from "./NodeName";
+
+/** The name box's `dir` and the text of each piece it shows. */
+function pieces(name: string) {
+  const html = renderToStaticMarkup(<NodeName name={name} />);
+  const dir = /^<span[^>]* dir="([^"]+)"/.exec(html)?.[1];
+  const texts = [...html.matchAll(/<span class="[^"]*">([^<]*)<\/span>/g)].map((m) => m[1]);
+  return { dir, texts };
+}
+
+describe("NodeName", () => {
+  it("keeps the end of a Latin name and cuts an Arabic one between words", () => {
+    expect(pieces("gpu-transcode-frankfurt-east-rack-07")).toEqual({
+      dir: "ltr",
+      texts: ["gpu-transcode-frankfurt-", "east-rack-07"],
+    });
+    expect(pieces("خادم البث الرئيسي في فرانكفورت")).toEqual({
+      dir: "rtl",
+      texts: ["خادم البث الرئيسي ", "في فرانكفورت"],
+    });
+  });
+
+  it("doesn't cut a name where its pieces would read in a different order", () => {
+    // Brackets pair across the whole name, a mark sets the direction of the text
+    // after it, and a Syriac first letter makes the name right to left.
+    for (const name of [
+      "ܬܪܢܣܟܘܕ-worker-east-01",
+      "gpu אבג(דהו abc12345678)",
+      "\u200fgpu-transcode-frankfurt-east-rack-07",
+    ]) {
+      expect(pieces(name)).toEqual({ dir: "auto", texts: [name] });
+    }
+  });
+
+  it("doesn't start the end piece with a zero-width joiner", () => {
+    const name = "render-node-\u{1f468}\u200d\u{1f469}\u200d\u{1f467}-family-box";
+    expect(pieces(name).texts.at(-1)?.startsWith("\u200d")).toBe(false);
+  });
+});
