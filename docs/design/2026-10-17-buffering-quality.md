@@ -351,7 +351,7 @@ a higher-priority notice holds the slot.
 
 | Event | Outcome |
 | --- | --- |
-| Trigger fires on Auto | Send a `quality_change` replan with `quality_preference: "auto"`, `bandwidth_estimate_kbps` set to the step-down estimate, and `bandwidth_estimate_source: "observed_rebuffer"`. Add `observed_throughput_kbps`, the throughput the plan has received so far, measured as `plan_summary` `throughput_kbps` (see *Playback samples*), and omit it when the plan has not measured one or the network changed while it played. Nothing shows yet. |
+| Trigger fires on Auto | Send a `quality_change` replan with `quality_preference: "auto"` and `bandwidth_estimate_kbps` set to the step-down estimate. Add `bandwidth_estimate_source: "observed_rebuffer"` and `observed_throughput_kbps`, the throughput the plan has received so far, timed the way *Slow-link evidence* describes (the same reading as `plan_summary` `throughput_kbps` where the client sends that sample; see *Playback samples*), only when the client has slow-link evidence (see *Slow-link evidence*). Otherwise send the estimate with no source: the server plans under it but does not learn it. Nothing shows yet. |
 | A plan fails before its first frame because the client's own start deadline passed while the player waited for media, whether it is the attempt's first plan or an adopted replacement still loading | On Auto in `always` mode, when the plan's media measurably arrived more slowly than its delivered bitrate, send the replan of the row above instead of a `failure_recovery` replan at the same quality. Otherwise, and in the cases listed under this table, the plan keeps the platform's failure path. |
 | The adopted plan is lower | Show the undo pill: the caption **"Quality lowered to stop buffering"** over the action **"Restore quality"**, with its timer running. Focus-driven platforms move focus to **Restore quality**, unless the viewer is mid-scrub or has a menu open (the intro-skip rule). A plan is lower when its delivered bitrate is below the delivered bitrate of the plan the lowering left. A plan with no delivered bitrate counts as lower unless it carries `quality_reduction_unavailable`. |
 | **Restore quality** | Send a `quality_change` replan with `quality_preference: "auto"`, no estimate, and `learned_limit: "clear"`. The title is answered at the restored quality. |
@@ -362,8 +362,8 @@ A missed start deadline lowers only under these rules:
 
 - The client has evidence that the link is too slow: it measured the plan's
   throughput, as for `throughput_kbps` (see *Playback samples*) or with the
-  platform's closest equivalent, such as AVPlayer's access log on the relay
-  hop, and it is below the delivered bitrate. The lowering carries it as
+  platform's closest equivalent that follows *Slow-link evidence*, and it is
+  below the delivered bitrate. The lowering carries it as
   `observed_throughput_kbps`. Without that evidence the failure path runs,
   and its `failure_recovery` keeps the server's exclusion of the failed route.
   A plan that received no bytes is in an outage; one that received them at
@@ -498,6 +498,35 @@ the server it talks to, so it keeps the revision check every web setting uses.
 The existing **Maximum bitrate** setting (`playback.max_bitrate_kbps`) remains
 the way to cap Auto by hand. It reaches the server as `bandwidth_cap_kbps`, and
 a learned limit never raises it.
+
+### Slow-link evidence
+
+A client's connection speed is never measured by how long the server takes to
+produce what the client is waiting for. A transcode slower than real time, a
+subtitle burn-in, a slow source read or a node starting up holds a request
+silent and then sends it quickly; that is server work, not a slow link.
+
+- Throughput is timed from a response's first body byte to its last, and only
+  while bytes flow. Time to first byte, and time between requests, never
+  count. A response that received data for less than 1 second gives no
+  reading, and a plan whose combined rate is under 100 kbps gives none
+  either, as for a `throughput_kbps` sample (see *Playback samples*). Apple
+  measures server HLS on AetherEngine's relay, per media segment;
+  AVPlayer's access log on the relay hop counts the wait before the first
+  byte and is not evidence. That relay reading is the evidence and the
+  lowering's `observed_throughput_kbps`, but not a `throughput_kbps` sample:
+  Apple still sends none on server HLS (see *Playback samples*).
+- A client has slow-link evidence when that throughput for the playing plan is
+  below its delivered bitrate. This applies before and after the plan's first
+  frame. A reading taken before the network changed while the plan played is
+  no evidence: the server would record it against the connection in use now.
+- A lowering without evidence still lowers: a smaller output also eases a
+  server that cannot keep up. It carries the estimate with no source, so the
+  server plans under it and records nothing.
+- The server does not rely on this alone: it also declines to learn from an
+  `observed_rebuffer` replan when it can see that its own transcode output
+  paced playback (the learned-limit recording rules in
+  `docs/architecture/playback-protocol-v3.md`).
 
 ## Learned limit (server)
 
@@ -837,8 +866,9 @@ stripe, so their rule does not change.
   127.0.0.1, so its access log only sees that local hop. AetherEngine does not
   yet report a total across every reader of a source, so Apple omits the sample
   while a second reader may share the link (an embedded or secondary subtitle
-  whose forward prefetch is running) and on server HLS, where the relay has no
-  byte count.
+  whose forward prefetch is running) and on server HLS. There the relay times
+  each media segment, and Apple uses that reading only as a lowering's
+  evidence (see *Slow-link evidence*).
 
 The server keeps one sample per device and connection as `playback_sample`. A
 new sample replaces it when it is higher, or when the kept one is older than the
@@ -1020,7 +1050,7 @@ in parallel:
 | --- | --- |
 | Feature | The server advertises `buffering_quality_v1` in the `/api/v2` capability `features` and native v2 start/replan response `server_features`. A client that sees it adds `buffering_quality_v1` to `client_features` on start and replan, and only then sends the fields below, because the server rejects unknown fields. The server records and applies learned limits only on requests that carry the feature. Against a server without it, clients still run the controller and send the same replans without the new fields; nothing is learned, and the limit row in Settings stays hidden. |
 | `bandwidth_estimate_source` | Start and replan, optional: `probe` or `observed_rebuffer`. Valid only alongside `bandwidth_estimate_kbps`; otherwise the request is a `400`. |
-| `observed_throughput_kbps` | Start and replan, optional integer, 100 to 1,000,000. Valid only with `bandwidth_estimate_source: "observed_rebuffer"`; otherwise the request is a `422`, as for the other buffering-quality validation. The throughput the plan that kept buffering has received so far, measured as `plan_summary` `throughput_kbps`. The server plans with, and learns, `min(bandwidth_estimate_kbps, observed_throughput_kbps)`. |
+| `observed_throughput_kbps` | Start and replan, optional integer, 100 to 1,000,000. Valid only with `bandwidth_estimate_source: "observed_rebuffer"`; otherwise the request is a `422`, as for the other buffering-quality validation. The throughput the plan that kept buffering has received so far, timed the way *Slow-link evidence* describes, as `plan_summary` `throughput_kbps` is. The server plans with, and learns, `min(bandwidth_estimate_kbps, observed_throughput_kbps)`. |
 | `learned_limit` | Start and replan, optional: `ignore` or `clear`. |
 | `playback_plan.bandwidth_limit` | Optional object: `kbps` (integer), `source` (`"observed_rebuffer"`), `expires_at` (RFC 3339). Present only when the learned limit lowered the plan. |
 | Connection endpoints | `GET /api/v2/playback/connection`, and `DELETE /api/v2/playback/connection/learned-limit` returning 204. Both exist when the feature is advertised. They use normal authenticated profile-scoped headers and `X-Silo-Device-Id`; no installation ID or body is required. The reset without `X-Silo-Device-Id` is a `422`. |
@@ -1059,9 +1089,11 @@ events are:
   The vectors have no case with a replacement adopted before the attempt has
   played, and no event for a missed start deadline. They carry no
   throughput either: a client's harness reports a measurement below every
-  plan's delivered bitrate, so a case that lowers before the attempt has
-  played (`slow_start`) has the evidence *Trigger* requires. Each client
-  covers those rules, a start without that evidence, and the deadline's
+  plan's delivered bitrate. Every Auto lowering therefore has slow-link
+  evidence (see *Slow-link evidence*) and carries `observed_rebuffer`, and a
+  case that lowers before the attempt has played (`slow_start`) has the
+  evidence *Trigger* requires. Each client covers those rules, a start
+  without that evidence, an Auto lowering without it, and the deadline's
   fallback in its own tests.
 - The pill answers `select_lower`, `select_keep`, `select_restore` and `back`.
 - `pick_sent` and `pick_refused`: the viewer's quality pick is sent, or the

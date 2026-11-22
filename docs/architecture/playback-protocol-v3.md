@@ -2300,10 +2300,11 @@ can measure use the bandwidth probe ([playback-api.md](../playback-api.md#bandwi
 A transcode is a single HLS rendition, so the player cannot step down on its
 own. A client on `auto` whose playback keeps rebuffering sends a
 `quality_change` replan that keeps `quality_preference: "auto"` and lowers
-`bandwidth_estimate_kbps` below the bitrate that stalled, with
-`bandwidth_estimate_source: "observed_rebuffer"`; the planner then re-runs
-`auto` against the lower estimate, and the server records a learned limit
-(see [Buffering quality](#buffering-quality-native-v2)). The
+`bandwidth_estimate_kbps` below the bitrate that stalled; the planner then
+re-runs `auto` against the lower estimate. With slow-link evidence the replan
+also carries `bandwidth_estimate_source: "observed_rebuffer"`, and the server
+records a learned limit (see [Buffering quality](#buffering-quality-native-v2));
+without it the replan has no source and records nothing. The
 [buffering-quality design](../design/2026-10-17-buffering-quality.md) defines
 when every client does this: after two stalls of at least a second within two
 minutes, or one stall of six seconds. Stall time in the first ten seconds of a
@@ -2685,12 +2686,47 @@ profile check the account's registry after their delete commits.
 Only a start or replan that the client sent with
 `bandwidth_estimate_source: "observed_rebuffer"` on Auto records a limit, and
 recording restarts its 24 hours. `observed_throughput_kbps` is the throughput
-the plan that kept buffering received, measured as `plan_summary`
-`throughput_kbps`; the server plans with, and records, the lower of it and
+the plan that kept buffering received, timed from first byte to last as
+`plan_summary` `throughput_kbps` is, even where the client sends no such
+sample; the server plans with, and records, the lower of it and
 `bandwidth_estimate_kbps`. An estimate without a source, which is how a
 client repeats its kept step-down estimate on later replans, records nothing.
 A seek reanchor reuses the playing recipe and a seek failure recovery replays
 the stored start request; neither records nor clears a limit.
+
+A stall the server's own transcode caused is not the link's. When a replan
+would record an `observed_rebuffer` estimate while the playing transcode has no
+lead over the client (the client has fetched every produced segment but at
+most the newest), the encoder was slower than real time, as a heavy subtitle
+burn-in can be, and the server plans the replan under the estimate but records
+no limit. An encoder that keeps up runs ahead of the client up to the throttle
+window, so a slow link leaves it far ahead. A transcode on the replica that
+answers the replan is judged from its live session. A transcode on a remote
+node is judged by that node, which the replica asks with the signed
+`GET /transcode/{session_id}/output-bound` (see
+[worker HTTP contracts](worker-http-protocol.md)); the node counts a segment
+fetched when the relay that delivered it acknowledges it, so the answer is the
+same whichever API replica or proxy relays the stream.
+
+A segment counts as fetched once its download completed, output an earlier
+FFmpeg generation left behind is no lead, and a client whose transcode is
+restarting is waiting on the server. An FFmpeg that failed is judged like a
+running one, by its output's lead over the client. A progressive remux has no
+segment lead and is never judged bound.
+
+When the answer is unknown, the stall counts as the server's and records
+nothing: the replan found a node on the session's route unreachable (its
+transcode node or its egress proxy, whatever the delivery), the node no longer
+runs the transport, the read failed or took longer than two seconds, or the
+session plays HLS but its transcode runs neither on the replica that answers
+nor on a node, as while it is being rebuilt or when another API replica runs
+it. A node older than the read answers it as unknown, so its transcodes teach
+no limit until it is upgraded. Each is a
+server-side fault that stalls a client on any link, as a node dying mid-stream
+does. Skipping the record loses only memory, since the replan still plans under
+the estimate and a slow link stalls and is learned again, while a wrong limit
+lowers every file the device plays for a day. The read is made only for a
+replan that would otherwise record.
 
 An Auto start or replan without `bandwidth_estimate_kbps` plans with the
 connection's current reading, the one `GET /api/v2/playback/connection`
