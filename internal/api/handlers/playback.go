@@ -3718,7 +3718,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 	// completes answers the retryable verdict below instead of a 404 or a
 	// restart, because a restart would not make the bytes arrive.
 	if err != nil && errors.Is(err, playback.ErrSegmentIncomplete) {
-		segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, transcodeSession.SegmentCompletionBudget())
+		segmentLease, err = transcodeSession.WaitForOpenSegmentGenerationContext(r.Context(), segmentName, requestedGeneration, transcodeSession.SegmentCompletionBudget())
 	}
 	if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && requestedGeneration == "" {
 		// Switchover overlap: a same-session replan publishes its successor
@@ -3795,9 +3795,9 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 					"playback_session_id", sessionID,
 				)
 				if decision.Reason == "near_produced_head" {
-					segmentLease, err = transcodeSession.WaitForOpenSegmentWithStall(segmentName, decision.WaitTimeout, playback.SegmentStallTimeoutFor(transcodeSession.Opts()))
+					segmentLease, err = transcodeSession.WaitForOpenSegmentWithStallGeneration(segmentName, requestedGeneration, decision.WaitTimeout, playback.SegmentStallTimeoutFor(transcodeSession.Opts()))
 				} else {
-					segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, decision.WaitTimeout)
+					segmentLease, err = transcodeSession.WaitForOpenSegmentGenerationContext(r.Context(), segmentName, requestedGeneration, decision.WaitTimeout)
 				}
 				if errors.Is(err, playback.ErrSegmentStalled) {
 					stalledHead := transcodeSession.SegmentProgress(time.Now()).ProducedHead

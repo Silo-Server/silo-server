@@ -190,6 +190,7 @@ vi.mock("hls.js", () => ({
       FRAG_LOAD_ERROR: "fragLoadError",
     };
     static isSupported = () => hlsJS.supported;
+    static DefaultConfig = { loader: class {} };
 
     handlers = new Map<string, (event: string, data: unknown) => void>();
     startLoad = hlsJS.startLoad;
@@ -4832,6 +4833,69 @@ describe("VideoPlayer source timeline", () => {
       // The element's own clock, not the media timeline: a start position of
       // 94 would ask hls.js for a position past the refetched window.
       expect((instance.config as { startPosition?: number }).startPosition).toBe(0);
+    });
+
+    // hls.js queues its own retry of a fragment it could not load. A 412 is
+    // the server's generation fence, so that retry names a dead URL and can
+    // only answer 412 again. One fence is answered once: stop the load (which
+    // drops the queued retry), refetch the playlist, and ignore the retries
+    // that were already in flight. A different generation is a new fence.
+    it("answers a fenced segment once per generation and never replays it", async () => {
+      hlsJS.supported = true;
+      vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+      const { container } = renderPlayer({ plan: anchoredPlan });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+
+      const instance = hlsJS.latest!;
+      Object.defineProperty(instance, "url", {
+        configurable: true,
+        value: anchoredPlan.stream.url,
+      });
+      Object.defineProperty(instance, "config", {
+        configurable: true,
+        value: { startPosition: 0 },
+      });
+      hlsJS.stopLoad.mockClear();
+      hlsJS.startLoad.mockClear();
+      hlsJS.loadSource.mockClear();
+
+      const stale = (generation: string) => ({
+        fatal: false,
+        type: "networkError",
+        details: "fragLoadError",
+        response: { code: 412 },
+        frag: {
+          sn: 47,
+          url: `/playback/transcode/session-1/seg_00047.ts?sgen=${encodeURIComponent(generation)}`,
+        },
+      });
+      const first = stale("session-1:inc:1");
+
+      act(() => instance.emit("error", first));
+      expect(hlsJS.stopLoad).toHaveBeenCalledOnce();
+      expect(hlsJS.loadSource).toHaveBeenCalledOnce();
+
+      // The retries hls.js had already queued for that fragment. Each one is
+      // a 412 from the dead URL; the transport stops, but the fence does not
+      // refetch or replay it.
+      act(() => instance.emit("error", first));
+      act(() => instance.emit("error", first));
+      expect(hlsJS.stopLoad).toHaveBeenCalledTimes(3);
+      expect(hlsJS.loadSource).toHaveBeenCalledOnce();
+      expect(hlsJS.startLoad).not.toHaveBeenCalled();
+
+      // A rebuilt generation is a new fence: it gets its own single answer,
+      // and the playlist gate makes hls.js fetch that generation's URLs.
+      const rebuilt = stale("session-1:inc:2");
+      act(() => instance.emit("error", rebuilt));
+      expect(hlsJS.stopLoad).toHaveBeenCalledTimes(4);
+      expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
+      expect(hlsJS.startLoad).not.toHaveBeenCalled();
     });
 
     // A transport a reanchor attaches starts on the old frame while it loads.

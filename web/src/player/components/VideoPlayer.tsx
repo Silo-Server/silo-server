@@ -83,6 +83,11 @@ import {
   recoverFromStaleGeneration,
   StartupGuard,
 } from "../utils/startupGuard";
+import {
+  createFencedPlaylistLoader,
+  createPlaylistGenerationGate,
+  generationTokenFromSegmentUrl,
+} from "../utils/fencedPlaylist";
 import type { DecodeErrorCarrier } from "../decode-failure";
 import {
   SegmentRetryBudget,
@@ -3489,6 +3494,10 @@ export function VideoPlayer({
     // does not refetch the playlist; it reanchors (see the hls.js ERROR
     // handler), so this only counts the in-place replay recovery.
     let staleGenerationRecoveries = 0;
+    // The fenced segment the transport has already answered. hls.js queues its
+    // own retry of a failed fragment before this listener runs, and a further
+    // 412 for the same URL is that retry arriving, not a new fence.
+    let fencedSegmentKey: string | null = null;
     // The pending seek target a stale-generation fence already sent back as a
     // reanchor. A second fence for the same target is not re-sent: it falls
     // through to the ordinary failure path, so one seek cannot loop on replans.
@@ -3812,6 +3821,28 @@ export function VideoPlayer({
               timeoutRetry: { maxNumRetry: 3, retryDelayMs: 500, maxRetryDelayMs: 3000 },
               errorRetry: { maxNumRetry: 3, retryDelayMs: 500, maxRetryDelayMs: 3000 },
             };
+            // A 412 names a generation the server has replaced. A playlist
+            // fetched before the successor is published lists the dead
+            // generation again, and hls.js would request (and retry) those
+            // URLs. The gate holds such a playlist back until the server
+            // serves the rebuilt generation, so hls.js only ever sees live
+            // segment URLs.
+            const playlistGeneration = createPlaylistGenerationGate(() => {
+              if (destroyed) return;
+              hls?.stopLoad();
+              if (
+                !reportCurrentPlanFailureRef.current({
+                  classification: "network_error",
+                  message: "HLS kept addressing a replaced segment generation.",
+                })
+              ) {
+                setPlayerError("Playback failed. Please try again.", true);
+              }
+            });
+            const defaultLoader = Hls.DefaultConfig?.loader;
+            const FencedPlaylistLoader = defaultLoader
+              ? createFencedPlaylistLoader(defaultLoader, playlistGeneration)
+              : undefined;
 
             hls = new Hls({
               lowLatencyMode: false,
@@ -3829,6 +3860,7 @@ export function VideoPlayer({
               fragLoadPolicy: {
                 default: retryingLoadPolicy,
               },
+              ...(FencedPlaylistLoader ? { pLoader: FencedPlaylistLoader } : {}),
             });
 
             // A fragment load that errors is neither aborted nor given an
@@ -3869,12 +3901,19 @@ export function VideoPlayer({
                 isStaleGenerationError(data as DecodeErrorCarrier)
               ) {
                 const seekTarget = pendingSeekTimeRef.current;
+                const fenceToken = generationTokenFromSegmentUrl(data.frag?.url ?? data.url);
+                const fenceKey = fenceToken ?? data.frag?.url ?? data.url ?? null;
+                // hls.js has already queued its own retry of this fragment
+                // for the next tick. Every one of those requests names the
+                // same fenced URL and answers 412 again, so stop the load
+                // before it can make one. This runs for a seek and for
+                // playback alike: only a refetch (or reanchor) may resume.
+                hls?.stopLoad();
                 if (seekTarget !== null) {
-                  // hls.js has already queued its own retry of this fragment
-                  // for the next tick. Every one of those requests names the
-                  // same fenced URL and answers 412 again, so stop the load
-                  // before it can make one: the replan brings a generation
-                  // that can serve the seek, this one cannot.
+                  // A reanchor can legitimately reuse the generation (a target
+                  // inside its window), so its refetched playlist must not be
+                  // held back by the dead segment's token.
+                  playlistGeneration.fence(null);
                   if (hls) {
                     stoppedHlsForSeekRef.current = {
                       hls,
@@ -3882,7 +3921,6 @@ export function VideoPlayer({
                       transportRevision: effectiveTransportRevision,
                     };
                   }
-                  hls?.stopLoad();
                   if (staleSeekReanchorTarget !== seekTarget) {
                     staleSeekReanchorTarget = seekTarget;
                     console.warn(
@@ -3897,6 +3935,13 @@ export function VideoPlayer({
                   // to end in). Wait for the reanchor instead.
                   return;
                 }
+                // One fence is answered once. A later 412 for the same URL is
+                // hls.js's queued retry (or a stale playlist this transport
+                // already refetched); the URL is dead, so it must not buy
+                // another refetch or another request.
+                if (fenceKey !== null && fenceKey === fencedSegmentKey) return;
+                if (fenceKey !== null) fencedSegmentKey = fenceKey;
+                if (fenceToken !== null) playlistGeneration.fence(fenceToken);
                 if (!destroyed && staleGenerationRecoveries < MAX_STALE_GENERATION_RECOVERIES) {
                   staleGenerationRecoveries += 1;
                   // hls.js's startPosition is on the playlist's own clock, the
@@ -3921,6 +3966,21 @@ export function VideoPlayer({
                     return;
                   }
                 }
+                // The refetch budget is spent (or the playlist URL is gone).
+                // The transport is already stopped; letting the fatal branch
+                // below retry would replay the fenced fragment. Surface the
+                // ordinary retryable failure so the session can replan.
+                if (!destroyed) {
+                  if (
+                    !reportCurrentPlanFailureRef.current({
+                      classification: "network_error",
+                      message: "HLS kept addressing a replaced segment generation.",
+                    })
+                  ) {
+                    setPlayerError("Playback failed. Please try again.", true);
+                  }
+                }
+                return;
               }
               if (
                 data.type === Hls.ErrorTypes.NETWORK_ERROR &&

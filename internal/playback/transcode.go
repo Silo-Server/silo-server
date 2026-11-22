@@ -5311,7 +5311,18 @@ func (s *TranscodeSession) WaitForOpenSegment(name string, timeout time.Duration
 
 // WaitForOpenSegmentContext stops polling when the request context ends.
 func (s *TranscodeSession) WaitForOpenSegmentContext(ctx context.Context, name string, timeout time.Duration) (*SegmentLease, error) {
-	return s.waitForOpenSegmentContext(ctx, name, timeout, 0)
+	return s.waitForOpenSegmentContext(ctx, name, timeout, 0, "")
+}
+
+// WaitForOpenSegmentGenerationContext is WaitForOpenSegmentContext for a
+// request that named a segment generation. A wait can outlast the generation
+// it belongs to (an in-place restart rotates it while the request is still
+// ahead of the produced head). The old token cannot be served from that
+// generation's files, so the wait answers the stale-generation verdict at the
+// rotation instead of spending its whole head budget on bytes the fence will
+// refuse. An empty token keeps the unfenced behavior.
+func (s *TranscodeSession) WaitForOpenSegmentGenerationContext(ctx context.Context, name, generationToken string, timeout time.Duration) (*SegmentLease, error) {
+	return s.waitForOpenSegmentContext(ctx, name, timeout, 0, generationToken)
 }
 
 // SegmentCompletionBudget is how long a request may wait for a name this
@@ -5330,6 +5341,12 @@ func (s *TranscodeSession) SegmentCompletionBudget() time.Duration {
 // as a dead segment.
 func (s *TranscodeSession) WaitForOpenSegmentWithStall(name string, timeout, stall time.Duration) (*SegmentLease, error) {
 	return s.waitForOpenSegment(name, timeout, stall)
+}
+
+// WaitForOpenSegmentWithStallGeneration is WaitForOpenSegmentWithStall for a
+// generation-scoped request; see WaitForOpenSegmentGenerationContext.
+func (s *TranscodeSession) WaitForOpenSegmentWithStallGeneration(name, generationToken string, timeout, stall time.Duration) (*SegmentLease, error) {
+	return s.waitForOpenSegmentContext(context.Background(), name, timeout, stall, generationToken)
 }
 
 // checkSegmentStall samples produced-head progress at most twice a second and
@@ -5362,10 +5379,10 @@ func (s *TranscodeSession) checkSegmentStall(now time.Time, stall time.Duration,
 }
 
 func (s *TranscodeSession) waitForOpenSegment(name string, timeout, stall time.Duration) (*SegmentLease, error) {
-	return s.waitForOpenSegmentContext(context.Background(), name, timeout, stall)
+	return s.waitForOpenSegmentContext(context.Background(), name, timeout, stall, "")
 }
 
-func (s *TranscodeSession) waitForOpenSegmentContext(ctx context.Context, name string, timeout, stall time.Duration) (*SegmentLease, error) {
+func (s *TranscodeSession) waitForOpenSegmentContext(ctx context.Context, name string, timeout, stall time.Duration, expectedGeneration string) (*SegmentLease, error) {
 	deadline := time.After(timeout)
 	numbered := false
 	if stall > 0 {
@@ -5388,8 +5405,19 @@ func (s *TranscodeSession) waitForOpenSegmentContext(ctx context.Context, name s
 		return ErrSegmentNotFound
 	}
 	for {
+		// A request minted against a replaced generation cannot be served from
+		// its successor's files at the same name. Answer the fence now rather
+		// than waiting out a head budget the successor will never spend on the
+		// old token.
+		if expectedGeneration != "" && !s.MatchesGenerationToken(expectedGeneration) {
+			return nil, ErrStaleSegmentGeneration
+		}
 		segment, err := s.OpenSegment(name)
 		if err == nil {
+			if expectedGeneration != "" && !s.MatchesGenerationToken(expectedGeneration) {
+				_ = segment.Close()
+				return nil, ErrStaleSegmentGeneration
+			}
 			return segment, nil
 		}
 		if errors.Is(err, ErrSegmentIncomplete) {
