@@ -146,12 +146,20 @@ export function CollectionOptionBody({
         <span dir="auto" className="block w-fit max-w-full truncate text-sm font-semibold">
           {title}
         </span>
-        <span aria-hidden className="text-muted-foreground block truncate text-[13px]">
-          {meta}
-        </span>
-        <span id={metaId} className="sr-only">
-          {srMeta ?? meta}
-        </span>
+        {srMeta === undefined ? (
+          <span id={metaId} className="text-muted-foreground block truncate text-[13px]">
+            {meta}
+          </span>
+        ) : (
+          <>
+            <span aria-hidden className="text-muted-foreground block truncate text-[13px]">
+              {meta}
+            </span>
+            <span id={metaId} className="sr-only">
+              {srMeta}
+            </span>
+          </>
+        )}
       </span>
     </>
   );

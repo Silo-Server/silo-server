@@ -49,13 +49,12 @@ function listMeta(t: Translate, list: MDBListListSummary) {
     list.mediatype === "movie" || list.mediatype === "show"
       ? t("web.collections.templateGallery.listKind", { kind: list.mediatype })
       : null;
+  const user = list.user_name.trim();
   return (
     <MetaLine
       parts={[
-        list.user_name.trim()
-          ? t("web.collections.templateGallery.byUser", {
-              user: <LineName name={list.user_name} />,
-            })
+        user
+          ? t("web.collections.templateGallery.byUser", { user: <LineName name={user} /> })
           : null,
         kind,
         t("web.collections.metaLine.titleCount", {

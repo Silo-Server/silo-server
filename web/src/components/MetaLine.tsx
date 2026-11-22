@@ -59,10 +59,12 @@ export function MetaLine({ parts, className }: { parts: ReactNode[]; className?:
   if (groups.length === 0) return null;
   const lastIndex = groups.length - 1;
   // Screen readers put a space around each flex item, so they read an inline copy
-  // instead: words joined to a name ("김님 작성") stay joined.
+  // instead: words joined to a name ("김님 작성") stay joined. The copy is placed
+  // in the line's own box, so in a scrolling list it can't stretch the page, and
+  // it is left out of a selection, so a copied line isn't doubled.
   return (
-    <>
-      <span className="sr-only">
+    <span className="relative block">
+      <span className="sr-only select-none">
         {groups.map((group, index) => (
           <Fragment key={index}>
             {index > 0 ? SEPARATOR : null}
@@ -84,6 +86,6 @@ export function MetaLine({ parts, className }: { parts: ReactNode[]; className?:
           </Fragment>
         ))}
       </span>
-    </>
+    </span>
   );
 }
