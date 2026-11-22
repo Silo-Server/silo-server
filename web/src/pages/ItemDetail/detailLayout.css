@@ -175,6 +175,22 @@
 }
 
 @layer utilities {
+  /* The viewport only bounds the hero while detail-viewport is a size
+     container (an episode without its rail, at desktop width). There the copy
+     hugs its text, so a percentage cap would resolve against that shorter
+     height and cut off a tall action bar with room above it. Measure the cap
+     against the primary content, the box the copy may grow to fill (less the
+     copy's 4px padding at each end). */
+  @container detail-viewport (min-height: 0px) {
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-primary-content {
+      container-type: size;
+    }
+
+    .item-detail-hero[data-viewport-bounded="true"] .detail-hero-copy > .detail-action-bar {
+      max-height: calc((100cqh - 8px) * 0.65);
+    }
+  }
+
   /* Use the remaining space after shell/player chrome, not device height. */
   @container detail-viewport (max-height: 600px) {
     .item-detail-hero[data-viewport-bounded="true"] .detail-hero-layout {
@@ -183,7 +199,7 @@
     }
 
     .item-detail-hero[data-viewport-bounded="true"] .detail-hero-copy > .detail-action-bar {
-      max-height: 45%;
+      max-height: calc((100cqh - 8px) * 0.45);
       margin-top: 12px;
     }
   }
