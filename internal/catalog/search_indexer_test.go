@@ -107,6 +107,19 @@ func TestMeilisearchRankingRulesLeadWithWordsTypoProximity(t *testing.T) {
 	}
 }
 
+// An episode ties with the film or series of the same title on every rule
+// before type_rank, so type_rank must sit after attributeRank and sort (a
+// title match still beats a genre match) and before wordPosition, exactness
+// and popularity (a movie whose title starts with the search still beats an
+// episode titled exactly that).
+func TestMeilisearchRankingRulesRankEpisodesAfterMediaInOneAttribute(t *testing.T) {
+	rules, _ := catalogSearchMeilisearchSettings(DefaultMeilisearchEmbedder, false, false)["rankingRules"].([]string)
+	want := []string{"attributeRank", "sort", "type_rank:asc", "wordPosition", "exactness", "popularity:desc"}
+	if len(rules) < len(want) || !slices.Equal(rules[len(rules)-len(want):], want) {
+		t.Fatalf("rankingRules = %v, want them to end with %v", rules, want)
+	}
+}
+
 // A failed rebuild must not leave its partial index behind, even when the
 // failure is its own context being canceled, and a new rebuild clears the
 // leftovers of runs that died before they could clean up.
@@ -187,16 +200,22 @@ func TestCatalogSearchIndexerFreezesRuntimeSettings(t *testing.T) {
 	}
 }
 
+type staticSearchSettings map[string]string
+
+func (s staticSearchSettings) GetAll(context.Context) (map[string]string, error) {
+	return s, nil
+}
+
 func TestCatalogSearchIndexerWaitsForRestartBeforeUsingSavedSchemaSettings(t *testing.T) {
 	startup := DefaultCatalogSearchSettings()
 	startup.Provider = SearchProviderMeilisearch
 	startup.MeilisearchURL = "http://meilisearch:7700"
-	store := &memSettings{m: map[string]string{
+	store := staticSearchSettings{
 		SearchSettingProvider:                    SearchProviderMeilisearch,
 		SearchSettingMeilisearchURL:              startup.MeilisearchURL,
 		SearchSettingMeilisearchSemanticEnabled:  "true",
 		SearchSettingMeilisearchRebuildBatchSize: "17",
-	}}
+	}
 	indexer := NewCatalogSearchIndexerFromSettings(nil, store, startup)
 
 	runtime, configured, err := indexer.loadMeilisearchRuntime(t.Context())

@@ -11,9 +11,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Silo-Server/silo-server/internal/mediatrack"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
-	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -390,14 +390,14 @@ func adminCatalogVersion(file *models.MediaFile) AdminCatalogVersion {
 		version.DynamicRange = tonemap.DynamicRangeHDRUnknown
 	}
 	if len(file.AudioTracks) > 0 {
-		track := file.AudioTracks[playback.SelectAudioTrack(file.AudioTracks, "", nil)]
+		track := file.AudioTracks[mediatrack.SelectAudioTrack(file.AudioTracks, "", nil)]
 		if track.Codec != "" {
 			version.CodecAudio = track.Codec
 		}
 		if track.Channels > 0 {
 			version.AudioChannels = track.Channels
 		}
-		version.Atmos = playback.AtmosAudioTrack(track)
+		version.Atmos = mediatrack.AtmosAudioTrack(track)
 	}
 	return version
 }

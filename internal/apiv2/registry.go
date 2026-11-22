@@ -232,14 +232,26 @@ type Operation struct {
 	Audited bool
 }
 
+type routeKey struct {
+	method string
+	path   string
+}
+
 // Registry is the deterministic registration surface. Domain files call
 // Register on it at router build; nothing registers later.
 type Registry struct {
 	api  huma.API
 	deps Dependencies
+	// fromSnapshot is true while registering base routes against
+	// sharedRuntimeSchemas: it skips startup validation and base-only OpenAPI
+	// documentation passes (declaredResponseDescriptions,
+	// documentCapabilityScope, documentConcurrencyResponses) that already ran
+	// when building the snapshot and GenerateOpenAPI.
+	fromSnapshot bool
 
 	mu                      sync.Mutex
 	ops                     []Declared
+	routes                  map[routeKey]struct{}
 	publicCapabilitySchemas map[string]bool
 }
 
@@ -276,9 +288,6 @@ func (reg *Registry) Declared() []Declared {
 // not a request failure.
 func Register[I, O any](reg *Registry, op Operation, handler func(context.Context, *I) (*O, error)) {
 	handler = prepareCapabilityOperation(&op, handler)
-	if err := checkOperation(op); err != nil {
-		panic(fmt.Sprintf("apiv2: %s: %v", op.OperationID, err))
-	}
 	if op.Audited {
 		audited := handler
 		handler = func(ctx context.Context, in *I) (*O, error) {
@@ -286,15 +295,11 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 		}
 	}
 	var in I
-	if err := checkInput(reflect.TypeOf(in)); err != nil {
-		panic(fmt.Sprintf("apiv2: %s: %v", op.OperationID, err))
-	}
 	var out O
-	if err := checkEnums(reflect.TypeOf(out)); err != nil {
-		panic(fmt.Sprintf("apiv2: %s: %v", op.OperationID, err))
-	}
-	if err := checkConcurrencyShape(op, reflect.TypeOf(in), reflect.TypeOf(out)); err != nil {
-		panic(fmt.Sprintf("apiv2: %s: %v", op.OperationID, err))
+	inType := reflect.TypeOf(in)
+	outType := reflect.TypeOf(out)
+	if !reg.fromSnapshot {
+		validateRegistration(op, inType, outType)
 	}
 	if op.Metadata == nil {
 		op.Metadata = map[string]any{}
@@ -313,14 +318,14 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	if op.Deprecation != nil {
 		op.Metadata[metaDeprecation] = op.Deprecation
 	}
-	op.Metadata[metaIdentityOnly] = op.GuardedReceipt || declaresHeader(reflect.TypeOf(out), etagField)
-	documentDeclaration(&op, reflect.TypeOf(in))
+	op.Metadata[metaIdentityOnly] = op.GuardedReceipt || declaresHeader(outType, etagField)
+	documentDeclaration(&op, inType)
 	limit := op.MaxBodyBytes
 	if limit == 0 {
 		limit = MaxJSONBodyBytes
 	}
 	op.Metadata[metaMaxBodyBytes] = limit
-	if name := multipartFormName(reflect.TypeOf(in)); name != "" {
+	if name := multipartFormName(inType); name != "" {
 		op.Metadata[metaFormSchema] = name
 	}
 	// Huma reads through a LimitReader and reports "too large" when the count
@@ -333,19 +338,54 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 			op.BodyReadTimeout = reg.deps.bodyReadTimeout
 		}
 	}
-	reg.mu.Lock()
-	reg.ops = append(reg.ops, Declared{Method: op.Method, Path: op.Path, OperationID: op.OperationID, Class: op.Class,
+	reg.recordDeclared(Declared{Method: op.Method, Path: op.Path, OperationID: op.OperationID, Class: op.Class,
 		Guarded: op.Guarded, Conditional: op.Conditional, CreateOnly: op.CreateOnly, RetrySafety: op.RetrySafety, Audited: op.Audited})
-	reg.mu.Unlock()
 	// Huma's defineErrors rewrites every status in Errors with the bare
 	// http.StatusText, and the registration's Responses map is shared with
 	// the copy it rewrites, so the declared descriptions are read first and
 	// restored after.
-	descriptions := declaredResponseDescriptions(op)
+	var descriptions map[string]string
+	if !reg.fromSnapshot {
+		descriptions = declaredResponseDescriptions(op)
+	}
 	huma.Register(reg.api, op.Operation, handler)
-	documentCapabilityScope(reg, op, reflect.TypeFor[O]())
-	documentDeclaredResponseDescriptions(reg.api.OpenAPI(), op, descriptions)
-	documentConcurrencyResponses(reg.api.OpenAPI(), op)
+	if !reg.fromSnapshot {
+		documentCapabilityScope(reg, op, outType)
+		documentDeclaredResponseDescriptions(reg.api.OpenAPI(), op, descriptions)
+		documentConcurrencyResponses(reg.api.OpenAPI(), op)
+	}
+}
+
+func validateRegistration(op Operation, inType, outType reflect.Type) {
+	if err := checkOperation(op); err != nil {
+		panic(fmt.Sprintf("apiv2: %s: %v", op.OperationID, err))
+	}
+	if err := checkInput(inType); err != nil {
+		panic(fmt.Sprintf("apiv2: %s: %v", op.OperationID, err))
+	}
+	if err := checkEnums(outType); err != nil {
+		panic(fmt.Sprintf("apiv2: %s: %v", op.OperationID, err))
+	}
+	if err := checkConcurrencyShape(op, inType, outType); err != nil {
+		panic(fmt.Sprintf("apiv2: %s: %v", op.OperationID, err))
+	}
+}
+
+func (reg *Registry) recordDeclared(d Declared) {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	reg.ops = append(reg.ops, d)
+	if reg.routes == nil {
+		reg.routes = make(map[routeKey]struct{}, 256)
+	}
+	reg.routes[routeKey{method: d.Method, path: d.Path}] = struct{}{}
+}
+
+func (reg *Registry) hasDeclaredRoute(method, path string) bool {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	_, ok := reg.routes[routeKey{method: method, path: path}]
+	return ok
 }
 
 // multipartFormName returns the form type name of an input whose RawBody is

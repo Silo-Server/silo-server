@@ -208,6 +208,8 @@ GET /api/v2/admin/diagnostics/reports	non-media
 DELETE /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}/download	non-media
+GET /api/v2/admin/direct-connections/capabilities	non-media
+GET /api/v2/admin/direct-connections/status	non-media
 GET /api/v2/admin/downloads/devices	non-media
 GET /api/v2/admin/downloads/entries	non-media
 GET /api/v2/admin/downloads/preparations	non-media
@@ -433,6 +435,7 @@ POST /api/v2/admin/requests/{id}/approve	non-media
 POST /api/v2/admin/requests/{id}/cancel	non-media
 POST /api/v2/admin/requests/{id}/decline	non-media
 GET /api/v2/admin/requests/{id}/events	non-media
+GET /api/v2/admin/requests/{id}/poster	non-media
 POST /api/v2/admin/requests/{id}/retry	non-media
 GET /api/v2/admin/sections	non-media
 POST /api/v2/admin/sections	non-media
@@ -890,6 +893,7 @@ POST /api/v2/profile/import	non-media
 DELETE /api/v2/profile/sections	non-media
 GET /api/v2/profile/sections	non-media
 PUT /api/v2/profile/sections	non-media
+GET /api/v2/profile/sections/baseline	non-media
 GET /api/v2/profile/sections/flags	non-media
 GET /api/v2/profile/sections/settings	non-media
 GET /api/v2/profiles	non-media
@@ -1281,6 +1285,8 @@ GET /api/v2/admin/diagnostics/reports	non-media
 DELETE /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}/download	non-media
+GET /api/v2/admin/direct-connections/capabilities	non-media
+GET /api/v2/admin/direct-connections/status	non-media
 GET /api/v2/admin/downloads/devices	non-media
 GET /api/v2/admin/downloads/entries	non-media
 GET /api/v2/admin/downloads/preparations	non-media
@@ -1506,6 +1512,7 @@ POST /api/v2/admin/requests/{id}/approve	non-media
 POST /api/v2/admin/requests/{id}/cancel	non-media
 POST /api/v2/admin/requests/{id}/decline	non-media
 GET /api/v2/admin/requests/{id}/events	non-media
+GET /api/v2/admin/requests/{id}/poster	non-media
 POST /api/v2/admin/requests/{id}/retry	non-media
 GET /api/v2/admin/sections	non-media
 POST /api/v2/admin/sections	non-media
@@ -1963,6 +1970,7 @@ POST /api/v2/profile/import	non-media
 DELETE /api/v2/profile/sections	non-media
 GET /api/v2/profile/sections	non-media
 PUT /api/v2/profile/sections	non-media
+GET /api/v2/profile/sections/baseline	non-media
 GET /api/v2/profile/sections/flags	non-media
 GET /api/v2/profile/sections/settings	non-media
 GET /api/v2/profiles	non-media

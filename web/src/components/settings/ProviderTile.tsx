@@ -3,6 +3,7 @@ import { useId, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { leadingGraphemes } from "@/lib/text";
 import "@/styles/admin-settings.css";
 
 export type ProviderTileState = "connected" | "not_connected" | "error" | "editing";
@@ -195,7 +196,7 @@ export function ProviderTile({
   children,
 }: ProviderTileProps) {
   const headingId = useId();
-  const mark = logo ?? (monogram ?? name.slice(0, 2)).toUpperCase();
+  const mark = logo ?? (monogram ?? leadingGraphemes(name, 2)).toUpperCase();
 
   return (
     <fieldset

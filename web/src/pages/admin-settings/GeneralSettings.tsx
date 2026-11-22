@@ -53,6 +53,8 @@ export default function GeneralSettings() {
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
   const [saveInProgress, setSaveInProgress] = useState(false);
   const saveInProgressRef = useRef(false);
+  // Each save and discard ends the Use Redis switch's own choice.
+  const [savesAndDiscards, setSavesAndDiscards] = useState(0);
 
   // The Redis URL is a credential: its editors are frozen while a save is in
   // flight so a late keystroke cannot ride along with it.
@@ -80,6 +82,7 @@ export default function GeneralSettings() {
           ? form.dirtyKeys.filter((key) => !REDIS_KEYS.includes(key))
           : undefined,
       );
+      setSavesAndDiscards((count) => count + 1);
     } finally {
       saveInProgressRef.current = false;
       setSaveInProgress(false);
@@ -89,6 +92,8 @@ export default function GeneralSettings() {
   function handleDiscard() {
     if (saveInProgressRef.current) return;
     form.discard();
+    // Discard clears nothing until the settings have loaded.
+    if (form.loaded) setSavesAndDiscards((count) => count + 1);
   }
 
   // Redis reads whether a URL is saved from the protected-credential status,
@@ -154,6 +159,7 @@ export default function GeneralSettings() {
             description={t("web.admin.settings.general.network.publicUrl.description")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="https://silo.example.com"
+            dir="ltr"
             value={form.getValue("server.public_url")}
             onChange={(v) => form.setValue("server.public_url", v)}
             restartRequired={restartKeys.has("server.public_url")}
@@ -175,6 +181,7 @@ export default function GeneralSettings() {
             description={t("web.admin.settings.general.network.localUrl.description")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="http://192.168.1.20:8080"
+            dir="ltr"
             value={form.getValue(LOCAL_URL_KEY)}
             onChange={(v) => form.setValue(LOCAL_URL_KEY, v)}
             restartRequired={restartKeys.has(LOCAL_URL_KEY)}
@@ -186,6 +193,7 @@ export default function GeneralSettings() {
             description={t("web.admin.settings.general.network.trustedProxies.description")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="172.16.0.0/12, 203.0.113.7/32"
+            dir="ltr"
             value={form.getValue(TRUSTED_PROXIES_KEY)}
             onChange={(v) => form.setValue(TRUSTED_PROXIES_KEY, v)}
             restartRequired={restartKeys.has(TRUSTED_PROXIES_KEY)}
@@ -226,7 +234,12 @@ export default function GeneralSettings() {
             </div>
           </div>
         ) : (
-          <RedisGroup form={form} restartKeys={restartKeys} secrets={redisUrlEditors} />
+          <RedisGroup
+            form={form}
+            restartKeys={restartKeys}
+            secrets={redisUrlEditors}
+            savesAndDiscards={savesAndDiscards}
+          />
         )}
       </div>
 

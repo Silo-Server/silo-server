@@ -22,8 +22,8 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 const (
@@ -276,7 +276,7 @@ func (l fakeLoader) FinishPluginProvisionRestore(context.Context, string, string
 func (l fakeLoader) CarryServerSpecificSettings(context.Context, string, string) (int, error) {
 	return 0, nil
 }
-func (l fakeLoader) CarryOutboundSettings(context.Context, string, string) ([]string, []string, error) {
+func (l fakeLoader) CarryOutboundSettings(context.Context, string, string, *secret.Cipher) ([]string, []string, error) {
 	return nil, nil, nil
 }
 func (l fakeLoader) InterruptWork(context.Context, string, string) ([]string, error) { return nil, nil }
@@ -1101,13 +1101,13 @@ func TestSensitiveSettingsAreClassified(t *testing.T) {
 			t.Errorf("%s is both rotated and restored", key)
 		}
 	}
-	for key := range catalog.SensitiveSettingKeys {
+	for key := range serversettings.SensitiveSettingKeys {
 		if _, rotated := rotatedSettings[key]; !rotated && !restored[key] {
 			t.Errorf("sensitive setting %s is neither in rotatedSettings nor in restoredSecretSettings", key)
 		}
 	}
 	for _, key := range append(rotatedSettingKeys(), restoredSecretSettings...) {
-		if !catalog.SensitiveSettingKeys[key] {
+		if !serversettings.SensitiveSettingKeys[key] {
 			t.Errorf("%s is classified but is not a sensitive setting", key)
 		}
 	}

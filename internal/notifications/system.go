@@ -15,13 +15,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/discord"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -165,7 +165,7 @@ func NewSystem(
 		// Pushes name the identity getServerIdentity reports, read through the
 		// raw settings repo as it is: a SECRET_KEY rotation must not change
 		// who the server is.
-		pushSenderInst.serverID = serveridentity.New(catalog.NewServerSettingsRepo(pool)).ServerID
+		pushSenderInst.serverID = serveridentity.New(serversettings.NewServerSettingsRepo(pool)).ServerID
 		pushDispatcher = newPushDispatcher(pushSenderInst)
 		dispatchers = append(dispatchers, pushDispatcher)
 	}
@@ -307,7 +307,15 @@ func NewSystem(
 		emailChannelInst.profileName = system.lookupProfileName
 	}
 	if sender != nil {
-		sender.operational = system.DispatchOperational
+		// The notice reaches no webhook (loop guard). Its channel settings
+		// are read before the sender's transaction begins.
+		sender.noticeWriter = func(ctx context.Context) func(context.Context, pgx.Tx, Delivery) (*InsertedDelivery, error) {
+			channels := system.operationalChannels(ctx)
+			return func(ctx context.Context, tx pgx.Tx, notice Delivery) (*InsertedDelivery, error) {
+				return system.insertOperational(ctx, tx, notice, OperationalDispatch{}, nil, channels)
+			}
+		}
+		sender.dispatchNotice = system.dispatchOperationalRow
 		sender.posterURL = system.discordPosterURL
 	}
 	system.wirePluginDestinationSender()

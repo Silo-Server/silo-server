@@ -21,6 +21,7 @@ import type {
   SplitHistoryMode,
 } from "@/api/types";
 import { ItemLibraryPicker } from "@/components/ItemLibraryPicker";
+import { PathText } from "@/components/PathText";
 import { useItemFiles, useSearchItemMatchCandidates, useSplitItem } from "@/hooks/queries/items";
 import { codeNumber, useT, type MessageKey } from "@/i18n";
 import { libraryIdsOfFiles } from "@/lib/itemLibraries";
@@ -251,8 +252,16 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                           aria-label={t("web.item.split.selectFolder", { folder: root })}
                         />
                         <Folder className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-                        <span className="min-w-0 flex-1 truncate font-mono text-xs" title={root}>
-                          {root}
+                        {/* The path reads left to right in any language, so a cut
+                            one keeps its start; w-fit keeps it on the page's start
+                            side. */}
+                        <span className="min-w-0 flex-1" title={root}>
+                          <span
+                            dir="ltr"
+                            className="block w-fit max-w-full truncate font-mono text-xs"
+                          >
+                            <PathText path={root} />
+                          </span>
                         </span>
                       </label>
                       <div className="mt-1 space-y-1 ps-6">
@@ -267,11 +276,17 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                               onChange={() => toggleFile(file.id)}
                               aria-label={t("web.item.split.selectFile", { path: file.file_path })}
                             />
-                            <span
-                              className="text-muted-foreground min-w-0 flex-1 truncate font-mono"
-                              title={file.file_path}
-                            >
-                              {file.file_path.split("/").pop()}
+                            {/* The outer span takes the free space so the episode
+                                badge stays at the end. The name inside keeps its start
+                                when cut, in either script, and w-fit keeps a short one
+                                on the page's start side. */}
+                            <span className="min-w-0 flex-1" title={file.file_path}>
+                              <span
+                                dir="auto"
+                                className="text-muted-foreground block w-fit max-w-full truncate font-mono"
+                              >
+                                {file.file_path.split("/").pop()}
+                              </span>
                             </span>
                             {file.season_number && file.episode_number ? (
                               <Badge variant="outline" className="text-[10px]">
@@ -441,7 +456,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                   count: preview.files_moved,
                   file_count: preview.files_moved,
                   target_id: preview.target_content_id,
-                  id: (chunks) => <span className="font-mono text-xs">{chunks}</span>,
+                  id: (chunks) => <code className="font-mono text-xs">{chunks}</code>,
                 })}
                 {preview.target_created ? (
                   <Badge variant="secondary" className="ms-2 text-[10px]">

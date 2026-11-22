@@ -3,6 +3,7 @@ package handlers
 import (
 	"cmp"
 	"context"
+	"log/slog"
 	"net/http"
 	"slices"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
@@ -88,7 +90,11 @@ func (h *PlaybackHandler) applyConnectionReading(r *http.Request, req *playback.
 // observed_rebuffer estimate written to the store. A seek-scoped replan replays
 // the stored start request instead, and this function may have rewritten that
 // request's estimate to the limit, so recording it would renew the limit.
-func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.StartRequestV3, clientSent bool) (*playback.BandwidthLimitV3, error) {
+// outputBound, called only when the request would record, says the stall it
+// reports was paced by the server's transcode rather than the link (see
+// transcodeOutputBoundV3): the request still plans under its estimate, but the
+// device learns no limit from it. nil means no transcode is playing.
+func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.StartRequestV3, clientSent bool, outputBound func() bool) (*playback.BandwidthLimitV3, error) {
 	if !playback.HasFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1) {
 		return nil, nil
 	}
@@ -111,8 +117,17 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 		return nil, nil
 	}
 	if clientSent && req.BandwidthEstimateSource == playback.BandwidthEstimateObservedRebufferV3 && req.BandwidthEstimateKbps != nil && req.QualityPreference == playback.QualityAutoV3 {
-		if err := h.Connections.Observe(r.Context(), user, device, key, *req.BandwidthEstimateKbps); err != nil {
-			return nil, err
+		switch {
+		case device == "" || key == "":
+			// Observe stores nothing without a device and a connection, so
+			// the replan need not wait on a node to ask.
+		case outputBound != nil && outputBound():
+			slog.InfoContext(r.Context(), "learned limit not recorded: the server paced playback, or whether it did is unknown", "component", "playback",
+				"estimate_kbps", *req.BandwidthEstimateKbps)
+		default:
+			if err := h.Connections.Observe(r.Context(), user, device, key, *req.BandwidthEstimateKbps); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if req.QualityPreference != playback.QualityAutoV3 {
@@ -129,6 +144,50 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 	req.BandwidthEstimateKbps = new(limit.Kbps)
 	req.BandwidthEstimateSource = playback.BandwidthEstimateObservedRebufferV3
 	return &playback.BandwidthLimitV3{Kbps: limit.Kbps, Source: playback.BandwidthEstimateObservedRebufferV3, ExpiresAt: limit.ExpiresAt.UTC().Format(time.RFC3339)}, nil
+}
+
+// transcodeOutputBoundV3 says whether sessionID's transcode has no lead over
+// its client, so a stall the client reports now was paced by the encoder, not
+// the link. A transcode on a remote node is judged by that node; one on this
+// replica by its live session. A session with neither, such as direct play,
+// is not bound, and neither is a progressive remux, which has no segment lead
+// wherever it runs.
+//
+// An unknown answer counts as bound, so no limit is learned. A node on the
+// session's route does not answer (unreachable lists the transcode node and
+// egress proxy the replan already found not answering, whatever the delivery),
+// the node no longer runs the transport or failed the read, an HLS session
+// has no transcode on this replica and none on a node, as while one is being
+// rebuilt, or the playback session itself is gone, as after a crash tore it
+// down while the replan ran: each is a server-side fault that stalls the client whatever its
+// link, as a node dying mid-stream does. Not learning loses only memory, since
+// the replan still plans under the client's estimate and a slow link stalls
+// and is learned again; a wrong limit pins every file the device plays to a
+// lower quality for a day.
+func (h *PlaybackHandler) transcodeOutputBoundV3(ctx context.Context, sessionID string, unreachable map[string]struct{}) bool {
+	if len(unreachable) > 0 {
+		return true
+	}
+	if h.tm == nil {
+		return false
+	}
+	session, err := h.sessionMgr.GetSession(sessionID)
+	if err != nil || session.TranscodeNodeURL == "" {
+		if local := h.tm.GetTranscodeSession(sessionID); local != nil {
+			return local.OutputBoundsClient()
+		}
+		return err != nil || session.OutputProtocol == playback.OutputProtocolHLS
+	}
+	if session.OutputProtocol == playback.OutputProtocolHTTP {
+		return false
+	}
+	bound, err := h.tm.RemoteOutputBound(ctx, remoteTransportID(session), session.TranscodeNodeURL)
+	if err != nil {
+		slog.WarnContext(ctx, "transcode node did not say whether its encoder paced the client; treating the stall as the server's", "component", "playback",
+			"playback_session_id", sessionID, "node", logredact.SanitizeURL(session.TranscodeNodeURL), "error", logredact.SanitizeText(err.Error()))
+		return true
+	}
+	return bound
 }
 
 func markLearnedLimit(result *playback.PlannerResultV3, limit *playback.BandwidthLimitV3, source *models.MediaFile, request playback.StartRequestV3, serverCap int) {

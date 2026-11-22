@@ -1,6 +1,6 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { BookOpen, Play } from "lucide-react";
-import { memo, useCallback, useRef } from "react";
+import { Children, memo, useCallback, useRef } from "react";
 import { useLocation } from "react-router";
 import type { ItemDetail, SectionItem } from "@/api/types";
 import { homeDismissalForCard } from "@/hooks/queries/homeDismissals";
@@ -161,15 +161,22 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
   // chapters head to the series page like the heading does.
   const detailHref = isMangaChapter ? headingHref : card.itemHref;
   const episodeNumbers = { season: card.seasonNumber, episode: card.episodeNumber };
+  // The episode or chapter title is cut in its own box, in its own direction,
+  // so an English title after Arabic words keeps its start.
+  const episodeTitle = card.title ? (
+    <span dir="auto" className="bidi-text max-w-max grow basis-[2.5em] truncate">
+      {card.title}
+    </span>
+  ) : null;
   const episodeMeta = hasEpisodeMeta
     ? card.seriesTitle && card.title
       ? t("web.home.continueWatching.episodeLabelWithTitle", {
           ...episodeNumbers,
-          title: card.title,
+          title: episodeTitle,
         })
       : t("web.home.continueWatching.episodeLabel", episodeNumbers)
     : isMangaChapter
-      ? card.title
+      ? episodeTitle
       : null;
   const premiereBadge =
     "sectionItem" in props && props.sectionItem
@@ -355,16 +362,29 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
       <div className="px-0.5 pt-2.5">
         <ViewTransitionLink
           to={headingHref}
-          className="block truncate text-[0.8125rem] font-semibold hover:underline"
+          dir="auto"
+          className="bidi-text block truncate text-[0.8125rem] font-semibold hover:underline"
         >
           {heading}
         </ViewTransitionLink>
         {episodeMeta && (
           <ViewTransitionLink
             to={isMangaChapter ? card.watchHref : card.itemHref}
-            className="text-muted-foreground block truncate text-xs hover:underline"
+            className="text-muted-foreground flex flex-wrap overflow-hidden text-xs hover:underline"
           >
-            {episodeMeta}
+            {/* The words around the title keep their width and are cut only
+                when they alone fill the line. The title takes what's left, up
+                to its own width, and moves to a second line when not even its
+                first letter and "…" fit. pre keeps the space before it. */}
+            {Children.map(episodeMeta, (part) =>
+              typeof part === "string" ? (
+                <span className="max-w-full shrink-0 overflow-hidden text-ellipsis whitespace-pre">
+                  {part}
+                </span>
+              ) : (
+                part
+              ),
+            )}
           </ViewTransitionLink>
         )}
         {(timeLeftLabel || premiereBadge) && (

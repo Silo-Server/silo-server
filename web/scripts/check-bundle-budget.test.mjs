@@ -5,6 +5,7 @@ import {
   eagerFiles,
   renderBlockingFailures,
   vendorChunkFailures,
+  webkitOnlyBackdropRules,
 } from "./check-bundle-budget.mjs";
 
 describe("eagerFiles", () => {
@@ -95,6 +96,18 @@ describe("crossOriginRenderBlocking", () => {
       "https://fonts.googleapis.com/css2?family=Outfit:wght@300..900&display=swap",
       "//cdn.example.com/blocking.js",
     ]);
+  });
+});
+
+describe("webkitOnlyBackdropRules", () => {
+  it("lists rules whose backdrop filter only Safari reads", () => {
+    const css =
+      ".glass{-webkit-backdrop-filter:blur(20px);background:#0003}" +
+      ".pill{-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}" +
+      "@media (min-width:640px){.bar.is-overlay{-webkit-backdrop-filter:none}}" +
+      ".plain{background:url(data:image/png;base64,AAAA)}";
+
+    expect(webkitOnlyBackdropRules(css)).toEqual([".glass", ".bar.is-overlay"]);
   });
 });
 

@@ -20,8 +20,11 @@ type AdminTaskAttemptBucket struct {
 type AdminTaskDebtSample struct {
 	TargetType    string   `json:"target_type"`
 	ContentID     ID       `json:"content_id"`
-	Title         string   `json:"title"`
+	Title         string   `json:"title" doc:"The target's own title as stored: the item's, the season's or the episode's, without its series. Empty when the target has no title or no longer exists"`
 	Type          string   `json:"type"`
+	SeriesTitle   string   `json:"series_title,omitempty" doc:"Series title for a season or episode that still exists; absent otherwise"`
+	SeasonNumber  *int     `json:"season_number,omitempty" doc:"Season number for a season or episode that still exists; absent otherwise"`
+	EpisodeNumber *int     `json:"episode_number,omitempty" doc:"Episode number for an episode that still exists; absent otherwise"`
 	ReasonMask    int64    `json:"reason_mask"`
 	NextRefreshAt Instant  `json:"next_refresh_at"`
 	LastAttemptAt *Instant `json:"last_attempt_at,omitempty"`
@@ -64,7 +67,7 @@ func (reg *Registry) getAdminTaskMetrics(ctx context.Context, in *AdminTaskInput
 func taskDebtSamples(samples []models.MetadataRefreshDebtSample) []AdminTaskDebtSample {
 	out := make([]AdminTaskDebtSample, 0, len(samples))
 	for _, s := range samples {
-		safe := AdminTaskDebtSample{TargetType: s.TargetType, ContentID: ID(s.ContentID), Title: s.Title, Type: s.Type, ReasonMask: s.ReasonMask, NextRefreshAt: NewInstant(s.NextRefreshAt), LastAttemptAt: instantPtr(s.LastAttemptAt), AttemptCount: s.AttemptCount}
+		safe := AdminTaskDebtSample{TargetType: s.TargetType, ContentID: ID(s.ContentID), Title: s.Title, Type: s.Type, SeriesTitle: s.SeriesTitle, SeasonNumber: s.SeasonNumber, EpisodeNumber: s.EpisodeNumber, ReasonMask: s.ReasonMask, NextRefreshAt: NewInstant(s.NextRefreshAt), LastAttemptAt: instantPtr(s.LastAttemptAt), AttemptCount: s.AttemptCount}
 		if s.LastError != "" {
 			safe.LastError = "Refresh failed. Inspect administrator diagnostics for details."
 		}

@@ -6,6 +6,7 @@ import ItemGrid from "@/components/ItemGrid";
 import PageBack from "@/components/PageBack";
 import { loadErrorDescription } from "@/components/loadErrorDescription";
 import PageUnavailable from "@/components/PageUnavailable";
+import { LineTitle, TitleLineParts } from "@/components/TitleLine";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -100,13 +101,17 @@ export default function BoxSetPage() {
                     })}
                   >
                     <Play className="size-[18px] fill-current" aria-hidden />
-                    {/* A film title can be wider than a phone; the label
-                        truncates rather than widen the hero past the screen. */}
-                    <span className="min-w-0 truncate">
-                      {t(
-                        started ? "web.detail.boxSet.continueTitle" : "web.detail.boxSet.playTitle",
-                        { title: next.title },
-                      )}
+                    {/* A film title can be wider than a phone; the title is
+                        cut rather than widen the hero past the screen. */}
+                    <span className="flex min-w-0 overflow-hidden">
+                      <TitleLineParts>
+                        {t(
+                          started
+                            ? "web.detail.boxSet.continueTitle"
+                            : "web.detail.boxSet.playTitle",
+                          { title: <LineTitle>{next.title}</LineTitle> },
+                        )}
+                      </TitleLineParts>
                     </span>
                   </ViewTransitionLink>
                 </Button>

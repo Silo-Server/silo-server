@@ -153,6 +153,14 @@ fi
 
 # --- An earlier install is here. ---------------------------------------------
 
+# This step reads the URLs to tell where Silo's data is; a file variant hides
+# them, and the earlier stack never read one.
+for name in DATABASE_URL_FILE REDIS_URL_FILE; do
+  if [[ -n "${!name:-}" ]]; then
+    fail "$name is set in .env, and this step needs to read the URL to move the earlier install. Remove it from .env while the install moves. If the earlier stack's own service held the data, set nothing in its place; the image runs PostgreSQL itself, and Redis unless ENABLE_REDIS=false. If an external service did, put its URL in ${name%_FILE} instead, where this step checks it"
+  fi
+done
+
 # The earlier file set these for Silo itself, hiding any in .env; this one
 # passes .env through, and the services they named are gone.
 if [[ -n "${DATABASE_URL:-}" ]]; then
@@ -170,13 +178,13 @@ fi
 # Silo applies these on every start, over the stored settings, and the image
 # keeps a URL set here even with its own Meilisearch on.
 if [[ "$(url_host "${SILO_MEILISEARCH_URL:-}")" == meilisearch ]]; then
-  fail "SILO_MEILISEARCH_URL in .env points at the earlier stack's Meilisearch. Remove SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, and SILO_MEILISEARCH_API_KEY from .env, and set ENABLE_MEILISEARCH=true to use the bundled one"
+  fail "SILO_MEILISEARCH_URL in .env points at the earlier stack's Meilisearch. Remove SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, SILO_MEILISEARCH_API_KEY, and SILO_MEILISEARCH_API_KEY_FILE from .env, and set ENABLE_MEILISEARCH=true to use the bundled one"
 fi
 # Without a URL here, the one stored from the admin UI applies, which named
 # the earlier stack's service. Silo trims and lowercases the provider.
 env_provider="$(printf '%s' "${SILO_SEARCH_PROVIDER:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
 if [[ "$env_provider" == meilisearch && -z "${SILO_MEILISEARCH_URL:-}" ]] && ! truthy "${ENABLE_MEILISEARCH:-false}"; then
-  fail "SILO_SEARCH_PROVIDER in .env chooses Meilisearch, and the earlier stack's Meilisearch is gone. Remove SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, and SILO_MEILISEARCH_API_KEY from .env, and set ENABLE_MEILISEARCH=true to use the bundled one"
+  fail "SILO_SEARCH_PROVIDER in .env chooses Meilisearch, and the earlier stack's Meilisearch is gone. Remove SILO_SEARCH_PROVIDER, SILO_MEILISEARCH_URL, SILO_MEILISEARCH_API_KEY, and SILO_MEILISEARCH_API_KEY_FILE from .env, and set ENABLE_MEILISEARCH=true to use the bundled one"
 fi
 
 # The earlier stack's Silo container reached these through bind mounts, which

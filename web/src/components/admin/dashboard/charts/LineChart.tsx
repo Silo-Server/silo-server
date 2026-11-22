@@ -59,9 +59,10 @@ export interface LineChartProps {
   height?: number;
   /**
    * Take the height of the parent instead of `height`. The chart then follows
-   * the widget's row height, which the admin can change at any time. Below lg
-   * the rows are content-sized, and `.admin-chart-fill` in app.css keeps the
-   * plot at a fixed-height chart's 10rem instead.
+   * the widget's row height, which the admin can change at any time. Below the
+   * dashboard's 12-column layout the rows are content-sized, and
+   * `.admin-chart-fill` in app.css keeps the plot at a fixed-height chart's
+   * 10rem instead.
    */
   fill?: boolean;
   /** Categorical slot for the series color; single-series charts stay on slot 0. */

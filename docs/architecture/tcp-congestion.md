@@ -304,9 +304,11 @@ The send-buffer lines carry the remedies.
 Attributes: `component`, `listener`, `requested`, `granted`, `notsent_lowat`, `state`, `reason`, `action`, `errno`, `error`.
 
 The component is `tcpcongestion`. `requested` is the configured byte size when a
-force is attempted, otherwise zero. `granted` is the `SO_SNDBUF` readback,
-otherwise zero. `notsent_lowat` is 131072 after a successful Linux set,
-independent of forcing, otherwise zero. The errno and error rules match the
+force is attempted, otherwise zero. `granted` is the usable size, half the
+`SO_SNDBUF` readback, because Linux doubles the value it stores (socket(7));
+otherwise zero. The table below compares the raw readback, so `on` means
+`granted` is at least `requested`. `notsent_lowat` is 131072 after a
+successful Linux set, independent of forcing, otherwise zero. The errno and error rules match the
 congestion line.
 State `on` logs at Info; `capped` logs at Warn. State `off` logs at Info
 except for `limits_unknown`, which logs at Warn.
